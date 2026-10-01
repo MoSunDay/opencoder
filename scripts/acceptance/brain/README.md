@@ -9,7 +9,7 @@ cd crates/web/spa && npm ci && npx playwright-core install chromium && npm run b
 cargo test -p opencoder-worker --test brain_browser schema_seven_canvas_parallel_return_and_execution_detail -- --ignored --nocapture
 ```
 
-该场景从工作台进入计划库，在画布配置两层里程碑：Coding 层并行绑定 Agent 和 Operator，测试层绑定 Operator；画出测试回 Coding 的连线并填写条件。关闭再打开草稿，提交 schema 7 计划，选择节点发布运行。确定性模型在首轮测试后回退 Coding，第二轮重新执行两层并完成。
+该场景从工作台进入计划库，在画布配置两层里程碑：Coding 层并行绑定 Agent 和 Operator，测试层绑定 Operator。关闭再打开草稿，提交 schema 7 计划，核验保存时自动补齐前进和回退路径，再选择节点发布运行。确定性模型在首轮测试后回退 Coding，第二轮重新执行两层并完成。
 
 断言覆盖：计划版本及能力绑定、可见的“类型 · 能力名称”、工作台入口、草稿持久化、四次层激活、每轮同层并行派发、全部节点终态后才越过层屏障、回退反思、六个互异执行 ID、按激活读取历史，以及详情抽屉的轮次表格和同一节点两轮分别按 ID 拉取执行面板。失败时 Chromium 截图和页面 HTML 写入 `/tmp/opencoder-brain-v7-browser-*`；CI 会保留这些证据。
 

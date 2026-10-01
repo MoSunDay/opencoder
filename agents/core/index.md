@@ -1,4 +1,4 @@
-Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # core 模块
 
@@ -8,12 +8,15 @@ Commit: 2aa44247d199d782881b9ee64921c4c6de2e6199
 ## 索引
 - `src/message.rs` — Message/Role/ContentBlock
 - `src/config.rs` + `src/config/` — Config 加载与 mcp/cli/skills/ap 域文件（含 `config/dag.rs`）；顶层 `local_memory` 默认关闭，供会话完成钩子读取。`load_with_home` 将候选链重定向到执行 home；`load_with_home_frozen` 额外跳过 `apply_env`（快照即最终，版本化 Operator resume 用）；`load_operator(dir)` 只读 Operator 配置平面目录（`config.json` + 域文件，不做 env 合并）；`effective_domain_value`/`domain_file_for` 供节点 bootstrap 携带域视图
+- [config/dag.rs](../../crates/core/src/config/dag.rs) — 原生 DAG 的镜像、二进制池、源工作区、节点数据根与独立只读 NFS 配置；严格拒绝未知字段，不提供执行模式切换。约定见 [规则 04](../../rules/04-dag-execution-contract.md)。
 - `src/harness/` — `Harness::{Opencoder,Codex}` 与私有运行态；`fresh_runtime` 统一前端新会话的执行器、env、model 选择，`matches_requested_env` 校验续会话显式 env，托管配置可补充其他变量
+- [harness/remote.rs](../../crates/core/src/harness/remote.rs) — `ServerConnection` 仅含默认关闭的 `enabled` 与 `url`；`ServerCapability` 表示能力 ID、种类、目标和摘要，`RemoteSession` 保存执行绑定与可重试首轮输入。已有 Harness JSON 保存 `remote` 与 `literal_mentions`，不新增表结构。
 - `src/agent/`、`src/skill.rs` — agent 引用卡（`meta.json` `run_mode`）、memory 池聚合（`agent/memory.rs`）与技能发现。技能根优先级：执行任务本地根（`skill::with_execution`/`execution_root`）→ 节点 pinned 根 → 真实 `~/.opencoder/skills`
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput
 - `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
+- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 2；原生 DAG journal 与项目 schema v32 需要停服迁移，数据格式 1 不在兼容滚动发布范围。
 - `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
 
 ## 私有任务文件

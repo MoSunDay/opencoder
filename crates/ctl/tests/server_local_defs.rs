@@ -24,8 +24,8 @@ pub const TEAM_RAW: &str = r#"{"name":"t2","captain":"act","members":[{"agent":"
 
 /// Legal DagSpec (bare spec, no `{"spec":…}` wrapper) from the same file.
 pub const DAG_SPEC: &str = r#"{"name":"etl-ctl","steps":[
-    {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}},
-    {"name":"load","depends_on":["fetch"],"kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
+    {"name":"fetch","kind":{"type":"binary","resource":"tool"}},
+    {"name":"load","depends_on":["fetch"],"kind":{"type":"binary","resource":"tool"}}]}"#;
 
 /// Minimal valid single-TODO WorkflowSpec (control e2e `spec()` helper).
 pub const WF_SPEC: &str = r#"{"schema_version":1,"id":"wf-ctl-demo","name":"demo",

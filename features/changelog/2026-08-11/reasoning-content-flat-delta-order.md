@@ -21,7 +21,6 @@ Thinking 块，错误频道还可能随工具轮次持久化并回传模型。
 
 - 修复 Thinking 的异常断块和句末标点错位。
 - 修复工具轮次中 reasoning/text 错分后持久化、回传模型的风险。
-- Viking 代理、公开 API、配置、存储结构及合法的交错思考行为不变。
 
 ## Related Docs
 

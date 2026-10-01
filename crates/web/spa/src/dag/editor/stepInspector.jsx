@@ -1,5 +1,5 @@
 // stepInspector.jsx — right-hand property panel for the DAG spec editor.
-// StepInspector edits ONE selected step (name / kind / prompt / command /
+// StepInspector edits ONE selected step (name / kind / prompt / resource /
 // agent / model / how_append / sandbox / timeout) as fully controlled antd
 // inputs inside a vertical Form (no Form instance, no local copy of the
 // step); every edit is delegated upward through onChange / onRename /
@@ -12,25 +12,22 @@ import { useEffect, useState } from 'react';
 import { MONO_VAR } from '../../ui/mono.js';
 import { changeStepKind, renameStep } from './canvasModel.js';
 import { SourceFields } from '../dynamic/sourceFields.jsx';
+import { BinaryResourceField } from '../resources/field.jsx';
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
 const KIND_OPTIONS = [
   { value: 'agent', label: 'Agent 步骤' },
-  { value: 'wasm', label: 'Wasm 步骤' },
+  { value: 'binary', label: 'Binary 步骤' },
   { value: 'dynamic', label: '动态步骤' },
-];
-const SANDBOX_OPTIONS = [
-  { value: 'in_process', label: '内嵌 VM (in_process)' },
-  { value: 'runc', label: 'runc 容器' },
 ];
 
 /// withKindField(step, key, value) → new step with kind[key] set; empty
 /// values are REMOVED from the kind payload so the wire shape stays clean.
 function withKindField(step, key, value) {
   const kind = { ...(step && step.kind) };
-  if (value === undefined || value === null || value === '') {
+  if (value === undefined || value === null || (value === '' && key !== 'args')) {
     delete kind[key];
   } else {
     kind[key] = value;
@@ -133,28 +130,10 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
             </Form.Item>
           </>
         ) : null}
-        {kindType === 'wasm' ? (
+        {kindType === 'binary' ? (
           <>
-            <Form.Item
-              label="Wasm 命令 (command)"
-              extra={'格式 <module.wasm> [args...]：模块路径 + 参数'}
-            >
-              <Input
-                placeholder="tool.wasm --flag"
-                style={{ fontFamily: MONO_VAR }}
-                value={kind.command || ''}
-                onChange={(e) => updateField('command', e.target.value)}
-              />
-            </Form.Item>
-            <Form.Item label="沙箱">
-              <Select
-                allowClear
-                placeholder="默认 in_process"
-                options={SANDBOX_OPTIONS}
-                value={kind.sandbox || undefined}
-                onChange={(v) => updateField('sandbox', v)}
-              />
-            </Form.Item>
+            <BinaryResourceField value={kind.resource || ''} onChange={(resource) => updateField('resource', resource)} />
+            <BinaryArguments value={kind.args ?? []} onChange={(args) => updateField('args', args)} />
           </>
         ) : null}
         <Form.Item label="超时（秒）">
@@ -180,6 +159,27 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
       </Popconfirm>
     </div>
   );
+}
+
+function BinaryArguments({ value, onChange }) {
+  const [draft, setDraft] = useState(typeof value === 'string' ? value : JSON.stringify(value));
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setDraft(typeof value === 'string' ? value : JSON.stringify(value));
+    setError(typeof value === 'string' ? '参数必须是 JSON 字符串数组' : '');
+  }, [JSON.stringify(value)]);
+  const change = (text) => {
+    setDraft(text);
+    try {
+      const args = JSON.parse(text);
+      if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string' || arg.includes('\0'))) throw new Error();
+      setError('');
+      onChange(args);
+    } catch { setError('参数必须是 JSON 字符串数组'); onChange(text); }
+  };
+  return <Form.Item label="参数数组" validateStatus={error ? 'error' : undefined} help={error || '保留空格、引号和空参数，不经过 shell 解析'}>
+    <Input.TextArea rows={2} value={draft} onChange={(event) => change(event.target.value)} />
+  </Form.Item>;
 }
 
 /// NameField — the step-name input with inline validation. Valid candidates

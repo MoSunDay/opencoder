@@ -55,9 +55,9 @@ pub fn validate_items(template: &StepKind, value: &Value) -> Result<Vec<Value>, 
                 item.as_str()
                     .ok_or_else(|| format!("instance {index}: agent input must be a string"))?;
             }
-            StepKind::Wasm { .. } => {
+            StepKind::Binary { .. } => {
                 let argv = item.as_array().ok_or_else(|| {
-                    format!("instance {index}: wasm input must be an array of strings")
+                    format!("instance {index}: binary input must be an array of strings")
                 })?;
                 if !argv
                     .iter()
@@ -68,7 +68,9 @@ pub fn validate_items(template: &StepKind, value: &Value) -> Result<Vec<Value>, 
                     ));
                 }
             }
-            StepKind::Dynamic { .. } => return Err("dynamic template must be agent or wasm".into()),
+            StepKind::Dynamic { .. } => {
+                return Err("dynamic template must be agent or binary".into())
+            }
         }
     }
     Ok(items.clone())
@@ -144,8 +146,9 @@ mod tests {
     fn agent() -> StepKind {
         serde_json::from_value(json!({"type":"agent","prompt":"common"})).unwrap()
     }
-    fn wasm() -> StepKind {
-        serde_json::from_value(json!({"type":"wasm","command":"t.wasm --format json"})).unwrap()
+    fn binary() -> StepKind {
+        serde_json::from_value(json!({"type":"binary","resource":"t --format json","args":[]}))
+            .unwrap()
     }
     #[test]
     fn sources_types_and_empty_batch() {
@@ -166,9 +169,9 @@ mod tests {
             .unwrap_err()
             .contains("missing"));
         assert!(validate_items(&agent(), &json!(["a", 2])).is_err());
-        assert!(validate_items(&wasm(), &json!([["--title", "hello world"], []])).is_ok());
-        assert!(validate_items(&wasm(), &json!([["ok"], [1]])).is_err());
-        assert!(validate_items(&wasm(), &json!([])).unwrap().is_empty());
+        assert!(validate_items(&binary(), &json!([["--title", "hello world"], []])).is_ok());
+        assert!(validate_items(&binary(), &json!([["ok"], [1]])).is_err());
+        assert!(validate_items(&binary(), &json!([])).unwrap().is_empty());
         assert!(validate_items(&agent(), &json!(vec!["x"; 1000])).is_ok());
         assert!(validate_items(&agent(), &json!(vec!["x"; 1001])).is_err());
         let source = DynamicSource::StepOutput {

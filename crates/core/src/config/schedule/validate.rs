@@ -72,16 +72,14 @@ pub(super) fn validate_target(job: &ScheduleJob) -> Result<(), String> {
     Ok(())
 }
 
-/// dag params fold into the frozen spec at fire time: `args` (optional
-/// string) is appended to every wasm step's command line, so a non-string
-/// must fail at config time instead of landing as an `error` ledger row
-/// that retries for an hour.
 pub(super) fn validate_dag_params(job: &ScheduleJob) -> Result<(), String> {
     if let Some(args) = job.params.get("args") {
-        if !args.is_string() {
+        if !args.as_array().is_some_and(|args| {
+            args.iter()
+                .all(|arg| arg.as_str().is_some_and(|arg| !arg.contains('\0')))
+        }) {
             return Err(format!(
-                "schedule {}: dag params.args must be a string (it is appended to the wasm \
-                 step command line)",
+                "schedule {}: dag params.args must be a string array without NUL",
                 job.id
             ));
         }

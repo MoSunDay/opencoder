@@ -196,5 +196,6 @@ fn variant_name(ev: &UiEvent) -> &'static str {
         UiEvent::Session(_) => "Session",
         UiEvent::AssistantFinal(_) => "AssistantFinal",
         UiEvent::TurnDone(_) => "TurnDone",
+        UiEvent::RemoteSnapshot { .. } => "RemoteSnapshot",
     }
 }

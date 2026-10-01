@@ -7,11 +7,20 @@ const GOOD = {
   name: 'etl',
   description: ' nightly etl ',
   steps: [
-    { name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } },
+    { name: 'fetch', kind: { type: 'binary', resource: 'tool' } },
     { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'review it', agent: 'explore', model: 'gpt' } },
-    { name: 'boxed', depends_on: ['fetch'], kind: { type: 'wasm', command: 'tool.wasm --flag', sandbox: 'runc' }, timeout_secs: 120 },
+    { name: 'boxed', depends_on: ['fetch'], kind: { type: 'binary', resource: 'tool@v3', args: ['--flag'] }, timeout_secs: 120 },
   ],
 };
+
+it('rejects unknown fields, reserved directories and invalid native version pins', () => {
+  expect(validateSpec({ ...GOOD, unsupported: true }).length).toBeGreaterThan(0);
+  for (const resource of ['.locks', '..', 'tool@v4294967296', 'tool@v01']) {
+    expect(validateSpec({ name: 'native', steps: [{ name: 'run', kind: { type: 'binary', resource } }] }).length).toBeGreaterThan(0);
+  }
+  expect(validateSpec({ name: 'native', steps: [{ name: 'upper', kind: { type: 'binary', resource: 'tool' } }] }).length).toBeGreaterThan(0);
+  expect(validateSpec({ name: 'native', steps: [{ name: 'run', kind: { type: 'binary', resource: 'tool', args: '[' } }] }).length).toBeGreaterThan(0);
+});
 
 describe('parseSpecDraft', () => {
   it('parses a JSON object draft', () => {
@@ -28,7 +37,7 @@ describe('parseSpecDraft', () => {
 });
 
 describe('validateSpec', () => {
-  it('accepts a representative spec (agent + wasm + runc sandbox)', () => {
+  it('accepts a representative spec (agent + binary + shared container)', () => {
     expect(validateSpec(GOOD)).toEqual([]);
   });
 
@@ -45,9 +54,9 @@ describe('validateSpec', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 'Bad_Name', kind: { type: 'wasm', command: 'x' } },
-        { name: 'dup', kind: { type: 'wasm', command: 'x' } },
-        { name: 'dup', kind: { type: 'wasm', command: 'x' } },
+        { name: 'Bad_Name', kind: { type: 'binary', resource: 'x' } },
+        { name: 'dup', kind: { type: 'binary', resource: 'x' } },
+        { name: 'dup', kind: { type: 'binary', resource: 'x' } },
       ],
     };
     const p = validateSpec(spec);
@@ -58,16 +67,16 @@ describe('validateSpec', () => {
   it('validates step kind payloads per type', () => {
     const mk = (kind) => ({ name: 'a', kind });
     expect(validateSpec({ name: 'x', steps: [mk({ type: 'shell', cmd: 'ls' })] })[0]).toContain(
-      'kind.type 必须是 agent | wasm',
+      'kind.type 必须是 agent | binary',
     );
     expect(validateSpec({ name: 'x', steps: [mk({ type: 'agent' })] })[0]).toContain('kind.prompt');
-    expect(validateSpec({ name: 'x', steps: [mk({ type: 'wasm' })] })[0]).toContain('kind.command');
+    expect(validateSpec({ name: 'x', steps: [mk({ type: 'binary' })] })[0]).toContain('kind.resource');
     expect(
-      validateSpec({ name: 'x', steps: [mk({ type: 'wasm', command: 'x', sandbox: 'jail' })] })[0],
-    ).toContain('sandbox');
+      validateSpec({ name: 'x', steps: [mk({ type: 'binary', resource: 'x', sandbox: 'jail' })] })[0],
+    ).toContain('不支持字段');
     // the removed python kind falls into the unknown-type branch
     expect(validateSpec({ name: 'x', steps: [mk({ type: 'python', code: 'x' })] })[0]).toContain(
-      'kind.type 必须是 agent | wasm',
+      'kind.type 必须是 agent | binary',
     );
     expect(validateSpec({ name: 'x', steps: [{ name: 'a', kind: null }] })[0]).toContain('kind 必须是对象');
   });
@@ -99,8 +108,8 @@ describe('validateSpec', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 'a', depends_on: ['ghost', 'a'], kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 'b', depends_on: ['a', 'a'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'a', depends_on: ['ghost', 'a'], kind: { type: 'binary', resource: 'tool' } },
+        { name: 'b', depends_on: ['a', 'a'], kind: { type: 'binary', resource: 'tool' } },
       ],
     };
     const p = validateSpec(spec);
@@ -113,9 +122,9 @@ describe('validateSpec', () => {
     const spec = {
       name: 'x',
       steps: [
-        { name: 'a', depends_on: ['c'], kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 'b', depends_on: ['a'], kind: { type: 'wasm', command: 'tool.wasm' } },
-        { name: 'c', depends_on: ['b'], kind: { type: 'wasm', command: 'tool.wasm' } },
+        { name: 'a', depends_on: ['c'], kind: { type: 'binary', resource: 'tool' } },
+        { name: 'b', depends_on: ['a'], kind: { type: 'binary', resource: 'tool' } },
+        { name: 'c', depends_on: ['b'], kind: { type: 'binary', resource: 'tool' } },
       ],
     };
     const p = validateSpec(spec);
@@ -123,7 +132,7 @@ describe('validateSpec', () => {
   });
 
   it('flags a non-positive timeout_secs', () => {
-    const spec = { name: 'x', steps: [{ name: 'a', timeout_secs: 0, kind: { type: 'wasm', command: 'tool.wasm' } }] };
+    const spec = { name: 'x', steps: [{ name: 'a', timeout_secs: 0, kind: { type: 'binary', resource: 'tool' } }] };
     expect(validateSpec(spec)[0]).toContain('timeout_secs');
   });
 
@@ -170,8 +179,8 @@ describe('problemsFromApiError', () => {
 });
 
 it('rejects Runner even with valid registered bindings', () => {
-  const spec = { name: 'business', steps: [{ name: 'workflow', kind: { type: 'runner', runner: 'eval-diagnose', agent: 'eval-diagnose' } }] };
-  expect(validateSpec(spec)).toEqual(['steps[0].kind.type 必须是 agent | wasm | dynamic']);
+  const spec = { name: 'business', steps: [{ name: 'workflow', kind: { type: 'runner', runner: 'custom-runner', agent: 'custom-agent' } }] };
+  expect(validateSpec(spec)).toEqual(['steps[0].kind.type 必须是 agent | binary | dynamic']);
 });
 
 it('validates failure and dependency policies without discarding them', () => {

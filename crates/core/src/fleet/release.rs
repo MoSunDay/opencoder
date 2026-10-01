@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const HANDOFF_PROTOCOL: u32 = 1;
-pub const HANDOFF_DATA_FORMAT: u32 = 1;
+// Native DAG journals and project schema v32 require a stopped migration.
+pub const HANDOFF_DATA_FORMAT: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,5 +51,20 @@ impl ReleaseCompatibility {
             && self.protocol.contains(peer.protocol.max)
             && self.data_format.contains(peer.data_format.min)
             && self.data_format.contains(peer.data_format.max)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_project_release_requires_maintenance_from_previous_format() {
+        let current = ReleaseCompatibility::current();
+        assert!(current.compatible(&current));
+        let mut previous = current.clone();
+        previous.data_format = CompatibleRange { min: 1, max: 1 };
+        assert!(!current.compatible(&previous));
+        assert!(!previous.compatible(&current));
     }
 }

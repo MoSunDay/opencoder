@@ -27,8 +27,6 @@ pub(super) fn run_handle(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
     handle_key(
         k,
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -50,8 +48,6 @@ pub(super) fn run_handle(
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     )
 }
@@ -73,8 +69,6 @@ pub(super) fn run_handle_disabled(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
     handle_key(
         k,
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -96,8 +90,6 @@ pub(super) fn run_handle_disabled(
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     )
 }
@@ -120,8 +112,6 @@ pub(super) fn run_handle_subagents_busy(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
     handle_key(
         k,
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -143,8 +133,6 @@ pub(super) fn run_handle_subagents_busy(
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     )
 }
@@ -165,8 +153,6 @@ pub(super) fn run_handle_subagent(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
     handle_key(
         k,
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -188,8 +174,6 @@ pub(super) fn run_handle_subagent(
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     )
 }
@@ -209,8 +193,6 @@ pub(super) fn run_handle_menu(
     let mut last_esc: Option<Instant> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
     handle_key(
         k,
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -232,8 +214,6 @@ pub(super) fn run_handle_menu(
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     )
 }
@@ -255,8 +235,6 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     // Up arrow: newest history entry lands in the composer.
     let action = handle_key(
@@ -280,8 +258,6 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(matches!(action, KeyAction::None));
@@ -310,8 +286,6 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(matches!(action, KeyAction::None));

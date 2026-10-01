@@ -12,7 +12,7 @@ async function main() {
   h = await harness.open(async (prompt) => {
     if (prompt.includes('HOLD_REVIEW')) await held;
     return { result: prompt.includes('HOLD_REVIEW') ? 'review-log-result' : 'fetch-log-result' };
-  }, { dag: true });
+  }, { dag: true, rootfs: process.argv[2] });
   const { page, api, root, until } = h;
   console.log(JSON.stringify({ root }));
   const served = await fetch(new URL('/static/app.js', page.url())).then((r) => r.arrayBuffer());
@@ -38,25 +38,29 @@ async function main() {
   await page.screenshot({ path: path.join(root, 'dag-current-result.png'), animations: 'disabled', timeout: 60000 });
   await page.locator('[data-id="fetch"] .dag-node').click();
   const drawer = page.locator('.dag-logs-drawer');
-  await drawer.getByRole('log').getByText(/fetch-log-result/).first().waitFor();
+  await drawer.locator('.execution-logs').getByText(/fetch-log-result/).first().waitFor();
   let box;
   await until(async () => {
     box = await drawer.locator('.ant-drawer-content-wrapper').boundingBox();
     return box && Math.abs(box.width - 1200) < 2 && Math.abs(box.x - 400) < 2;
   }, 'right drawer settles at 75% width');
-  await drawer.getByRole('combobox', { name: '切换步骤日志' }).click();
+  await drawer.getByRole('button', { name: '运行日志', exact: true }).click();
+  const runDrawer = page.locator('.dag-logs-drawer').filter({ has: page.getByRole('combobox', { name: '切换步骤日志' }) });
+  await runDrawer.getByRole('log').getByText(/fetch-log-result/).first().waitFor();
+  await runDrawer.getByRole('combobox', { name: '切换步骤日志' }).click();
   await page.locator('.ant-select-item-option-content').getByText('review', { exact: true }).click();
-  assert(!(await drawer.getByRole('log').innerText()).includes('fetch-log-result'));
+  assert(!(await runDrawer.getByRole('log').innerText()).includes('fetch-log-result'));
   finish();
   await until(async () => (await api('GET', `/api/dag/runs/${id}/progress`)).done === 2, 'finished DAG');
-  await drawer.getByRole('log').getByText(/review-log-result/).first().waitFor();
+  await runDrawer.getByRole('log').getByText(/review-log-result/).first().waitFor();
   await page.screenshot({ path: path.join(root, 'dag-step-logs.png'), animations: 'disabled', timeout: 60000 });
+  await runDrawer.locator('.ant-drawer-close').click();
   await drawer.locator('.ant-drawer-close').click();
   await until(async () => await page.locator('.dag-node--done').count() === 2, 'final graph');
   await page.getByRole('button', { name: '执行详情与产物' }).click();
   const detail = page.locator('.oc-execution-detail');
   await detail.locator('[data-id="fetch"] .dag-node').click();
-  await page.locator('.dag-logs-drawer').getByRole('log').getByText(/fetch-log-result/).first().waitFor();
+  await page.locator('.dag-logs-drawer .execution-logs').getByText(/fetch-log-result/).first().waitFor();
   await page.screenshot({ path: path.join(root, 'dag-execution-detail.png'), animations: 'disabled', timeout: 60000 });
   assert.deepEqual(h.errors, []);
   const result = { result: 'PASS', id, cases: ['snapshot-first', 'live-state', 'right-75-percent', 'step-switch', 'live-logs', 'execution-detail'], requests };

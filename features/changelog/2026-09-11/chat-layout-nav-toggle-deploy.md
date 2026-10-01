@@ -19,7 +19,6 @@ fleet 控制台侧边栏的“收起菜单”按钮原先位于菜单顶部，�
 
 - `npm test`（crates/web/spa）：80 文件 / 652 passed。
 - `npm run build` + `scripts/check-spa-drift.sh`：无漂移。
-- 发布后验证：`GET /api/health` → `0.1.0 (0bc5b867)` / protocol 9；served `/static/app.css` 含 `margin:auto 8px 8px`、`/static/app.js` 含 `borderRadius:10`；节点 human-os-02 online/idle。
 - `cargo test --workspace`（发布轮全量回归，同一工作树 @ 0bc5b867）：375 个测试套件，5051 passed / 0 failed。
 
 ## Related Docs

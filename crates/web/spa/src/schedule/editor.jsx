@@ -2,7 +2,7 @@
 // 文本) / overlap / node_id / enabled。新建隐藏 ID 与时区（id 缺省由后端
 // 生成 schedule-<ULID>，时区固定 +08:00）；编辑保留两字段（id 是主键、时区
 // 可改）。params 按 kind 分流为普通文本输入：agent/team/todos → prompt
-// （team 是话题需求、todos 追加 objective）、dag → args（追加到每个 Wasm 步
+// （team 是话题需求、todos 追加 objective）、dag → args（追加到每个 Binary 步
 // 的命令行）、brain → objective（必填）；字符串值可带 {{now…}} 时间模板。
 // 编辑保存按当前键合并 initial.params 的其余键（brain 的 inputs/mode/plan
 // 不丢），agent 编辑清掉 how_append 旧键（prompt 经回落机制补进 how.md，
@@ -49,9 +49,9 @@ const PARAM_FIELDS = {
     placeholder: '聚焦昨晚的线上告警',
   },
   dag: {
-    key: 'args', label: '命令行参数', required: false,
-    extra: '触发时追加到每个 Wasm 步的命令行；字符串值可带 {{now…}} 时间模板',
-    placeholder: '--date {{now-1d:%Y-%m-%d}}',
+    key: 'args', label: '参数数组', required: false,
+    extra: 'JSON 字符串数组，追加到每个二进制步骤；各元素可带 {{now…}} 时间模板',
+    placeholder: '["--date", "{{now-1d:%Y-%m-%d}}"]' ,
   },
   brain: {
     key: 'objective', label: '目标', required: true,
@@ -82,6 +82,7 @@ export function ScheduleEditorModal({ open, initial, nodes, onCancel, onSaved })
     const seedParams = record?.params || {};
     const seedText = seedKind === 'agent'
       ? (typeof seedParams.how_append === 'string' && seedParams.how_append) || (typeof seedParams.prompt === 'string' && seedParams.prompt) || ''
+      : seedKind === 'dag' ? JSON.stringify(seedParams.args || [])
       : (typeof seedParams[paramField(seedKind).key] === 'string' && seedParams[paramField(seedKind).key]) || '';
     form.setFieldsValue({
       id: record?.id || '',
@@ -102,9 +103,11 @@ export function ScheduleEditorModal({ open, initial, nodes, onCancel, onSaved })
   const paramsOf = (values) => {
     const key = paramField(values.kind).key;
     const text = (values.params || '').trim();
-    if (!isEdit) return text ? { [key]: text } : {};
+    const value = values.kind === 'dag' && text ? JSON.parse(text) : text;
+    if (values.kind === 'dag' && text && (!Array.isArray(value) || value.some((arg) => typeof arg !== 'string' || arg.includes('\0')))) throw new Error('参数必须是 JSON 字符串数组');
+    if (!isEdit) return text ? { [key]: value } : {};
     const merged = { ...(seed.current?.params || {}) };
-    if (text) merged[key] = text;
+    if (text) merged[key] = value;
     else delete merged[key];
     if (values.kind === 'agent') delete merged.how_append;
     return merged;

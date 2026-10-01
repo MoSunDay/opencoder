@@ -255,6 +255,10 @@ opencoder run "Implement terminal Snake..."
 
 ## 🧪 Development & Testing
 
+This repository maintains OpenCoder platform capabilities. External business implementations, workflows, and descriptions live separately under `/data00/opencoder-tools/`. Core builds and tests do not depend on that directory.
+
+
+
 This project strictly follows the development rules under [`rules/`](rules/): every business feature must have corresponding tests, and a full regression run with a changelog + test manifest is required before each iteration ends.
 
 ```bash

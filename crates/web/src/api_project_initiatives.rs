@@ -4,7 +4,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use opencoder_core::message::now_ms;
-use opencoder_store::{ProjectMilestonePatch, ProjectMilestoneRecord, ProjectMilestoneStatus};
+use opencoder_store::{ProjectInitiativePatch, ProjectInitiativeRecord, ProjectInitiativeStatus};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -36,6 +36,7 @@ pub async fn list(
 
 #[derive(Deserialize)]
 pub struct CreateBody {
+    pub status: Option<ProjectInitiativeStatus>,
     pub goal_id: Option<String>,
     pub title: String,
     pub detail_md: Option<String>,
@@ -54,17 +55,17 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<CreateB
     if let Some(goal_id) = &body.goal_id {
         match deps.projects.list_goals().await {
             Ok(goals) if goals.iter().any(|goal| &goal.id == goal_id) => {}
-            Ok(_) => return error_404("project not found"),
+            Ok(_) => return error_404(format!("project not found: {goal_id}")),
             Err(error) => return error_500(error.to_string()),
         }
     }
     let now = now_ms();
-    let item = ProjectMilestoneRecord {
+    let item = ProjectInitiativeRecord {
         id: format!("pi-{}", ulid::Ulid::new()),
         goal_id: body.goal_id,
         title: title.to_owned(),
         detail_md: body.detail_md,
-        status: ProjectMilestoneStatus::Planned,
+        status: body.status.unwrap_or(ProjectInitiativeStatus::Planned),
         sort: body.sort.unwrap_or(0),
         created_at: now,
         updated_at: now,
@@ -81,7 +82,7 @@ pub struct PatchBody {
     pub goal_id: Option<Option<String>>,
     pub title: Option<String>,
     pub detail_md: Option<String>,
-    pub status: Option<ProjectMilestoneStatus>,
+    pub status: Option<ProjectInitiativeStatus>,
     pub sort: Option<i64>,
 }
 
@@ -101,11 +102,11 @@ pub async fn patch(
     if let Some(Some(goal_id)) = &body.goal_id {
         match deps.projects.list_goals().await {
             Ok(goals) if goals.iter().any(|goal| &goal.id == goal_id) => {}
-            Ok(_) => return error_404("project not found"),
+            Ok(_) => return error_404(format!("project not found: {goal_id}")),
             Err(error) => return error_500(error.to_string()),
         }
     }
-    let change = ProjectMilestonePatch {
+    let change = ProjectInitiativePatch {
         goal_id: body.goal_id,
         title,
         detail_md: body.detail_md,
@@ -127,7 +128,7 @@ pub async fn delete(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
     match deps.projects.delete_initiative(&id).await {
         Ok(true) => Json(json!({ "deleted": true })).into_response(),
         Ok(false) => error_404("initiative not found"),
-        Err(error) if error.is::<opencoder_store::project::MilestoneNotEmpty>() => {
+        Err(error) if error.is::<opencoder_store::project::InitiativeNotEmpty>() => {
             error_409("initiative contains TODOs")
         }
         Err(error) => error_500(error.to_string()),

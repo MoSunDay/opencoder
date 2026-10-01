@@ -1,4 +1,4 @@
-Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # store 模块
 
@@ -9,13 +9,17 @@ Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
 - `src/lib.rs` — `Store` trait
 - `src/libsql_store/` — libsql 实现（WAL）
 - `src/libsql_store/sessions.rs` — 会话批删（FK 级联）；`node_tasks.rs` — 节点任务与终态清扫
+- [libsql_store/messages.rs](../../crates/store/src/libsql_store/messages.rs) — `load_transcript_page` 在 SQL 中投影并按字节切块，保留消息角色、展示原文、合成标记和用量，排除私有 provider 状态；与已有消息块读取共用游标和预算。
 - `src/types.rs` — `SessionMeta.kind` 泳道标签（schema v28 起 `sessions.kind TEXT`；创建时定值：`operator`/`agent`/`team`/`dag`/`todos`/`project`/`brain`，存量行为 NULL）
 - `src/libsql_store/sessions.rs` 泳道栅栏 — `SessionFilter.kind=None` 的默认清单排除 `kind='operator'`（`s.kind IS NULL OR s.kind <> 'operator'`），精确泳道用 `s.kind = ?`；存量 NULL 行仍走 id 前缀/标题回退
 - `src/schedule_types.rs`、`src/libsql_store/schedule.rs` — 调度台账与定义表（schema v26/v27）
 - `src/fleet/` — 节点容量/归属/派发回执（`handoff/`），容量领取在 `handoff/capacity.rs`
 - `src/fleet/records.rs` — 终态执行索引批删
-- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 31）
-- `src/project.rs`、`src/libsql_store/project_links.rs`、`src/sql_store/project_links.rs` — TODO 看板列与排序、执行指派记录及结论；SQLite 排序在事务内提交，schema v31 为存量执行关联补齐类型、名称、结论和同步状态，MySQL/StarRocks 同步升级
+- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 32）
+- `src/project.rs`、`src/libsql_store/project_links.rs`、`src/sql_store/project_links.rs` — TODO 看板、执行指派记录及结论；排序按专项或未归属范围校验，拒绝缺失或外部 TODO，SQLite/MySQL 在事务内提交
+- `src/project/tags.rs`、`src/libsql_store/project/tags.rs`、`src/sql_store/catalog/` — Tag 范围解析与关联整理；定义范围固定且所属项目或专项必须存在，SQLite/MySQL 的 Tag 与 TODO 变更原子提交，StarRocks 沿用顺序写入并先验证选择
+- `src/libsql_store/schema/catalog.rs`、`src/sql_store/ddl/catalog.rs` — schema v32 的专项、Tag 与 TODO 关联结构；迁移校验专项复制结果，解除旧里程碑的 TODO 归属并移除旧容器，保留执行记录
+- [libsql_store/schema.rs](../../crates/store/src/libsql_store/schema.rs) — 初始化先读取版本，超出当前支持版本时在业务 DDL 前拒绝打开；已有旧版本记录或版本跟踪前的会话表时创建历史项目结构，再运行升级链，支持只有部分业务表的旧数据库
 - `src/sql_store/ddl.rs` — MySQL/StarRocks 存量 TODO 排序列升级以 `-1` 标记待回填行；重试只处理标记行，不改动用户已保存的第 0 位
 - `src/store/contract/` 与 `src/libsql_store/impl_methods/` 分组组装 Store 接口和实现；`schema/migrations.rs` 保存共享表升级链。旧大脑专属表不再创建，历史数据由经过核准的维护清单单独清理。
 

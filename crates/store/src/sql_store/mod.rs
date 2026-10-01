@@ -17,11 +17,12 @@ use sqlx::MySqlPool;
 
 use crate::project::ProjectStore;
 use crate::project_types::{
-    ProjectGoalPatch, ProjectGoalRecord, ProjectMilestonePatch, ProjectMilestoneRecord,
+    ProjectGoalPatch, ProjectGoalRecord, ProjectInitiativePatch, ProjectInitiativeRecord,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPatch, ProjectTodoRunRecord,
     ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
+mod catalog;
 pub mod ddl;
 mod project_crud;
 mod project_crud_runs;
@@ -140,6 +141,44 @@ impl ProjectStore for SqlProjectStore {
         project_links::unlink(&self.pool, self.starrocks, todo_id, execution_id).await
     }
 
+    async fn list_tags(&self) -> Result<Vec<crate::project::ProjectTag>> {
+        catalog::tags(&self.pool, self.starrocks).await
+    }
+    async fn list_todo_tags(&self) -> Result<Vec<crate::project::ProjectTodoTag>> {
+        catalog::links(&self.pool, self.starrocks).await
+    }
+    async fn write_tag(&self, tag: &crate::project::ProjectTag) -> Result<()> {
+        catalog::mutate(&self.pool, self.starrocks, catalog::Change::Tag(tag))
+            .await
+            .map(|_| ())
+    }
+    async fn delete_tag(&self, id: &str) -> Result<bool> {
+        catalog::mutate(&self.pool, self.starrocks, catalog::Change::DeleteTag(id)).await
+    }
+    async fn create_todo_tagged(&self, rec: &ProjectTodoRecord, ids: &[String]) -> Result<()> {
+        catalog::mutate(
+            &self.pool,
+            self.starrocks,
+            catalog::Change::CreateTodo(rec, ids),
+        )
+        .await
+        .map(|_| ())
+    }
+    async fn patch_todo_tagged(
+        &self,
+        id: &str,
+        patch: &ProjectTodoPatch,
+        ids: Option<&[String]>,
+        now: i64,
+    ) -> Result<bool> {
+        catalog::mutate(
+            &self.pool,
+            self.starrocks,
+            catalog::Change::PatchTodo(id, patch, ids, now),
+        )
+        .await
+    }
+
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> Result<()> {
         project_crud::create_goal(&self.pool, self.starrocks, rec).await
     }
@@ -147,55 +186,59 @@ impl ProjectStore for SqlProjectStore {
         project_crud::patch_goal(&self.pool, self.starrocks, id, patch, now_ms).await
     }
     async fn delete_goal(&self, id: &str) -> Result<bool> {
-        project_crud::delete_goal(&self.pool, self.starrocks, id).await
+        catalog::mutate(&self.pool, self.starrocks, catalog::Change::DeleteGoal(id)).await
     }
     async fn list_goals(&self) -> Result<Vec<ProjectGoalRecord>> {
         project_crud::list_goals(&self.pool, self.starrocks).await
     }
 
-    async fn create_milestone(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
-        project_crud::create_milestone(&self.pool, self.starrocks, rec, "milestone").await
-    }
-    async fn patch_milestone(
-        &self,
-        id: &str,
-        patch: &ProjectMilestonePatch,
-        now_ms: i64,
-    ) -> Result<bool> {
-        project_crud::patch_milestone(&self.pool, self.starrocks, id, patch, now_ms, "milestone")
-            .await
-    }
-    async fn delete_milestone(&self, id: &str) -> Result<bool> {
-        project_crud::delete_milestone(&self.pool, self.starrocks, id, "milestone").await
-    }
-    async fn list_milestones(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
-        project_crud::list_milestones(&self.pool, self.starrocks, goal_id, "milestone").await
-    }
-
-    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
-        project_crud::create_milestone(&self.pool, self.starrocks, rec, "initiative").await
+    async fn create_initiative(&self, rec: &ProjectInitiativeRecord) -> Result<()> {
+        project_crud::create_initiative(&self.pool, self.starrocks, rec).await
     }
     async fn patch_initiative(
         &self,
         id: &str,
-        patch: &ProjectMilestonePatch,
+        patch: &ProjectInitiativePatch,
         now_ms: i64,
     ) -> Result<bool> {
-        project_crud::patch_milestone(&self.pool, self.starrocks, id, patch, now_ms, "initiative")
-            .await
+        catalog::mutate(
+            &self.pool,
+            self.starrocks,
+            catalog::Change::PatchInitiative(id, patch, now_ms),
+        )
+        .await
     }
     async fn delete_initiative(&self, id: &str) -> Result<bool> {
-        project_crud::delete_milestone(&self.pool, self.starrocks, id, "initiative").await
+        catalog::mutate(
+            &self.pool,
+            self.starrocks,
+            catalog::Change::DeleteInitiative(id),
+        )
+        .await
     }
-    async fn list_initiatives(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
-        project_crud::list_milestones(&self.pool, self.starrocks, goal_id, "initiative").await
+    async fn list_initiatives(
+        &self,
+        goal_id: Option<&str>,
+    ) -> Result<Vec<ProjectInitiativeRecord>> {
+        project_crud::list_initiatives(&self.pool, self.starrocks, goal_id).await
     }
 
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> Result<()> {
-        project_crud_todo::create_todo(&self.pool, self.starrocks, rec).await
+        catalog::mutate(
+            &self.pool,
+            self.starrocks,
+            catalog::Change::CreateTodo(rec, &[]),
+        )
+        .await
+        .map(|_| ())
     }
     async fn patch_todo(&self, id: &str, patch: &ProjectTodoPatch, now_ms: i64) -> Result<bool> {
-        project_crud_todo::patch_todo(&self.pool, self.starrocks, id, patch, now_ms).await
+        catalog::mutate(
+            &self.pool,
+            self.starrocks,
+            catalog::Change::PatchTodo(id, patch, None, now_ms),
+        )
+        .await
     }
     async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool> {
         project_crud_todo::claim_todo_running(&self.pool, self.starrocks, id, now_ms).await
@@ -224,15 +267,28 @@ impl ProjectStore for SqlProjectStore {
     async fn get_todo(&self, id: &str) -> Result<Option<ProjectTodoRecord>> {
         project_crud_todo::get_todo(&self.pool, self.starrocks, id).await
     }
-    async fn reorder_todos(&self, board_status: &str, ids: &[String], now_ms: i64) -> Result<()> {
-        project_crud_todo::reorder_todos(&self.pool, self.starrocks, board_status, ids, now_ms)
-            .await
+    async fn reorder_todos(
+        &self,
+        initiative_id: Option<&str>,
+        board_status: &str,
+        ids: &[String],
+        now_ms: i64,
+    ) -> Result<()> {
+        catalog::reorder_todos(
+            &self.pool,
+            self.starrocks,
+            initiative_id,
+            board_status,
+            ids,
+            now_ms,
+        )
+        .await
     }
     async fn get_todo_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoSummary>> {
         project_crud_todo::get_todo_summary(&self.pool, self.starrocks, id).await
     }
-    async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>> {
-        project_crud_todo::list_todos(&self.pool, self.starrocks, milestone_id).await
+    async fn list_todos(&self, initiative_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>> {
+        project_crud_todo::list_todos(&self.pool, self.starrocks, initiative_id).await
     }
 
     async fn create_todo_run(&self, rec: &ProjectTodoRunRecord) -> Result<()> {

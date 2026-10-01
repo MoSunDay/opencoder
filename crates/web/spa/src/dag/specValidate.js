@@ -16,6 +16,14 @@ export const MAX_HOW_APPEND_BYTES = 8 * 1024;
 /// MAX_CONCURRENCY; default_concurrency is 4 server-side).
 export const MAX_CONCURRENCY = 30;
 
+const RESERVED_STEPS = new Set(['workspace', 'upper', 'work', 'bundle', 'private', 'runc-state', 'rootfs-upper', 'rootfs-work', 'resources']);
+
+function unknownFields(value, allowed, where, problems) {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) problems.push(where + ' 不支持字段: ' + key);
+  }
+}
+
 /// parseSpecDraft(text) → {spec} on success or {error} with a readable
 /// Chinese message (JSON.parse's own message is English/noisy).
 export function parseSpecDraft(text) {
@@ -50,6 +58,7 @@ export function validateSpec(spec) {
       problems.push(`spec.max_concurrency 必须是 1..=${MAX_CONCURRENCY} 的整数`);
     }
   }
+  unknownFields(spec, ['name', 'description', 'steps', 'max_concurrency'], 'spec', problems);
   if (typeof spec.name !== 'string' || !spec.name.trim()) {
     problems.push('spec.name 必须是非空字符串');
   }
@@ -67,7 +76,8 @@ export function validateSpec(spec) {
       problems.push(where + ' 必须是对象');
       return;
     }
-    if (typeof s.name !== 'string' || !SLUG_RE.test(s.name)) {
+    unknownFields(s, ['name', 'kind', 'depends_on', 'timeout_secs', 'trigger_rule'], where, problems);
+    if (typeof s.name !== 'string' || !SLUG_RE.test(s.name) || RESERVED_STEPS.has(s.name)) {
       problems.push(where + '.name 必须匹配 [a-z0-9][a-z0-9-]{0,63}: ' + JSON.stringify(s.name));
     } else if (names.has(s.name)) {
       problems.push(where + '.name 重复: ' + s.name);
@@ -82,17 +92,20 @@ export function validateSpec(spec) {
       problems.push(where + '.trigger_rule 必须是 all_success | all_done');
     }
     if (kind.type === 'dynamic') {
+      unknownFields(kind, ['type', 'source', 'template', 'failure_policy'], where + '.kind', problems);
       if (kind.failure_policy !== undefined && !['fail_fast', 'collect_all'].includes(kind.failure_policy)) {
         problems.push(where + '.kind.failure_policy 必须是 fail_fast | collect_all');
       }
       const source = kind.source || {};
+      unknownFields(source, source.type === 'input' ? ['type', 'pointer'] : ['type', 'pointer', 'step'], where + '.source', problems);
       if (!['input', 'step_output'].includes(source.type)) problems.push(where + ' 派生来源必须是 input | step_output');
       if (typeof source.pointer !== 'string' || (source.pointer && !source.pointer.startsWith('/')) || /~(?![01])/u.test(source.pointer)) problems.push(where + ' 数组路径必须是有效 JSON pointer');
-      if (source.type === 'step_output' && !(s.depends_on || []).includes(source.step)) problems.push(where + ' 上游来源必须在 depends_on 中');
+      if (source.type === 'step_output' && !dependsOn(s).includes(source.step)) problems.push(where + ' 上游来源必须在 depends_on 中');
       kind = kind.template || {};
-      if (!['agent', 'wasm'].includes(kind.type)) problems.push(where + ' 动态模板必须是 agent | wasm');
+      if (!['agent', 'binary'].includes(kind.type)) problems.push(where + ' 动态模板必须是 agent | binary');
     }
     if (kind.type === 'agent') {
+      unknownFields(kind, ['type', 'prompt', 'agent', 'model', 'how_append'], where + '.kind', problems);
       if (typeof kind.prompt !== 'string' || !kind.prompt.trim()) {
         problems.push(where + ' (agent) 需要 non-empty kind.prompt');
       }
@@ -111,15 +124,17 @@ export function validateSpec(spec) {
           );
         }
       }
-    } else if (kind.type === 'wasm') {
-      if (typeof kind.command !== 'string' || !kind.command.trim()) {
-        problems.push(where + ' (wasm) 需要 non-empty kind.command');
+    } else if (kind.type === 'binary') {
+      unknownFields(kind, ['type', 'resource', 'args'], where + '.kind', problems);
+      if (typeof kind.resource !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,47}(?:@v[1-9][0-9]*)?$/.test(kind.resource) || Number(kind.resource.split('@v')[1] || 1) > 4294967295) {
+        problems.push(where + ' (binary) 需要有效的 kind.resource');
       }
-      if (kind.sandbox !== undefined && !['in_process', 'runc'].includes(kind.sandbox)) {
-        problems.push(where + '.kind.sandbox 只能是 in_process | runc');
+      if (kind.args !== undefined && (!Array.isArray(kind.args) || kind.args.some((arg) => typeof arg !== 'string' || arg.includes('\0')))) {
+        problems.push(where + '.kind.args 必须是字符串数组');
       }
+      if (kind.sandbox !== undefined || kind.command !== undefined) problems.push(where + ' 包含已移除的字段');
     } else {
-      problems.push(where + '.kind.type 必须是 agent | wasm | dynamic');
+      problems.push(where + '.kind.type 必须是 agent | binary | dynamic');
     }
     if (s.timeout_secs !== undefined && !(Number.isInteger(s.timeout_secs) && s.timeout_secs > 0)) {
       problems.push(where + '.timeout_secs 必须是正整数');

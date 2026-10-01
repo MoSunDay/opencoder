@@ -41,7 +41,7 @@ use opencoder_core::agent::{builtin_agents, read_agent_meta, scope, RunMode};
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use opencoder_core::{Config, Message};
 use opencoder_dag_runtime::exec::how_append;
-use opencoder_dag_runtime::sandbox::oci::{write_bundle, ArgvStyle, BundleSpec};
+use opencoder_dag_runtime::sandbox::oci::{write_bundle, BundleSpec};
 use opencoder_dag_runtime::sandbox::runc::{run_step_streamed, runc_available};
 use opencoder_session::handoff;
 use serde_json::{json, Value};
@@ -173,6 +173,26 @@ pub(super) async fn run_round(
         session_dir.join("messages.json"),
         serde_json::to_vec(&prior)?,
     )?;
+    let mut runtime = worker
+        .inner
+        .state
+        .store
+        .harness_runtime(&id)
+        .await?
+        .unwrap_or_default();
+    runtime.literal_mentions = input["literal_mentions"]
+        .as_bool()
+        .unwrap_or(runtime.literal_mentions);
+    worker
+        .inner
+        .state
+        .store
+        .set_harness_runtime(&id, &runtime)
+        .await?;
+    std::fs::write(
+        session_dir.join("harness.json"),
+        serde_json::to_vec(&runtime)?,
+    )?;
     std::fs::write(session_dir.join("events.ndjson"), b"")?;
     std::fs::write(run_root.join("prompt.txt"), &prompt)?;
     // The runner resolves its LLM endpoint from the injected env (the
@@ -207,7 +227,6 @@ pub(super) async fn run_round(
         timeout_hint: None,
         knowledge: None,
         agents: config.agent.agents_dir.clone(),
-        argv: ArgvStyle::Direct,
     };
     // Bundles live outside the run root (which the guest sees as
     // /workspace/context) and are rebuilt per turn.

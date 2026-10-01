@@ -34,8 +34,8 @@ fn parse_known_commands() {
     assert_eq!(parse("/mcp"), Some(SlashAction::Mcp));
     assert_eq!(parse("/skill"), Some(SlashAction::Skill));
     assert_eq!(parse("/sk"), Some(SlashAction::Skill));
-    // Agent commands are not exposed in the TUI yet.
-    assert_eq!(parse("/agent"), None);
+    assert_eq!(parse("/agent"), Some(SlashAction::Agent));
+    assert_eq!(parse("/tasks"), Some(SlashAction::Task));
     assert_eq!(parse("/agent writer"), None);
     assert_eq!(parse("/"), Some(SlashAction::Task));
     assert_eq!(parse("/unknown"), None);
@@ -44,11 +44,11 @@ fn parse_known_commands() {
 }
 
 #[test]
-fn agent_entry_is_hidden_from_picker() {
-    assert!(!COMMANDS.iter().any(|(name, _)| *name == "/agent"));
+fn agent_entry_is_available_in_picker() {
+    assert!(COMMANDS.iter().any(|(name, _)| *name == "/agent"));
     let mut m = CommandMenu::new();
     m.paste("agent");
-    assert_ne!(m.selected_action(), Some(SlashAction::Agent));
+    assert_eq!(m.selected_action(), Some(SlashAction::Agent));
 }
 
 #[test]

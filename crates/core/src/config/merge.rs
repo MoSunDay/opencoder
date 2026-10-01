@@ -9,6 +9,7 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         None => return false,
     };
     if obj.contains_key("model")
+        || obj.contains_key("opencoder_server")
         || obj.contains_key("small_model")
         || obj.contains_key("embedding_model")
         || obj.contains_key("embedding_provider")
@@ -135,6 +136,14 @@ fn legacy_domain_keys(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<&
 /// keys present in `value` are overwritten; everything else is left as-is.
 pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
     if let Some(obj) = value.as_object() {
+        if let Some(server) = obj.get("opencoder_server") {
+            if let Some(enabled) = server.get("enabled").and_then(|v| v.as_bool()) {
+                cfg.opencoder_server.enabled = enabled;
+            }
+            if let Some(url) = server.get("url").and_then(|v| v.as_str()) {
+                cfg.opencoder_server.url = url.to_owned();
+            }
+        }
         // Legacy domain keys are hard-cut below (silent, pinned by test);
         // surface a one-shot migration hint so the drop is visible. Every
         // production caller feeds config.json-shaped candidates here —
@@ -305,38 +314,36 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 }
             }
         }
-        // DAG block mirrors the agent one: `wasm_dir` + a partial `nfs`
+        // DAG block mirrors the agent one: `binary_dir` + a partial `nfs`
         // object whose serde defaults fill the rest
         // (`{"dag":{"nfs":{"port":0}}}` only overrides the port).
         if let Some(d) = obj.get("dag").and_then(|v| v.as_object()) {
             // A malformed or cleared authority disables device workflows; never
             // retain an earlier credential endpoint after an invalid override.
-            if let Some(manager) = d.get("device_manager") {
-                cfg.dag.device_manager = serde_json::from_value(manager.clone()).ok();
+            if let Some(dir) = d.get("binary_dir").and_then(|v| v.as_str()) {
+                cfg.dag.binary_dir = Some(std::path::PathBuf::from(dir));
             }
-            if let Some(dir) = d.get("wasm_dir").and_then(|v| v.as_str()) {
-                cfg.dag.wasm_dir = Some(std::path::PathBuf::from(dir));
+            for (key, target) in [
+                ("workspace_dir", &mut cfg.dag.workspace_dir),
+                ("rootfs_dir", &mut cfg.dag.rootfs_dir),
+                ("data_dir", &mut cfg.dag.data_dir),
+            ] {
+                if let Some(value) = d.get(key).and_then(|value| value.as_str()) {
+                    *target = Some(std::path::PathBuf::from(value));
+                }
+            }
+            if let Some(value) = d.get("workspace_nfs") {
+                if let Ok(parsed) = serde_json::from_value(value.clone()) {
+                    cfg.dag.workspace_nfs = parsed;
+                }
             }
             if let Some(root) = d.get("knowledge_root").and_then(|v| v.as_str()) {
                 cfg.dag.knowledge_root = Some(std::path::PathBuf::from(root));
             }
-            if let Some(sandbox) = d.get("agent_sandbox") {
-                if let Ok(parsed) =
-                    serde_json::from_value::<crate::config::dag::AgentSandbox>(sandbox.clone())
-                {
-                    cfg.dag.agent_sandbox = parsed;
-                }
-            }
+
             if let Some(n) = d.get("nfs") {
                 if let Ok(parsed) = serde_json::from_value(n.clone()) {
                     cfg.dag.nfs = parsed;
-                }
-            }
-            // The op registry replaces as a whole map: partial per-op
-            // merging would silently blend two operators' intents.
-            if let Some(ops) = d.get("ops") {
-                if let Ok(parsed) = serde_json::from_value(ops.clone()) {
-                    cfg.dag.ops = parsed;
                 }
             }
         }
@@ -581,47 +588,18 @@ mod tests {
         assert!(cfg.agent.nfs.read_only);
     }
 
-    /// The `dag` block (wasm pool root + nfs exposure) must merge from
-    /// disk: without it `dag.wasm_dir` was silently dropped and the
-    /// serving daemons always fell back to the data-dir default pool.
-    /// `dag.ops` merges as a whole-map replacement and stays empty when no
-    /// file mentions it (fail-closed default: nothing registered).
     #[test]
-    fn merge_dag_block_ops_registry() {
-        let mut cfg = Config::default();
-        merge_into(
-            &mut cfg,
-            serde_json::json!({ "dag": { "ops": { "noop": { "command": "/bin/true" } } } }),
-        );
-        assert_eq!(cfg.dag.ops.len(), 1);
-        assert_eq!(cfg.dag.ops["noop"].command, "/bin/true");
-        assert!(cfg.dag.ops["noop"].env_keys.is_empty());
-        // A later file replacing the registry swaps it wholesale.
-        merge_into(
-            &mut cfg,
-            serde_json::json!({ "dag": { "ops": {
-                "probe": { "command": "/bin/true", "env_keys": ["A"] } } } }),
-        );
-        assert_eq!(cfg.dag.ops.len(), 1);
-        assert_eq!(cfg.dag.ops["probe"].env_keys, vec!["A".to_string()]);
-        // Files without a dag block never invent an op.
-        let mut fresh = Config::default();
-        merge_into(&mut fresh, serde_json::json!({ "model": "x" }));
-        assert!(fresh.dag.ops.is_empty());
-    }
-
-    #[test]
-    fn merge_dag_block_wasm_dir_and_nfs() {
+    fn merge_dag_block_binary_dir_and_nfs() {
         let mut cfg = Config::default();
         merge_into(
             &mut cfg,
             serde_json::json!({
-                "dag": { "wasm_dir": "/custom/wasm", "nfs": { "enabled": true, "port": 0 } }
+                "dag": { "binary_dir": "/custom/binaries", "nfs": { "enabled": true, "port": 0 } }
             }),
         );
         assert_eq!(
-            cfg.dag.wasm_dir.as_deref(),
-            Some(std::path::Path::new("/custom/wasm"))
+            cfg.dag.binary_dir.as_deref(),
+            Some(std::path::Path::new("/custom/binaries"))
         );
         assert!(cfg.dag.nfs.enabled);
         assert_eq!(cfg.dag.nfs.port, 0);
@@ -634,15 +612,11 @@ mod tests {
         let mut cfg = Config::default();
         merge_into(
             &mut cfg,
-            serde_json::json!({ "dag": { "knowledge_root": "/kb/root", "agent_sandbox": "runc" } }),
+            serde_json::json!({ "dag": { "knowledge_root": "/kb/root" } }),
         );
         assert_eq!(
             cfg.dag.knowledge_root.as_deref(),
             Some(std::path::Path::new("/kb/root"))
-        );
-        assert_eq!(
-            cfg.dag.agent_sandbox,
-            crate::config::dag::AgentSandbox::Runc
         );
 
         // A partial dag block leaves the rest at defaults (no leakage
@@ -652,12 +626,9 @@ mod tests {
             &mut cfg,
             serde_json::json!({ "dag": { "nfs": { "port": 1 } } }),
         );
-        assert_eq!(cfg.dag.wasm_dir, None);
+        assert_eq!(cfg.dag.binary_dir, None);
         assert_eq!(cfg.dag.knowledge_root, None);
-        assert_eq!(
-            cfg.dag.agent_sandbox,
-            crate::config::dag::AgentSandbox::Host
-        );
+
         assert!(!cfg.dag.nfs.enabled);
         assert_eq!(cfg.dag.nfs.port, 1);
     }
@@ -669,24 +640,5 @@ mod tests {
         assert!(cfg.local_memory);
         merge_into(&mut cfg, serde_json::json!({"local_memory": false}));
         assert!(!cfg.local_memory);
-    }
-
-    #[test]
-    fn device_manager_config_loads_whole_authority_and_invalid_override_disables_it() {
-        let mut cfg = Config::default();
-        merge_into(
-            &mut cfg,
-            serde_json::json!({"dag":{"device_manager":{
-            "host_endpoint":"http://127.0.0.1:18109", "step_endpoint":"http://127.0.0.1:18109", "token_file":"/private/device-token"}}}),
-        );
-        assert_eq!(
-            cfg.dag.device_manager.as_ref().unwrap().token_file,
-            std::path::PathBuf::from("/private/device-token")
-        );
-        merge_into(
-            &mut cfg,
-            serde_json::json!({"dag":{"device_manager":{"host_endpoint":"invalid-partial"}}}),
-        );
-        assert!(cfg.dag.device_manager.is_none());
     }
 }

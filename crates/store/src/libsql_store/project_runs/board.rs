@@ -6,6 +6,7 @@ use libsql::{Connection, Value};
 // One SQL statement moves and reorders a destination lane atomically.
 pub async fn reorder_todos(
     conn: &Connection,
+    initiative_id: Option<&str>,
     board_status: &str,
     ids: &[String],
     now_ms: i64,
@@ -25,8 +26,9 @@ pub async fn reorder_todos(
     }
     values.push(now_ms.into());
     values.extend(ids.iter().map(|id| Value::from(id.as_str())));
+    values.push(initiative_id.map(Value::from).unwrap_or(Value::Null));
     let marks = vec!["?"; ids.len()].join(",");
-    let sql = format!("UPDATE project_todos SET board_status = ?, position = CASE {} END, updated_at = ? WHERE id IN ({marks})", cases.join(" "));
+    let sql = format!("UPDATE project_todos SET board_status = ?, position = CASE {} END, updated_at = ? WHERE id IN ({marks}) AND initiative_id IS ?", cases.join(" "));
     super::super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let changed = conn.execute(&sql, values).await?;
         anyhow::ensure!(

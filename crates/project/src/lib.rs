@@ -1,4 +1,4 @@
-//! 用户策划的项目跟踪模块：目标(goal) → 里程碑(milestone) → 待办(todo)。
+//! 用户策划的项目跟踪模块：目标(goal) → 专项(initiative) → 待办(todo)。
 //!
 //! 每个待办携带一份粗略草稿(draft)；计划运行(`start_plan`)让 plan 代理把草稿
 //! 整理成可执行的实施方案(markdown)，执行运行(`start_execute`)驱动主代理在

@@ -1,4 +1,4 @@
-//! Project-module persistence — goals & milestones CRUD (libsql).
+//! Project-module persistence — goals & initiatives CRUD (libsql).
 //!
 //! Free functions over a raw `Connection`, mirroring sibling submodules;
 //! multi-statement deletes run via [`super::tx::run_tx`] (`BEGIN IMMEDIATE`)
@@ -10,15 +10,16 @@ use anyhow::{Context, Result};
 use libsql::{params, Connection, Value};
 
 use super::LibsqlStore;
+mod tags;
 use crate::project::ProjectStore;
 use crate::project_types::{
-    ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectMilestonePatch,
-    ProjectMilestoneRecord, ProjectMilestoneStatus, ProjectTodoPatch, ProjectTodoRecord,
+    ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus, ProjectInitiativePatch,
+    ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectTodoPatch, ProjectTodoRecord,
     ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
 const GOAL_COLS: &str = "id, title, detail_md, status, sort_key, created_at, updated_at";
-const MILESTONE_COLS: &str =
+const INITIATIVE_COLS: &str =
     "id, goal_id, title, detail_md, status, sort_key, created_at, updated_at";
 
 // ---- goals ----
@@ -78,19 +79,26 @@ pub async fn patch_goal(
     Ok(n > 0)
 }
 
-/// Delete the goal, preserving its milestones, TODOs and runs.
+/// Delete the goal, preserving its initiatives, TODOs and runs.
 pub async fn delete_goal(conn: &Connection, id: &str) -> Result<bool> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         if !exists(conn, "SELECT 1 FROM project_goals WHERE id = ?1", id).await? {
             return Ok(false);
         }
+        let previous_tags = tags::list(conn).await?;
         conn.execute(
-            "UPDATE project_milestones SET goal_id = NULL WHERE goal_id = ?1",
+            "UPDATE project_initiatives SET goal_id = NULL WHERE goal_id = ?1",
             params![id],
         )
         .await?;
         conn.execute("DELETE FROM project_goals WHERE id = ?1", params![id])
             .await?;
+        conn.execute(
+            "DELETE FROM project_tags WHERE scope_type='project' AND scope_id=?",
+            params![id],
+        )
+        .await?;
+        tags::reconcile(conn, &previous_tags, None).await?;
         Ok(true)
     })
     .await
@@ -124,15 +132,11 @@ fn row_to_goal(r: &libsql::Row) -> Result<ProjectGoalRecord> {
     })
 }
 
-// ---- milestones ----
+// ---- initiatives ----
 
-pub async fn create_milestone(
-    conn: &Connection,
-    rec: &ProjectMilestoneRecord,
-    kind: &str,
-) -> Result<()> {
+pub async fn create_initiative(conn: &Connection, rec: &ProjectInitiativeRecord) -> Result<()> {
     conn.execute(
-        "INSERT INTO project_milestones (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at, kind) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO project_initiatives (id, goal_id, title, detail_md, status, sort_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
         params![
             rec.id.as_str(),
             rec.goal_id.as_deref(),
@@ -141,21 +145,19 @@ pub async fn create_milestone(
             rec.status.as_str(),
             rec.sort,
             rec.created_at,
-            rec.updated_at,
-            kind
+            rec.updated_at
         ],
     )
     .await
-    .context("insert project milestone")?;
+    .context("insert project initiative")?;
     Ok(())
 }
 
-pub async fn patch_milestone(
+pub async fn patch_initiative(
     conn: &Connection,
     id: &str,
-    patch: &ProjectMilestonePatch,
+    patch: &ProjectInitiativePatch,
     now_ms: i64,
-    kind: &str,
 ) -> Result<bool> {
     let mut sets: Vec<&'static str> = Vec::new();
     let mut vals: Vec<Value> = Vec::new();
@@ -182,25 +184,24 @@ pub async fn patch_milestone(
     sets.push("updated_at = ?");
     vals.push(now_ms.into());
     let sql = format!(
-        "UPDATE project_milestones SET {} WHERE id = ? AND kind = ?",
+        "UPDATE project_initiatives SET {} WHERE id = ?",
         sets.join(", ")
     );
     vals.push(id.into());
-    vals.push(kind.into());
     let n = conn
         .execute(&sql, vals)
         .await
-        .context("patch project milestone")?;
+        .context("patch project initiative")?;
     Ok(n > 0)
 }
 
-/// Only empty milestones can be deleted; associations must be changed explicitly.
-pub async fn delete_milestone(conn: &Connection, id: &str, kind: &str) -> Result<bool> {
+/// Only empty initiatives can be deleted; associations must be changed explicitly.
+pub async fn delete_initiative(conn: &Connection, id: &str) -> Result<bool> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let stmt = conn
-            .prepare("SELECT 1 FROM project_milestones WHERE id = ?1 AND kind = ?2")
+            .prepare("SELECT 1 FROM project_initiatives WHERE id = ?1")
             .await?;
-        let mut rows = stmt.query(params![id, kind]).await?;
+        let mut rows = stmt.query(params![id]).await?;
         let found = rows.next().await?.is_some();
         drop(rows);
         if !found {
@@ -208,15 +209,22 @@ pub async fn delete_milestone(conn: &Connection, id: &str, kind: &str) -> Result
         }
         if exists(
             conn,
-            "SELECT 1 FROM project_todos WHERE milestone_id = ?1",
+            "SELECT 1 FROM project_todos WHERE initiative_id = ?1",
             id,
         )
         .await?
         {
-            return Err(crate::project::MilestoneNotEmpty.into());
+            return Err(crate::project::InitiativeNotEmpty.into());
         }
-        conn.execute("DELETE FROM project_milestones WHERE id = ?1", params![id])
+        conn.execute("DELETE FROM project_initiatives WHERE id = ?1", params![id])
             .await?;
+        let previous = tags::list(conn).await?;
+        conn.execute(
+            "DELETE FROM project_tags WHERE scope_type='initiative' AND scope_id=?",
+            params![id],
+        )
+        .await?;
+        tags::reconcile(conn, &previous, None).await?;
         Ok(true)
     })
     .await
@@ -224,36 +232,35 @@ pub async fn delete_milestone(conn: &Connection, id: &str, kind: &str) -> Result
 
 /// `goal_id == None` lists across all goals; ordered by `sort_key` then
 /// `created_at`.
-pub async fn list_milestones(
+pub async fn list_initiatives(
     conn: &Connection,
     goal_id: Option<&str>,
-    kind: &str,
-) -> Result<Vec<ProjectMilestoneRecord>> {
-    let mut sql = format!("SELECT {MILESTONE_COLS} FROM project_milestones WHERE kind = ?");
+) -> Result<Vec<ProjectInitiativeRecord>> {
+    let mut sql = format!("SELECT {INITIATIVE_COLS} FROM project_initiatives ");
     if goal_id.is_some() {
-        sql.push_str(" AND goal_id = ?");
+        sql.push_str(" WHERE goal_id = ?");
     }
     sql.push_str(" ORDER BY sort_key, created_at");
     let stmt = conn.prepare(&sql).await?;
     let mut rows = match goal_id {
-        Some(g) => stmt.query(params![kind, g]).await?,
-        None => stmt.query(params![kind]).await?,
+        Some(g) => stmt.query(params![g]).await?,
+        None => stmt.query(()).await?,
     };
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
-        out.push(row_to_milestone(&r)?);
+        out.push(row_to_initiative(&r)?);
     }
     Ok(out)
 }
 
-fn row_to_milestone(r: &libsql::Row) -> Result<ProjectMilestoneRecord> {
-    Ok(ProjectMilestoneRecord {
+fn row_to_initiative(r: &libsql::Row) -> Result<ProjectInitiativeRecord> {
+    Ok(ProjectInitiativeRecord {
         id: r.get(0)?,
         goal_id: r.get(1)?,
         title: r.get(2)?,
         detail_md: r.get(3)?,
-        status: ProjectMilestoneStatus::parse(&r.get::<String>(4)?)
-            .context("project_milestones.status")?,
+        status: ProjectInitiativeStatus::parse(&r.get::<String>(4)?)
+            .context("project_initiatives.status")?,
         sort: r.get(5)?,
         created_at: r.get(6)?,
         updated_at: r.get(7)?,
@@ -273,6 +280,37 @@ async fn exists(conn: &Connection, sql: &str, id: &str) -> Result<bool> {
 impl ProjectStore for LibsqlStore {
     fn project_backend_name(&self) -> &'static str {
         "libsql"
+    }
+
+    async fn list_tags(&self) -> Result<Vec<crate::project::ProjectTag>> {
+        let _guard = self.db_lock.lock().await;
+        tags::list(&self.conn().await?).await
+    }
+    async fn list_todo_tags(&self) -> Result<Vec<crate::project::ProjectTodoTag>> {
+        let _guard = self.db_lock.lock().await;
+        tags::links(&self.conn().await?).await
+    }
+    async fn write_tag(&self, tag: &crate::project::ProjectTag) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        tags::write(&self.conn().await?, tag).await
+    }
+    async fn delete_tag(&self, id: &str) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        tags::delete(&self.conn().await?, id).await
+    }
+    async fn create_todo_tagged(&self, rec: &ProjectTodoRecord, ids: &[String]) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        tags::create_todo(&self.conn().await?, rec, ids).await
+    }
+    async fn patch_todo_tagged(
+        &self,
+        id: &str,
+        patch: &ProjectTodoPatch,
+        ids: Option<&[String]>,
+        now: i64,
+    ) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        tags::patch_todo(&self.conn().await?, id, patch, ids, now).await
     }
 
     async fn list_todo_assignments(
@@ -345,63 +383,48 @@ impl ProjectStore for LibsqlStore {
         list_goals(&conn).await
     }
 
-    async fn create_milestone(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
+    async fn create_initiative(&self, rec: &ProjectInitiativeRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
-        let conn = self.conn().await?;
-        create_milestone(&conn, rec, "milestone").await
-    }
-    async fn patch_milestone(
-        &self,
-        id: &str,
-        patch: &ProjectMilestonePatch,
-        now_ms: i64,
-    ) -> Result<bool> {
-        let _guard = self.db_lock.lock().await;
-        let conn = self.conn().await?;
-        patch_milestone(&conn, id, patch, now_ms, "milestone").await
-    }
-    async fn delete_milestone(&self, id: &str) -> Result<bool> {
-        let _guard = self.db_lock.lock().await;
-        let conn = self.conn().await?;
-        delete_milestone(&conn, id, "milestone").await
-    }
-    async fn list_milestones(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
-        let _guard = self.db_lock.lock().await;
-        let conn = self.conn().await?;
-        list_milestones(&conn, goal_id, "milestone").await
-    }
-
-    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> Result<()> {
-        let _guard = self.db_lock.lock().await;
-        create_milestone(&self.conn().await?, rec, "initiative").await
+        create_initiative(&self.conn().await?, rec).await
     }
     async fn patch_initiative(
         &self,
         id: &str,
-        patch: &ProjectMilestonePatch,
+        patch: &ProjectInitiativePatch,
         now_ms: i64,
     ) -> Result<bool> {
         let _guard = self.db_lock.lock().await;
-        patch_milestone(&self.conn().await?, id, patch, now_ms, "initiative").await
+        let conn = self.conn().await?;
+        super::tx::run_tx(&conn, "BEGIN IMMEDIATE", || async {
+            let changed = patch_initiative(&conn, id, patch, now_ms).await?;
+            if changed && patch.goal_id.is_some() {
+                tags::reconcile(&conn, &[], None).await?;
+            }
+            Ok(changed)
+        })
+        .await
     }
     async fn delete_initiative(&self, id: &str) -> Result<bool> {
         let _guard = self.db_lock.lock().await;
-        delete_milestone(&self.conn().await?, id, "initiative").await
+        delete_initiative(&self.conn().await?, id).await
     }
-    async fn list_initiatives(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>> {
+    async fn list_initiatives(
+        &self,
+        goal_id: Option<&str>,
+    ) -> Result<Vec<ProjectInitiativeRecord>> {
         let _guard = self.db_lock.lock().await;
-        list_milestones(&self.conn().await?, goal_id, "initiative").await
+        list_initiatives(&self.conn().await?, goal_id).await
     }
 
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        super::project_runs::create_todo(&conn, rec).await
+        tags::create_todo(&conn, rec, &[]).await
     }
     async fn patch_todo(&self, id: &str, patch: &ProjectTodoPatch, now_ms: i64) -> Result<bool> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        super::project_runs::patch_todo(&conn, id, patch, now_ms).await
+        tags::patch_todo(&conn, id, patch, None, now_ms).await
     }
     async fn claim_todo_running(&self, id: &str, now_ms: i64) -> Result<bool> {
         let _guard = self.db_lock.lock().await;
@@ -438,20 +461,26 @@ impl ProjectStore for LibsqlStore {
         let conn = self.conn().await?;
         super::project_runs::get_todo(&conn, id).await
     }
-    async fn reorder_todos(&self, board_status: &str, ids: &[String], now_ms: i64) -> Result<()> {
+    async fn reorder_todos(
+        &self,
+        initiative_id: Option<&str>,
+        board_status: &str,
+        ids: &[String],
+        now_ms: i64,
+    ) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        super::project_runs::reorder_todos(&conn, board_status, ids, now_ms).await
+        super::project_runs::reorder_todos(&conn, initiative_id, board_status, ids, now_ms).await
     }
     async fn get_todo_summary(&self, id: &str) -> Result<Option<crate::ProjectTodoSummary>> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         super::project_runs::get_todo_summary(&conn, id).await
     }
-    async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>> {
+    async fn list_todos(&self, initiative_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
-        super::project_runs::list_todos(&conn, milestone_id).await
+        super::project_runs::list_todos(&conn, initiative_id).await
     }
 
     async fn create_todo_run(&self, rec: &ProjectTodoRunRecord) -> Result<()> {

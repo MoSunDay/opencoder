@@ -88,6 +88,11 @@ pub(in crate::operations) async fn inspect(
                 return Ok(steps);
             }
             result["dag_steps"] = steps.body;
+            result["dag_context"] = super::dag_context::load(worker, execution).await?;
+            if let Some(annotations) = result["annotations"].as_object_mut() {
+                annotations.remove("dag_parent");
+                annotations.remove("dag_config");
+            }
         }
         ExecutionKind::Agent | ExecutionKind::Maintenance | ExecutionKind::Operator => {
             result["session"] = session_detail(worker, id).await?.body;

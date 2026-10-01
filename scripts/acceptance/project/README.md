@@ -1,6 +1,14 @@
 # 项目工作台与执行留存验收
 
-在独立临时目录中启动构建后的 Server、两个 Node、只读 NFSv3 Agent 资源池、HTTP 模型夹具和 Chromium，覆盖项目、里程碑、关联项目与独立专项、分组 TODO 与 backlog 的真实浏览器创建，以及通过原生能力界面发起执行、关联指派记录和查看结论。模型响应由本地夹具确定性提供，不调用外部 LLM。
+工作台界面可单独使用可变 API 夹具验收，无需启动 Server 或 Node：
+
+```sh
+node scripts/acceptance/project_workbench_ui.js
+```
+
+该脚本使用当前 SPA 构建产物，检查项目、专项、TODO 三个表格在 1920、1280、768 和 390 像素宽度下的展示，项目详情与专项看板抽屉，筛选后拖动的完整顺序，Tag 分组中的同一 TODO 同步，保存失败回退，以及项目与 Tag 增删改。默认在 `/tmp/opencoder-project-ui` 保存 `receipt.json` 和截图，可用 `PROJECT_UI_ARTIFACTS` 指定输出目录。浏览器需要 SPA 的 `playwright-core` 依赖及其配套的 Chromium，也可通过 `CHROME_PATH` 指定路径。此验收使用临时 HTTP 服务与夹具凭证，不访问生产数据；存储迁移与真实接口由 Rust 测试验证。
+
+在独立临时目录中启动构建后的 Server、两个 Node、只读 NFSv3 Agent 资源池、HTTP 模型夹具和 Chromium，覆盖项目、关联项目与独立专项、分组 TODO 与 backlog 的真实浏览器创建，以及通过原生能力界面发起执行、关联指派记录和查看结论。模型响应由本地夹具确定性提供，不调用外部 LLM。
 
 先完成 SPA 构建与 `cargo build --workspace`。运行环境需要 Linux NFS 客户端、挂载权限、Python 3、支持 `Array.prototype.toReversed` 的 Node.js、SPA 的 `playwright-core` 依赖及其配套的 Chromium；旧系统 Chromium 可能不支持 `marked` 所需的 `Array.prototype.at`。临时目录所在卷须满足 Node 的存储就绪检查（至少 20% 可用空间）。
 

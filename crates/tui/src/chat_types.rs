@@ -140,6 +140,8 @@ pub struct SidecarPanel {
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct ChatView {
+    /// Current task is owned by OpenCoder Server.
+    pub remote: bool,
     pub attempt_snapshot: Option<AttemptSnapshot>,
     pub blocks: Vec<ChatBlock>,
     pub agent: String,

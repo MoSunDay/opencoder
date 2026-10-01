@@ -1,4 +1,4 @@
-//! `project` domain: user-curated goal → milestone → todo tracking with
+//! `project` domain: user-curated goal → initiative → todo tracking with
 //! per-todo plan/execute runs. Pure `plan()` mapping only; execution goes
 //! through the shared `exec_plan` transport.
 
@@ -18,14 +18,14 @@ fn required_body(raw: &str) -> Result<serde_json::Value> {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCmd {
-    /// GET /api/project/overview — nested goals→milestones→todos snapshot.
+    /// GET /api/project/overview — nested goals→initiatives→todos snapshot.
     Overview,
     /// Goal records.
     #[command(subcommand)]
     Goals(GoalsCmd),
-    /// Milestones grouped under goals.
+    /// Initiatives grouped under goals.
     #[command(subcommand)]
-    Milestones(MilestonesCmd),
+    Initiatives(InitiativesCmd),
     /// Todo lifecycle, plan/execute dispatch and run history.
     #[command(subcommand)]
     Todos(TodosCmd),
@@ -53,41 +53,41 @@ pub enum GoalsCmd {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum MilestonesCmd {
-    /// GET /api/project/milestones — one goal's milestones via --goal,
+pub enum InitiativesCmd {
+    /// GET /api/project/initiatives — one goal's initiatives via --goal,
     /// or across all goals when absent.
     List {
         /// Filter by goal id (goal_id query param).
         #[arg(long)]
         goal: Option<String>,
     },
-    /// POST /api/project/milestones — {"goal_id","title","detail_md"?,"sort"?}.
+    /// POST /api/project/initiatives — {"goal_id","title","detail_md"?,"sort"?}.
     Create {
         /// Body: inline JSON or @file.
         #[arg(long)]
         json: String,
     },
-    /// PATCH /api/project/milestones/{id}.
+    /// PATCH /api/project/initiatives/{id}.
     Patch {
         id: String,
         /// Body: inline JSON or @file.
         #[arg(long)]
         json: String,
     },
-    /// DELETE /api/project/milestones/{id}.
+    /// DELETE /api/project/initiatives/{id}.
     Delete { id: String },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum TodosCmd {
-    /// GET /api/project/todos — one milestone's todos via --milestone,
+    /// GET /api/project/todos — one initiative's todos via --initiative,
     /// or every todo (backlog included) when absent.
     List {
-        /// Filter by milestone id (milestone_id query param).
+        /// Filter by initiative id (initiative_id query param).
         #[arg(long)]
-        milestone: Option<String>,
+        initiative: Option<String>,
     },
-    /// POST /api/project/todos — {"title","draft","milestone_id"?,"agent"?,
+    /// POST /api/project/todos — {"title","draft","initiative_id"?,"agent"?,
     /// "executor_kind"?,"executor_ref"?,"executor_spec"?}.
     Create {
         /// Body: inline JSON or @file.
@@ -134,7 +134,7 @@ pub fn plan(sub: &ProjectCmd) -> Result<RequestPlan> {
     Ok(match sub {
         ProjectCmd::Overview => RequestPlan::get("/api/project/overview"),
         ProjectCmd::Goals(sub) => plan_goals(sub)?,
-        ProjectCmd::Milestones(sub) => plan_milestones(sub)?,
+        ProjectCmd::Initiatives(sub) => plan_initiatives(sub)?,
         ProjectCmd::Todos(sub) => plan_todos(sub)?,
     })
 }
@@ -152,28 +152,28 @@ fn plan_goals(sub: &GoalsCmd) -> Result<RequestPlan> {
     })
 }
 
-fn plan_milestones(sub: &MilestonesCmd) -> Result<RequestPlan> {
+fn plan_initiatives(sub: &InitiativesCmd) -> Result<RequestPlan> {
     Ok(match sub {
-        MilestonesCmd::List { goal } => {
-            RequestPlan::get("/api/project/milestones").with_opt("goal_id", goal.clone())
+        InitiativesCmd::List { goal } => {
+            RequestPlan::get("/api/project/initiatives").with_opt("goal_id", goal.clone())
         }
-        MilestonesCmd::Create { json } => {
-            RequestPlan::post("/api/project/milestones").with_body(required_body(json)?)
+        InitiativesCmd::Create { json } => {
+            RequestPlan::post("/api/project/initiatives").with_body(required_body(json)?)
         }
-        MilestonesCmd::Patch { id, json } => {
-            RequestPlan::patch(format!("/api/project/milestones/{id}"))
+        InitiativesCmd::Patch { id, json } => {
+            RequestPlan::patch(format!("/api/project/initiatives/{id}"))
                 .with_body(required_body(json)?)
         }
-        MilestonesCmd::Delete { id } => {
-            RequestPlan::delete(format!("/api/project/milestones/{id}"))
+        InitiativesCmd::Delete { id } => {
+            RequestPlan::delete(format!("/api/project/initiatives/{id}"))
         }
     })
 }
 
 fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
     Ok(match sub {
-        TodosCmd::List { milestone } => {
-            RequestPlan::get("/api/project/todos").with_opt("milestone_id", milestone.clone())
+        TodosCmd::List { initiative } => {
+            RequestPlan::get("/api/project/todos").with_opt("initiative_id", initiative.clone())
         }
         TodosCmd::Create { json } => {
             RequestPlan::post("/api/project/todos").with_body(required_body(json)?)

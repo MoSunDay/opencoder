@@ -249,14 +249,14 @@ pub fn execution_failed(
 pub fn rewind(
     spec: &WorkflowSpec,
     mut state: WorkflowState,
-    milestone_id: &str,
+    initiative_id: &str,
     reason: String,
 ) -> Result<WorkflowState> {
-    if !state.milestones.contains(milestone_id) {
-        bail!("unknown milestone TODO {milestone_id}");
+    if !state.milestones.contains(initiative_id) {
+        bail!("unknown milestone TODO {initiative_id}");
     }
     state.world_epoch += 1;
-    let affected = domain::descendants(spec, milestone_id);
+    let affected = domain::descendants(spec, initiative_id);
     for id in affected {
         if let Some(todo) = state.todos.get_mut(&id) {
             todo.status = TodoStatus::Invalidated;
@@ -273,7 +273,7 @@ pub fn rewind(
         }
         state.active_todo_ids.remove(&id);
     }
-    let milestone = item(&mut state, milestone_id)?;
+    let milestone = item(&mut state, initiative_id)?;
     milestone.status = TodoStatus::Recovering;
     milestone.accepted_generation = None;
     milestone.last_error = Some(reason.clone());
@@ -281,7 +281,7 @@ pub fn rewind(
     milestone.candidate = None;
     milestone.next_context_mode = None;
     state.incidents.push(serde_json::json!({
-        "milestone_todo_id": milestone_id,
+        "milestone_todo_id": initiative_id,
         "reason": reason,
         "world_epoch": state.world_epoch
     }));

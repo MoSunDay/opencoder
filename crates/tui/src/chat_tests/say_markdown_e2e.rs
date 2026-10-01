@@ -199,6 +199,7 @@ async fn final_say_is_markdown_rendered_after_turn_done() {
             UiEvent::Session(sev) => chat.apply(&sev),
             UiEvent::AssistantFinal(text) => chat.reconcile_completed_assistant(&text),
             UiEvent::TurnDone(_) => chat.finalize_assistant(),
+            UiEvent::RemoteSnapshot { chat: restored, .. } => chat = *restored,
         }
     }
 

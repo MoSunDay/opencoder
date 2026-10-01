@@ -2,9 +2,9 @@
 //!
 //! Registers to `opencoder-server` over an outbound channel and executes
 //! agents, teams, workflows, projects and maintenance locally: agent steps through the real
-//! session runner, wasm steps through the embedded wasmtime engine (or an
+//! session runner, binary steps through the embedded binarytime engine (or an
 //! `runc` container), artifacts under the node-local typed execution tree. The
-//! wasmtime/runc dependency chain lives ONLY here — the main `opencoder`
+//! binarytime/runc dependency chain lives ONLY here — the main `opencoder`
 //! binary and `opencoder-server` never link it.
 //!
 //! Node (client) token semantics are inherited from the node crate: the
@@ -102,7 +102,7 @@ enum AgentCommand {
 
 #[derive(Subcommand, Debug)]
 enum DagCommand {
-    /// Scaffold the shared read-only rootfs used by `sandbox: runc` wasm
+    /// Scaffold the shared read-only rootfs used by `sandbox: runc` binary
     /// steps (mount points, resolv.conf copy, provisioning README).
     PrepareRootfs {
         /// Directory to write the rootfs scaffold tree into.
@@ -163,7 +163,7 @@ fn prepare_rootfs(out: &std::path::Path) -> Result<()> {
     print_tree(out);
     println!();
     println!(
-        "next: add a static wasmtime tree under usr/ — see {} for the provisioning guide",
+        "next: provision native runners and tools under usr/ — see {} for the provisioning guide",
         out.join("README.md").display()
     );
     Ok(())

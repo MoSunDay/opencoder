@@ -34,6 +34,10 @@ class Operations:
     def run(self, *args):
         subprocess.run(args, check=True, stdin=subprocess.DEVNULL)
 
+    def output(self, *args):
+        return subprocess.run(args, check=True, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True).stdout
+
     def inactive(self, unit):
         result = subprocess.run(["systemctl", "show", "--property=ActiveState", "--value", unit],
             check=True, capture_output=True, text=True)

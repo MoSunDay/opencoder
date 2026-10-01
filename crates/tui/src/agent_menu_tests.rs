@@ -128,8 +128,13 @@ fn m_down(slot: &mut Option<AgentMenu>) {
 }
 
 #[test]
-fn pick_token_carries_the_control_head_with_trailing_space() {
-    assert_eq!(pick_token("writer"), "/agent writer ");
+fn self_pick_returns_the_task_selector() {
+    let mut menu = Some(AgentMenu::new(vec![card("self", "本地执行")]));
+    assert_eq!(
+        handle_agent_key(&mut menu, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        AgentOutcome::Pick("self".into())
+    );
+    assert!(menu.is_none());
 }
 
 #[test]
@@ -155,11 +160,11 @@ fn enter_and_tab_close_empty_results_without_picking() {
 #[test]
 fn popup_distinguishes_no_custom_agents_from_no_search_matches() {
     for (cards, expected, absent) in [
-        (vec![], "no custom agents available", "no matching agent"),
+        (vec![], "no capabilities available", "no matching agent"),
         (
             vec![card("writer", "w")],
             "no matching agent",
-            "no custom agents available",
+            "no capabilities available",
         ),
     ] {
         let mut menu = AgentMenu::new(cards);

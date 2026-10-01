@@ -111,7 +111,7 @@ pub struct ScheduleJob {
     /// brain: plan-def id.
     pub target: String,
     /// Passed to the target as `CreateExecution.input`: agent/team/todos
-    /// read `prompt`, dag reads `args` (string appended to every wasm
+    /// read `prompt`, dag reads `args` (string appended to every binary
     /// step's command line at fire time). brain reads
     /// `objective`/`inputs`/`plan{,version}`/`mode` from here.
     #[serde(default)]

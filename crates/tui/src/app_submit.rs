@@ -95,33 +95,40 @@ pub(crate) async fn handle_submit_action(
     }
     // Idle submit: the turn starts now, so eager skill
     // activation (and persistence) is the correct timing.
-    let (clean, _unresolved) = resolve_persist(
-        &text,
-        active_skill,
-        active_skill_body,
-        sys_tokens,
-        agent_name,
-        workdir,
-        skill_handle,
-        chat,
-        store,
-        session_id,
-    )
-    .await;
+    let clean = if chat.remote {
+        text.clone()
+    } else {
+        resolve_persist(
+            &text,
+            active_skill,
+            active_skill_body,
+            sys_tokens,
+            agent_name,
+            workdir,
+            skill_handle,
+            chat,
+            store,
+            session_id,
+        )
+        .await
+        .0
+    };
     *plan_skill_active = act_plan_highlight(active_skill.as_deref());
     let clean = clean.trim().to_string();
     let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
     // Clear-context arm (both spellings, compound included):
     // countdown guard — unlike command::parse this keeps
     // the compound tail (previously leaked verbatim).
-    if crate::clear_confirm::maybe_arm(
-        clear_confirm,
-        chat,
-        mode_flash,
-        anim_tick,
-        &clean,
-        Some(clean.clone()),
-    ) {
+    if !chat.remote
+        && crate::clear_confirm::maybe_arm(
+            clear_confirm,
+            chat,
+            mode_flash,
+            anim_tick,
+            &clean,
+            Some(clean.clone()),
+        )
+    {
         return LoopFlow::Proceed;
     }
     // Intercept /annotation: open the editor instead of submitting
@@ -188,8 +195,14 @@ pub(crate) async fn handle_submit_action(
         // clean for the LLM, the echo is display-only. History keeps the
         // raw input for arrow-up recall.
         let echo = opencoder_session::consumed_echo_text(&text).unwrap_or_else(|| text.clone());
-        push_user(chat, history, hist_idx, &echo, &text);
-        chat.context_used += estimate(&clean) as u64;
+        if chat.remote {
+            // Server consumption events own the user echo.
+            // Render it once when the input reaches the remote runner.
+            push_history(history, hist_idx, &text);
+        } else {
+            push_user(chat, history, hist_idx, &echo, &text);
+            chat.context_used += estimate(&clean) as u64;
+        }
         let image_uris = snapshot_image_uris(pending_images);
         if !start_turn(cmd_tx, cancel, UiCmd::Prompt(clean, image_uris)).await {
             worker_dead(chat);

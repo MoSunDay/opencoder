@@ -70,12 +70,7 @@ pub(super) async fn run(
             .map_err(anyhow::Error::msg)?,
         );
     }
-    let legacy = worker.inner.journal.lock().await.uses_legacy(id);
-    let workflow_root = if legacy {
-        worker.inner.layout.checked_legacy_workflow_root()?
-    } else {
-        worker.inner.layout.kind_root(ExecutionKind::Dag)
-    };
+    let workflow_root = crate::layout::dag::accepted_parent(record)?;
     let definition = assignment
         .definition
         .as_ref()
@@ -83,7 +78,7 @@ pub(super) async fn run(
     let mut spec: opencoder_dag::DagSpec =
         opencoder_dag::decode_spec(definition.get("spec").unwrap_or(definition))
             .map_err(|e| anyhow::anyhow!(e))?;
-    apply_input(&mut spec, &assignment.request.input);
+    apply_input(&mut spec, &assignment.request.input)?;
     let input_path = workflow_root.join(id).join("input.json");
     std::fs::create_dir_all(input_path.parent().unwrap())?;
     if !input_path.exists() {
@@ -114,7 +109,6 @@ pub(super) async fn run(
         uplink,
         exec: opencoder_dag_runtime::ExecDeps {
             store: worker.inner.state.store.clone(),
-            client: worker.client(&config)?,
             workdir: crate::brain::workdir::for_record(worker, record)?,
             config,
         },
@@ -131,7 +125,7 @@ pub(super) async fn run(
             .request
             .target
             .clone()
-            .unwrap_or_else(|| spec.name.clone()),
+            .unwrap_or_else(|| assignment.index.id.clone()),
         spec,
         created_at: assignment.index.created_at,
     };
@@ -166,126 +160,79 @@ fn execution_input(input: &Value) -> &Value {
     }
 }
 
-/// Apply one dispatch directive to executable steps, including dynamic templates.
-/// The frozen definition is decoded fresh on resume, so this never accumulates.
-fn apply_input(spec: &mut opencoder_dag::DagSpec, input: &Value) {
-    fn apply(kind: &mut opencoder_dag::StepKind, input: &Value) {
-        use opencoder_dag::StepKind;
+fn apply_input(spec: &mut opencoder_dag::DagSpec, input: &Value) -> Result<()> {
+    let arguments: Vec<String> = input
+        .get("args")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()?
+        .unwrap_or_default();
+    anyhow::ensure!(
+        arguments.iter().all(|arg| !arg.contains('\0')),
+        "DAG argument contains NUL"
+    );
+    for step in &mut spec.steps {
+        let kind = match &mut step.kind {
+            opencoder_dag::StepKind::Dynamic { template, .. } => template.as_mut(),
+            kind => kind,
+        };
         match kind {
-            StepKind::Dynamic { template, .. } => apply(template, input),
-            StepKind::Agent { prompt, .. } => {
-                if let Some(directive) = input["prompt"].as_str().filter(|p| !p.is_empty()) {
+            opencoder_dag::StepKind::Agent { prompt, .. } => {
+                if let Some(directive) =
+                    input["prompt"].as_str().filter(|prompt| !prompt.is_empty())
+                {
                     *prompt = format!("{prompt}\n执行要求：{directive}");
                 }
             }
-            StepKind::Wasm { command, .. } => {
-                if let Some(args) = input["args"].as_str().filter(|a| !a.trim().is_empty()) {
-                    *command = format!("{command} {args}");
-                }
+            opencoder_dag::StepKind::Binary { args, .. } => args.extend(arguments.clone()),
+            opencoder_dag::StepKind::Dynamic { .. } => {
+                unreachable!("nested dynamic kind is invalid")
             }
         }
     }
-    for step in &mut spec.steps {
-        apply(&mut step.kind, input);
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn spec() -> opencoder_dag::DagSpec {
-        opencoder_dag::decode_spec(&serde_json::json!({
-            "name": "t",
-            "steps": [
-                {"name": "w", "kind": {"type": "wasm", "command": "tool.wasm"}},
-                {"name": "a", "kind": {"type": "agent", "prompt": "base"}},
-            ],
-        }))
-        .expect("fixture spec")
-    }
-
-    fn wasm_command(spec: &opencoder_dag::DagSpec) -> &str {
-        match &spec.steps[0].kind {
-            opencoder_dag::StepKind::Wasm { command, .. } => command,
-            _ => panic!("step 0 must be wasm"),
-        }
-    }
-
-    fn agent_prompt(spec: &opencoder_dag::DagSpec) -> &str {
-        match &spec.steps[1].kind {
-            opencoder_dag::StepKind::Agent { prompt, .. } => prompt,
-            _ => panic!("step 1 must be agent"),
-        }
-    }
-
     #[test]
-    fn args_append_to_every_wasm_command_only() {
-        let mut spec = spec();
-        apply_input(&mut spec, &serde_json::json!({"args": "--date 2026-09-18"}));
-        assert_eq!(wasm_command(&spec), "tool.wasm --date 2026-09-18");
-        assert_eq!(agent_prompt(&spec), "base");
-    }
-
-    #[test]
-    fn prompt_appends_the_execution_directive_to_agent_steps_only() {
-        let mut spec = spec();
-        apply_input(&mut spec, &serde_json::json!({"prompt": "聚焦告警"}));
-        assert_eq!(agent_prompt(&spec), "base\n执行要求：聚焦告警");
-        assert_eq!(wasm_command(&spec), "tool.wasm");
-    }
-
-    #[test]
-    fn empty_or_whitespace_values_are_no_ops() {
-        for input in [
-            serde_json::json!({}),
-            serde_json::json!({"args": "", "prompt": ""}),
-            serde_json::json!({"args": "   "}),
-        ] {
-            let mut spec = spec();
-            apply_input(&mut spec, &input);
-            assert_eq!(wasm_command(&spec), "tool.wasm", "{input}");
-            assert_eq!(agent_prompt(&spec), "base", "{input}");
-        }
-    }
-
-    #[test]
-    fn prompt_and_args_coexist() {
-        let mut spec = spec();
-        apply_input(
-            &mut spec,
-            &serde_json::json!({"prompt": "巡检", "args": "--mode strict"}),
-        );
-        assert_eq!(wasm_command(&spec), "tool.wasm --mode strict");
-        assert_eq!(agent_prompt(&spec), "base\n执行要求：巡检");
-    }
-    #[test]
-    fn scheduler_named_inputs_and_dynamic_templates_preserve_parameters() {
-        let payload = json!({"items":["带空格 parameter", "quoted \"value\""]});
-        let managed = json!({"brain_layered":{"run_id":"root"},"layered_inputs":payload});
-        assert_eq!(execution_input(&managed), &payload);
-        assert_eq!(execution_input(&payload), &payload);
-        let ordinary = json!({"layered_inputs":payload});
-        assert_eq!(execution_input(&ordinary), &ordinary);
-        let mut spec = opencoder_dag::decode_spec(&json!({"name":"dynamic","steps":[
-            {"name":"a","kind":{"type":"dynamic","source":{"type":"input","pointer":"/items"},"template":{"type":"agent","prompt":"base"}}},
-            {"name":"w","kind":{"type":"dynamic","source":{"type":"input","pointer":"/args"},"template":{"type":"wasm","command":"tool.wasm"}}}
+    fn directive_and_binary_arguments_keep_exact_values() {
+        let mut spec = opencoder_dag::decode_spec(&json!({"name":"test","steps":[
+            {"name":"binary","kind":{"type":"binary","resource":"tool","args":["first"]}},
+            {"name":"agent","kind":{"type":"agent","prompt":"base"}},
+            {"name":"dynamic","kind":{"type":"dynamic","source":{"type":"input","pointer":"/items"},"template":{"type":"binary","resource":"tool","args":[]}}}
         ]})).unwrap();
         apply_input(
             &mut spec,
-            &json!({"prompt":"bound inputs", "args":"--mode strict"}),
+            &json!({"prompt":"check", "args":["with space", "quoted \"value\"", ""]}),
+        )
+        .unwrap();
+        let opencoder_dag::StepKind::Binary { args, .. } = &spec.steps[0].kind else {
+            panic!("binary expected")
+        };
+        assert_eq!(args, &["first", "with space", "quoted \"value\"", ""]);
+        let opencoder_dag::StepKind::Agent { prompt, .. } = &spec.steps[1].kind else {
+            panic!("agent expected")
+        };
+        assert_eq!(prompt, "base\n执行要求：check");
+        let opencoder_dag::StepKind::Binary { args, .. } = spec.steps[2].kind.executable() else {
+            panic!("binary template expected")
+        };
+        assert_eq!(args, &["with space", "quoted \"value\"", ""]);
+        assert!(apply_input(&mut spec, &json!({"args":"shell string"})).is_err());
+        assert!(apply_input(&mut spec, &json!({"args":["nul\u{0000}"]})).is_err());
+    }
+
+    #[test]
+    fn scheduler_named_inputs_preserve_parameters() {
+        let payload = json!({"items":["带空格 parameter", "quoted \"value\""]});
+        assert_eq!(
+            execution_input(&json!({"brain_layered":{"run_id":"root"},"layered_inputs":payload})),
+            &payload
         );
-        match spec.steps[0].kind.executable() {
-            opencoder_dag::StepKind::Agent { prompt, .. } => {
-                assert_eq!(prompt, "base\n执行要求：bound inputs")
-            }
-            _ => panic!("agent template"),
-        }
-        match spec.steps[1].kind.executable() {
-            opencoder_dag::StepKind::Wasm { command, .. } => {
-                assert_eq!(command, "tool.wasm --mode strict")
-            }
-            _ => panic!("wasm template"),
-        }
+        assert_eq!(execution_input(&payload), &payload);
+        let ordinary = json!({"layered_inputs":payload});
+        assert_eq!(execution_input(&ordinary), &ordinary);
     }
 }

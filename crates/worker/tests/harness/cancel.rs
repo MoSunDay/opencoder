@@ -48,7 +48,7 @@ pub async fn all(node: &opencoder_worker::Worker, root: &Path) {
                     .iter()
                     .find(|r| r["prompt"].as_str().unwrap().contains("MATRIX_HANG"))
                 {
-                    break record["pid"].as_u64().unwrap();
+                    break fixture::host_pid(record);
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }

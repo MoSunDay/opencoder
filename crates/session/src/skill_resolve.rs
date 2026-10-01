@@ -129,7 +129,11 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
     // Expand `@path` mentions to absolute paths before the message is
     // recorded (direct-prompt path; steer/queue get the same treatment
     // via the head hook in `record_compound`).
-    crate::mention_resolve::expand_mentions(&clean, &session.working_dir)
+    if !session.harness.literal_mentions {
+        crate::mention_resolve::expand_mentions(&clean, &session.working_dir)
+    } else {
+        clean
+    }
 }
 
 /// Record a prompt as a synthetic user message after resolving inline
@@ -147,10 +151,24 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
 /// Activations made here are one-shot: the run consuming this input clears
 /// them at its end (`skill_lifecycle`).
 pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[String]) {
+    record_compound_with_display(session, rest, images, None).await;
+}
+
+pub(crate) async fn record_compound_with_display(
+    session: &mut SessionState,
+    rest: &str,
+    images: &[String],
+    display: Option<&str>,
+) {
     // Expand `@path` mentions to absolute paths first so the recorded user
     // message (and the model request) carry full paths — the steer/queue
     // twin of the tail hook in `resolve_inline_skills`.
-    let rest = &crate::mention_resolve::expand_mentions(rest, &session.working_dir);
+    let expanded = if !session.harness.literal_mentions {
+        crate::mention_resolve::expand_mentions(rest, &session.working_dir)
+    } else {
+        rest.to_owned()
+    };
+    let rest = &expanded;
     // Session-agent-aware discovery (agent pools shadow the global skills
     // dir): the steer/queue twin of `resolve_inline_skills` above.
     let skills = crate::agent_pools::discover_session_skills(session);
@@ -174,12 +192,17 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
             msg.synthetic = true;
             // Echo contract: replay surfaces show the verbatim input (the
             // `$name` token included), never the injected trigger body.
-            msg.display = Some(rest.clone());
+            msg.display = Some(display.unwrap_or(rest).to_owned());
             session.record(msg).await;
         }
         return;
     }
-    let m = Message::user_with_display(new_id(), text, Some(rest.clone()), images);
+    let m = Message::user_with_display(
+        new_id(),
+        text,
+        Some(display.unwrap_or(rest).to_owned()),
+        images,
+    );
     session.record(m).await;
 }
 

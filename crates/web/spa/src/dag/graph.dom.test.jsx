@@ -10,7 +10,7 @@ import { RunDetail } from './runDetail.jsx';
 import { ExecutionView } from '../fleet/detail.jsx';
 
 const spec = { name: 'etl', steps: [
-  { name: 'fetch', kind: { type: 'wasm', command: 'tool.wasm' } },
+  { name: 'fetch', kind: { type: 'binary', resource: 'tool' } },
   { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'r' } },
 ] };
 const run = { id: 'dag-result', kind: 'dag', node_id: 'node-1', status: 'done', created_at: 1 };

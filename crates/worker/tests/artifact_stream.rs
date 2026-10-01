@@ -16,14 +16,14 @@ const FIXTURE_BYTES: u64 = 256 * 1024 * 1024;
 #[tokio::test]
 async fn declared_report_and_nested_evidence_require_integrity_and_stay_in_the_step() {
     let fleet = Fleet::new(1, mock()).await;
-    support::stage_stdout_wasm(&fleet.root().join("n0/node"), "tool.wasm", "small");
+    support::stage_stdout_binary(&fleet.root().join("n0/node"), "tool", "small");
     let assignment = assignment(
         &fleet.nodes[0],
         "dag-declared-artifacts",
         ExecutionKind::Dag,
         json!({}),
         Some(
-            json!({"name":"reports","steps":[{"name":"first","kind":{"type":"wasm","command":"tool.wasm"}}]}),
+            json!({"name":"reports","steps":[{"name":"first","kind":{"type":"binary","resource":"tool"}}]}),
         ),
     );
     let execution = assignment.index.execution_ref();
@@ -35,9 +35,8 @@ async fn declared_report_and_nested_evidence_require_integrity_and_stay_in_the_s
         200
     );
     settled(&fleet.nodes[0], "dag-declared-artifacts").await;
-    let dir = fleet
-        .root()
-        .join("n0/node/dag/dag-declared-artifacts/first");
+    let dir =
+        support::dag_run(&fleet.root().join("n0/node"), "dag-declared-artifacts").join("first");
     std::fs::create_dir_all(dir.join("evidence")).unwrap();
     let bytes = b"original evidence";
     let digest = format!("{:x}", Sha256::digest(bytes));
@@ -137,9 +136,9 @@ fn rss_bytes() -> u64 {
 #[tokio::test]
 async fn streams_256_mib_artifact_with_bounded_frames_and_memory() {
     let fleet = Fleet::new(1, mock()).await;
-    support::stage_stdout_wasm(&fleet.root().join("n0/node"), "tool.wasm", "small");
+    support::stage_stdout_binary(&fleet.root().join("n0/node"), "tool", "small");
     let spec = json!({"name":"large-dag","steps":[{
-        "name":"first","kind":{"type":"wasm","command":"tool.wasm"}
+        "name":"first","kind":{"type":"binary","resource":"tool"}
     }]});
     let assignment = assignment(
         &fleet.nodes[0],
@@ -159,9 +158,8 @@ async fn streams_256_mib_artifact_with_bounded_frames_and_memory() {
     settled(&fleet.nodes[0], "dag-large-artifact").await;
     fleet.state.fleet.put_index(&index).await.unwrap();
 
-    let path = fleet
-        .root()
-        .join("n0/node/dag/dag-large-artifact/first/output.txt");
+    let path = support::dag_run(&fleet.root().join("n0/node"), "dag-large-artifact")
+        .join("first/output.txt");
     std::fs::OpenOptions::new()
         .write(true)
         .truncate(true)

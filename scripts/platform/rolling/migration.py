@@ -9,6 +9,13 @@ from .state import Journal, atomic_bytes, write
 
 def receipt(settings, bundle):
     candidate = manifest.verify(bundle)
+    if candidate.get('compatibility', {}).get('data_format', {}).get('min', 1) >= 2:
+        raise ValueError('the legacy bootstrap migration cannot restore schema v32; use --maintenance on a versioned installation')
+    journal = Journal(settings.state_dir)
+    if journal.data['current'] and journal.data.get('migration_stage') != 'switching':
+        from .maintenance.preflight import receipt as maintenance_receipt
+        from .io import Operations
+        return maintenance_receipt(settings, candidate, Operations(settings.token_file))
     manifest.brain_preflight(settings, candidate)
     if not settings.legacy_agent_data or not (settings.legacy_agent_data / "node-id").is_file():
         raise ValueError("migration requires legacy_agent_data with its persisted node-id")
@@ -22,6 +29,10 @@ def receipt(settings, bundle):
 
 
 def migrate(settings, bundle, operations, seconds=90):
+    existing = Journal(settings.state_dir).data
+    if existing['current'] and existing.get('migration_stage') != 'switching':
+        from .maintenance import deploy
+        return deploy(settings, bundle, operations, seconds)
     review = receipt(settings, bundle)
     journal = Journal(settings.state_dir)
     if journal.data["current"] and journal.data["current"] != review["release_id"]:

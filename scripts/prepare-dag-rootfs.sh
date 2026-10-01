@@ -1,22 +1,4 @@
 #!/usr/bin/env bash
-# prepare-dag-rootfs.sh — provision a runnable `<workflow_root>/rootfs` for
-# `sandbox: runc` wasm steps and the manual runc tests.
-#
-# `opencoder-agent dag prepare-rootfs` writes the scaffold but leaves
-# usr/ empty (runtimes are a provisioning concern). This script fills that
-# gap with three in-repo example binaries plus the shared libs they need,
-# all placed at their host-absolute paths inside the rootfs:
-#   - `wasmtime-cli` — the wasm runtime (same wasmtime/wasi crates as the
-#     in-process executor) for `sandbox: runc` wasm steps, at usr/bin/wasmtime;
-#   - `agent-step-runner` — the container-side single-step agent runner for
-#     `dag.agent_sandbox = runc`, at usr/bin/agent-step-runner;
-#   - `agent-session-runner` — the container-side multi-turn agent session
-#     runner for `run_mode: agent` custom agents, at
-#     usr/bin/agent-session-runner.
-#
-# Usage: scripts/prepare-dag-rootfs.sh <dir> [--codex <native-codex-binary>]
-# Then:  DAG_TEST_ROOTFS=<dir> cargo test -p opencoder-dag-runtime --lib \
-#          sandbox::runc -- --ignored
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,29 +15,25 @@ if [ "$#" -gt 0 ]; then
 fi
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
-[ "$(basename "$out")" = "rootfs" ] || {
-  echo "rootfs dir must be named 'rootfs' (its parent becomes the workflow root)" >&2
-  exit 2
-}
 
-echo "==> building the wasmtime-cli + agent-step-runner + agent-session-runner examples (debug profile reuses workspace artifacts)"
+echo "==> building the dag-runner + agent-step-runner + agent-session-runner examples (debug profile reuses workspace artifacts)"
 cargo build --manifest-path "$repo_root/Cargo.toml" -p opencoder-dag-runtime \
-  --example wasmtime-cli --example agent-step-runner --example agent-session-runner
+  --example dag-runner --example agent-step-runner --example agent-session-runner
 target_dir="$(cargo metadata --manifest-path "$repo_root/Cargo.toml" --no-deps --format-version 1 |
   python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-bins=("$target_dir/debug/examples/wasmtime-cli" "$target_dir/debug/examples/agent-step-runner" \
+bins=("$target_dir/debug/examples/dag-runner" "$target_dir/debug/examples/agent-step-runner" \
   "$target_dir/debug/examples/agent-session-runner")
 
 echo "==> writing the scaffold via 'opencoder-agent dag prepare-rootfs'"
 cargo run -q --manifest-path "$repo_root/Cargo.toml" -p opencoder-agent -- dag prepare-rootfs --out "$out" >/dev/null
 
-echo "==> installing the wasm runtime at usr/bin/wasmtime and the agent runners at usr/bin/agent-step-runner + usr/bin/agent-session-runner"
-cp "${bins[0]}" "$out/usr/bin/wasmtime"
+echo "==> installing the DAG supervisor at usr/bin/dag-runner and the agent runners at usr/bin/agent-step-runner + usr/bin/agent-session-runner"
+cp "${bins[0]}" "$out/usr/bin/dag-runner"
 cp "${bins[1]}" "$out/usr/bin/agent-step-runner"
 cp "${bins[2]}" "$out/usr/bin/agent-session-runner"
 # Debug symbols belong in the build tree, not in each container's private
 # rootfs copy. These examples are otherwise over 1 GiB together.
-strip --strip-debug "$out/usr/bin/wasmtime" \
+strip --strip-debug "$out/usr/bin/dag-runner" \
   "$out/usr/bin/agent-step-runner" \
   "$out/usr/bin/agent-session-runner"
 
@@ -68,10 +46,11 @@ done | sort -u | while read -r lib; do
   cp -L "$lib" "$dest"
 done
 
+bash "$repo_root/scripts/dag-rootfs/install-tools.sh" "$out"
 bash "$repo_root/scripts/dag-rootfs/install-python.sh" "$out"
 
 if [ -n "$codex_binary" ]; then
   bash "$repo_root/scripts/dag-rootfs/install-codex.sh" "$out" "$codex_binary"
 fi
 
-echo "==> rootfs ready at $out (workflow root: $(dirname "$out"))"
+echo "==> rootfs ready at $out; set dag.rootfs_dir to this immutable directory"

@@ -178,9 +178,11 @@ pub async fn run(host: Arc<Host>, port: u16, remote: String, standby: bool) -> R
         std::collections::HashMap::<String, tokio::task::JoinHandle<Result<()>>>::new();
     let mut active_once = false;
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+    let shutdown = crate::shutdown_signal();
+    tokio::pin!(shutdown);
     loop {
         tokio::select! {
-            _ = crate::shutdown_signal() => { host.retiring.store(true, Ordering::SeqCst); break; },
+            _ = &mut shutdown => { host.retiring.store(true, Ordering::SeqCst); break; },
             result = &mut server => { result??; break; },
             _ = tick.tick() => {}
         }

@@ -7,6 +7,7 @@ import { Tabs } from 'antd';
 import { useCallback, useState } from 'react';
 import { DefsTab } from './dag/defsTab.jsx';
 import { RunsTable } from './dag/runsTable.jsx';
+import { BinaryResources } from './dag/resources/panel.jsx';
 
 export function DagPanel({ onNotice }) {
   const [tab, setTab] = useState('defs');
@@ -25,7 +26,7 @@ export function DagPanel({ onNotice }) {
   const onDetailClosed = useCallback(() => setFocusRunId(''), []);
 
   return (
-    <Tabs
+    <Tabs destroyOnHidden
       activeKey={tab}
       onChange={setTab}
       items={[
@@ -46,6 +47,7 @@ export function DagPanel({ onNotice }) {
             />
           ),
         },
+        { key: 'binaries', label: '二进制资源', children: <BinaryResources /> },
       ]}
     />
   );

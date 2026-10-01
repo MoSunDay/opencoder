@@ -80,21 +80,47 @@ Restart=no
     return {"unit_prefix": prefix(settings), "controller": str(target)}
 
 
-def stage(settings, bundle):
+def stage(settings, bundle, maintenance=False):
     candidate = manifest.verify(bundle)
     journal = Journal(settings.state_dir).data
     if not journal["current"]:
         raise ValueError("first migration is required before staging a signal release")
     if journal["candidate"] not in (None, candidate["release_id"]):
         raise ValueError("another release is unfinished; resume it or roll it back first")
-    manifest.compatible(candidate, [r["manifest"] for r in journal["releases"].values()])
+    state = journal.get('maintenance')
+    if state and state['stage'] not in ('complete', 'rolled_back') and state['target'] != candidate['release_id']:
+        raise ValueError('another maintenance upgrade is unfinished')
+    if not maintenance:
+        manifest.compatible(candidate, manifest.overlapping(journal))
+    else:
+        from rolling.maintenance.preflight import check
+        from rolling.io import Operations
+        check(settings, candidate, Operations(settings.token_file))
     manifest.resources(settings, candidate)
     versions = settings.state_dir / "staged"
     versions.mkdir(parents=True, exist_ok=True)
     installed = manifest._installer.stage_bundle(bundle, versions, candidate)
     intent = {"bundle": str(installed), "release_id": candidate["release_id"]}
+    if maintenance:
+        intent['maintenance'] = True
+        remember_controller(settings, candidate['release_id'])
     write(settings.state_dir / "signal-pending.json", intent)
     return intent
+
+
+def remember_controller(settings, release_id):
+    import base64
+    path = settings.state_dir / 'maintenance-controller.json'
+    if path.exists():
+        prior = json.loads(path.read_text())
+        if prior['release_id'] == release_id:
+            return
+        state = Journal(settings.state_dir).data.get('maintenance')
+        if not state or state['stage'] not in ('complete', 'rolled_back'):
+            raise ValueError('another controller recovery receipt is pending')
+    unit = settings.systemd_dir / (prefix(settings) + '@.service')
+    write(path, {'release_id': release_id, 'path': str(unit),
+                 'content': base64.b64encode(unit.read_bytes()).decode() if unit.exists() else None})
 
 
 def status(settings):

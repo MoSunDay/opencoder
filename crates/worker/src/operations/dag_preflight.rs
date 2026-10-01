@@ -1,63 +1,51 @@
 use crate::Worker;
-use anyhow::{bail, Result};
-use opencoder_core::fleet::ExecutionKind;
+use anyhow::{ensure, Result};
+use opencoder_core::fleet::Assignment;
 
 pub(super) fn validate(
     worker: &Worker,
     config: &opencoder_core::Config,
     spec: &opencoder_dag::DagSpec,
+    assignment: &Assignment,
     legacy: bool,
 ) -> Result<()> {
-    if spec
-        .steps
-        .iter()
-        .any(|step| crate::layout::reserved_execution_entry(&step.name))
-    {
-        bail!("DAG step name is reserved by the execution layout");
-    }
-    let workflow_root = if legacy {
-        worker.inner.layout.checked_legacy_workflow_root()?
-    } else {
-        worker.inner.layout.checked_kind_root(ExecutionKind::Dag)?
-    };
-    // Wasm modules are pinned at accept so already-running runs keep
-    // their frozen `_modules` copies through later pool publishes.
-    crate::dag_wasm_pin::pin(config, spec, &workflow_root)?;
-    if !spec.steps.iter().any(|step| {
-        matches!(
-            step.kind.executable(),
-            opencoder_dag::StepKind::Wasm {
-                sandbox: Some(opencoder_dag::SandboxMode::Runc),
-                ..
-            }
-        ) || (config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc
-            && matches!(
-                step.kind.executable(),
-                opencoder_dag::StepKind::Agent { .. }
-            ))
-    }) {
-        return Ok(());
-    }
-    let rootfs = workflow_root.join("rootfs");
-    if !std::fs::symlink_metadata(&rootfs).is_ok_and(|meta| meta.is_dir()) {
-        bail!(
-            "runc rootfs unavailable at {}; prepare a real directory before creating the execution",
-            rootfs.display()
+    ensure!(
+        !legacy,
+        "old DAG checkpoints cannot resume; start a new container run"
+    );
+    if let Some(arguments) = assignment.request.input.get("args") {
+        let arguments: Vec<String> = serde_json::from_value(arguments.clone())?;
+        ensure!(
+            arguments.iter().all(|argument| !argument.contains('\0')),
+            "DAG arguments cannot contain NUL"
         );
     }
-    if !opencoder_dag_runtime::sandbox::runc::runc_available() {
-        bail!("runc executable unavailable for requested DAG sandbox");
+    opencoder_dag_runtime::sandbox::run::preflight(config)?;
+    let parent = crate::layout::dag::parent(worker, config, assignment)?;
+    let root = parent.join(&assignment.index.id);
+    if !root.join("resources.json").exists()
+        && spec.steps.iter().any(|step| {
+            matches!(
+                step.kind.executable(),
+                opencoder_dag::StepKind::Binary { .. }
+            )
+        })
+    {
+        let source = config
+            .dag
+            .binary_dir
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("DAG binary pool is required"))?;
+        opencoder_dag_runtime::nfs::read_only_mount(source)?;
     }
-    if config.dag.agent_sandbox == opencoder_core::config::AgentSandbox::Runc {
-        for step in &spec.steps {
-            if let opencoder_dag::StepKind::Agent { agent, .. } = step.kind.executable() {
-                opencoder_dag_runtime::sandbox::codex::resolve(
-                    config,
-                    agent.as_deref().unwrap_or("act"),
-                    &rootfs,
-                )?;
-            }
+    for step in &spec.steps {
+        if let opencoder_dag::StepKind::Agent { agent, .. } = step.kind.executable() {
+            opencoder_dag_runtime::sandbox::codex::resolve(
+                config,
+                agent.as_deref().unwrap_or("act"),
+                config.dag.rootfs_dir.as_ref().unwrap(),
+            )?;
         }
     }
-    Ok(())
+    opencoder_dag_runtime::resources::freeze(&root, config, spec)
 }

@@ -8,7 +8,7 @@ license.workspace = true
 opencoder-core.workspace = true
 opencoder-agents.workspace = true
 opencoder-dag.workspace = true
-opencoder-llm.workspace = true
+opencoder-dag-binary.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
 opencoder-node.workspace = true
@@ -22,21 +22,13 @@ serde_json.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 ulid.workspace = true
-wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "component-model", "async", "wat"] }
-wasmtime-wasi = { version = "48", default-features = false, features = ["p1"] }
 libc = "0.2"
 sha2 = "0.10"
 dirs.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]
-wasmtime = { version = "48", default-features = false, features = ["cache"] }
 tempfile.workspace = true
-wat = "1.254"
 opencoder-llm.workspace = true
 axum = { version = "0.7", features = ["json"] }
 tokio = { workspace = true, features = ["test-util"] }
-
-[[example]]
-name = "wasmtime-cli"
-test = true

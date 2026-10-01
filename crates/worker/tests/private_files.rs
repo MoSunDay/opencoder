@@ -10,7 +10,7 @@ async fn private_dag_files_are_pinned_durable_and_absent_from_public_readback() 
     let _config = isolated_config();
     let temp = tempfile::tempdir().unwrap();
     let client = mock();
-    let node = worker(temp.path(), client.clone()).await;
+    let (node, _container, _bridge) = dag_worker(temp.path(), client.clone()).await;
     let probe = node
         .handle(NodeOperation::Brain {
             execution: ExecutionRef {
@@ -88,7 +88,8 @@ async fn private_dag_files_are_pinned_durable_and_absent_from_public_readback() 
             .collect::<Vec<_>>(),
     )
     .unwrap();
-    assert!(requests.contains("private-executions/dag-private"));
+    assert!(requests.contains(opencoder_core::fleet::private_files::GUEST_ROOT));
+    assert!(!requests.contains(&temp.path().display().to_string()));
     assert!(!requests.contains("fixture-do-not-publish"));
     assert_eq!(
         node.handle(NodeOperation::Create {

@@ -74,7 +74,7 @@ export function MilestoneRunBody({ view, id, refresh, onNotice }) {
         </Space></div>
         {(view.events || []).filter((event) => ['human_input', 'guidance_processed'].includes(event.event_type)).slice(-20).map((event) =>
           <div key={event.seq} className="brain-human-message"><strong>{event.event_type === 'human_input' ? '你' : '大脑'}：</strong>{event.user_input || event.reason_summary}</div>)}
-        {!view.problem && ['paused', 'blocked'].includes(run.phase) && <Space style={{ marginBottom: 16 }}>
+        {['paused', 'blocked'].includes(run.phase) && <Space style={{ marginBottom: 16 }}>
           <InputNumber aria-label="新的轮次预算" min={run.round + 1} max={32} precision={0} value={budget} onChange={setBudget} />
           <Button disabled={busy || !budget} onClick={() => command('set_round_budget', { max_rounds: budget })}>调整预算</Button>
         </Space>}

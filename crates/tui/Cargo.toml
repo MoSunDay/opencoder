@@ -29,5 +29,6 @@ signal-hook = "0.3"
 dirs = "5"
 
 [dev-dependencies]
+axum = "0.7"
 tempfile = "3"
 libc = "0.2"

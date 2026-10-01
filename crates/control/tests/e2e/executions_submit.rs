@@ -159,31 +159,40 @@ async fn submit_resolves_catalog_targets_on_the_generic_route() {
 }
 
 #[tokio::test]
-async fn device_workflow_freezes_capacity_and_rejects_caller_definition() {
+async fn registered_workflow_definitions_and_inputs_are_pinned_without_rewriting() {
     let h = Harness::new().await;
-    let (status, body) = submit(
+    let definition = json!({"name":"custom-workflow","steps":[{
+        "name":"run","kind":{"type":"agent","agent":"act","prompt":"Use the supplied inputs"}
+    }]});
+    h.state
+        .fleet
+        .put_definition("dag", "custom-workflow", &definition)
+        .await
+        .unwrap();
+    let input = json!({"batch":3,"task":{"source":"custom-input"}});
+    let (status, receipt) = submit(
         &h,
-        json!({"id":"dag-device-fixture","kind":"dag","target":"device-cases",
-        "input":{"device_count":2,"case_ids":["a","b","c"],"case_source":"/frozen/cases.json"}}),
+        json!({"id":"dag-custom-workflow","kind":"dag","target":"custom-workflow","input":input}),
     )
     .await;
-    assert_eq!(status, 202, "{body}");
-    let spec = h.node.pinned_definition("dag-device-fixture").unwrap();
-    let spec = spec.get("spec").unwrap_or(&spec);
-    assert_eq!(spec["max_concurrency"], 2);
-    assert_eq!(spec["steps"].as_array().unwrap().len(), 2);
-    assert_eq!(spec["steps"][1]["kind"]["failure_policy"], "collect_all");
-    assert_eq!(spec["steps"][0]["kind"]["agent"], "device-cases");
-    for (index, input) in [
-        json!({"device_count":1,"case_ids":["a"],"definition":{}}),
-        json!({"device_count":19,"case_ids":["a"]}),
-        json!({"device_count":1,"case_ids":["a"],"prompt":"override"}),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let (status, _) = submit(&h,json!({"id":format!("dag-device-reject-{index}"),"kind":"dag","target":"device-cases","input":input})).await;
-        assert_eq!(status, 400);
-    }
-    assert_eq!(h.node.journal_ids(), vec!["dag-device-fixture"]);
+    assert_eq!(status, 202, "{receipt}");
+    assert_eq!(
+        h.node.pinned_definition("dag-custom-workflow"),
+        Some(definition)
+    );
+    let saved = h
+        .state
+        .fleet
+        .assignment("dag-custom-workflow")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.request.input, input);
+    let (status, rejection) = submit(
+        &h,
+        json!({"id":"dag-unregistered-workflow","kind":"dag","target":"unregistered-workflow","input":input}),
+    )
+    .await;
+    assert_eq!(status, 404, "{rejection}");
+    assert_eq!(h.node.journal_ids(), vec!["dag-custom-workflow"]);
 }

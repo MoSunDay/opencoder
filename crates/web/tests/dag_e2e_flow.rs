@@ -12,6 +12,12 @@
 mod node_e2e_support;
 mod support;
 
+#[path = "../../dag-runtime/tests/support/container.rs"]
+#[allow(dead_code)]
+mod container;
+#[path = "../../dag-runtime/tests/support/model.rs"]
+mod model;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -109,14 +115,17 @@ async fn claimed_run_executes_and_converges_done_on_the_server() {
         },
     ]));
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
+    let native = container::ContainerFixture::open(tmp.path());
+    let bridge = model::ModelBridge::start(client);
+    let mut config = native.config.clone();
+    bridge.configure(&mut config);
     let status = execute_run(
         RunDeps {
             uplink: Arc::clone(&uplink),
             exec: ExecDeps {
                 store: Arc::clone(&server.store),
-                client,
                 workdir: tmp.path().to_path_buf(),
-                config: opencoder_core::Config::load(tmp.path()).unwrap(),
+                config,
             },
             workflow_root: tmp.path().join("workflow"),
         },
@@ -200,14 +209,14 @@ async fn pre_cancelled_run_reports_cancelled_without_starting_a_step() {
 
     let (tx, cancel_rx) = tokio::sync::watch::channel(false);
     tx.send(true).unwrap();
+    let native = container::ContainerFixture::open(tmp.path());
     let status = execute_run(
         RunDeps {
             uplink: Arc::clone(&uplink),
             exec: ExecDeps {
                 store: Arc::clone(&server.store),
-                client: Arc::new(MockChatClient::new()),
                 workdir: tmp.path().to_path_buf(),
-                config: opencoder_core::Config::load(tmp.path()).unwrap(),
+                config: native.config.clone(),
             },
             workflow_root: tmp.path().join("workflow"),
         },

@@ -1,5 +1,5 @@
 //! Dynamic definition → fleet dispatch → node instances, HTTP pages and SSE.
-use crate::fixtures::{args_echo_wat, publish};
+use crate::fixtures::{args_source, publish};
 use crate::support::{
     fleet_proc::{Fleet, TOKEN},
     http_util::http_text,
@@ -30,21 +30,21 @@ fn save_dispatch(fleet: &Fleet, name: &str, steps: Value, input: Value) -> Strin
 }
 
 #[test]
-fn dynamic_wasm_instances_have_http_pages_isolated_argv_artifacts_and_replay() {
+fn dynamic_binary_instances_have_http_pages_isolated_argv_artifacts_and_replay() {
     let stub = LlmStub::spawn_text(&[]);
     let tmp = tempfile::tempdir().unwrap();
-    let fleet = Fleet::spawn_with_config(
+    let fleet = Fleet::spawn_native(
         tmp.path(),
         stub.port(),
-        json!({"dag":{"wasm_dir":tmp.path().join("wasm-pool")}}),
+        json!({"dag":{"binary_dir":tmp.path().join("binary-pool")}}),
         "dynamic-http",
     );
-    publish(&fleet, "argv", &args_echo_wat());
+    publish(&fleet, "argv", &args_source());
     let id = save_dispatch(
         &fleet,
         "dynamic-argv",
         json!([
-            {"name":"process","kind":{"type":"dynamic","source":{"type":"input","pointer":"/items"},"template":{"type":"wasm","command":"argv.wasm --format json"}}}
+            {"name":"process","kind":{"type":"dynamic","source":{"type":"input","pointer":"/items"},"template":{"type":"binary","resource":"argv","args":["--format", "json"]}}}
         ]),
         json!({"items":[["--title","hello world"],["--target","web"]]}),
     );
@@ -82,7 +82,7 @@ fn dynamic_wasm_instances_have_http_pages_isolated_argv_artifacts_and_replay() {
     assert_eq!(status, 200, "{artifact}");
     assert_eq!(
         artifact,
-        "argv.wasm\0--format\0json\0--title\0hello world\0"
+        "/workspace/process/meta/program\0--format\0json\0--title\0hello world\0"
     );
     let missing = fleet.http("GET", &format!("{base}/2"), &json!({}));
     assert_eq!(missing.0, 404);
@@ -92,7 +92,7 @@ fn dynamic_wasm_instances_have_http_pages_isolated_argv_artifacts_and_replay() {
 }
 
 #[test]
-fn runc_dynamic_agent_and_wasm_read_isolated_copies_and_argv() {
+fn runc_dynamic_agent_and_binary_read_isolated_copies_and_argv() {
     if !std::process::Command::new("runc")
         .arg("--version")
         .output()
@@ -121,32 +121,19 @@ fn runc_dynamic_agent_and_wasm_read_isolated_copies_and_argv() {
     });
     let stub = LlmStub::spawn(vec![responder.clone(), responder]);
     let tmp = tempfile::tempdir().unwrap();
-    let fleet = Fleet::spawn_with_config(
+    let fleet = Fleet::spawn_native(
         tmp.path(),
         stub.port(),
-        json!({"dag":{"agent_sandbox":"runc","wasm_dir":tmp.path().join("wasm-pool")}}),
+        json!({"dag":{"binary_dir":tmp.path().join("binary-pool")}}),
         "dynamic-runc",
     );
-    let prep = std::process::Command::new("bash")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/scripts/prepare-dag-rootfs.sh"
-        ))
-        .arg(fleet.node_data.join("dag/rootfs"))
-        .output()
-        .unwrap();
-    assert!(
-        prep.status.success(),
-        "rootfs: {}",
-        String::from_utf8_lossy(&prep.stderr)
-    );
-    publish(&fleet, "argv", &args_echo_wat());
+    publish(&fleet, "argv", &args_source());
     let id = save_dispatch(
         &fleet,
         "dynamic-runc",
         json!([
             {"name":"agents","kind":{"type":"dynamic","source":{"type":"input","pointer":"/text"},"template":{"type":"agent","prompt":"run","how_append":"runc-common-how"}}},
-            {"name":"wasms","kind":{"type":"dynamic","source":{"type":"input","pointer":"/argv"},"template":{"type":"wasm","command":"argv.wasm --format json","sandbox":"runc"}}}
+            {"name":"binarys","kind":{"type":"dynamic","source":{"type":"input","pointer":"/argv"},"template":{"type":"binary","resource":"argv","args":["--format", "json"]}}}
         ]),
         json!({"text":["runc-zero","runc-one"],"argv":[["hello world","--env","MODE=guest","--dir=/guest"],[]]}),
     );
@@ -172,12 +159,12 @@ fn runc_dynamic_agent_and_wasm_read_isolated_copies_and_argv() {
     assert_eq!(status, 200);
     assert!(log.contains("zero"), "{log}");
     assert!(!log.contains("\\\"item\\\":\\\"one\\\""), "{log}");
-    let root = fleet.node_data.join("dag").join(id);
+    let root = fleet.run_root(&id);
     assert_eq!(
-        std::fs::read_to_string(root.join("agents/instances/0/how.md")).unwrap(),
+        std::fs::read_to_string(root.join("agents/meta/instances/0/how.md")).unwrap(),
         "runc-common-how\n\nrunc-zero"
     );
-    let output = std::fs::read_to_string(root.join("wasms/instances/0/output.txt")).unwrap();
+    let output = std::fs::read_to_string(root.join("binarys/instances/0/output.txt")).unwrap();
     assert_eq!(
         &output.split('\0').collect::<Vec<_>>()[3..7],
         &["hello world", "--env", "MODE=guest", "--dir=/guest"]

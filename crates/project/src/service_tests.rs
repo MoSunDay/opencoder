@@ -47,7 +47,7 @@ async fn seed_todo(p: &Arc<LibsqlStore>, id: &str, status: ProjectTodoStatus) {
     let now = 1000;
     p.create_todo(&ProjectTodoRecord {
         id: id.into(),
-        milestone_id: None,
+        initiative_id: None,
         title: format!("待办 {id}"),
         draft: "草稿".into(),
         plan_md: Some("# 方案".into()),
@@ -292,3 +292,6 @@ async fn panic_convergence_keeps_terminal_run_label() {
 
 #[path = "service_tests/lifecycle.rs"]
 mod lifecycle;
+
+#[path = "service_tests/dag_recovery.rs"]
+mod dag_recovery;

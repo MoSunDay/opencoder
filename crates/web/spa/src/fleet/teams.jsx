@@ -59,7 +59,7 @@ export function FleetTeamsPanel({ onNotice, onCreated, initialPrompt = '' }) {
     ? rows.filter((r) => [r.name].some((v) => String(v || '').toLowerCase().includes(query)))
     : rows;
   return <PageShell page="team">
-    <Space style={{ marginBottom: 12 }}>
+    <Space wrap style={{ marginBottom: 12, maxWidth: '100%' }}>
       <Input.Search
         allowClear
         style={{ minWidth: 220 }}

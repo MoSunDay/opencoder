@@ -19,6 +19,7 @@ export function MdEditDrawer({ open, title, initial, extraTop, onCancel, onOk })
       sort: seed.current?.sort || 0,
       detail_md: seed.current?.detail_md || '',
       goal_id: seed.current?.goal_id ?? null,
+      status: seed.current?.status || 'planned',
     });
     setMode('edit');
   }, [open, recordId, form]);
@@ -37,7 +38,7 @@ export function MdEditDrawer({ open, title, initial, extraTop, onCancel, onOk })
     }
   };
 
-  return <Drawer open={open} title={title} onClose={() => { if (!saving) onCancel(); }} size={640} destroyOnHidden
+  return <Drawer open={open} title={title} onClose={() => { if (!saving) onCancel(); }} size="min(640px, 100vw)" destroyOnHidden
     extra={<Space><Button disabled={saving} onClick={onCancel}>取消</Button><Button type="primary" loading={saving} onClick={submit}>保存</Button></Space>}>
     <Form form={form} layout="vertical" disabled={saving}>
       {extraTop}

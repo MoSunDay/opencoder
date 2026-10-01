@@ -82,18 +82,7 @@ fn write_card(
 
 /// Provision `<node-data>/dag/rootfs` through the repo script (dag_e2e style).
 fn prepare_rootfs(fleet: &Fleet) {
-    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let prep = std::process::Command::new("bash")
-        .arg(repo.join("scripts").join("prepare-dag-rootfs.sh"))
-        .arg(fleet.node_data.join("dag").join("rootfs"))
-        .output()
-        .expect("spawn prepare-dag-rootfs.sh");
-    assert!(
-        prep.status.success(),
-        "prepare-dag-rootfs.sh failed:\n-- stdout --\n{}\n-- stderr --\n{}",
-        String::from_utf8_lossy(&prep.stdout),
-        String::from_utf8_lossy(&prep.stderr),
-    );
+    crate::support::native::copy_rootfs(&fleet.node_data.join("dag/rootfs"));
 }
 
 fn read_json(path: &Path) -> Value {

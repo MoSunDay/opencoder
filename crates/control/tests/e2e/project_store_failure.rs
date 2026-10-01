@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use opencoder_store::{
-    PayloadChunkRecord, ProjectGoalPatch, ProjectGoalRecord, ProjectMilestonePatch,
-    ProjectMilestoneRecord, ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPage,
+    PayloadChunkRecord, ProjectGoalPatch, ProjectGoalRecord, ProjectInitiativePatch,
+    ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPage,
     ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
 };
 use reqwest::Method;
@@ -85,33 +85,13 @@ impl ProjectStore for GetTodoFailingStore {
     async fn list_goals(&self) -> anyhow::Result<Vec<ProjectGoalRecord>> {
         self.inner.list_goals().await
     }
-    async fn create_milestone(&self, rec: &ProjectMilestoneRecord) -> anyhow::Result<()> {
-        self.inner.create_milestone(rec).await
-    }
-    async fn patch_milestone(
-        &self,
-        id: &str,
-        patch: &ProjectMilestonePatch,
-        now_ms: i64,
-    ) -> anyhow::Result<bool> {
-        self.inner.patch_milestone(id, patch, now_ms).await
-    }
-    async fn delete_milestone(&self, id: &str) -> anyhow::Result<bool> {
-        self.inner.delete_milestone(id).await
-    }
-    async fn list_milestones(
-        &self,
-        goal_id: Option<&str>,
-    ) -> anyhow::Result<Vec<ProjectMilestoneRecord>> {
-        self.inner.list_milestones(goal_id).await
-    }
-    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> anyhow::Result<()> {
+    async fn create_initiative(&self, rec: &ProjectInitiativeRecord) -> anyhow::Result<()> {
         self.inner.create_initiative(rec).await
     }
     async fn patch_initiative(
         &self,
         id: &str,
-        patch: &ProjectMilestonePatch,
+        patch: &ProjectInitiativePatch,
         now_ms: i64,
     ) -> anyhow::Result<bool> {
         self.inner.patch_initiative(id, patch, now_ms).await
@@ -122,7 +102,7 @@ impl ProjectStore for GetTodoFailingStore {
     async fn list_initiatives(
         &self,
         goal_id: Option<&str>,
-    ) -> anyhow::Result<Vec<ProjectMilestoneRecord>> {
+    ) -> anyhow::Result<Vec<ProjectInitiativeRecord>> {
         self.inner.list_initiatives(goal_id).await
     }
     async fn create_todo(&self, rec: &ProjectTodoRecord) -> anyhow::Result<()> {
@@ -163,9 +143,9 @@ impl ProjectStore for GetTodoFailingStore {
     }
     async fn list_todos(
         &self,
-        milestone_id: Option<&str>,
+        initiative_id: Option<&str>,
     ) -> anyhow::Result<Vec<ProjectTodoRecord>> {
-        self.inner.list_todos(milestone_id).await
+        self.inner.list_todos(initiative_id).await
     }
     async fn create_todo_run(&self, rec: &ProjectTodoRunRecord) -> anyhow::Result<()> {
         self.inner.create_todo_run(rec).await

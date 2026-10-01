@@ -30,44 +30,57 @@ fn read(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 
-async fn prepared_container_timeout(node_root: &Path) {
-    // Reuse a completed bundle so image staging cannot consume this budget.
-    // The DAG cancellation case below separately exercises the running Codex
-    // session; this probe checks runc's own deadline and process-tree cleanup.
-    let bundle = node_root.join("bundles/dag-codex-runc-default/first");
-    let config_path = bundle.join("config.json");
-    let mut config = read(&config_path);
-    config["process"]["args"] = json!([
-        "/bin/sh",
-        "-c",
-        r#"printf started > "$OPENCODER_STEP_DIR/timeout-started"; exec /usr/bin/sleep 120"#,
-    ]);
-    std::fs::write(config_path, config.to_string()).unwrap();
-    let marker = node_root.join("dag-codex-runc-default/first/timeout-started");
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let execution = opencoder_dag_runtime::sandbox::runc::run_step_cancellable(
-        &bundle,
-        "codex-prepared-timeout",
-        Some(5),
-        cancel.clone(),
+async fn prepared_container_timeout(root: &Path, config: &opencoder_core::Config) {
+    let run = opencoder_dag::DagClaimedRun {
+        run_id: "dag-process-timeout".into(),
+        dag_id: "cleanup".into(),
+        created_at: 0,
+        spec: serde_json::from_value(json!({"name":"cleanup","steps":[]})).unwrap(),
+    };
+    let container = opencoder_dag_runtime::sandbox::run::RunContainer::start(root, config, &run)
+        .await
+        .unwrap();
+    let process = opencoder_dag_runtime::sandbox::run::StepProcess {
+        key: "timeout".into(),
+        argv: vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "echo started > timeout-started; exec /usr/bin/sleep 120".into(),
+        ],
+        env: vec![],
+        cwd: "/workspace".into(),
+        timeout_secs: Some(1),
+    };
+    let error = opencoder_dag_runtime::sandbox::run::execute(
+        root,
+        process,
+        tokio_util::sync::CancellationToken::new(),
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("DAG step timeout"), "{error:#}");
+    assert!(root.join("workspace/timeout-started").is_file());
+    let process = opencoder_dag_runtime::sandbox::run::StepProcess {
+        key: "healthy".into(),
+        argv: vec!["/bin/sh".into(), "-c".into(), "printf alive".into()],
+        env: vec![],
+        cwd: "/workspace".into(),
+        timeout_secs: Some(10),
+    };
+    assert_eq!(
+        opencoder_dag_runtime::sandbox::run::execute(
+            root,
+            process,
+            tokio_util::sync::CancellationToken::new(),
+            None
+        )
+        .await
+        .unwrap(),
+        (0, "alive".into())
     );
-    tokio::pin!(execution);
-    let initial = futures::poll!(&mut execution);
-    assert!(initial.is_pending(), "{initial:?}");
-    // runc now runs independently of this current-thread reactor. Hold off
-    // polling its deadline until the shell starts, so slow OCI startup cannot
-    // turn this running-container cleanup check into a pre-start timeout.
-    let startup = std::time::Instant::now();
-    while !marker.is_file() && startup.elapsed() < Duration::from_secs(180) {
-        std::thread::sleep(Duration::from_millis(30));
-    }
-    if !marker.is_file() {
-        cancel.cancel();
-    }
-    let error = execution.await.unwrap_err();
-    assert!(marker.is_file(), "container never started: {error:#}");
-    assert!(error.to_string().contains("runc step timeout"), "{error:#}");
-    assert!(std::fs::read_dir(bundle.join("runc-state"))
+    container.cleanup().await.unwrap();
+    assert!(std::fs::read_dir(root.join("runc-state"))
         .unwrap()
         .next()
         .is_none());
@@ -127,7 +140,7 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     std::fs::write(
         fleet.root().join("n0/work/.opencoder/config.json"),
         json!({"model":"unconfigured/model","providers":{"unconfigured":{"api_key":""}},
-        "dag":{"agent_sandbox":"runc","knowledge_root":knowledge}})
+        "dag":{"knowledge_root":knowledge,"rootfs_dir":rootfs}})
         .to_string(),
     )
     .unwrap();
@@ -140,20 +153,23 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     let result = settled(&fleet.nodes[0], "dag-codex-runc-default").await;
     assert_eq!(result["execution"]["status"], "done", "{result}");
     for step in ["first", "second"] {
-        let dir = node_root.join("dag-codex-runc-default").join(step);
+        let accepted_root =
+            support::dag_run(&fleet.root().join("n0/node"), "dag-codex-runc-default");
+        let dir = accepted_root.join(step);
         assert_eq!(read(&dir.join("output.json")), json!({"runc":true}));
         let session = read(&dir.join("session.json"));
         assert_eq!(session["harness"], "codex");
         assert_eq!(session["thread_id"], "runc-codex-thread");
-        assert!(std::fs::read_to_string(dir.join("events.ndjson"))
-            .unwrap()
-            .contains("runc-tool-ok"));
-        let bundle = node_root.join("bundles/dag-codex-runc-default").join(step);
-        let config = read(&bundle.join("config.json"));
+        assert!(std::fs::read_to_string(
+            accepted_root.join("upper").join(step).join("events.ndjson")
+        )
+        .unwrap()
+        .contains("runc-tool-ok"));
+        let config = read(&accepted_root.join("bundle/config.json"));
         assert!(!config["process"]["env"]
             .to_string()
             .contains("OPENAI_API_KEY="));
-        assert!(std::fs::read_dir(bundle.join("runc-state"))
+        assert!(std::fs::read_dir(accepted_root.join("runc-state"))
             .unwrap()
             .next()
             .is_none());
@@ -181,7 +197,7 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
         )
         .await;
     assert_eq!(reply.status, 200, "{reply:?}");
-    std::fs::write(temp.path().join("agents/codex-runc/meta.json"),
+    std::fs::write(fleet.root().join("n0/node/native-resources/source/agents/codex-runc/meta.json"),
         json!({"name":"codex-runc","harness":"codex","harness_profile":"selected","current":{"prompt":"probe"}}).to_string()).unwrap();
     save(&fleet, json!({"name":"codex-runc","steps":[{"name":"batch","kind":{
         "type":"dynamic","source":{"type":"input","pointer":"/items"},
@@ -200,7 +216,8 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     let result = settled(&fleet.nodes[0], "dag-codex-runc-batch").await;
     assert_eq!(result["execution"]["status"], "done", "{result}");
     for index in 0..2 {
-        let dir = node_root.join(format!("dag-codex-runc-batch/batch/instances/{index}"));
+        let dir = support::dag_run(&fleet.root().join("n0/node"), "dag-codex-runc-batch")
+            .join(format!("upper/batch/instances/{index}"));
         let args = std::fs::read_to_string(dir.join("argv.txt")).unwrap();
         for expected in [
             "--auth-slot\n2",
@@ -231,7 +248,8 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
         assert_eq!(accepted.status, 202, "{accepted:?}");
         let result = settled(&fleet.nodes[0], id).await;
         assert_eq!(result["execution"]["status"], "error", "{result}");
-        let meta = read(&node_root.join(format!("{id}/probe/meta.json")));
+        let accepted_root = support::dag_run(&fleet.root().join("n0/node"), id);
+        let meta = read(&accepted_root.join("probe/meta.json"));
         let expected = match prompt {
             "CODEX_AUTH_FAIL" => "fixture authentication rejected",
             "CODEX_MALFORMED" => "invalid Codex JSONL",
@@ -239,7 +257,7 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
             _ => unreachable!(),
         };
         assert!(meta["error"].as_str().unwrap().contains(expected), "{meta}");
-        let state = node_root.join(format!("bundles/{id}/probe/runc-state"));
+        let state = accepted_root.join("runc-state");
         // The DAG deadline includes image staging; no runc state is created
         // if cancellation arrives before container launch.
         if timeout.is_none() || state.exists() {
@@ -253,7 +271,16 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
             .status,
         202
     );
-    wait_file(&node_root.join("dag-codex-runc-cancel/probe/started")).await;
+    let cancel_root = loop {
+        let journal = fleet
+            .root()
+            .join("n0/node/dag/dag-codex-runc-cancel/execution.json");
+        if journal.is_file() {
+            break support::dag_run(&fleet.root().join("n0/node"), "dag-codex-runc-cancel");
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    };
+    wait_file(&cancel_root.join("workspace/probe/started")).await;
     let cancelled = fleet
         .call(
             "POST",
@@ -264,13 +291,13 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     assert_eq!(cancelled.status, 200, "{cancelled:?}");
     let result = settled(&fleet.nodes[0], "dag-codex-runc-cancel").await;
     assert_eq!(result["execution"]["status"], "cancelled", "{result}");
-    assert!(
-        std::fs::read_dir(node_root.join("bundles/dag-codex-runc-cancel/probe/runc-state"))
-            .unwrap()
-            .next()
-            .is_none()
-    );
+    assert!(std::fs::read_dir(cancel_root.join("runc-state"))
+        .unwrap()
+        .next()
+        .is_none());
 
+    let config = opencoder_core::Config::load(&fleet.root().join("n0/work")).unwrap();
+    prepared_container_timeout(&node_root.join("cleanup-probe"), &config).await;
     std::fs::rename(
         rootfs.join("usr/bin/codex"),
         rootfs.join("usr/bin/codex-disabled"),
@@ -287,6 +314,5 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
         0,
         "Codex must not call the native provider"
     );
-    prepared_container_timeout(&node_root).await;
     fleet.shutdown().await;
 }

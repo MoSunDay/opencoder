@@ -30,7 +30,7 @@ async fn resume_freezes_inputs_skips_success_and_never_appends_twice() {
         execute_run(f.deps(client), run.clone(), rx).await.unwrap(),
         DagRunStatus::Error
     );
-    let how = f.text(&run, "process/instances/1/how.md");
+    let how = f.text(&run, "process/meta/instances/1/how.md");
     assert_eq!(
         std::fs::read_to_string(pool.join("v1/how.md")).unwrap(),
         "original-how\n"
@@ -61,7 +61,7 @@ async fn resume_freezes_inputs_skips_success_and_never_appends_twice() {
         DagRunStatus::Done
     );
     assert_eq!(client.requests.lock().unwrap().len(), 1);
-    assert_eq!(f.text(&run, "process/instances/1/how.md"), how);
+    assert_eq!(f.text(&run, "process/meta/instances/1/how.md"), how);
     assert_eq!(
         f.json(&run, "process/instances/0/session.json"),
         saved_session
@@ -77,7 +77,7 @@ async fn resume_freezes_inputs_skips_success_and_never_appends_twice() {
     assert!(!pool.join("v2").exists());
     // Container loader consumes the same frozen agent + local how copy.
     let loaded = opencoder_dag_runtime::exec::how_copy::load(
-        &f.root.join(&run.run_id).join("process/instances/1"),
+        &f.root.join(&run.run_id).join("process/meta/instances/1"),
     )
     .unwrap();
     assert!(loaded.prompt.contains("RETRY-ITEM"));

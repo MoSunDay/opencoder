@@ -37,7 +37,7 @@ pub use agent::{AgentDefaults, AgentNfsConfig, ToolsScope};
 pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
 pub use compaction::{CompactionConfig, OutputStreamlineConfig};
-pub use dag::{AgentSandbox, DagConfig, DagDeviceConfig, DagOpConfig};
+pub use dag::DagConfig;
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
@@ -55,6 +55,9 @@ use model_guard::warn_if_suspicious_model;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Optional TUI connection. Credentials come from OPENCODER_SERVER_TOKEN.
+    #[serde(default)]
+    pub opencoder_server: crate::harness::ServerConnection,
     #[serde(default)]
     pub provider: ProviderConfig,
     /// Named OpenAI-compatible providers. Each entry is `{base_url, api_key?, model?}`.
@@ -90,7 +93,7 @@ pub struct Config {
     pub embedding_provider: Option<String>,
     #[serde(default)]
     pub agent: AgentDefaults,
-    /// DAG wasm-module pool + NFS export knobs.
+    /// DAG binary-module pool + NFS export knobs.
     #[serde(default)]
     pub dag: DagConfig,
     #[serde(default)]
@@ -273,6 +276,7 @@ pub struct NetworkConfig {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            opencoder_server: Default::default(),
             provider: ProviderConfig {
                 base_url: provider::default_base_url(),
                 ..Default::default()

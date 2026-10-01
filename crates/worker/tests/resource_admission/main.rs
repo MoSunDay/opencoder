@@ -1,4 +1,4 @@
-//! A slow filesystem must not stop a current-thread node's timers/control work.
+//! Invalid resource files must fail before durable execution admission.
 #![cfg(unix)]
 #[path = "../support/mod.rs"]
 mod support;
@@ -6,13 +6,10 @@ mod support;
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use serde_json::json;
-use std::{
-    io::Write,
-    time::{Duration, Instant},
-};
+use std::time::Duration;
 
 #[tokio::test]
-async fn blocked_resource_read_does_not_starve_node_executor_or_lose_scoped_pool() {
+async fn fifo_resource_is_rejected_without_waiting_for_a_writer_or_accepting_execution() {
     let (_guard, home) = support::isolated_config();
     let directory = tempfile::tempdir().unwrap();
     let worker = support::worker(directory.path(), support::mock()).await;
@@ -24,18 +21,6 @@ async fn blocked_resource_read_does_not_starve_node_executor_or_lose_scoped_pool
         .status()
         .unwrap()
         .success());
-    let (release, receiver) = std::sync::mpsc::channel();
-    let (reading, read_started) = tokio::sync::oneshot::channel();
-    let fifo_for_cleanup = fifo.clone();
-    let writer = std::thread::spawn(move || {
-        // Opening the writer proves the real metadata reader has arrived.
-        // That read blocks until the delayed bytes arrive. The timeout also
-        // makes the pre-fix case terminate so it fails rather than hanging CI.
-        let mut file = std::fs::OpenOptions::new().write(true).open(fifo).unwrap();
-        let _ = reading.send(Instant::now());
-        let _ = receiver.recv_timeout(Duration::from_secs(3));
-        file.write_all(b"{invalid metadata}").unwrap();
-    });
     let assignment = support::assignment(
         &worker,
         "agent-slow-resources",
@@ -43,41 +28,17 @@ async fn blocked_resource_read_does_not_starve_node_executor_or_lose_scoped_pool
         json!({"prompt":""}),
         None,
     );
-    let control = async {
-        let observed = tokio::time::timeout(Duration::from_secs(1), read_started).await;
-        if observed.is_err() {
-            // Unblock and clean the helper if the scoped pool was lost.
-            let _reader = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(fifo_for_cleanup)
-                .unwrap();
-            let _ = release.send(());
-            panic!("preflight did not read its caller-scoped resource pool");
-        }
-        // Measure the blocked read itself, excluding durable admission setup.
-        // The writer thread's timestamp still exposes an executor blocked in read().
-        let started = observed.unwrap().unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let elapsed = started.elapsed();
-        let _ = release.send(());
-        elapsed
-    };
-    let (reply, elapsed) =
-        tokio::join!(worker.handle(NodeOperation::Create { assignment }), control);
-    writer.join().unwrap();
-    assert!(
-        elapsed < Duration::from_secs(1),
-        "node executor blocked for {elapsed:?}"
-    );
+    let reply = tokio::time::timeout(
+        Duration::from_secs(5),
+        worker.handle(NodeOperation::Create { assignment }),
+    )
+    .await
+    .expect("resource preflight waited for a FIFO writer");
     assert_eq!(
         reply.status, 400,
-        "caller-scoped invalid pool must be read: {reply:?}"
+        "caller-scoped invalid pool must be rejected: {reply:?}"
     );
-    assert!(
-        reply.body.to_string().contains("key must be a string"),
-        "{reply:?}"
-    );
+    assert!(reply.body.to_string().contains("regular file"), "{reply:?}");
     assert!(
         worker.indexes().await.unwrap().is_empty(),
         "failed preflight must not accept execution"

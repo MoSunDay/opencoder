@@ -133,7 +133,6 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
         timeout_hint: None,
         knowledge: None,
         agents: None,
-        argv: crate::sandbox::oci::ArgvStyle::Direct,
     };
     let bundle = launch.write_bundle(&root.join("bundle"), &spec).unwrap();
     let value: serde_json::Value =

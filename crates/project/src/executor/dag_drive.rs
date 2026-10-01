@@ -14,8 +14,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
 use opencoder_dag::{
-    decode_spec_str, validate as validate_dag, DagClaimedRun, DagEventBatch, DagSpec,
-    DagStatusReport,
+    decode_spec_str, validate as validate_dag, DagEventBatch, DagSpec, DagStatusReport,
 };
 use opencoder_node::uplink::{LocalDagPersistence, Uplink};
 use opencoder_store::{
@@ -29,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     context::ProjectContext,
     executor::ResolvedExecutor,
-    plan_gen::{close_run, forget_spawn, runtime_setup},
+    plan_gen::{close_run, forget_spawn, runtime_config},
     service::Deps,
 };
 
@@ -73,7 +72,7 @@ async fn resolve_spec(
         let spec: DagSpec =
             decode_spec_str(spec_json).map_err(|e| anyhow!("parse dag executor spec: {e}"))?;
         validate_dag(&spec).map_err(|e| anyhow!("invalid dag spec: {}", e.join("; ")))?;
-        let dag_id = spec.name.clone();
+        let dag_id = format!("project-dag-{}", todo.id);
         return Ok((spec, dag_id));
     }
     let ref_ = resolved
@@ -246,16 +245,38 @@ async fn run_dag(
     resolved: &ResolvedExecutor,
     token: &CancellationToken,
 ) -> Result<(opencoder_dag::DagRunStatus, PathBuf, PathBuf, DagSpec), DagFailure> {
-    let (config, client) = runtime_setup(deps).map_err(pre_session_failure)?;
-    let (spec, dag_id) = resolve_spec(deps, todo, resolved)
+    let record = deps
+        .projects
+        .get_todo_run(run_id)
         .await
-        .map_err(pre_session_failure)?;
-    let workflow_root = opencoder_core::data_dir_for(&deps.workdir).join("workflow");
-    let run_root = opencoder_dag::artifacts::run_root(&workflow_root, run_id)
-        .map_err(|e| pre_session_failure(anyhow!("illegal dag run id {run_id:?}: {e}")))?;
-    create_host_session(deps, run_id, todo, &config)
+        .map_err(pre_session_failure)?
+        .ok_or_else(|| pre_session_failure(anyhow!("project DAG run missing")))?;
+    let (config, claimed, run_root, resume) = if let Some(restored) =
+        super::dag_state::restored(deps, &record).map_err(pre_session_failure)?
+    {
+        restored
+    } else {
+        let config = runtime_config(deps).map_err(pre_session_failure)?;
+        let (spec, dag_id) = resolve_spec(deps, todo, resolved)
+            .await
+            .map_err(pre_session_failure)?;
+        super::dag_state::prepare(deps, &record, config, spec, dag_id)
+            .await
+            .map_err(pre_session_failure)?
+    };
+    let spec = claimed.spec.clone();
+    let workflow_root = run_root.parent().unwrap().to_path_buf();
+    if deps
+        .store
+        .get_session(run_id)
         .await
-        .map_err(pre_session_failure)?;
+        .map_err(pre_session_failure)?
+        .is_none()
+    {
+        create_host_session(deps, run_id, todo, &config)
+            .await
+            .map_err(pre_session_failure)?;
+    }
 
     let uplink = Arc::new(Uplink::for_local_dag(Arc::new(LocalDagEvents {
         store: deps.store.clone(),
@@ -264,7 +285,6 @@ async fn run_dag(
         uplink,
         exec: opencoder_dag_runtime::ExecDeps {
             store: deps.store.clone(),
-            client,
             workdir: deps.workdir.clone(),
             config,
         },
@@ -280,13 +300,11 @@ async fn run_dag(
             let _ = tx.send(true);
         })
     };
-    let claimed = DagClaimedRun {
-        run_id: run_id.to_string(),
-        dag_id,
-        spec: spec.clone(),
-        created_at: opencoder_core::message::now_ms(),
+    let status = if resume {
+        opencoder_dag_runtime::resume_run(run_deps, claimed, rx).await
+    } else {
+        opencoder_dag_runtime::execute_run(run_deps, claimed, rx).await
     };
-    let status = opencoder_dag_runtime::execute_run(run_deps, claimed, rx).await;
     fwd.abort();
     // 宿主 session 已创建：此后失败 close 仍写 session_id 供回看。
     let status = status.map_err(|e| DagFailure {

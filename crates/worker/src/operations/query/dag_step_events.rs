@@ -1,8 +1,8 @@
 //! DAG single-step event stream: the query behind
 //! `GET /api/dag/runs/:id/steps/:step/events`. An `agent` step owns a child
 //! session (`session.json`, falling back to `meta.json.session_id`) and its
-//! events are read straight from it; `wasm` steps multiplex into the
-//! run session, so their frames are selected by `payload.step` (wasm output
+//! events are read straight from it; `binary` steps multiplex into the
+//! run session, so their frames are selected by `payload.step` (binary output
 //! additionally by the `step_output` kind). Frame shape, page caps and the
 //! 413 guards match `query::events` so the control SSE loop is reusable.
 
@@ -47,7 +47,7 @@ pub(in crate::operations) async fn events(
             "dag step events require a DAG execution",
         ));
     }
-    let (definition, legacy, run_status) = {
+    let (definition, root, run_status) = {
         let journal = worker.inner.journal.lock().await;
         let record = journal
             .records
@@ -55,8 +55,8 @@ pub(in crate::operations) async fn events(
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("dag execution not found"))?;
         (
-            record.assignment.definition,
-            journal.uses_legacy(&execution.id),
+            record.assignment.definition.clone(),
+            crate::layout::dag::accepted_parent(&record)?,
             record.assignment.index.status.as_str().to_owned(),
         )
     };
@@ -78,7 +78,7 @@ pub(in crate::operations) async fn events(
         kind = Some(
             match ctx.template {
                 opencoder_dag::StepKind::Agent { .. } => "agent",
-                _ => "wasm",
+                _ => "binary",
             }
             .into(),
         );
@@ -88,11 +88,6 @@ pub(in crate::operations) async fn events(
             "select a dynamic instance to read its events",
         ));
     }
-    let root = if legacy {
-        worker.inner.layout.checked_legacy_workflow_root()?
-    } else {
-        worker.inner.layout.kind_root(ExecutionKind::Dag)
-    };
     let meta = execution_meta(&root, &execution.id, step, index).await?;
     let status = if index.is_some() {
         super::instances::status(&meta, &run_status)
@@ -101,7 +96,7 @@ pub(in crate::operations) async fn events(
     };
     let session_id = execution_session_id(&root, &execution.id, step, index, &meta).await?;
     // An agent step streams its own child session once it exists; until then
-    // (and for wasm) the run session is the only source.
+    // (and for binary) the run session is the only source.
     let child = kind.as_deref() == Some("agent") && session_id.is_some();
     let source = if child {
         session_id.clone().unwrap_or_default()
@@ -232,7 +227,7 @@ pub(in crate::operations) async fn events(
     })))
 }
 
-/// Run-session frames belong to a step only when the payload names it; wasm
+/// Run-session frames belong to a step only when the payload names it; binary
 /// output is additionally restricted to the `step_output` kind so a step never
 /// inherits another step's stdout/stderr.
 #[derive(Clone, Copy)]
@@ -248,7 +243,7 @@ impl StepFilter<'_> {
         if self.since.is_some_and(|start| event.ts < start) {
             return false;
         }
-        if self.kind == Some("wasm")
+        if self.kind == Some("binary")
             && !matches!(event.sse_kind.as_deref(), Some("step_output" | "step_log"))
         {
             return false;

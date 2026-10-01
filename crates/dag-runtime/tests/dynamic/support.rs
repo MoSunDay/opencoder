@@ -10,6 +10,11 @@ use std::{
     time::Duration,
 };
 
+#[path = "../support/container.rs"]
+mod container;
+#[path = "../support/model.rs"]
+mod model;
+
 #[derive(Default)]
 pub struct Events(pub Mutex<Vec<DagEventIn>>);
 #[async_trait::async_trait]
@@ -24,6 +29,8 @@ impl LocalDagPersistence for Events {
 }
 
 pub struct Fixture {
+    container: container::ContainerFixture,
+    bridges: Mutex<Vec<model::ModelBridge>>,
     pub tmp: tempfile::TempDir,
     pub root: PathBuf,
     pub events: Arc<Events>,
@@ -41,8 +48,13 @@ impl Fixture {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("workflow");
         let mut config = opencoder_core::Config::default();
+        let container = container::ContainerFixture::open(tmp.path());
+        container.configure(&mut config);
         config.agent.agents_dir = Some(tmp.path().join("agents"));
+        std::fs::create_dir_all(config.agent.agents_dir.as_ref().unwrap()).unwrap();
         Self {
+            container,
+            bridges: Mutex::new(vec![]),
             tmp,
             root,
             events: Arc::new(Events::default()),
@@ -67,14 +79,18 @@ impl Fixture {
         run
     }
     pub fn deps(&self, client: Arc<dyn ChatStream>) -> RunDeps {
+        let bridge = model::ModelBridge::start(client.clone());
+        let mut config = self.config.clone();
+        bridge.configure(&mut config);
+        self.bridges.lock().unwrap().push(bridge);
         RunDeps {
             uplink: Arc::new(Uplink::for_local_dag(self.events.clone())),
             workflow_root: self.root.clone(),
             exec: ExecDeps {
                 store: self.store.clone(),
-                client,
+
                 workdir: self.tmp.path().into(),
-                config: self.config.clone(),
+                config,
             },
         }
     }
@@ -85,10 +101,29 @@ impl Fixture {
     pub fn text(&self, run: &DagClaimedRun, path: &str) -> String {
         std::fs::read_to_string(self.root.join(&run.run_id).join(path)).unwrap()
     }
-    pub fn module(&self, run: &DagClaimedRun, name: &str, wat: &str) {
-        std::fs::write(
-            self.root.join(&run.run_id).join(name),
-            wat::parse_str(wat).unwrap(),
+    pub fn binary(&self, name: &str, source: &str) {
+        let directory = self.tmp.path().join("compile");
+        std::fs::create_dir_all(&directory).unwrap();
+        let source_path = directory.join(format!("{name}.c"));
+        let output_path = directory.join(name);
+        std::fs::write(&source_path, source).unwrap();
+        let result = std::process::Command::new("cc")
+            .args(["-O2", "-static"])
+            .arg(source_path)
+            .arg("-o")
+            .arg(&output_path)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        opencoder_dag_binary::save_binary_version(
+            &self.container.pool,
+            name,
+            "fixture",
+            &std::fs::read(output_path).unwrap(),
         )
         .unwrap();
     }
@@ -147,14 +182,11 @@ impl ChatStream for Scripted {
     }
 }
 
-pub const ARGV_WAT: &str = r#"(module
-(import "wasi_snapshot_preview1" "args_sizes_get" (func $sizes (param i32 i32) (result i32)))
-(import "wasi_snapshot_preview1" "args_get" (func $args (param i32 i32) (result i32)))
-(import "wasi_snapshot_preview1" "fd_write" (func $write (param i32 i32 i32 i32) (result i32)))
-(memory (export "memory") 1)
-(func (export "_start")
-(drop (call $sizes (i32.const 0) (i32.const 4)))
-(drop (call $args (i32.const 8) (i32.const 4096)))
-(i32.store (i32.const 2048) (i32.const 4096))
-(i32.store (i32.const 2052) (i32.load (i32.const 4)))
-(drop (call $write (i32.const 1) (i32.const 2048) (i32.const 1) (i32.const 2056)))))"#;
+pub const ARGV_C: &str = r#"
+#include <stdio.h>
+#include <string.h>
+int main(int count, char **arguments) {
+    for (int index=0; index<count; index++) fwrite(arguments[index], strlen(arguments[index])+1, 1, stdout);
+    return 0;
+}
+"#;

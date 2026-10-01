@@ -14,6 +14,9 @@ const token = crypto.randomBytes(24).toString('hex');
 const children = [];
 const browserErrors = [];
 const expectedOfflineErrors = [];
+const initializationConflicts = [];
+const conflictResponses = [];
+const conflictReads = [];
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let base;
 let browser;
@@ -176,6 +179,7 @@ async function createTodo(id, nodeId) {
 }
 
 async function openExecution(id) {
+  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
   await page.getByRole('button', { name: /^刷\s*新$/ }).click();
   await page.getByRole('button', { name: id, exact: true }).click();
@@ -210,11 +214,16 @@ async function main() {
   page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.setDefaultTimeout(15_000);
   page.on('pageerror', (error) => browserErrors.push(error.message));
+  page.on('response', (response) => {
+    if (response.status() === 409) conflictReads.push(response.json().then((body) => conflictResponses.push({ url: response.url(), error: body.error })));
+  });
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     const text = message.text();
     if (plannedRestart && /^Failed to load resource: the server responded with a status of 503/.test(text)) {
       expectedOfflineErrors.push(text);
+    } else if (/^Failed to load resource: the server responded with a status of 409/.test(text)) {
+      initializationConflicts.push(message.location().url);
     } else {
       browserErrors.push(text);
     }
@@ -310,8 +319,14 @@ async function main() {
   assert.equal(await drawer.getByText('TODO 工作流正在初始化', { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(root, 'todo-init-stopped.png'), animations: 'disabled' });
 
+  await Promise.all(conflictReads);
+  for (const conflict of conflictResponses) {
+    assert.match(new URL(conflict.url).pathname, /^\/api\/todo\/workflows\/todos-ui-(init-failed|preinit-interrupt|preinit-restart)\/review$/);
+    assert.match(conflict.error, /^workflow initialization (failed|stopping|stopped): /);
+  }
+  for (const url of initializationConflicts) assert(conflictResponses.some((response) => response.url === url), `unverified 409: ${url}`);
   assert.deepEqual(browserErrors, []);
-  console.log(JSON.stringify({ result: 'PASS', root, node_id: nodeId, states: ['initializing', 'ready', 'failed', 'interrupted', 'restart-stopped'], expected_offline_503: expectedOfflineErrors.length }));
+  console.log(JSON.stringify({ result: 'PASS', root, node_id: nodeId, states: ['initializing', 'ready', 'failed', 'interrupted', 'restart-stopped'], expected_offline_503: expectedOfflineErrors.length, expected_initialization_409: conflictResponses.length }));
 }
 
 const deadline = setTimeout(() => { for (const child of children) child.kill('SIGKILL'); process.exit(1); }, 240_000);

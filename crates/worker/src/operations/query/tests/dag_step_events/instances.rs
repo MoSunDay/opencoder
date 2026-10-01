@@ -5,7 +5,7 @@ async fn dynamic_run(worker: &Worker, run: &str, kind: &str, count: usize) {
     let template = if kind == "agent" {
         json!({"type":"agent","prompt":"review"})
     } else {
-        json!({"type":"wasm","command":"x.wasm"})
+        json!({"type":"binary","resource":"x"})
     };
     dag_run(
         worker,
@@ -44,7 +44,7 @@ fn instance_artifacts(worker: &Worker, run: &str, index: usize, files: &[(&str, 
 #[tokio::test]
 async fn thousand_instances_page_cap_detail_and_identity_validation() {
     let (_tmp, worker) = worker().await;
-    dynamic_run(&worker, "dag-instances", "wasm", 1000).await;
+    dynamic_run(&worker, "dag-instances", "binary", 1000).await;
     let r = dag_ref("dag-instances");
     let page = instances::query(&worker, &r, "process", None, 0, 100)
         .await
@@ -63,7 +63,7 @@ async fn thousand_instances_page_cap_detail_and_identity_validation() {
         .await
         .unwrap();
     assert_eq!(detail.body["input"], json!(["--title", "hello world"]));
-    assert_eq!(detail.body["kind"], "wasm");
+    assert_eq!(detail.body["kind"], "binary");
     assert_eq!(
         instances::query(&worker, &r, "process", Some(1000), 0, 100)
             .await
@@ -84,7 +84,7 @@ async fn thousand_instances_page_cap_detail_and_identity_validation() {
 async fn instance_logs_filter_index_replay_cursor_and_agent_session() {
     let (_tmp, worker) = worker().await;
     let run = "dag-instance-logs";
-    dynamic_run(&worker, run, "wasm", 2).await;
+    dynamic_run(&worker, run, "binary", 2).await;
     session(&worker, run).await;
     let seqs = append(
         &worker,

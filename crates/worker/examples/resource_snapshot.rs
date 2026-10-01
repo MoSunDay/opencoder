@@ -1,6 +1,5 @@
 //! Measure a private snapshot without creating an execution or changing source.
-#[path = "../src/resources/snapshot.rs"]
-mod snapshot;
+use opencoder_agents::snapshot;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();

@@ -14,7 +14,6 @@ fn press_running_command(
     let mut skill_menu = None;
     let mut undo_state = crate::undo::init(&input, cursor);
     let mut queue_scroll = 0;
-    let mut file_menu = None;
     let action = handle_key(
         KeyEvent::new(code, KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -36,8 +35,6 @@ fn press_running_command(
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        Path::new("."),
         &mut None,
     );
     (action, input, cursor)
@@ -48,12 +45,16 @@ fn press_running_mode_command(command: &str, code: KeyCode) -> (KeyAction, Strin
 }
 
 #[test]
-fn agent_commands_are_unavailable_on_enter_and_tab() {
-    for command in ["/agent", "/agent writer", "/agents", "/agents list"] {
+fn agent_selection_intercepts_enter_and_tab_even_while_running() {
+    for command in ["/agent", "/agent self", "/agent server-operator"] {
         for code in [KeyCode::Enter, KeyCode::Tab] {
-            let (action, input, _) = press_running_mode_command(command, code);
-            assert!(matches!(action, KeyAction::AgentCommandUnavailable));
-            assert_eq!(input, command);
+            let (action, input, cursor) = press_running_mode_command(command, code);
+            let KeyAction::SelectAgent(name) = action else {
+                panic!("expected selection")
+            };
+            assert_eq!(name, command.strip_prefix("/agent").unwrap().trim());
+            assert_eq!(input, "");
+            assert_eq!(cursor, 0);
         }
     }
 }
@@ -68,7 +69,6 @@ fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction,
     let mut skill_menu = None;
     let mut undo_state = crate::undo::init(&input, cursor);
     let mut queue_scroll = 0;
-    let mut file_menu = None;
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -90,8 +90,6 @@ fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction,
         input_disabled,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        Path::new("."),
         &mut None,
     );
     (action, input)
@@ -178,7 +176,6 @@ fn idle_tab_with_live_subagents_becomes_queue() {
     let mut skill_menu = None;
     let mut undo_state = crate::undo::init(&input, cursor);
     let mut queue_scroll = 0;
-    let mut file_menu = None;
     let action = handle_key(
         KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -200,8 +197,6 @@ fn idle_tab_with_live_subagents_becomes_queue() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        Path::new("."),
         &mut None,
     );
     assert!(
@@ -248,403 +243,18 @@ fn running_normal_prompt_keeps_steer_and_queue_behavior() {
 /// canonical command, carrying the raw text as `draft` for the guard's Esc
 /// 回撤 to restore verbatim. Execution only happens after the confirm (Enter
 /// / window elapsed). Identical entry to typing the command.
+
 #[test]
-fn backtab_in_plan_mode_arms_clear_context_confirm() {
-    fn run(input_text: &str) -> (KeyAction, String) {
-        let mut input = input_text.to_string();
-        let mut cursor = input.chars().count();
-        let mut hist_idx = None;
-        let mut scroll = 0;
-        let mut follow = true;
-        let mut last_esc = None;
-        let mut skill_menu = None;
-        let mut undo_state = crate::undo::init(&input, cursor);
-        let mut queue_scroll = 0;
-        let mut file_menu = None;
-        let action = handle_key(
-            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
-            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-            &mut input,
-            &mut cursor,
-            &[],
-            &mut hist_idx,
-            false,
-            false,
-            "plan",
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-            false,
-            false,
-            &mut undo_state,
-            &mut queue_scroll,
-            &mut file_menu,
-            Path::new("."),
-            &mut None,
-        );
-        (action, input)
-    }
-
-    let (action, input) = run("");
-    match action {
-        KeyAction::ArmClearConfirm { rest, draft } => {
-            assert_eq!(rest, None);
-            assert_eq!(draft, None);
-        }
-        other => panic!("expected ArmClearConfirm, got {other:?}"),
-    }
-    assert!(input.is_empty(), "arming clears the input line");
-
-    let (action, input) = run("now run the checks");
-    match action {
-        KeyAction::ArmClearConfirm { rest, draft } => {
-            assert_eq!(rest, Some("now run the checks".into()));
-            assert_eq!(draft, Some("now run the checks".into()));
-        }
-        other => panic!("expected compound Submit, got {other:?}"),
-    }
-    assert!(input.is_empty(), "submit clears the input line");
-
-    // Raw draft round-trips untrimmed — Esc 回撤 restores byte-exact input.
-    let (action, _) = run("  padded draft  ");
-    match action {
-        KeyAction::ArmClearConfirm { rest, draft } => {
-            assert_eq!(rest, Some("padded draft".into()));
-            assert_eq!(draft, Some("  padded draft  ".into()));
-        }
-        other => panic!("expected ArmClearConfirm, got {other:?}"),
-    }
-}
-
-/// BackTab-arm → Esc 回撤 is lossless: the draft captured by the guard's arm
-/// action comes back into the composer verbatim when the countdown is
-/// cancelled (handle_key → arm(rest, draft) → intercept(Esc), the exact
-/// chain app.rs runs).
-#[test]
-fn backtab_arm_then_esc_restores_the_raw_draft() {
-    for raw in ["fold and then run the checks", "  padded  ", ""] {
-        let mut input = raw.to_string();
-        let mut cursor = raw.chars().count();
-        let mut hist_idx = None;
-        let mut scroll = 0;
-        let mut follow = true;
-        let mut last_esc = None;
-        let mut skill_menu = None;
-        let mut undo_state = crate::undo::init(&input, cursor);
-        let mut queue_scroll = 0;
-        let mut file_menu = None;
-        let action = handle_key(
-            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
-            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-            &mut input,
-            &mut cursor,
-            &[],
-            &mut hist_idx,
-            false,
-            false,
-            "plan",
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-            false,
-            false,
-            &mut undo_state,
-            &mut queue_scroll,
-            &mut file_menu,
-            Path::new("."),
-            &mut None,
-        );
-        let (rest, draft) = match action {
-            KeyAction::ArmClearConfirm { rest, draft } => (rest, draft),
-            other => panic!("expected ArmClearConfirm, got {other:?}"),
-        };
-        assert!(input.is_empty(), "arming clears the composer");
-
-        // The guard's Esc puts the raw draft back — nothing was lost.
-        let mut cc = Some(crate::clear_confirm::arm(rest, draft));
-        let mut undo = crate::undo::init(&input, cursor);
-        assert_eq!(
-            crate::clear_confirm::intercept(
-                &mut cc,
-                &mut input,
-                &mut cursor,
-                &mut undo,
-                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
-            ),
-            Some(crate::clear_confirm::ConfirmFlow::Cancel)
-        );
-        assert!(cc.is_none(), "Esc drops the arm");
-        assert_eq!(input, raw, "Esc 回撤 restores the raw draft verbatim");
-        assert_eq!(cursor, raw.chars().count());
-    }
-}
-
-/// Shift+Tab in act mode is the non-destructive way back to plan: it issues a
-/// plain mode switch (context preserved), not the clear-context countdown.
-/// The composer draft is untouched — unlike the plan-mode arm, nothing is
-/// swallowed.
-#[test]
-fn backtab_in_act_mode_switches_to_plan() {
-    fn run(input_text: &str, running: bool) -> (KeyAction, String) {
-        let mut input = input_text.to_string();
-        let mut cursor = input.chars().count();
-        let mut hist_idx = None;
-        let mut scroll = 0;
-        let mut follow = true;
-        let mut last_esc = None;
-        let mut skill_menu = None;
-        let mut undo_state = crate::undo::init(&input, cursor);
-        let mut queue_scroll = 0;
-        let mut file_menu = None;
-        let action = handle_key(
-            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
-            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-            &mut input,
-            &mut cursor,
-            &[],
-            &mut hist_idx,
-            running,
-            false,
-            "act",
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-            false,
-            false,
-            &mut undo_state,
-            &mut queue_scroll,
-            &mut file_menu,
-            Path::new("."),
-            &mut None,
-        );
-        (action, input)
-    }
-
-    for running in [false, true] {
-        let (action, input) = run("some draft", running);
-        assert!(
-            matches!(action, KeyAction::SwitchAgent(ref to) if to == "plan"),
-            "act + Shift+Tab must switch to plan, got {action:?}"
-        );
-        assert_eq!(input, "some draft", "mode switch preserves the composer");
-    }
-}
-
-/// Shift+Tab spelled as (Tab, SHIFT) — some terminals report the chord this
-/// way — must take the same mode-aware path
-/// as BackTab: arm the countdown in plan mode, switch to plan in act mode.
-/// The plain Tab arm (queue/submit) must never swallow the chord.
-#[test]
-fn tab_shift_spelling_arms_or_switches_like_backtab() {
-    fn run(
-        code: KeyCode,
-        mods: KeyModifiers,
-        agent: &str,
-        input_text: &str,
-    ) -> (KeyAction, String) {
-        let mut input = input_text.to_string();
-        let mut cursor = input.chars().count();
-        let mut hist_idx = None;
-        let mut scroll = 0;
-        let mut follow = true;
-        let mut last_esc = None;
-        let mut skill_menu = None;
-        let mut undo_state = crate::undo::init(&input, cursor);
-        let mut queue_scroll = 0;
-        let mut file_menu = None;
-        let action = handle_key(
-            KeyEvent::new(code, mods),
-            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-            &mut input,
-            &mut cursor,
-            &[],
-            &mut hist_idx,
-            false,
-            false,
-            agent,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-            false,
-            false,
-            &mut undo_state,
-            &mut queue_scroll,
-            &mut file_menu,
-            Path::new("."),
-            &mut None,
-        );
-        (action, input)
-    }
-
-    // Plan mode: both spellings arm the countdown, forwarding the draft.
-    for code in [KeyCode::BackTab, KeyCode::Tab] {
-        let (action, input) = run(code, KeyModifiers::SHIFT, "plan", "run the checks");
-        match action {
-            KeyAction::ArmClearConfirm { rest, draft } => {
-                assert_eq!(rest, Some("run the checks".into()), "{code:?}");
-                assert_eq!(draft, Some("run the checks".into()), "{code:?}");
-            }
-            other => panic!("{code:?} in plan mode must arm, got {other:?}"),
-        }
-        assert!(input.is_empty(), "{code:?} arming clears the composer");
-    }
-
-    // Act mode: both spellings switch back to plan, draft preserved.
-    for code in [KeyCode::BackTab, KeyCode::Tab] {
-        let (action, input) = run(code, KeyModifiers::SHIFT, "act", "draft stays");
-        assert!(
-            matches!(action, KeyAction::SwitchAgent(ref to) if to == "plan"),
-            "{code:?} in act mode must switch to plan, got {action:?}"
-        );
-        assert_eq!(
-            input, "draft stays",
-            "{code:?} switch preserves the composer"
-        );
-    }
-}
-
-/// CONTROL/ALT/SUPER chord variants of the Shift+Tab family never arm the
-/// countdown nor switch modes: the retired ctrl+shift+tab (BackTab+CONTROL)
-/// must stay inert, mirroring the confirm side (`clear_confirm::intercept`)
-/// — a chord that cannot confirm the guard must not arm it either.
-#[test]
-fn ctrl_alt_shift_tab_chords_never_arm_or_switch() {
-    fn run(code: KeyCode, mods: KeyModifiers, agent: &str) -> (KeyAction, String) {
-        let mut input = "draft stays".to_string();
-        let mut cursor = input.chars().count();
-        let mut hist_idx = None;
-        let mut scroll = 0;
-        let mut follow = true;
-        let mut last_esc = None;
-        let mut skill_menu = None;
-        let mut undo_state = crate::undo::init(&input, cursor);
-        let mut queue_scroll = 0;
-        let mut file_menu = None;
-        let action = handle_key(
-            KeyEvent::new(code, mods),
-            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-            &mut input,
-            &mut cursor,
-            &[],
-            &mut hist_idx,
-            false,
-            false,
-            agent,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-            false,
-            false,
-            &mut undo_state,
-            &mut queue_scroll,
-            &mut file_menu,
-            Path::new("."),
-            &mut None,
-        );
-        (action, input)
-    }
-
-    // BackTab + CONTROL/ALT/SUPER: fully inert in both modes — no arm, no
-    // switch, draft untouched.
-    for mods in [
-        KeyModifiers::CONTROL,
-        KeyModifiers::ALT,
-        KeyModifiers::SUPER,
-    ] {
-        for agent in ["plan", "act"] {
-            let (action, input) = run(KeyCode::BackTab, mods, agent);
-            assert!(
-                matches!(action, KeyAction::None),
-                "BackTab+{mods:?} in {agent} must stay inert, got {action:?}"
-            );
-            assert_eq!(input, "draft stays", "inert chord preserves the draft");
+fn task_command_opens_picker_instead_of_steering_running_execution() {
+    for command in ["/task", "/tasks", "/t"] {
+        for code in [KeyCode::Enter, KeyCode::Tab] {
+            let (action, input, cursor) = press_running_mode_command(command, code);
+            assert!(matches!(action, KeyAction::OpenTask));
+            assert!(input.is_empty());
+            assert_eq!(cursor, 0);
         }
     }
-
-    // (Tab, SHIFT+CONTROL) misses the shift_tab arm and is swallowed by the
-    // generic Ctrl-combo guard — never an arm, never a mode switch, and it
-    // can never leak into the plain Tab queue/submit arm either.
-    let (action, input) = run(
-        KeyCode::Tab,
-        KeyModifiers::SHIFT | KeyModifiers::CONTROL,
-        "plan",
-    );
-    assert!(
-        matches!(action, KeyAction::None),
-        "Tab+SHIFT+CONTROL must be swallowed inert, got {action:?}"
-    );
-    assert_eq!(
-        input, "draft stays",
-        "the swallowed chord preserves the draft"
-    );
 }
 
-/// The arm is a PARENT-session operation: while a running subagent (or the
-/// sidecar box) is focused, Shift+Tab must not arm — the armed guard would
-/// swallow the next Enter meant for the focused pane. The chord is inert
-/// there, mirroring the plain Tab arm's QueueUnsupported gate.
-#[test]
-fn shift_tab_with_focused_subagent_never_arms() {
-    for code in [KeyCode::BackTab, KeyCode::Tab] {
-        let mut input = "steer text".to_string();
-        let mut cursor = input.chars().count();
-        let mut hist_idx = None;
-        let mut scroll = 0;
-        let mut follow = true;
-        let mut last_esc = None;
-        let mut skill_menu = None;
-        let mut undo_state = crate::undo::init(&input, cursor);
-        let mut queue_scroll = 0;
-        let mut file_menu = None;
-        let action = handle_key(
-            KeyEvent::new(code, KeyModifiers::SHIFT),
-            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-            &mut input,
-            &mut cursor,
-            &[],
-            &mut hist_idx,
-            true,
-            false,
-            "plan",
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,  // subagent_focused
-            false, // sidecar_focused
-            false,
-            &mut undo_state,
-            &mut queue_scroll,
-            &mut file_menu,
-            Path::new("."),
-            &mut None,
-        );
-        assert!(
-            matches!(action, KeyAction::None),
-            "{code:?} with a focused subagent must stay inert, got {action:?}"
-        );
-        assert_eq!(input, "steer text", "the draft stays for the child steer");
-    }
-}
+#[path = "key_handler_running_mode_tests/shift_tab.rs"]
+mod shift_tab;

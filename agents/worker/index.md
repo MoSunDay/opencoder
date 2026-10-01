@@ -1,4 +1,4 @@
-Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # worker 模块
 
@@ -8,6 +8,8 @@ Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
 - `crates/worker/src/service.rs` — 根执行与会话清单
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器
 - `crates/worker/src/workloads/agent_how.rs`、`agent_runc.rs`（+ `agent_runc/`）— how 契约与 `run_mode: agent` runc 运行时（准入 fail-closed）
+- [workloads/agent.rs](../../crates/worker/src/workloads/agent.rs)、[agent_runc.rs](../../crates/worker/src/workloads/agent_runc.rs) — 持久化调用方的 `literal_mentions`；容器通过 staged Harness JSON 继承该策略。宿主首轮使用队列投递，展示原文与模型执行前缀分别保存；托管 Codex 设置仍由 Server 冻结。
+- [workloads/agent/initialization.rs](../../crates/worker/src/workloads/agent/initialization.rs) — 首轮投递前补齐 Harness、启动环境、展示策略及 Server 模型设置；已有 session 行也执行该步骤。恢复保留已启动的 Codex 线程和冻结设置，Operator HOME 最后覆盖输入与托管环境。
 - `crates/worker/src/operations/` — 准入/launch/维护命令/查询（含 `query/instances/`、`artifacts.rs`、`operator_env.rs` Operator 隔离快照、`operator_config.rs` 节点级 Operator 配置平面）
 - `crates/worker/src/state.rs`、`src/layout.rs`、`src/journal/` — runtime.db、执行布局与原子落盘（layout 含 `<data>/operator/<id>/{home,workspace}` 预留）
 - `crates/worker/src/runtime/`、`src/resources.rs` — Runtime 归属与资源快照
@@ -24,7 +26,9 @@ Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
 
 ## 接缝
 - `runtime/health.rs` 统一计算节点存储准入：可用磁盘块低于 10% 或可用 inode 低于 20% 拒绝新执行；容量读取失败、零容量仍拒绝准入。健康查询和新执行入口共用纯函数判断，已接收的工作可继续完成。
-- `operations/dag_preflight.rs` 使用本次冻结配置校验静态步骤和动态模板。runc 模式要求节点 rootfs 和 runc 可用；Codex Agent 额外校验 guest CLI 与节点登录目录，不检查 host CLI，也不要求原生 provider 凭证。实际执行和私有挂载由 dag-runtime 负责。
+- `operations/dag_preflight.rs` 使用本次冻结配置校验静态步骤和动态模板。所有 DAG 都要求配套 rootfs、runc 与只读源挂载；Codex Agent 额外校验 guest CLI 与节点登录目录，纯二进制与纯 Codex 不要求原生 provider 凭证。实际执行和私有挂载由 dag-runtime 负责。
+- [layout/dag.rs](../../crates/worker/src/layout/dag.rs)、[workloads/dag.rs](../../crates/worker/src/workloads/dag.rs) — 受理保存 UTC 日期目录、资源版本与配置；恢复沿用固定目录与资源。启动先清理遗留容器和挂载，再更新 journal；缺少本次固定数据的未终态运行明确拒绝恢复。
+- [operations/query/dag_context.rs](../../crates/worker/src/operations/query/dag_context.rs) — DAG Inspect 从 journal 的冻结定义和原受理目录读取资源快照，校验步骤身份、版本与摘要后投影只读 `context`。未固定为 `preparing`，非待受理运行缺少快照为 `unavailable`，损坏快照明确报错；公开结果不返回宿主路径或 Agent 依赖摘要。
 - DAG 的 how 追加由 dag-runtime 写入本地副本；普通 Agent 会话资源追加由 `agent_how.rs` 管理。
 - Brain：仅 `brain/v4/`，根节点持有运行、操作与事件投影；`layer` 是已派发层。每层并行执行，全部终态后唤醒决策；人工输入也唤醒一次决策，并取消正在生成的旧决策。层屏障未满足时只可 `guide`，引导动作经 `layered_guidance` outbox 按事件序列投递和确认；模型可依据证据选择正常前进或任一已执行层，内部路径约束由计划准入补齐，回退消耗轮次；末层达标收口。generation 栅栏保障恢复与重复回执幂等。
 - Team 的 `steer` 命令按 `input_id` 去重并写入执行 journal，保留最近 32 条引导；`workloads/team.rs` 在下一次成员发问时读取，正在生成的成员回答不会被打断。
@@ -32,6 +36,7 @@ Commit: 51cb1e361e0774effa9f4eb38e93cc75e432b068
 
 ## 相关
 - [agents/node](../node/index.md)、[agents/dag-runtime](../dag-runtime/index.md)
+- [DAG 执行约定](../../rules/04-dag-execution-contract.md)
 - [agents/brain](../brain/index.md)
 - [运行协议](../../docs/brain-orchestration.md)、[动态步骤接口](../../docs/dag-dynamic.md)
 

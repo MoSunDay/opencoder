@@ -99,11 +99,9 @@ pub fn build_app_with_metrics(
         .route("/api/agents/resources/:cat/:name/rollback", post(api_agent_resources::rollback))
         .route("/api/agents/resources/:cat/:name/versions/:v/files/*path", get(api_agent_resources::read_file))
         .route("/api/agents/nfs", get(api_agent_nfs::get_status).post(api_agent_nfs::post_set))
-        .route("/api/dag/wasm", get(api_dag_wasm::list).post(api_dag_wasm::create))
-        .route("/api/dag/wasm/nfs", get(api_dag_wasm_nfs::nfs_get).post(api_dag_wasm_nfs::nfs_post))
-        .route("/api/dag/wasm/:name", get(api_dag_wasm::get).put(api_dag_wasm::put_version).delete(api_dag_wasm::delete))
-        .route("/api/dag/wasm/:name/rollback", post(api_dag_wasm::rollback))
-        .route("/api/dag/wasm/:name/versions/:v/wasm.bin", get(api_dag_wasm::download))
+        .merge(binary_resources(state.clone()))
+        .route("/api/dag/binaries/nfs", get(api_dag_binaries_nfs::nfs_get).post(api_dag_binaries_nfs::nfs_post))
+        .route("/api/dag/workspace/nfs", get(api_dag_workspace_nfs::get_status).post(api_dag_workspace_nfs::set_status))
         .route("/api/todo/envs", get(api_todo_envs::list_envs).post(api_todo_envs::create_env))
         .route("/api/todo/envs/:name", get(api_todo_envs::get_env).put(api_todo_envs::update_env).delete(api_todo_envs::delete_env))
         .route("/api/todo/tools", get(api_todo_envs::list_tools))
@@ -120,10 +118,10 @@ pub fn build_app_with_metrics(
         .route("/api/project/overview", get(project::overview))
         .route("/api/project/goals", get(api_project::list_goals).post(api_project::create_goal))
         .route("/api/project/goals/:id", patch(api_project::patch_goal).delete(api_project::delete_goal))
-        .route("/api/project/milestones", get(api_project::list_milestones).post(api_project::create_milestone))
-        .route("/api/project/milestones/:id", patch(api_project::patch_milestone).delete(api_project::delete_milestone))
         .route("/api/project/initiatives", get(api_project_initiatives::list).post(api_project_initiatives::create))
         .route("/api/project/initiatives/:id", patch(api_project_initiatives::patch).delete(api_project_initiatives::delete))
+        .route("/api/project/tags", get(api_project_tags::list).post(api_project_tags::create))
+        .route("/api/project/tags/:id", patch(api_project_tags::rename).delete(api_project_tags::delete))
         .route("/api/project/todos", get(api_project_todos::list_todos).post(api_project_todos::create_todo))
         .route("/api/project/todos/order", put(api_project_todos::reorder_todos))
         .route("/api/project/todos/:id", patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo))
@@ -152,12 +150,6 @@ pub fn build_app_with_metrics(
             state.clone(),
             crate::release::track,
         ))
-        // dag-wasm pool scope: same position as the agents scope below, so
-        // both resource-root resolvers run inside the role gate.
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            api_dag_wasm_nfs::configured_dag_wasm,
-        ))
         .layer(axum::middleware::from_fn_with_state(
             state,
             crate::resource_scope::configured_agents,
@@ -174,4 +166,31 @@ pub fn build_app_with_metrics(
         ));
     }
     app
+}
+
+pub(crate) fn binary_resources(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    Router::new()
+        .route(
+            "/api/dag/binaries",
+            get(api_dag_binaries::list).post(api_dag_binaries::create),
+        )
+        .route(
+            "/api/dag/binaries/:name",
+            get(api_dag_binaries::get)
+                .put(api_dag_binaries::put_version)
+                .delete(api_dag_binaries::delete),
+        )
+        .route(
+            "/api/dag/binaries/:name/rollback",
+            post(api_dag_binaries::rollback),
+        )
+        .route(
+            "/api/dag/binaries/:name/versions/:v/binary.bin",
+            get(api_dag_binaries::download),
+        )
+        .layer(axum::extract::DefaultBodyLimit::max(48 * 1024 * 1024))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            api_dag_binaries_nfs::configured_dag_binary,
+        ))
 }

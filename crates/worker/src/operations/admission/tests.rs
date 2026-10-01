@@ -3,6 +3,9 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 use std::{path::Path, sync::Arc, time::Duration};
 
+#[path = "../../../../dag-runtime/tests/support/container.rs"]
+mod native_fixture;
+
 #[path = "tests/pinned_retry.rs"]
 mod pinned_retry;
 
@@ -74,13 +77,22 @@ async fn synchronous_preparation_releases_the_only_async_worker() {
 }
 
 #[tokio::test]
-async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
+async fn new_native_admission_and_freeze_bypass_cold_resource_waiters() {
     // All resource permits stay held until both operations finish, so the
     // ordering proves bypass. The deadline only detects a deadlock; durable
     // filesystem work on a busy runner need not satisfy a one-second SLO.
     let deadline = Duration::from_secs(10);
     let root = tempfile::tempdir().unwrap();
     let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let native = native_fixture::ContainerFixture::open(&root.path().join("node"));
+    let mut config = opencoder_core::Config::default();
+    native.configure(&mut config);
+    std::fs::create_dir_all(root.path().join("work")).unwrap();
+    std::fs::write(
+        root.path().join("work/opencoder.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
     let worker = open(root.path()).await;
     let cold = assignment(&worker, "agent-cold", ExecutionKind::Agent);
     let lifecycle = worker.preparation_gate(&cold.index.id).await;
@@ -100,19 +112,30 @@ async fn new_wasi_admission_and_freeze_bypass_cold_resource_waiters() {
     .await
     .unwrap();
 
-    let modules = root.path().join("node/dag/_modules");
-    std::fs::create_dir_all(&modules).unwrap();
-    std::fs::write(
-        modules.join("quick.wasm"),
-        b"(module (func (export \"_start\")))",
+    let compile = root.path().join("quick.c");
+    let binary_path = root.path().join("quick");
+    std::fs::write(&compile, "int main(void) { return 0; }").unwrap();
+    assert!(std::process::Command::new("cc")
+        .args(["-static", "-s"])
+        .arg(compile)
+        .arg("-o")
+        .arg(&binary_path)
+        .status()
+        .unwrap()
+        .success());
+    opencoder_dag_binary::save_binary_version(
+        &native.pool,
+        "quick",
+        "fixture",
+        &std::fs::read(binary_path).unwrap(),
     )
     .unwrap();
-    let mut wasm = assignment(&worker, "dag-quick", ExecutionKind::Dag);
-    wasm.definition = Some(json!({"name":"quick","steps":[{"name":"execute",
-        "kind":{"type":"wasm","command":"quick.wasm"}}]}));
-    let reply = tokio::time::timeout(deadline, create(&worker, wasm))
+    let mut binary = assignment(&worker, "dag-quick", ExecutionKind::Dag);
+    binary.definition = Some(json!({"name":"quick","steps":[{"name":"execute",
+        "kind":{"type":"binary","resource":"quick"}}]}));
+    let reply = tokio::time::timeout(deadline, create(&worker, binary))
         .await
-        .expect("WASI admission waited for unrelated resource capacity")
+        .expect("native admission waited for unrelated resource capacity")
         .unwrap();
     assert_eq!(reply.status, 200, "{reply:?}");
     assert!(root

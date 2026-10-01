@@ -103,7 +103,7 @@ fn row(seq: i64, kind: &str) -> Value {
 /// Minimal inline dag definition for artifact-capable executions.
 fn dag_spec() -> Value {
     json!({"name": "ctl-relay", "steps": [
-        {"name": "build", "kind": {"type": "wasm", "command": "tool.wasm"}}]})
+        {"name": "build", "kind": {"type":"binary","resource":"tool"}}]})
 }
 
 /// Create body pinned to the scripted node (`kind` must match the id prefix).

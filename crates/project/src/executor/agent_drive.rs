@@ -119,7 +119,7 @@ async fn new_or_resume_session(
         executor_kind: None,
         executor_ref: None,
         executor_spec: None,
-        milestone_id: None,
+        initiative_id: None,
         active_session_id: Some(Some(session.id.clone())),
     };
     deps.projects

@@ -2,11 +2,6 @@
 
 ## 背景
 
-code-review 门禁 DAG 以节点知识库（human-os-02 `~/workspace`）为审查对象，
-要求「步骤可读、内核级不可写」。M0 打地基：节点配置一个只读挂载根，
-所有沙箱形态（runc bind / in-process preopen / 宿主 agent 步）共享同一
-guest 路径 `/workspace/knowledge`，DTO（StepSpec）零变更。
-
 ## 变更
 
 - `crates/core/src/config/dag.rs`：`DagConfig` 新增

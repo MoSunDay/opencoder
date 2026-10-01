@@ -1,10 +1,12 @@
 //! Node-local artifact directory contract (pure path/slug/truncation
 //! helpers — no IO; the runtime applies them).
 //!
-//! Layout under the configured `workflow_root` (default `/workflow`):
+//! Layout under the dated DAG parent directory on the execution node:
 //!
 //! ```text
-//! /workflow/<run_id>/                 <- also the runc /workspace/context mount
+//! YYYY-MM-DD/<dag_id>/<run_id>/
+//!   workspace/                       <- merged view mounted at /workspace
+//!   upper/                           <- node-local copy-on-write files
 //!   <step-slug>/output.json           <- machine-readable step output (optional)
 //!   <step-slug>/output.txt            <- captured stdout / transcript tail
 //!   <step-slug>/meta.json             <- runtime-written step metadata
@@ -23,6 +25,31 @@ use serde_json::{json, Value};
 /// preview only; full artifacts stay on the node).
 pub const MAX_SNAPSHOT_BYTES: usize = 4 * 1024;
 
+pub fn validate_dag_id(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && name != "."
+        && name != ".."
+        && !name
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\'))
+}
+
+pub fn reserved_step_name(name: &str) -> bool {
+    matches!(
+        name,
+        "workspace"
+            | "upper"
+            | "work"
+            | "bundle"
+            | "private"
+            | "runc-state"
+            | "rootfs-upper"
+            | "rootfs-work"
+            | "resources"
+    )
+}
+
 /// `[a-z0-9][a-z0-9-]{0,63}` — also the artifact directory name.
 pub fn validate_step_slug(name: &str) -> bool {
     let mut chars = name.chars();
@@ -37,13 +64,8 @@ pub fn validate_step_slug(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
 }
 
-/// Run ids appear in paths: ULIDs are fine, traversal is not. `_modules`
-/// is reserved — the node's shared wasm module library lives at
-/// `<workflow_root>/_modules/`, so a run with that id would collide with
-/// it (and fail later with a confusing directory-exists error).
 pub fn validate_run_id(run_id: &str) -> bool {
-    run_id != "_modules"
-        && !run_id.is_empty()
+    !run_id.is_empty()
         && run_id.len() <= 64
         && run_id
             .chars()
@@ -188,8 +210,7 @@ mod tests {
     fn run_id_rejects_traversal() {
         assert!(validate_run_id("01JARUN"));
         assert!(validate_run_id("run-1_x"));
-        // `_modules` is reserved for the shared module library.
-        for bad in ["", "..", "a/b", "a b", &"x".repeat(65), ".", "_modules"] {
+        for bad in ["", "..", "a/b", "a b", &"x".repeat(65), "."] {
             assert!(!validate_run_id(bad), "{bad:?}");
         }
     }

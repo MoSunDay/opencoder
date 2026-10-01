@@ -7,8 +7,12 @@ production service, credential, database, mount, or admission is changed.
 """
 import argparse
 import json
+import os
+import os
 from pathlib import Path
+import sys
 import threading
+import sys
 import time
 import traceback
 import urllib.error
@@ -32,6 +36,7 @@ def done(env, identifier):
 
 def exercise(env):
     first = env.warm('r1')
+    probe = probes.spec(probes.publish_probe(env.settings, first, env))
     first_skill = Path(first['runtime_data']) / 'global-skills/release-reference/SKILL.md'
     assert 'first release bytes' in first_skill.read_text()
     env.switch(first)
@@ -41,9 +46,9 @@ def exercise(env):
     receipt = env.api('/api/executions','POST',todo)
     assert env.model.entered.wait(90), 'TODO dependency did not reach the model'
     dag = {'id':'dag-hold','kind':'dag','input':{'definition':{'name':'hold',
-        'steps':[{'name':'hold','timeout_secs':900,'kind':{'type':'wasm','command':'hold.wasm'}}]}}}
+        'steps':[{'name':'hold','timeout_secs':900,'kind':{'type':'binary','resource':env.hold_resource}}]}}}
     env.api('/api/executions','POST',dag)
-    until(lambda:env.api('/api/executions/dag-hold')['dag_steps']['running'] == 1,'live WASI step')
+    until(lambda:env.api('/api/executions/dag-hold')['dag_steps']['running'] == 1,'live native step')
     stream = Stream(env,'dag-hold')
     until(lambda:len(stream.ids) > 0,'initial SSE cursor')
     pid = env.runtime_pid(first)
@@ -55,23 +60,16 @@ def exercise(env):
     def unchanged_shell():
         assert Path(f'/proc/{shell_pid}/stat').read_text().split()[21] == shell_start, 'shell tool process changed'
         assert env.owner(shell['id']) == 'r1'
-    container = None
-    if env.containers.wasmtime:
-        container_dag = json.loads(json.dumps(dag))
-        container_dag['id'] = 'dag-container-hold'
-        container_dag['input']['definition']['steps'][0]['kind']['sandbox'] = 'runc'
-        env.api('/api/executions','POST',container_dag)
-        container = until(lambda:(lambda s:s if s['status'] == 'running' else None)(env.containers.state(first['runtime_data'],'dag-container-hold')),'real OCI container started')
+    container = until(lambda:(lambda state:state if state['status'] == 'running' else None)(env.containers.state(first['runtime_data'], 'dag-hold')), 'shared DAG container started')
     def unchanged_container():
-        if container:
-            current = env.containers.state(first['runtime_data'],'dag-container-hold')
-            assert current['status'] == 'running' and (current['pid'],current['process_start']) == (container['pid'],container['process_start']), 'OCI process changed'
-    print('old TODO and WASI tasks running',flush=True)
+        current = env.containers.state(first['runtime_data'], 'dag-hold')
+        assert current['status'] == 'running' and (current['pid'], current['process_start']) == (container['pid'], container['process_start']), 'DAG container process changed'
+    print('old TODO and native tasks running',flush=True)
     # Cold admission may first snapshot the resource pool. Verify that path
     # before measuring uninterrupted requests across release transitions.
     preflight = 'dag-traffic-preflight'
     preflight_started = time.monotonic()
-    env.api('/api/executions','POST',{'id':preflight,'kind':'dag','input':{'definition':probes.spec()}})
+    env.api('/api/executions','POST',{'id':preflight,'kind':'dag','input':{'definition':probe}})
     until(lambda:done(env,preflight),'traffic preflight completion')
     (env.root / 'traffic-preflight.json').write_text(json.dumps({
         'id':preflight,'seconds':time.monotonic()-preflight_started},indent=2))
@@ -84,7 +82,7 @@ def exercise(env):
             identifier = 'dag-traffic-' + str(len(traffic))
             started = time.monotonic()
             try:
-                env.api('/api/executions','POST',{'id':identifier,'kind':'dag','input':{'definition':probes.spec()}})
+                env.api('/api/executions','POST',{'id':identifier,'kind':'dag','input':{'definition':probe}})
                 traffic.append({'id':identifier,'seconds':time.monotonic()-started,'at':started})
             except Exception as error:
                 failures.append(str(error))
@@ -97,7 +95,7 @@ def exercise(env):
         second = env.warm('r2')
         assert 'second release bytes' in (Path(second['runtime_data']) / 'global-skills/release-reference/SKILL.md').read_text()
         assert 'first release bytes' in first_skill.read_text(), 'new startup changed old Runtime skills'
-        late = LateRequest(env, {'id':late_id,'kind':'dag','input':{'definition':probes.spec()}})
+        late = LateRequest(env, {'id':late_id,'kind':'dag','input':{'definition':probe}})
         node_channel = NodeChannel(env, f"http://127.0.0.1:{first['host_port']}")
         env.switch(second)
         print('second release active',flush=True)
@@ -134,16 +132,16 @@ def exercise(env):
         unchanged_shell()
         unchanged_container()
         assert env.model.calls == ['first'], env.model.calls
-        env.api('/api/executions','POST',{'id':'dag-latest','kind':'dag','input':{'definition':probes.spec()}})
+        env.api('/api/executions','POST',{'id':'dag-latest','kind':'dag','input':{'definition':probe}})
         until(lambda:done(env,'dag-latest'),'new release execution')
         assert env.owner('dag-latest') == 'r3'
         env.api('/api/executions','POST',{**dag,'id':'dag-r3-hold'})
-        until(lambda:env.api('/api/executions/dag-r3-hold')['dag_steps']['running'] == 1,'third-version WASI task')
+        until(lambda:env.api('/api/executions/dag-r3-hold')['dag_steps']['running'] == 1,'third-version binary task')
         third_pid = env.runtime_pid(third)
         env.reopen(second)
         env.switch(second)
         print('rollback active with both old and new work running',flush=True)
-        env.api('/api/executions','POST',{'id':'dag-return','kind':'dag','input':{'definition':probes.spec()}})
+        env.api('/api/executions','POST',{'id':'dag-return','kind':'dag','input':{'definition':probe}})
         until(lambda:done(env,'dag-return'),'rollback new task')
         assert env.owner('dag-return') == 'r2'
         assert env.runtime_pid(first) == pid and env.runtime_pid(third) == third_pid
@@ -168,9 +166,7 @@ def exercise(env):
         env.release_work()
     until(lambda:done(env,todo['id']),'old TODO chain completion')
     until(lambda:done(env,shell['id']),'old shell tool completion')
-    if container:
-        until(lambda:done(env,'dag-container-hold'),'old OCI tool completion')
-    until(lambda:done(env,dag['id']),'old WASI completion')
+    until(lambda:done(env,dag['id']),'retained binary completion')
     until(lambda:done(env,'dag-r3-hold'),'rolled-back version task completion')
     assert env.model.calls == ['first','second'], env.model.calls
     until(lambda:stream.finished.is_set() or stream.errors,'SSE completion')
@@ -199,7 +195,7 @@ def exercise(env):
     assert not failures, failures
     assert traffic, 'traffic fixture never submitted'
     result = {'result':'PASS','build':env.info,'cases':['three-runtime-processes','two-host-handovers',
-        'real-wasi-continues','shell-process-continues','pinned-global-skills','todo-dependency-chain','continuous-submission','request-replay-conflict',
+        'native-dag-continues','shell-process-continues','pinned-global-skills','todo-dependency-chain','continuous-submission','request-replay-conflict',
         'sse-cursor-reconnect','hibernate-history-wake','rollback-with-live-new-work','server-sigkill-recovery',
         'independent-readonly-nfs','accepted-ingress-request-before-reload','node-channel-releases-ingress-worker'],'traffic':traffic,'failures':failures,
         'todo_calls':env.model.calls,'sse_ids':stream.ids,'sse_resume_seconds':stream.resume_delays,
@@ -219,9 +215,13 @@ def main():
     parser.add_argument('--nginx',type=Path,required=True)
     parser.add_argument('--data-parent',type=Path,
         help='Optional isolated fixture storage; production latency acceptance must use production storage')
-    parser.add_argument('--wasmtime',type=Path,help='Verified wasmtime executable for real OCI continuation acceptance')
+    parser.add_argument('--rootfs',type=Path,required=True,help='Verified native DAG image')
+    parser.add_argument('--inside',action='store_true',help=argparse.SUPPRESS)
     args = parser.parse_args()
-    env = Environment(args.bin_dir.resolve(),args.nginx.resolve(),args.data_parent,args.wasmtime)
+    if not args.inside:
+        os.execv('/usr/bin/unshare', ['unshare', '--mount', '--propagation', 'private',
+            sys.executable, str(Path(__file__).resolve()), *sys.argv[1:], '--inside'])
+    env = Environment(args.bin_dir.resolve(),args.nginx.resolve(),args.rootfs.resolve(),args.data_parent)
     try:
         exercise(env)
     except BaseException:

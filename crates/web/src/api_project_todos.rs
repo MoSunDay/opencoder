@@ -10,20 +10,19 @@ use serde::Deserialize;
 use serde_json::json;
 
 use opencoder_core::message::now_ms;
-use opencoder_store::{
-    ProjectExecutorKind, ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoStatus,
-};
+use opencoder_store::{ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoStatus};
 
-use crate::api_project_util::{error_400, error_404, error_500, rec_list, require_deps, to_json};
+use crate::api_project_util::{error_400, error_404, error_500, require_deps, to_json};
 use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct TodoQuery {
-    pub milestone_id: Option<String>,
+    pub initiative_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct ReorderBody {
+    pub initiative_id: Option<String>,
     pub board_status: String,
     pub ids: Vec<String>,
 }
@@ -44,9 +43,30 @@ pub async fn reorder_todos(
         Ok(deps) => deps,
         Err(reply) => return *reply,
     };
+    {
+        match deps
+            .projects
+            .list_todos(body.initiative_id.as_deref())
+            .await
+        {
+            Ok(todos)
+                if body.ids.iter().all(|id| {
+                    todos
+                        .iter()
+                        .any(|todo| &todo.id == id && todo.initiative_id == body.initiative_id)
+                }) => {}
+            Ok(_) => return error_400("reorder contains TODOs outside this initiative"),
+            Err(error) => return error_500(error.to_string()),
+        }
+    }
     match deps
         .projects
-        .reorder_todos(&body.board_status, &body.ids, now_ms())
+        .reorder_todos(
+            body.initiative_id.as_deref(),
+            &body.board_status,
+            &body.ids,
+            now_ms(),
+        )
         .await
     {
         Ok(()) => Json(json!({"ok":true})).into_response(),
@@ -55,14 +75,6 @@ pub async fn reorder_todos(
 }
 
 async fn group_exists(projects: &dyn ProjectStore, id: &str) -> anyhow::Result<bool> {
-    if projects
-        .list_milestones(None)
-        .await?
-        .iter()
-        .any(|item| item.id == id)
-    {
-        return Ok(true);
-    }
     Ok(projects
         .list_initiatives(None)
         .await?
@@ -70,7 +82,7 @@ async fn group_exists(projects: &dyn ProjectStore, id: &str) -> anyhow::Result<b
         .any(|item| item.id == id))
 }
 
-/// GET /api/project/todos?milestone_id= — one milestone's todos; without the
+/// GET /api/project/todos?initiative_id= — one initiative's todos; without the
 /// parameter ALL todos are listed (backlog included), `created_at` order.
 pub async fn list_todos(
     State(state): State<Arc<AppState>>,
@@ -80,17 +92,27 @@ pub async fn list_todos(
         Ok(d) => d,
         Err(r) => return *r,
     };
-    match deps.projects.list_todos(q.milestone_id.as_deref()).await {
-        Ok(items) => Json(json!({ "todos": rec_list(items) })).into_response(),
+    match deps.projects.list_todos(q.initiative_id.as_deref()).await {
+        Ok(items) => match deps.projects.list_todo_tags().await {
+            Ok(links) => Json(json!({"todos": items.into_iter().map(|todo| {
+                let mut value = to_json(&todo);
+                value["tag_ids"] = json!(links.iter().filter(|link| link.todo_id == todo.id).map(|link| &link.tag_id).collect::<Vec<_>>());
+                value
+            }).collect::<Vec<_>>()})).into_response(),
+            Err(error) => crate::api_project_tags::tag_error(error),
+        },
         Err(e) => error_500(format!("list todos: {e:#}")),
     }
 }
 
 #[derive(Deserialize)]
 pub struct CreateTodoBody {
-    /// Absent ⇒ milestone-less backlog item.
     #[serde(default)]
-    pub milestone_id: Option<String>,
+    pub tag_ids: Vec<String>,
+    pub board_status: Option<String>,
+    /// Absent ⇒ initiative-less backlog item.
+    #[serde(default)]
+    pub initiative_id: Option<String>,
     pub title: String,
     pub draft: String,
     /// Optional capability selected for later explicit assignment.
@@ -129,12 +151,16 @@ pub async fn create_todo(
         Ok(value) => value,
         Err(reply) => return reply,
     };
-    if let Some(mid) = &body.milestone_id {
+    if let Some(mid) = &body.initiative_id {
         match group_exists(deps.projects.as_ref(), mid).await {
             Ok(true) => {}
             Ok(false) => return error_404(format!("TODO group not found: {mid}")),
-            Err(e) => return error_500(format!("verify milestone: {e:#}")),
+            Err(e) => return error_500(format!("verify initiative: {e:#}")),
         }
+    }
+    let board_status = body.board_status.as_deref().unwrap_or("backlog");
+    if !matches!(board_status, "backlog" | "todo" | "in_progress" | "done") {
+        return error_400("unsupported board status");
     }
     let now = now_ms();
     // Executor triple: kind string resolves (unknown → 400), spec validates
@@ -147,12 +173,12 @@ pub async fn create_todo(
         };
     let rec = ProjectTodoRecord {
         id: format!("pt-{}", ulid::Ulid::new()),
-        milestone_id: body.milestone_id,
+        initiative_id: body.initiative_id,
         title,
         draft: body.draft,
         plan_md: None,
         status: ProjectTodoStatus::Draft,
-        board_status: "backlog".into(),
+        board_status: board_status.into(),
         position: now,
         capability_id,
         agent: body.agent.unwrap_or_else(|| "act".into()),
@@ -163,21 +189,22 @@ pub async fn create_todo(
         created_at: now,
         updated_at: now,
     };
-    match deps.projects.create_todo(&rec).await {
+    match deps.projects.create_todo_tagged(&rec, &body.tag_ids).await {
         Ok(()) => Json(to_json(&rec)).into_response(),
-        Err(e) => error_500(format!("create todo: {e:#}")),
+        Err(e) => crate::api_project_tags::tag_error(e),
     }
 }
 
 #[derive(Deserialize)]
 pub struct PatchTodoBody {
+    pub tag_ids: Option<Vec<String>>,
     /// `Option<Option<String>>` + [`double_option`] distinguishes the three
     /// PATCH cases: absent ⇒ unchanged, JSON `null` ⇒ clear to the backlog,
-    /// a value ⇒ re-parent (unknown milestone → 404). Plain
+    /// a value ⇒ re-parent (unknown initiative → 404). Plain
     /// `Option<Option<T>>` is NOT enough: serde resolves JSON `null` to the
     /// OUTER `None`, making null and absent indistinguishable.
     #[serde(default, deserialize_with = "double_option")]
-    pub milestone_id: Option<Option<String>>,
+    pub initiative_id: Option<Option<String>>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -201,72 +228,11 @@ pub struct PatchTodoBody {
     pub executor_spec: Option<Option<String>>,
 }
 
-/// Force deserialization of the INNER `Option<T>` so JSON `null` produces
-/// `Some(None)` (clear) instead of collapsing to the outer `None` (absent).
-pub(crate) fn double_option<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
-where
-    T: serde::Deserialize<'de>,
-    D: serde::Deserializer<'de>,
-{
-    Ok(Some(Option::<T>::deserialize(de)?))
-}
-
-/// Flatten a doubled spec field into the plain value that lands in the
-/// record: absent/null/blank ⇒ None, else the trimmed JSON text. Blank
-/// normalizes to a clear so `{"executor_spec": ""}` cannot store junk.
-fn flatten_spec(spec: Option<Option<String>>) -> Option<String> {
-    spec.flatten()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// Trimmed executor ref; empty ⇒ None (agent falls back to `act`, team/dag
-/// resolve lazily from their inline spec at execute time).
-fn normalize_ref(raw: Option<&str>) -> Option<String> {
-    let trimmed = raw.unwrap_or("").trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
-#[allow(clippy::result_large_err)]
-fn validate_capability(raw: Option<&str>) -> Result<Option<String>, Response> {
-    match raw.map(str::trim) {
-        None | Some("") => Ok(None),
-        Some(value)
-            if matches!(
-                value,
-                "operator" | "agent" | "team" | "dag" | "todos" | "brain"
-            ) =>
-        {
-            Ok(Some(value.to_owned()))
-        }
-        Some(_) => Err(error_400("unsupported TODO capability")),
-    }
-}
-
-/// Parse `executor_kind` (absent ⇒ default agent; unknown string → 400
-/// `unknown executor_kind: {x}`) and validate the non-blank inline spec
-/// against it via the store-side pure `validate_spec` (the canonical
-/// validator shared with the control plane; it also owns the agent-with-
-/// spec rejection, "agent executor takes no spec").
-// `Response` (axum) is inherently large; boxing would ripple through every
-// handler call site for no gain.
-#[allow(clippy::result_large_err)]
-fn validate_executor(
-    kind: Option<&str>,
-    spec: Option<&str>,
-) -> Result<ProjectExecutorKind, Response> {
-    let kind = match kind {
-        None => ProjectExecutorKind::default(),
-        Some(raw) => ProjectExecutorKind::parse(raw)
-            .ok_or_else(|| error_400(format!("unknown executor_kind: {raw}")))?,
-    };
-    if let Some(spec) = spec.map(str::trim).filter(|s| !s.is_empty()) {
-        if let Err(e) = opencoder_store::project_executor_spec::validate_spec(kind, spec) {
-            return Err(error_400(format!("executor_spec: {e:#}")));
-        }
-    }
-    Ok(kind)
-}
+pub use validation::{
+    double_option, flatten_spec, normalize_ref, validate_capability, validate_executor,
+};
+#[path = "api_project_todos/validation.rs"]
+mod validation;
 
 /// PATCH /api/project/todos/:id — partial update; unknown id → 404.
 pub async fn patch_todo(
@@ -308,11 +274,11 @@ pub async fn patch_todo(
     if body.position.is_some_and(|position| position < 0) {
         return error_400("todo position must not be negative");
     }
-    if let Some(Some(mid)) = &body.milestone_id {
+    if let Some(Some(mid)) = &body.initiative_id {
         match group_exists(deps.projects.as_ref(), mid).await {
             Ok(true) => {}
             Ok(false) => return error_404(format!("TODO group not found: {mid}")),
-            Err(e) => return error_500(format!("verify milestone: {e:#}")),
+            Err(e) => return error_500(format!("verify initiative: {e:#}")),
         }
     }
     // Executor columns: null-clear vs value semantics ride the patch's
@@ -368,13 +334,17 @@ pub async fn patch_todo(
         executor_kind,
         executor_ref,
         executor_spec,
-        milestone_id: body.milestone_id,
+        initiative_id: body.initiative_id,
         active_session_id: None,
     };
-    match deps.projects.patch_todo(&id, &patch, now_ms()).await {
+    match deps
+        .projects
+        .patch_todo_tagged(&id, &patch, body.tag_ids.as_deref(), now_ms())
+        .await
+    {
         Ok(true) => Json(json!({ "ok": true })).into_response(),
         Ok(false) => error_404(format!("todo not found: {id}")),
-        Err(e) => error_500(format!("patch todo: {e:#}")),
+        Err(e) => crate::api_project_tags::tag_error(e),
     }
 }
 

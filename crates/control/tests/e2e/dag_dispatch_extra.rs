@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 use crate::support::{Harness, SHARE_GATE};
 
 const SPEC: &str = r#"{"name":"etl-demo","steps":[
-    {"name":"fetch","kind":{"type":"wasm","command":"tool.wasm"}},
-    {"name":"load","depends_on":["fetch"],"kind":{"type":"wasm","command":"tool.wasm"}}]}"#;
+    {"name":"fetch","kind":{"type":"binary","resource":"tool"}},
+    {"name":"load","depends_on":["fetch"],"kind":{"type":"binary","resource":"tool"}}]}"#;
 
 async fn seed_definition(h: &Harness) {
     let spec: Value = serde_json::from_str(SPEC).unwrap();

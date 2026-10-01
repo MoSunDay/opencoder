@@ -22,6 +22,7 @@ use nfsserve::tcp::{NFSTcp as _, NFSTcpListener};
 use serde::Serialize;
 
 use crate::nfs::{agents_fs, ReadOnlyAgentsFs};
+mod transport;
 
 /// How long [`NfsServerHandle::shutdown`] waits for the accept loop to die.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -132,6 +133,7 @@ pub fn spawn_nfs_server(opts: &NfsServerOpts) -> anyhow::Result<NfsServerHandle>
 /// before the `done` flag flips.
 fn spawn_listener(root: PathBuf, opts: &NfsServerOpts) -> anyhow::Result<NfsServerHandle> {
     let fs: ReadOnlyAgentsFs = agents_fs(root.clone());
+    let transport_root = root.clone();
     let bind = format!("{}:{}", opts.host, opts.port);
     let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<SocketAddr>>();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
@@ -151,7 +153,7 @@ fn spawn_listener(root: PathBuf, opts: &NfsServerOpts) -> anyhow::Result<NfsServ
                 }
             };
             rt.block_on(async move {
-                let listener = match NFSTcpListener::bind(&bind, fs).await {
+                let listener = match NFSTcpListener::bind("127.0.0.1:0", fs).await {
                     Ok(l) => l,
                     Err(e) => {
                         let _ = tx
@@ -162,11 +164,19 @@ fn spawn_listener(root: PathBuf, opts: &NfsServerOpts) -> anyhow::Result<NfsServ
                 };
                 // Export name stays "/" so any mount path under it resolves
                 // (MOUNT strips the export prefix and walks path_to_id).
-                let addr = SocketAddr::new(listener.get_listen_ip(), listener.get_listen_port());
+                let backend = SocketAddr::new(listener.get_listen_ip(), listener.get_listen_port());
+                let frontend = match tokio::net::TcpListener::bind(&bind).await {
+                    Ok(frontend) => frontend,
+                    Err(error) => { let _ = tx.send(Err(error.into())); return; },
+                };
+                let addr = frontend.local_addr().expect("bound NFS socket address");
                 let _ = tx.send(Ok(addr));
                 tokio::select! {
                     biased;
                     _ = shutdown_rx.changed() => {}
+                    res = transport::serve(frontend, backend, transport_root) => {
+                        if let Err(error) = res { tracing::warn!(%error, "NFS ACL transport terminated"); }
+                    }
                     res = listener.handle_forever() => {
                         if let Err(e) = res {
                             tracing::warn!("nfs accept loop terminated: {e}");

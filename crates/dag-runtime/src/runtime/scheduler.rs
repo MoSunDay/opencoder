@@ -206,7 +206,6 @@ pub(super) async fn schedule(
                     workflow_root: root.into(),
                     log: Some(sink.step_log(&step.name).with_instance(instance)),
                     knowledge_root: exec.config.dag.knowledge_root.clone(),
-                    ops: exec.config.dag.ops.clone(),
                 };
                 active.insert((step.name.clone(), instance));
                 let exec = exec.clone();

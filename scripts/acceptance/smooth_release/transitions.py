@@ -4,7 +4,7 @@ import subprocess
 import sys
 from rolling import probes
 from rolling.state import Journal, atomic_bytes
-from fixture import HOLD_WASM, release_wasi_gate
+from fixture import publish_hold, release_native_gate
 
 
 def command(args, rollback=False):
@@ -29,13 +29,13 @@ def execute(args, root, env, continuity):
     record = current['releases'][current['current']]
     data = Path(record['runtime_data'])
     identifier = 'dag-' + root.name + '-new-hold'
-    module = identifier + '.wasm'
-    atomic_bytes(data / 'dag/_modules' / module, HOLD_WASM.encode(), 0o444)
+    resource = publish_hold(env)
+    probe = probes.spec(probes.publish_probe(env.settings, record, env))
     runtime_pid = subprocess.check_output(['systemctl','show',record['runtime_unit'],'-p','MainPID','--value']).strip()
     try:
         env.submit_initial({'id':identifier,'kind':'dag','input':{'definition':{
             'name':'signal rollback continuation','steps':[{'name':'hold','timeout_secs':1800,
-            'kind':{'type':'wasm','command':module}}]}}})
+            'kind':{'type':'binary','resource':resource}}]}}})
         env.wait(lambda:env.api('/api/executions/' + identifier)['dag_steps']['running'] == 1,90)
         for label, rollback in [('signal-rollback',True),('signal-republish',False)]:
             invoke(label,rollback)
@@ -46,10 +46,10 @@ def execute(args, root, env, continuity):
                 assert active['releases'][record['id']]['server_unit'] != record['server_unit'], 'republish reused a retiring Server'
                 assert active['releases'][record['id']]['host_unit'] != record['host_unit'], 'republish reused a retiring Host'
             probe = 'dag-' + root.name + '-' + label
-            env.api('/api/executions','POST',{'id':probe,'kind':'dag','input':{'definition':probes.spec()}})
+            env.api('/api/executions','POST',{'id':probe,'kind':'dag','input':{'definition':probe}})
             env.wait(lambda:env.completed(probe),30)
             target = Path(active['releases'][active['current']]['runtime_data'])
             assert (target / 'dag' / probe / 'execution.json').is_file(), 'post-signal task has incorrect owner'
     finally:
-        release_wasi_gate(data, identifier)
+        release_native_gate(data, identifier)
     env.wait(lambda:env.completed(identifier),90)

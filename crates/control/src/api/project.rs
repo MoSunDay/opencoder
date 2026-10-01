@@ -13,39 +13,7 @@ mod routing;
 pub(super) use routing::{brain_preresolve, initial_receipt};
 
 pub async fn overview(State(state): State<Arc<AppState>>) -> Response {
-    let result = async {
-        let goals = state.projects.list_goals().await?;
-        let milestones = state.projects.list_milestones(None).await?;
-        let initiatives = state.projects.list_initiatives(None).await?;
-        let assignment_states = state
-            .projects
-            .latest_todo_assignment_states()
-            .await?
-            .into_iter()
-            .map(|item| (item.todo_id.clone(), item))
-            .collect::<std::collections::HashMap<_, _>>();
-        let items: Vec<Value> = state
-            .projects
-            .list_todos(None)
-            .await?
-            .into_iter()
-            .map(|todo| {
-                let todo_id = todo.id.clone();
-                let mut value = json!(todo);
-                if let Some(assignment) = assignment_states.get(&todo_id) {
-                    value["latest_assignment"] = json!(assignment);
-                }
-                value
-            })
-            .collect();
-        Ok::<_, anyhow::Error>(opencoder_store::project::overview::overview(
-            &goals,
-            &milestones,
-            &initiatives,
-            &items,
-        ))
-    }
-    .await;
+    let result = opencoder_store::project::overview::load(state.projects.as_ref()).await;
     match result {
         Ok(value) => response(RpcReply::ok(value)),
         Err(error) => error_500(error.to_string()),

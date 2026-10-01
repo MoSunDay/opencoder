@@ -195,18 +195,18 @@ describe('SchedulePanel', () => {
     // kind 下拉收敛为后端五种；切到 DAG（antd Select 需真开下拉再点选项）。
     const kindSelect = within(modal).getByLabelText('类型').closest('.ant-select');
     await pickSelectOption(kindSelect, 'DAG');
-    // 切换后 params 文案随之变为「命令行参数」。
-    expect(within(modal).getByText('命令行参数')).toBeTruthy();
+    // 切换后 params 文案随之变为「参数数组」。
+    expect(within(modal).getByText('参数数组')).toBeTruthy();
     await act(async () => {
       fireEvent.change(within(modal).getAllByPlaceholderText('0 3 * * *')[0], { target: { value: '0 3 * * *' } });
       fireEvent.change(within(modal).getByLabelText('schedule_target'), { target: { value: 'etl-demo' } });
-      fireEvent.change(within(modal).getByLabelText('schedule_params'), { target: { value: '--date {{now-1d:%Y-%m-%d}}' } });
+      fireEvent.change(within(modal).getByLabelText('schedule_params'), { target: { value: '["--date","{{now-1d:%Y-%m-%d}}"]'  } });
     });
     await act(async () => { fireEvent.click(findButton('保存', modal)); });
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
     const [, body] = apiPostMock.mock.calls[0];
     expect(body.kind).toBe('dag');
-    expect(body.params).toEqual({ args: '--date {{now-1d:%Y-%m-%d}}' });
+    expect(body.params).toEqual({ args: ['--date', '{{now-1d:%Y-%m-%d}}'] });
     expect(body.timezone).toBe('+08:00');
   });
 
@@ -235,7 +235,7 @@ describe('SchedulePanel', () => {
     expect(body.id).toBe('nightly-etl');
     expect(body.target).toBe('etl-demo');
     expect(body.timezone).toBe('+08:00');
-    expect(body.params).toEqual({}); // dag 记录 params 为空，编辑不凭空造键
+    expect(body.params).toEqual({args:[]}); // dag 记录 params 为空，编辑不凭空造键
   });
 
   it('edits merge params: the other keys survive an objective change', async () => {
@@ -321,7 +321,7 @@ describe('SchedulePanel', () => {
     render(<SchedulePanel onNotice={vi.fn()} />);
     await screen.findByText('nightly-etl');
     await act(async () => { fireEvent.click(findButton('触发历史')); });
-    await waitFor(() => expect(apiGetMock).toHaveBeenCalledWith('/api/schedules/nightly-etl/runs?limit=50'));
+    await waitFor(() => expect(apiGetMock).toHaveBeenCalledWith('/api/schedules/nightly-etl/runs?limit=50', expect.objectContaining({ signal: expect.any(AbortSignal) })));
     // 主表的 last_run 也有一颗「已触发」，断言一律圈定在 Drawer 的 portal 内
     // （antd 6 的内容容器是 .ant-drawer-body，旧 .ant-drawer-content 已更名）。
     const drawerEl = await waitFor(() => {

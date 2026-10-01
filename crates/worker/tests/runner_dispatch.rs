@@ -73,7 +73,7 @@ async fn registered_runner_is_rejected_by_dag_definition_and_inline_dispatch() {
         .await;
     assert_eq!(reply.status, 400, "{reply:?}");
     // Inline dispatch hits the serde boundary first: `runner` is no longer a
-    // known step kind variant after the convergence to agent/wasm.
+    // known step kind variant after the convergence to agent/binary.
     assert!(
         reply.body.to_string().contains("unknown variant"),
         "{reply:?}"

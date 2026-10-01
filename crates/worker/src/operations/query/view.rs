@@ -82,7 +82,7 @@ pub(super) fn spec_step_names(definition: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Declared `steps[].kind.type` for one spec step (`agent`/`wasm`).
+/// Declared `steps[].kind.type` for one spec step (`agent`/`binary`).
 /// `None` when the step is absent or its kind is not a tagged object. Pure.
 pub(super) fn spec_step_kind(definition: Option<&Value>, name: &str) -> Option<String> {
     definition

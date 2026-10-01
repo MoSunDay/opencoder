@@ -148,3 +148,24 @@ fn compute_display_subagent_title_keeps_navigation() {
         "subagent display_mode mirrors subagent kind"
     );
 }
+
+#[test]
+fn remote_display_identifies_server_capability_instead_of_local_model() {
+    let chat = ChatView {
+        agent: "operator:ops".into(),
+        remote: true,
+        ..Default::default()
+    };
+    let ds = compute_display(
+        &chat,
+        None,
+        0,
+        0,
+        &opencoder_core::Config::default(),
+        Path::new("/local"),
+        80,
+        crate::app::app_display::TOP_ARROW_W,
+    );
+    assert_eq!(line_text(&ds.display_title), "Server · operator:ops");
+    assert_eq!(ds.display_mode, "operator:ops");
+}

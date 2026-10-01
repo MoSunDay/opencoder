@@ -1,4 +1,4 @@
-Commit: 24a1081aff7fd8591f860723bae5eb787edf68e9
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # session 模块
 
@@ -12,5 +12,6 @@ Commit: 24a1081aff7fd8591f860723bae5eb787edf68e9
 - `src/tools/` — 工具注册与实现
 - `src/bash_guard.rs` — plan/sidecar 只读 bash 门（薄适配 shellguard，fail-closed 见 [shellguard](../shellguard/index.md)）
 - `src/compaction/` — 上下文压缩
+- [skill_resolve.rs](../../crates/session/src/skill_resolve.rs)、[runner/drain.rs](../../crates/session/src/runner/drain.rs) — `literal_mentions` 控制是否跳过 `@` 扩展；队列项的 `display_text` 同时用于消费事件和用户消息展示，模型输入可以保留执行前缀。
 - `src/resume.rs` — 恢复；取消原语在 `src/lib.rs`
 - `tests/` — 集成回归（`bash_guard_plan_mode.rs`、`subagent.rs`、`compaction_*` 等），需登录式环境（`HOME`/`SHELL`）

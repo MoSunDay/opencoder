@@ -37,14 +37,7 @@ fn read_json_at(path: &std::path::Path) -> Value {
 
 /// Node artifact `<node-data>/dag/<run>/<step>/output.json`.
 fn step_json(fleet: &Fleet, run: &str, step: &str) -> Value {
-    read_json_at(
-        &fleet
-            .node_data
-            .join("dag")
-            .join(run)
-            .join(step)
-            .join("output.json"),
-    )
+    read_json_at(&fleet.run_root(run).join(step).join("output.json"))
 }
 
 /// Content-keyed replies: a step sub-session also fires a best-effort title
@@ -73,7 +66,7 @@ fn agent_step_extracts_fenced_and_bare_json_output() {
     // slot order never matters.
     let stub = LlmStub::spawn(vec![reply_by_prompt(); 8]);
     let tmp = tempfile::tempdir().unwrap();
-    let fleet = Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "dag-structured-node");
+    let fleet = Fleet::spawn_native(tmp.path(), stub.port(), json!({}), "dag-structured-node");
 
     let (status, body) = fleet.http("POST", "/api/dag/defs", &json!({"spec": spec()}));
     assert_eq!(status, 200, "save def: {body}");
@@ -112,14 +105,7 @@ fn agent_step_extracts_fenced_and_bare_json_output() {
 
     // Both steps closed done with the extraction serving the artifact IO.
     for step in ["fenced", "bare"] {
-        let meta = read_json_at(
-            &fleet
-                .node_data
-                .join("dag")
-                .join(RUN)
-                .join(step)
-                .join("meta.json"),
-        );
+        let meta = read_json_at(&fleet.run_root(RUN).join(step).join("meta.json"));
         assert_eq!(meta["outcome"], "done", "{step} meta: {meta}");
     }
 

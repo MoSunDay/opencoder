@@ -12,7 +12,7 @@ vi.mock('./execute/launcher.jsx', () => ({
 }));
 import { TodoDrawer } from './todoDrawer.jsx';
 
-const overview = { goals: [], standalone_milestones: [], backlog: [{ id: 'todo-1', title: '任务', draft: '说明', status: 'draft', capability_id: 'agent' }] };
+const overview = { goals: [], standalone_initiatives: [], backlog: [{ id: 'todo-1', title: '任务', draft: '说明', status: 'draft', capability_id: 'agent' }] };
 
 beforeEach(() => {
   Object.values(api).forEach((method) => method.mockReset());
@@ -30,7 +30,7 @@ it('displays execution type, name and ID resolved from the index', async () => {
   expect(screen.getAllByText('已完成').length).toBeGreaterThan(0);
   expect(screen.getByText('结论已回写')).toBeTruthy();
   expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
-  fireEvent.click(screen.getByRole('button', { name: '查看' }));
+  fireEvent.click(screen.getByText('查看', { selector: 'button span' }).closest('button'));
   expect(await screen.findByText('execution:agent-1')).toBeTruthy();
 }, 20000);
 
@@ -47,7 +47,7 @@ it('reads the previous execution_ids response during a service rollback', async 
     : { id: 'operator-1', kind: 'operator', status: 'running' }));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   expect((await screen.findAllByText('operator-1')).length).toBeGreaterThan(0);
-  fireEvent.click(screen.getByRole('button', { name: '查看' }));
+  fireEvent.click(screen.getByText('查看', { selector: 'button span' }).closest('button'));
   expect(await screen.findByText('execution:operator-1')).toBeTruthy();
 }, 20000);
 
@@ -56,8 +56,10 @@ it('submits Team guidance with a stable input ID from the execution detail', asy
     ? { assignments: [{ execution_id: 'team-1', kind: 'team', name: '审核', sync_state: 'pending' }] }
     : { id: 'team-1', kind: 'team', name: '审核', status: 'running' }));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: '查看' }));
-  fireEvent.click(await screen.findByRole('button', { name: '提交引导' }));
+  const view = (await screen.findByText('查看', { selector: 'button span' })).closest('button');
+  await waitFor(() => expect(view.disabled).toBe(false));
+  fireEvent.click(view);
+  fireEvent.click(await screen.findByText('提交引导', { selector: 'button' }));
   await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/executions/team-1/commands', {
     action: 'steer', input: { prompt: '补充说明', input_id: expect.stringMatching(/^input-/) },
   }));

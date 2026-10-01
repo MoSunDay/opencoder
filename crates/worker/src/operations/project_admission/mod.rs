@@ -138,18 +138,18 @@ async fn sync_snapshot(worker: &Worker, snapshot: &Value, action: &str) -> Resul
             }
         }
         for m in
-            serde_json::from_value::<Vec<ProjectMilestoneRecord>>(snapshot["milestones"].clone())?
+            serde_json::from_value::<Vec<ProjectInitiativeRecord>>(snapshot["milestones"].clone())?
         {
             if projects
-                .list_milestones(None)
+                .list_initiatives(None)
                 .await?
                 .iter()
                 .any(|old| old.id == m.id)
             {
                 projects
-                    .patch_milestone(
+                    .patch_initiative(
                         &m.id,
-                        &ProjectMilestonePatch {
+                        &ProjectInitiativePatch {
                             title: Some(m.title),
                             goal_id: Some(m.goal_id),
                             detail_md: m.detail_md,
@@ -159,7 +159,7 @@ async fn sync_snapshot(worker: &Worker, snapshot: &Value, action: &str) -> Resul
                     )
                     .await?;
             } else {
-                projects.create_milestone(&m).await?;
+                projects.create_initiative(&m).await?;
             }
         }
     }
@@ -176,7 +176,7 @@ async fn sync_snapshot(worker: &Worker, snapshot: &Value, action: &str) -> Resul
         if action == "plan" {
             patch.title = Some(todo.title);
             patch.draft = Some(todo.draft);
-            patch.milestone_id = Some(todo.milestone_id);
+            patch.initiative_id = Some(todo.initiative_id);
         }
         projects
             .patch_todo(&todo.id, &patch, opencoder_core::message::now_ms())

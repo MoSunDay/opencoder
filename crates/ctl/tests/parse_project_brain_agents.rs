@@ -101,39 +101,39 @@ fn project_overview_and_goal_crud() {
 }
 
 #[test]
-fn project_milestones_filter_and_crud() {
-    let plan = planned_project(&["milestones", "list"]);
-    assert_eq!(plan, RequestPlan::get("/api/project/milestones"));
+fn project_initiatives_filter_and_crud() {
+    let plan = planned_project(&["initiatives", "list"]);
+    assert_eq!(plan, RequestPlan::get("/api/project/initiatives"));
     assert!(plan.query.is_empty());
 
-    let plan = planned_project(&["milestones", "list", "--goal", "g1"]);
+    let plan = planned_project(&["initiatives", "list", "--goal", "g1"]);
     assert_eq!(plan.query, vec![("goal_id".to_owned(), "g1".to_owned())]);
 
     let plan = planned_project(&[
-        "milestones",
+        "initiatives",
         "create",
         "--json",
         r#"{"goal_id":"g1","title":"m"}"#,
     ]);
     assert_eq!(plan.method, reqwest::Method::POST);
-    assert_eq!(plan.path, "/api/project/milestones");
+    assert_eq!(plan.path, "/api/project/initiatives");
 
-    let plan = planned_project(&["milestones", "patch", "m1", "--json", r#"{"title":"x"}"#]);
+    let plan = planned_project(&["initiatives", "patch", "m1", "--json", r#"{"title":"x"}"#]);
     assert_eq!(plan.method, reqwest::Method::PATCH);
-    assert_eq!(plan.path, "/api/project/milestones/m1");
+    assert_eq!(plan.path, "/api/project/initiatives/m1");
 
-    let plan = planned_project(&["milestones", "delete", "m1"]);
-    assert_eq!(plan, RequestPlan::delete("/api/project/milestones/m1"));
+    let plan = planned_project(&["initiatives", "delete", "m1"]);
+    assert_eq!(plan, RequestPlan::delete("/api/project/initiatives/m1"));
 }
 
 #[test]
 fn project_todos_lifecycle_runs_and_cancel() {
     let plan = planned_project(&["todos", "list"]);
     assert_eq!(plan, RequestPlan::get("/api/project/todos"));
-    let plan = planned_project(&["todos", "list", "--milestone", "m1"]);
+    let plan = planned_project(&["todos", "list", "--initiative", "m1"]);
     assert_eq!(
         plan.query,
-        vec![("milestone_id".to_owned(), "m1".to_owned())]
+        vec![("initiative_id".to_owned(), "m1".to_owned())]
     );
 
     let plan = planned_project(&["todos", "create", "--json", r#"{"title":"t","draft":"d"}"#]);

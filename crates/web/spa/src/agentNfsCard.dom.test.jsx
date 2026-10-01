@@ -46,8 +46,10 @@ describe('AgentNfsCard', () => {
     render(<AgentNfsCard onNotice={() => {}} />);
     expect(await screen.findByText('运行中')).toBeTruthy();
     fireEvent.click(screen.getByRole('switch'));
+    expect(apiPostMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByText('确认停止导出'));
     await waitFor(() => {
-      expect(apiPostMock).toHaveBeenCalledWith('/api/agents/nfs', { enabled: false });
+      expect(apiPostMock).toHaveBeenCalledWith('/api/agents/nfs', { enabled: false }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     });
     // POST 响应里的新状态接管渲染（停止后不再显示挂载提示）。
     await waitFor(() => {
@@ -70,7 +72,25 @@ describe('AgentNfsCard', () => {
     expect(await screen.findByText('已停止')).toBeTruthy();
     fireEvent.click(screen.getByRole('switch'));
     await waitFor(() => {
-      expect(apiPostMock).toHaveBeenCalledWith('/api/agents/nfs', { enabled: true });
+      expect(apiPostMock).toHaveBeenCalledWith('/api/agents/nfs', { enabled: true }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     });
+  });
+
+  it('does not present a failed read as a stopped export', async () => {
+    apiGetMock.mockRejectedValueOnce(new Error('export unavailable'));
+    render(<AgentNfsCard onNotice={vi.fn()} />);
+    expect(await screen.findByText('export unavailable')).toBeTruthy();
+    expect(screen.getByText('状态未知')).toBeTruthy();
+    expect(screen.queryByText('已停止')).toBeNull();
+    expect(screen.getByRole('switch').disabled).toBe(true);
+    expect(apiPostMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the configured workspace source without changing it', async () => {
+    apiGetMock.mockResolvedValue({ root: '/existing/source', status: { ...statusFixture, export_root: '' } });
+    render(<AgentNfsCard endpoint="/api/dag/workspace/nfs" title="工作区只读导出" label="workspace-nfs" onNotice={vi.fn()} />);
+    expect(await screen.findByText('/existing/source')).toBeTruthy();
+    expect(apiGetMock).toHaveBeenCalledWith('/api/dag/workspace/nfs', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiPostMock).not.toHaveBeenCalled();
   });
 });

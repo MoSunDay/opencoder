@@ -7,8 +7,22 @@
 // the rc-* components beneath it assume browser APIs that jsdom does not
 // implement (media queries, observers, scrolling, animation, network).
 
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
+// Antd uses a constant ID in NODE_ENV=test. Multiple drawers then share an
+// aria-labelledby target, breaking accessible names and making role queries
+// traverse unrelated content. Keep the browser's unique React IDs in jsdom.
+vi.mock('@rc-component/util/es/hooks/useId.js', async (original) => {
+  const module = await original();
+  const React = await import('react');
+  return { ...module, default: (id) => { const generated = React.useId(); return id || generated; } };
+});
+vi.mock('@rc-component/util/lib/hooks/useId.js', async (original) => {
+  const module = await original();
+  const React = await import('react');
+  return { ...module, default: (id) => { const generated = React.useId(); return id || generated; } };
+});
+
 
 /// Assign `value` for `name` on `target` only when missing, so a future jsdom
 /// that implements an API natively wins over the shim.

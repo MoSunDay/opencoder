@@ -147,6 +147,15 @@ fn run() -> Result<(), i32> {
         client,
         step_dir.clone(),
     );
+    if let Ok(bytes) = std::fs::read(step_dir.join("harness.json")) {
+        match serde_json::from_slice::<opencoder_core::harness::HarnessRuntime>(&bytes) {
+            Ok(runtime) => session.harness.literal_mentions = runtime.literal_mentions,
+            Err(error) => {
+                eprintln!("agent-session-runner: cannot parse harness.json: {error}");
+                return Err(2);
+            }
+        }
+    }
     if let Ok(bytes) = std::fs::read(step_dir.join("messages.json")) {
         match serde_json::from_slice::<Vec<opencoder_core::Message>>(&bytes) {
             Ok(history) => session.messages = history,

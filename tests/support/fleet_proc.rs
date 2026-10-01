@@ -118,12 +118,11 @@ fn spawn_reader(stream: impl Read + Send + 'static, label: &str, kind: &str, log
 }
 
 /// Write `<workdir>/.opencoder/config.json`: the loopback LLM stub plus any
-/// extra config keys (e.g. `dag.wasm_dir` for the DAG suites). Both fleet
+/// extra config keys (e.g. `dag.binary_dir` for the DAG suites). Both fleet
 /// processes discover this file through `--workdir`.
 pub fn write_config(workdir: &Path, stub_port: u16, extra: Value) {
     let mut config = json!({
         "model": "stub/m1",
-        "dag": {"wasm_dir": workdir.join("wasm-pool")},
         "providers": {
             "stub": {
                 "base_url": format!("http://127.0.0.1:{stub_port}/v1"),
@@ -136,7 +135,7 @@ pub fn write_config(workdir: &Path, stub_port: u16, extra: Value) {
         for (key, value) in extra {
             match (base.get_mut(key), value.as_object()) {
                 // Merge object sections one level deep (e.g. extra `dag.ops`
-                // must not clobber the default `dag.wasm_dir`) instead of
+                // must not clobber the default `dag.binary_dir`) instead of
                 // replacing the whole default section.
                 (Some(serde_json::Value::Object(base_inner)), Some(extra_inner)) => {
                     for (inner_key, inner_value) in extra_inner {
@@ -166,6 +165,7 @@ pub struct Fleet {
     _server: Proc,
     agent: Option<Proc>,
     node_name: String,
+    _native: Option<super::native::NativeMounts>,
 }
 
 impl Fleet {
@@ -181,6 +181,25 @@ impl Fleet {
         extra: Value,
         node_name: &str,
     ) -> Self {
+        Self::spawn_inner(workdir, stub_port, extra, node_name, false)
+    }
+
+    pub fn spawn_native(workdir: &Path, stub_port: u16, extra: Value, node_name: &str) -> Self {
+        Self::spawn_inner(workdir, stub_port, extra, node_name, true)
+    }
+
+    fn spawn_inner(
+        workdir: &Path,
+        stub_port: u16,
+        extra: Value,
+        node_name: &str,
+        native: bool,
+    ) -> Self {
+        let native = native.then(|| super::native::NativeMounts::prepare(workdir, extra.clone()));
+        let extra = native
+            .as_ref()
+            .map(|plan| plan.server_config.clone())
+            .unwrap_or(extra);
         write_config(workdir, stub_port, extra);
         let log = ProcLog::default();
         let server = spawn_server(workdir, &log);
@@ -198,6 +217,14 @@ impl Fleet {
                 None
             }
         });
+        if let Some(native) = &native {
+            native.mount(&base);
+            write_config(
+                &workdir.join("node-work"),
+                stub_port,
+                native.node_config.clone(),
+            );
+        }
         let agent = spawn_agent(workdir, &base, &log, node_name);
         let fleet = Self {
             base,
@@ -207,6 +234,7 @@ impl Fleet {
             _server: server,
             agent: Some(agent),
             node_name: node_name.to_string(),
+            _native: native,
         };
         fleet.wait_ready(&["operator", "dag"]);
         fleet
@@ -240,6 +268,14 @@ impl Fleet {
     /// The node id (persisted across agent restarts in `<data>/node-id`).
     pub fn node_id(&self) -> String {
         self.wait_ready(&["operator", "dag"])
+    }
+
+    pub fn run_root(&self, id: &str) -> PathBuf {
+        let record: Value = serde_json::from_slice(
+            &std::fs::read(self.node_data.join("dag").join(id).join("execution.json")).unwrap(),
+        )
+        .unwrap();
+        PathBuf::from(record["annotations"]["dag_parent"].as_str().unwrap()).join(id)
     }
 
     /// Bearer-authenticated JSON request against this server.
@@ -335,7 +371,11 @@ fn spawn_agent(workdir: &Path, base: &str, log: &ProcLog, name: &str) -> Proc {
     command
         .env("HOME", workdir)
         .arg("--workdir")
-        .arg(workdir)
+        .arg(if workdir.join("node-work").exists() {
+            workdir.join("node-work")
+        } else {
+            workdir.to_path_buf()
+        })
         .arg("--data-dir")
         .arg(workdir.join("node-state"))
         .args(["--remote", base, "--token", TOKEN, "--name", name]);

@@ -25,6 +25,22 @@ use crate::{
 /// stale run 收敛的统一留痕文案（sweep 与 execute 前置守卫共用）。
 const STALE_RUN_NOTE: &str = "stale run converged: driver lost (restart/panic)";
 
+async fn cleanup_dag(deps: &Deps, run_id: &str) -> bool {
+    let cleanup = async {
+        if let Some(run) = deps.projects.get_todo_run(run_id).await? {
+            crate::executor::dag_state::cleanup(deps, &run).await?;
+        }
+        anyhow::Ok(())
+    }
+    .await;
+    if let Err(error) = cleanup {
+        *deps.persistence_error.lock().unwrap() = Some(format!("project DAG cleanup: {error:#}"));
+        tracing::error!(run_id, %error, "project DAG cleanup failed; run remains nonterminal");
+        return false;
+    }
+    true
+}
+
 /// spawn 后台驱动 + 小监控任务：await 驱动的 JoinHandle，若其以 panic 退出
 /// 则做兜底收敛。正常完成路径的收敛由 drive 自身负责，监控只在 join 失败
 /// 且 `is_panic()` 时出手（我们从不 abort 任务，Err 实际只可能是 panic，
@@ -69,6 +85,9 @@ pub(crate) async fn converge_panicked_run(
     kind: ProjectTodoRunKind,
 ) {
     let _admission = deps.admission.lock().await;
+    if !cleanup_dag(deps, run_id).await {
+        return;
+    }
     // 驱动可能在 close_run(Done) 与 todo 回写的两个 await 之间 panic——run
     // 已终态时条件收敛不改写其标签/输出；但 todo 若仍 Running 必须补收敛，
     // 否则悬死。
@@ -92,6 +111,9 @@ pub(crate) async fn converge_panicked_run(
 /// todo（Plan 不占 todo 状态）。返回是否赢得 CAS——输家说明并发方已收敛，
 /// 同样视为已处理。
 pub(crate) async fn converge_stale_run(deps: &Arc<Deps>, run: &ProjectTodoRunRecord) -> bool {
+    if !cleanup_dag(deps, &run.id).await {
+        return false;
+    }
     close_run_if_running(
         deps,
         &run.id,
@@ -121,6 +143,9 @@ pub(crate) async fn converge_lost_run(deps: &Arc<Deps>, run_id: &str) -> bool {
         }
     };
     if run.status != ProjectTodoRunStatus::Running {
+        return false;
+    }
+    if !cleanup_dag(deps, run_id).await {
         return false;
     }
     let won = close_run_if_running(

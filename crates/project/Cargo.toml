@@ -23,6 +23,11 @@ async-trait.workspace = true
 tracing.workspace = true
 ulid.workspace = true
 sha2 = "0.10"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+opencoder-agents.workspace = true
+opencoder-dag-binary.workspace = true
+axum = "0.7"
+futures.workspace = true

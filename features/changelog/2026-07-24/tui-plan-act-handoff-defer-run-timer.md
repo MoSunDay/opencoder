@@ -81,7 +81,3 @@ commit `db71fa1` 把 `run_app` 主循环中三块内联逻辑抽成纯/异步函
 - 仅影响 TUI 主循环与状态栏渲染；不触碰 session runner / store / llm / web / cli 的契约。
 - 用户可感知：plan 跑到一半切 act 不再打架（延迟到该 turn 跑完）；压缩后切 act 仍能
   handoff；状态栏多一个运行计时；body 标题显示当前 workdir。
-
-## Related Docs
-- [既有 changelog：plan→act handoff submit guard](../2026-07-23/plan-act-handoff-submit-guard.md)
-- [既有 changelog：handoff 回归测试](../2026-07-23/plan-act-handoff-regression-tests.md)

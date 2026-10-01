@@ -6,9 +6,9 @@ export function batchError(template, items) {
   for (let i = 0; i < items.length; i += 1) {
     if (template?.type === 'agent') {
       if (typeof items[i] !== 'string') return `实例 ${i} 必须是文本`;
-    } else if (template?.type === 'wasm') {
+    } else if (template?.type === 'binary') {
       if (!Array.isArray(items[i]) || items[i].some((s) => typeof s !== 'string' || s.includes('\0'))) return `实例 ${i} 必须是字符串 argv 数组`;
-    } else return '模板必须是 Agent 或 Wasm';
+    } else return '模板必须是 Agent 或 Binary';
   }
   return '';
 }

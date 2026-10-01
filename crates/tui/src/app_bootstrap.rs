@@ -49,9 +49,18 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     } else {
         None
     };
+    if stored
+        .as_ref()
+        .is_some_and(|runtime| runtime.remote.is_some())
+    {
+        anyhow::ensure!(
+            config.opencoder_server.enabled,
+            "This is a remote task; enable opencoder_server.enabled to resume it"
+        );
+    }
     let harness = if let Some(runtime) = &stored {
         anyhow::ensure!(
-            opts.harness.is_none_or(|h| h == runtime.harness),
+            runtime.remote.is_some() || opts.harness.is_none_or(|h| h == runtime.harness),
             "harness is fixed when the session starts"
         );
         runtime.harness
@@ -61,7 +70,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         })
     };
     let (config, client, active_terminal): (Config, Arc<dyn ChatStream>, Option<ActiveTerminal>) =
-        if harness == opencoder_core::harness::Harness::Codex {
+        if harness == opencoder_core::harness::Harness::Codex || config.opencoder_server.enabled {
             let client = opencoder_session::harness::configured_client(config.clone());
             (config, client, None)
         } else {
@@ -116,7 +125,14 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
 
     // Resume an existing session if --session was given, otherwise start fresh.
     let t_session = Instant::now();
-    let mut session = if let Some(id) = &opts.session {
+    let remote_session = if let Some(id) = &opts.session {
+        crate::remote::load(id, config.clone(), client.clone(), store.clone(), &workdir).await?
+    } else {
+        None
+    };
+    let mut session = if let Some(remote) = remote_session {
+        remote
+    } else if let Some(id) = &opts.session {
         let existing = store.get_session(id).await?;
         // If not found as a session, try as a subagent task_id to resolve
         // the parent session.
@@ -176,7 +192,8 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         )
         .with_store(store.clone())
     };
-    if stored.is_some() {
+    session.harness.literal_mentions = true;
+    if stored.is_some() && session.harness.remote.is_none() {
         anyhow::ensure!(
             opencoder_core::harness::matches_requested_env(&session.harness, &opts.envs),
             "environment is fixed when the session starts"
@@ -187,7 +204,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
                 || opts.model == session.harness.model,
             "Codex model is fixed when the session starts"
         );
-    } else if session.messages.is_empty() {
+    } else if stored.is_none() && session.messages.is_empty() {
         session.harness = opencoder_core::harness::fresh_runtime(
             harness,
             Some(harness),
@@ -199,12 +216,13 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
 
     // Explicit --model wins over a resumed session's stored model and is
     // re-persisted so later resumes honor it (headless run-path parity).
+    let local = session.harness.remote.is_none();
     if let Some(m) = reapply_session_model(
         &mut session,
         &opts
             .model
             .clone()
-            .filter(|_| harness == opencoder_core::harness::Harness::Opencoder),
+            .filter(|_| harness == opencoder_core::harness::Harness::Opencoder && local),
     ) {
         persist_session_model(store.as_ref(), &session.id, m).await;
     }

@@ -1,4 +1,3 @@
-//! OCI bundle generation for `sandbox: runc` wasm steps.
 //!
 //! JSON/path plumbing and bundle preparation; process driving lives in
 //! [`super::runc`]. Each bundle takes a private copy of the provisioned
@@ -20,7 +19,6 @@ pub struct BundleSpec {
     pub run_root: PathBuf,
     /// Step slug (annotations + step dir naming).
     pub step_slug: String,
-    /// The wasm launch command argv (module token first). The module path
     /// is resolved inside the container against `/workspace/context`.
     pub command: Vec<String>,
     /// Extra env pairs injected into the container process (the
@@ -37,12 +35,6 @@ pub struct BundleSpec {
     /// (host path): agent cards + the four shared pools, kernel-enforced ro.
     /// Agent-session workloads set this; DAG steps leave it `None`.
     pub agents: Option<PathBuf>,
-    /// How `command` is interpreted. `WasmModule` (default) rewrites the
-    /// first token under `/workspace/context` and wraps it in the
-    /// `wasmtime run` CLI; `Direct` runs the argv verbatim (native
-    /// step-runner binaries installed in the rootfs, e.g.
-    /// `agent-step-runner`).
-    pub argv: ArgvStyle,
 }
 
 /// A read-only bind of a host knowledge tree into the container.
@@ -51,17 +43,6 @@ pub struct KnowledgeMount {
     /// Host path (absolute after [`write_bundle`] normalization; validated
     /// as a REAL directory, fail-closed).
     pub host: PathBuf,
-}
-
-/// Container argv style for [`BundleSpec::command`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ArgvStyle {
-    /// `wasmtime run --dir=... [--env K=V]... <module-under-context> ...`
-    #[default]
-    WasmModule,
-    /// The argv verbatim (a rootfs-installed binary); env pairs ride the
-    /// process env list instead of `--env` flags.
-    Direct,
 }
 
 /// Where the shared read-only rootfs lives for a given run root:
@@ -73,7 +54,6 @@ pub fn shared_rootfs(run_root: &Path) -> Result<PathBuf> {
     Ok(workflow_root.join("rootfs"))
 }
 
-/// The OCI `config.json` for one wasm step.
 ///
 /// Notes on the (deliberate) shape:
 /// - `ociVersion` stays at `"1.0.0"` — the most widely accepted value across
@@ -112,8 +92,8 @@ pub fn container_config(spec: &BundleSpec) -> Value {
         "process": {
             "terminal": false,
             "user": { "uid": 0, "gid": 0 },
-            "args": wasm_args(spec),
-            "env": wasm_env(spec),
+            "args": spec.command.clone(),
+            "env": process_env(spec),
             "cwd": "/workspace",
         },
         "root": { "path": "rootfs", "readonly": true },
@@ -204,47 +184,7 @@ fn agents_mount(spec: &BundleSpec) -> Option<Value> {
     }))
 }
 
-/// Container argv. `WasmModule` (the wasm step contract) runs the module
-/// with the static `wasmtime` CLI — `wasmtime run --dir=<context>
-/// [--env K=V]... <module> [args...]` — rewriting the module token to its
-/// guest-visible path under `/workspace/context`; later tokens pass
-/// through verbatim. `Direct` passes the argv through untouched for
-/// rootfs-installed step-runner binaries (their env pairs ride the
-/// process env list, not `--env` flags).
-fn wasm_args(spec: &BundleSpec) -> Vec<String> {
-    if spec.argv == ArgvStyle::Direct {
-        return spec.command.clone();
-    }
-    let mut args = vec![
-        "wasmtime".to_string(),
-        "run".to_string(),
-        format!("--dir={}", crate::exec::wasm::CONTEXT_MOUNT),
-        "-Ccache-config=/opencoder-wasmtime-cache.toml".to_string(),
-    ];
-    if spec.knowledge.is_some() {
-        args.push(format!("--dir={}", crate::exec::KNOWLEDGE_MOUNT));
-    }
-    for (k, v) in &spec.env {
-        args.push("--env".to_string());
-        args.push(format!("{k}={v}"));
-    }
-    for (i, token) in spec.command.iter().enumerate() {
-        if i == 0 {
-            args.push(format!(
-                "{}/{}",
-                crate::exec::wasm::CONTEXT_MOUNT,
-                token.trim_start_matches('/')
-            ));
-        } else {
-            args.push(token.clone());
-        }
-    }
-    args
-}
-
-/// Container process env: the standard PATH plus the `OPENCODER_*` step
-/// contract pairs.
-fn wasm_env(spec: &BundleSpec) -> Vec<String> {
+fn process_env(spec: &BundleSpec) -> Vec<String> {
     let mut env = vec!["PATH=/usr/local/bin:/usr/bin:/bin".to_string()];
     env.extend(spec.env.iter().map(|(k, v)| format!("{k}={v}")));
     env
@@ -271,7 +211,6 @@ fn normalize_knowledge(spec: &BundleSpec) -> Result<BundleSpec> {
     Ok(normalized)
 }
 
-/// Materialize the bundle at `dir`: `config.json` referencing the wasm
 /// module under the bind-mounted `/workspace/context` (the executor
 /// already wrote the module-adjacent step artifacts). The shared rootfs is
 /// validated and copied into the bundle; subsequent attempts reuse that
@@ -293,7 +232,7 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
         .unwrap_or(false);
     if !is_real_dir {
         bail!(
-            "shared rootfs unusable at {}: it must be a REAL directory (missing, or a symlink — runc rejects symlinks; move/copy the tree or bind-mount it). Run `opencoder-agent dag prepare-rootfs` / place a static wasmtime tree there",
+            "shared rootfs unusable at {}: it must be a REAL directory (missing, or a symlink — runc rejects symlinks; move/copy the tree or bind-mount it). Run `opencoder-agent dag prepare-rootfs`",
             shared.display()
         );
     }
@@ -321,14 +260,6 @@ pub fn write_bundle(dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
         fs::create_dir_all(rootfs.join(crate::exec::AGENTS_MOUNT.trim_start_matches('/')))
             .with_context(|| format!("mkdir agents mountpoint under {}", rootfs.display()))?;
     }
-    // The root image is read-only at execution time. Wasmtime's default
-    // cache under /.cache cannot be created there; use the container's
-    // existing private /tmp mount without changing the guest environment.
-    opencoder_core::atomic_write(
-        &rootfs.join("opencoder-wasmtime-cache.toml"),
-        b"[cache]\ndirectory = \"/tmp/wasmtime-cache\"\n",
-    )?;
-
     // 2. config.json.
     let config = container_config(&spec);
     let config_path = dir.join("config.json");
@@ -378,40 +309,13 @@ pub fn write_rootfs_template(out: &Path) -> Result<()> {
 }
 
 const README_TEMPLATE: &str = r#"
-# DAG sandbox rootfs scaffold
+# Native runtime rootfs
 
-This directory is the provisioned rootfs template for runc DAG steps. It is
-a scaffold: install the runtime needed by the selected Wasm or Agent step.
-
-For Codex Agent steps, run `scripts/prepare-dag-rootfs.sh <rootfs> --codex
-<native-codex-binary>`. This installs the CLI, shell, Git, TLS and libraries.
-The executor mounts the node's original Codex home at launch; do not copy
-credentials into this image. Profile executable paths resolve inside it.
-
-1. Place a STATIC `wasmtime` CLI tree under `usr/` (build wasmtime with
-   `cargo build --release` on the target arch and copy the binary plus any
-   needed runtime libs so that `/usr/bin/wasmtime` resolves inside the
-   rootfs). A static build avoids glibc-version coupling with the host.
-2. Keep `etc/resolv.conf` in sync if your host resolver setup changes
-   (copied from the host by `dag prepare-rootfs`; the sandbox shares the
-   host network — there is no network namespace).
-3. `dev`, `proc`, `sys`, `tmp`, `workspace/context` and `workspace/agent`
-   are recreated as empty runtime directories in each private copy. `proc`
-   and `tmp` are mounted at runtime; workspace/context receives the run
-   artifacts bind; workspace/agent is the (optional) read-only agents-pool
-   bind of agent-session workloads.
-4. Point `<workflow_root>/rootfs` at this tree. It must end up a REAL
-   directory — runc rejects symlinked rootfs paths ("invalid rootfs: not an
-   absolute path, or a symlink"), so move/copy the tree there or bind-mount
-   it (`mount --bind <tree> <workflow_root>/rootfs`). Every step bundle
-   copies the runtime tree into its own real `rootfs` directory, used
-   read-only at runtime and reused for retries. Reserve disk space for
-   one private runtime tree per step; no shared files are hard-linked.
-
-No network downloads happen at prepare or step time in the runtime itself —
-populating `usr/` is a provisioning concern. The wasm module itself is NOT
-part of the rootfs: it lives in the run artifacts and reaches the container
-through the `/workspace/context` bind mount.
+Install dag-runner, agent-step-runner and agent-session-runner under usr/bin
+using scripts/prepare-dag-rootfs.sh. Provision required native tools and
+libraries; never place credentials in this image. Keep etc/resolv.conf valid.
+DAG runs use an OverlayFS private runtime view and one shared /workspace.
+Standalone Agent sessions use their own OCI bundles.
 "#;
 
 #[cfg(test)]
@@ -422,12 +326,11 @@ mod tests {
         BundleSpec {
             run_root: workflow_root.join("run-1"),
             step_slug: "step-a".into(),
-            command: vec!["step-a/main.wasm".into(), "--flag".into()],
+            command: vec!["/usr/bin/native-tool".into(), "--flag".into()],
             env: vec![("OPENCODER_RUN_ID".into(), "run-1".into())],
             timeout_hint: Some(30),
             knowledge: None,
             agents: None,
-            argv: ArgvStyle::WasmModule,
         }
     }
 
@@ -457,17 +360,10 @@ mod tests {
         let opts = bind["options"].as_array().unwrap();
         assert!(opts.contains(&json!("rw")), "{opts:?}");
         assert!(opts.contains(&json!("rbind")), "{opts:?}");
-        // Args run the module via the static wasmtime CLI with the context
-        // dir preopened and the step env forwarded; later tokens verbatim.
-        let args = cfg["process"]["args"].as_array().unwrap();
-        assert_eq!(args[0], "wasmtime");
-        assert_eq!(args[1], "run");
-        assert_eq!(args[2], "--dir=/workspace/context");
-        assert_eq!(args[3], "-Ccache-config=/opencoder-wasmtime-cache.toml");
-        assert_eq!(args[4], "--env");
-        assert_eq!(args[5], "OPENCODER_RUN_ID=run-1");
-        assert_eq!(args[6], "/workspace/context/step-a/main.wasm");
-        assert_eq!(args[7], "--flag");
+        assert_eq!(
+            cfg["process"]["args"],
+            json!(["/usr/bin/native-tool", "--flag"])
+        );
         let env = cfg["process"]["env"].as_array().unwrap();
         assert!(env.contains(&json!("OPENCODER_RUN_ID=run-1")), "{env:?}");
         assert_eq!(cfg["process"]["cwd"], "/workspace");
@@ -497,14 +393,11 @@ mod tests {
             write_bundle(&workflow_root.join("run-1.bundle"), &spec(&workflow_root)).unwrap();
         assert!(bundle.is_absolute());
 
-        // config.json references the module inside the context bind via the
-        // static wasmtime CLI (the module itself was staged by the executor).
         let cfg: Value =
             serde_json::from_str(&fs::read_to_string(bundle.join("config.json")).unwrap()).unwrap();
-        assert_eq!(cfg["process"]["args"][0], "wasmtime");
         assert_eq!(
-            cfg["process"]["args"][6],
-            "/workspace/context/step-a/main.wasm"
+            cfg["process"]["args"],
+            json!(["/usr/bin/native-tool", "--flag"])
         );
         assert_eq!(cfg["root"]["path"], "rootfs");
         assert!(fs::symlink_metadata(bundle.join("rootfs"))
@@ -512,13 +405,6 @@ mod tests {
             .is_dir());
         assert!(bundle.join("rootfs/workspace/context").is_dir());
         assert!(!workflow_root.join("rootfs/workspace").exists());
-        assert_eq!(
-            fs::read_to_string(bundle.join("rootfs/opencoder-wasmtime-cache.toml")).unwrap(),
-            "[cache]\ndirectory = \"/tmp/wasmtime-cache\"\n"
-        );
-        assert!(!workflow_root
-            .join("rootfs/opencoder-wasmtime-cache.toml")
-            .exists());
     }
 
     #[test]
@@ -567,7 +453,7 @@ mod tests {
         let readme = fs::read_to_string(out.join("README.md")).unwrap();
         assert!(
             readme.contains("usr/"),
-            "readme explains wasmtime placement"
+            "readme explains executable placement"
         );
         assert!(readme.contains("resolv.conf"));
     }
@@ -597,11 +483,9 @@ mod tests {
         let opts = kb["options"].as_array().unwrap();
         assert!(opts.contains(&json!("ro")), "{opts:?}");
         assert!(opts.contains(&json!("rbind")), "{opts:?}");
-        // Wasm argv preopens the knowledge dir for the guest module.
-        let args = cfg["process"]["args"].as_array().unwrap();
-        assert!(
-            args.contains(&json!("--dir=/workspace/knowledge")),
-            "{args:?}"
+        assert_eq!(
+            cfg["process"]["args"],
+            json!(["/usr/bin/native-tool", "--flag"])
         );
 
         // write_bundle normalizes the host path, creates the mountpoint in
@@ -660,7 +544,6 @@ mod tests {
         assert!(opts.contains(&json!("ro")), "{opts:?}");
         assert!(opts.contains(&json!("rbind")), "{opts:?}");
         // The agents pool serves the agent-session runner (Direct argv):
-        // the wasm argv never preopens it.
         let args = cfg["process"]["args"].as_array().unwrap();
         assert!(
             !args
@@ -736,7 +619,6 @@ mod tests {
     fn direct_argv_passes_command_through_verbatim() {
         let tmp = tempfile::tempdir().unwrap();
         let mut this = spec(tmp.path());
-        this.argv = ArgvStyle::Direct;
         this.command = vec!["/usr/bin/agent-step-runner".into()];
         let cfg = container_config(&this);
         let args = cfg["process"]["args"].as_array().unwrap();

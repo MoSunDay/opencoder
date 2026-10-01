@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn dag_recovery_reads_without_closing_before_container_cleanup_and_rejects_unpinned_runs() {
+    let directory = tempfile::tempdir().unwrap();
+    let layout = DirectoryLayout::new(directory.path().into(), None).unwrap();
+    let path = layout
+        .record_path(ExecutionKind::Dag, "dag-recovery")
+        .unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut record = serde_json::json!({"assignment":{
+        "index":{"id":"dag-recovery","kind":"dag","created_at":1,"node_id":"node-a","status":"running"},
+        "request":{"id":"dag-recovery","kind":"dag","input":{}}},
+        "annotations":{"dag_parent":directory.path().join("runs")},"result":null,"error":null,"events":[]});
+    std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let loaded = Journal::load(layout.clone()).unwrap();
+    assert_eq!(
+        loaded.records["dag-recovery"].assignment.index.status,
+        ExecutionStatus::Running
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(
+        loaded.recover().unwrap().records["dag-recovery"]
+            .assignment
+            .index
+            .status,
+        ExecutionStatus::Interrupted
+    );
+    record["annotations"] = serde_json::json!({});
+    std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    assert!(Journal::load(layout.clone())
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("DAG migration blocked"));
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    record["assignment"]["index"]["status"] = serde_json::json!("done");
+    std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    assert_eq!(Journal::load(layout).unwrap().records.len(), 1);
+}
+
+#[test]
 fn legacy_journal_kind_comes_from_accepted_request() {
     let mut value = json!({"assignment":{"index":{"id":"team-old","created_at":1,"node_id":"node-a","status":"done"},"request":{"id":"team-old","kind":"team","input":null}},"result":null,"error":null,"events":[]});
     normalize_legacy_index(&mut value).unwrap();

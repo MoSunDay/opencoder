@@ -60,7 +60,7 @@ async fn seed_todo(h: &Harness, id: &str, executor_ref: &str) {
     h.projects
         .create_todo(&ProjectTodoRecord {
             id: id.into(),
-            milestone_id: None,
+            initiative_id: None,
             title: format!("待办 {id}"),
             draft: "整理项目结构".into(),
             plan_md: Some("# 方案\n1. 落地目录约定".into()),

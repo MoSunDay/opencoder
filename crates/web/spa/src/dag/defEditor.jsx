@@ -20,7 +20,7 @@ const EXAMPLE = `{
   "max_concurrency": 4,
   "description": "可选：一段描述",
   "steps": [
-    { "name": "fetch", "kind": { "type": "wasm", "command": "tool.wasm" } },
+    { "name": "fetch", "kind": { "type": "binary", "resource": "tool" } },
     { "name": "review", "depends_on": ["fetch"], "kind": { "type": "agent", "prompt": "review the artifacts" } }
   ]
 }`;
@@ -151,7 +151,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Text type="secondary">
           spec 为 JSON：name / description? / steps[]，每个 step 为 name、depends_on[]、kind{' '}
-          {'{type: "agent"|"wasm", ...}'}。步骤名须为小写 slug。
+          {'{type: "agent"|"binary", ...}'}。步骤名须为小写 slug。
         </Text>
         <Segmented
           disabled={saving}

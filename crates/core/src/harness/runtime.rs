@@ -90,7 +90,7 @@ mod composition_tests {
     fn server_profiles_win_whole_versions_and_node_private_profiles_survive() {
         let node = RuntimeSettings {
             profiles: BTreeMap::from([
-                ("device-cases".into(), profile(1, "node-private")),
+                ("node-private".into(), profile(1, "node-private")),
                 ("shared".into(), profile(4, "node-shared")),
             ]),
             ..Default::default()
@@ -104,8 +104,8 @@ mod composition_tests {
         };
         let merged = node.with_server(&server);
         assert_eq!(
-            merged.profiles["device-cases"],
-            node.profiles["device-cases"]
+            merged.profiles["node-private"],
+            node.profiles["node-private"]
         );
         assert_eq!(merged.profiles["shared"], server.profiles["shared"]);
         assert_eq!(

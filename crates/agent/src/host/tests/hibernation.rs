@@ -1,6 +1,107 @@
 use super::*;
 
 #[tokio::test]
+async fn admission_changes_leave_hibernated_runtimes_stopped() {
+    let root = tempfile::tempdir().unwrap();
+    let host = Host::open(
+        &root.path().join("host"),
+        "node".into(),
+        "test-token".into(),
+        1,
+    )
+    .await
+    .unwrap();
+    let model = Arc::new(MockChatClient::new());
+    let (_, asleep_http) = runtime(&host, root.path(), "asleep", model.clone()).await;
+    host.store.activate_runtime("asleep").await.unwrap();
+    let (active, _active_http) = runtime(&host, root.path(), "active", model).await;
+    host.store.activate_runtime("active").await.unwrap();
+    let asleep = host.runtime("asleep").await.unwrap();
+    let saved = serde_json::to_value(host.inventory(&asleep, false).await.unwrap()).unwrap();
+    host.store
+        .put_definition("runtime_sleep", "asleep", &saved)
+        .await
+        .unwrap();
+    asleep_http.abort();
+    let _ = asleep_http.await;
+    for command in [
+        NodeAdmissionCommand::Freeze,
+        NodeAdmissionCommand::Status,
+        NodeAdmissionCommand::Reopen,
+    ] {
+        let reply = host.handle(NodeOperation::Admission { command }).await;
+        assert_eq!(reply.status, 200, "{:?}", reply.body);
+        assert_eq!(reply.body["active_runs"], 0);
+        assert_eq!(
+            host.store
+                .definition("runtime_sleep", "asleep")
+                .await
+                .unwrap(),
+            Some(saved.clone())
+        );
+        assert_eq!(
+            active.admission_open(),
+            command == NodeAdmissionCommand::Reopen
+        );
+    }
+}
+
+#[tokio::test]
+async fn accessed_hibernated_runtime_inherits_current_admission_mode() {
+    let root = tempfile::tempdir().unwrap();
+    let host = Host::open(
+        &root.path().join("host"),
+        "node".into(),
+        "test-token".into(),
+        1,
+    )
+    .await
+    .unwrap();
+    let model = Arc::new(MockChatClient::new());
+    let (retired, _retired_http) = runtime(&host, root.path(), "retired", model.clone()).await;
+    host.store.activate_runtime("retired").await.unwrap();
+    let (_, _active_http) = runtime(&host, root.path(), "active", model).await;
+    host.store.activate_runtime("active").await.unwrap();
+    let runtime = host.runtime("retired").await.unwrap();
+    let saved = serde_json::to_value(host.inventory(&runtime, false).await.unwrap()).unwrap();
+    let read = NodeOperation::Maintenance {
+        command: ExecutionCommand {
+            action: "status".into(),
+            input: json!({}),
+        },
+    };
+    for command in [NodeAdmissionCommand::Freeze, NodeAdmissionCommand::Reopen] {
+        host.store
+            .put_definition("runtime_sleep", "retired", &saved)
+            .await
+            .unwrap();
+        assert_eq!(
+            host.handle(NodeOperation::Admission { command })
+                .await
+                .status,
+            200
+        );
+        let reply =
+            tokio::time::timeout(Duration::from_secs(2), host.call_runtime("retired", &read))
+                .await
+                .expect("waking a Runtime must not deadlock admission")
+                .unwrap();
+        assert_eq!(reply.status, 200, "{:?}", reply.body);
+        assert_eq!(
+            retired.admission_open(),
+            command == NodeAdmissionCommand::Reopen
+        );
+        assert_eq!(
+            host.store
+                .definition("runtime_sleep", "retired")
+                .await
+                .unwrap(),
+            Some(serde_json::Value::Null)
+        );
+    }
+}
+
+#[tokio::test]
 async fn retired_runtime_storage_error_does_not_block_active_runtime() {
     let root = tempfile::tempdir().unwrap();
     let host = Host::open(

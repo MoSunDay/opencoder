@@ -3,7 +3,7 @@ use super::{
     Host,
 };
 use anyhow::{ensure, Context, Result};
-use opencoder_core::fleet::{NodeOperation, RpcReply};
+use opencoder_core::fleet::{NodeAdmissionCommand, NodeOperation, RpcReply};
 use opencoder_store::fleet::handoff::RuntimeRecord;
 use std::time::Duration;
 
@@ -18,6 +18,16 @@ impl Host {
     }
 
     pub async fn inventory(&self, runtime: &RuntimeRecord, wake: bool) -> Result<Inventory> {
+        let inventory = self.read_inventory(runtime, wake).await?;
+        if wake {
+            self.store
+                .put_definition("runtime_sleep", &runtime.id, &serde_json::Value::Null)
+                .await?;
+        }
+        Ok(inventory)
+    }
+
+    async fn read_inventory(&self, runtime: &RuntimeRecord, wake: bool) -> Result<Inventory> {
         let config: RuntimeConfig = serde_json::from_value(runtime.config.clone())?;
         config.validate()?;
         let request = || {
@@ -68,12 +78,60 @@ impl Host {
             inventory.registration.protocol_version == self.registration.protocol_version,
             "runtime protocol is incompatible"
         );
-        if wake {
-            self.store
-                .put_definition("runtime_sleep", &runtime.id, &serde_json::Value::Null)
-                .await?;
-        }
         Ok(inventory)
+    }
+
+    async fn restore_runtime_admission(
+        &self,
+        runtime: &RuntimeRecord,
+        sleeping_only: bool,
+    ) -> Result<()> {
+        // Use the same lock order as admission fanout; no request can enter a
+        // waking Runtime before it inherits the current Host admission mode.
+        let _admission = self.store.request_lock("host-admission", "cluster").await?;
+        let _use = self.store.request_lock("runtime-use", &runtime.id).await?;
+        if sleeping_only
+            && self
+                .store
+                .definition("runtime_sleep", &runtime.id)
+                .await?
+                .is_none_or(|v| v.is_null())
+        {
+            return Ok(());
+        }
+        self.read_inventory(runtime, true).await?;
+        let command = self
+            .store
+            .definition("host", "admission")
+            .await?
+            .map(serde_json::from_value::<NodeAdmissionCommand>)
+            .transpose()?
+            .unwrap_or(NodeAdmissionCommand::Reopen);
+        ensure!(
+            command != NodeAdmissionCommand::Status,
+            "invalid persisted Host admission mode"
+        );
+        let config: RuntimeConfig = serde_json::from_value(runtime.config.clone())?;
+        let reply: RpcReply = self
+            .client
+            .post(format!("{}/rpc", config.endpoint.trim_end_matches('/')))
+            .bearer_auth(&self.token)
+            .json(&NodeOperation::Admission { command })
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        ensure!(
+            (200..300).contains(&reply.status),
+            "runtime admission synchronization failed: {}",
+            reply.body
+        );
+        self.store
+            .put_definition("runtime_sleep", &runtime.id, &serde_json::Value::Null)
+            .await?;
+        self.changes.send_modify(|n| *n += 1);
+        Ok(())
     }
 
     pub async fn call_runtime(
@@ -104,12 +162,22 @@ impl Host {
         runtime_id: &str,
         operation: &NodeOperation,
     ) -> Result<RpcReply> {
-        let _use = self
-            .store
-            .shared_request_lock("runtime-use", runtime_id)
-            .await?;
         let runtime = self.runtime(runtime_id).await?;
         let config: RuntimeConfig = serde_json::from_value(runtime.config.clone())?;
+        if !matches!(operation, NodeOperation::Admission { .. })
+            && self
+                .store
+                .definition("runtime_sleep", runtime_id)
+                .await?
+                .is_some_and(|v| !v.is_null())
+        {
+            self.restore_runtime_admission(&runtime, true).await?;
+        }
+        let mut runtime_use = Some(
+            self.store
+                .shared_request_lock("runtime-use", runtime_id)
+                .await?,
+        );
         let request = || {
             self.client
                 .post(format!("{}/rpc", config.endpoint.trim_end_matches('/')))
@@ -120,7 +188,17 @@ impl Host {
         let (response, awakened) = match request().await {
             Ok(response) => (response, false),
             Err(error) if error.is_connect() => {
-                self.inventory(&runtime, true).await?;
+                drop(runtime_use.take());
+                if matches!(operation, NodeOperation::Admission { .. }) {
+                    self.inventory(&runtime, true).await?;
+                } else {
+                    self.restore_runtime_admission(&runtime, false).await?;
+                }
+                runtime_use = Some(
+                    self.store
+                        .shared_request_lock("runtime-use", runtime_id)
+                        .await?,
+                );
                 (request().await?, true)
             }
             Err(error) => return Err(error.into()),
@@ -139,6 +217,7 @@ impl Host {
         if awakened || was_asleep || operation.refreshes_inventory() {
             self.changes.send_modify(|n| *n += 1);
         }
+        drop(runtime_use);
         Ok(reply)
     }
 

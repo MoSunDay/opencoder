@@ -50,6 +50,10 @@ pub enum UiCmd {
 
 #[derive(Debug)]
 pub enum UiEvent {
+    RemoteSnapshot {
+        chat: Box<crate::chat::ChatView>,
+        running: bool,
+    },
     Session(SessionEvent),
     /// Authoritative completed parent answer. Ordered bridge delivery precedes
     /// TurnDone; every interim streaming answer is also delivered losslessly.
@@ -59,6 +63,24 @@ pub enum UiEvent {
 
 /// Bounded worker-to-UI channel capacity shared by initial and switched tasks.
 pub(crate) const UI_EVENT_CAPACITY: usize = 512;
+
+pub(crate) fn spawn_task(
+    mut session: SessionState,
+    mut commands: mpsc::Receiver<UiCmd>,
+    ui: mpsc::Sender<UiEvent>,
+) -> tokio::task::JoinHandle<()> {
+    session.harness.literal_mentions = true;
+    if session.harness.remote.is_some() {
+        return crate::remote::spawn(session, commands, ui);
+    }
+    tokio::spawn(async move {
+        while let Some(command) = commands.recv().await {
+            if process_cmd(command, &mut session, &ui).await {
+                break;
+            }
+        }
+    })
+}
 
 /// Session-scoped child runtime registries used by TUI controls while the
 /// worker owns the corresponding [`SessionState`]. These handles must move as
@@ -238,6 +260,7 @@ pub async fn process_cmd(
     sess: &mut SessionState,
     evt_tx: &mpsc::Sender<UiEvent>,
 ) -> bool {
+    sess.harness.literal_mentions = true;
     let (ui_tx, ui_forwarder) = spawn_ui_event_forwarder(evt_tx.clone());
     let quit = match cmd {
         UiCmd::Prompt(prompt, images) => {

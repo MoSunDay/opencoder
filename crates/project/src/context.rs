@@ -1,14 +1,14 @@
 //! 纯提示词构造：计划/执行两种运行的 LLM 输入完全由这些纯函数从
 //! `ProjectContext` 生成——无 IO、无状态，便于单测锁定措辞契约。
 
-/// 一次 plan/execute 运行所需的全部业务上下文（目标→里程碑→待办链路上
-/// 各级标题与正文；项目与里程碑均可缺失，缺失的段落直接省略）。
+/// 一次 plan/execute 运行所需的全部业务上下文（目标→专项→待办链路上
+/// 各级标题与正文；项目与专项均可缺失，缺失的段落直接省略）。
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectContext {
     pub goal_title: Option<String>,
     pub goal_detail_md: Option<String>,
-    pub milestone_title: Option<String>,
-    pub milestone_detail_md: Option<String>,
+    pub initiative_title: Option<String>,
+    pub initiative_detail_md: Option<String>,
     pub todo_title: String,
     pub todo_draft: String,
 }
@@ -27,11 +27,11 @@ pub fn plan_prompt(cx: &ProjectContext) -> String {
     if let Some(detail) = &cx.goal_detail_md {
         out.push_str(&format!("  目标说明：{}\n", detail.trim()));
     }
-    if let (Some(title), Some(detail)) = (&cx.milestone_title, &cx.milestone_detail_md) {
-        out.push_str(&format!("- 里程碑：{}\n", title));
-        out.push_str(&format!("  里程碑说明：{}\n", detail.trim()));
-    } else if let Some(title) = &cx.milestone_title {
-        out.push_str(&format!("- 里程碑：{}\n", title));
+    if let (Some(title), Some(detail)) = (&cx.initiative_title, &cx.initiative_detail_md) {
+        out.push_str(&format!("- 专项：{}\n", title));
+        out.push_str(&format!("  专项说明：{}\n", detail.trim()));
+    } else if let Some(title) = &cx.initiative_title {
+        out.push_str(&format!("- 专项：{}\n", title));
     }
     out.push_str(&format!(
         "\n待办：{}\n草稿：{}\n",
@@ -55,8 +55,8 @@ pub fn execute_prompt(cx: &ProjectContext, plan_md: &str, version: i64, resume: 
     if let Some(title) = &cx.goal_title {
         out.push_str(&format!("- 目标：{}\n", title));
     }
-    if let Some(title) = &cx.milestone_title {
-        out.push_str(&format!("- 里程碑：{}\n", title));
+    if let Some(title) = &cx.initiative_title {
+        out.push_str(&format!("- 专项：{}\n", title));
     }
     out.push_str(&format!("- 待办：{}\n", cx.todo_title));
     if resume {
@@ -86,8 +86,8 @@ mod tests {
         ProjectContext {
             goal_title: Some("构建个人知识库".into()),
             goal_detail_md: Some("长期目标说明".into()),
-            milestone_title: Some("M1 检索".into()),
-            milestone_detail_md: Some("里程碑说明".into()),
+            initiative_title: Some("M1 检索".into()),
+            initiative_detail_md: Some("专项说明".into()),
             todo_title: "做一个计数器".into(),
             todo_draft: "先支持自增".into(),
         }
@@ -104,22 +104,22 @@ mod tests {
     }
 
     #[test]
-    fn plan_prompt_omits_milestone_section_when_absent() {
+    fn plan_prompt_omits_initiative_section_when_absent() {
         let mut c = cx();
-        c.milestone_title = None;
-        c.milestone_detail_md = None;
+        c.initiative_title = None;
+        c.initiative_detail_md = None;
         let p = plan_prompt(&c);
-        assert!(!p.contains("里程碑"));
+        assert!(!p.contains("专项"));
         assert!(p.contains("目标：构建个人知识库"));
     }
 
     #[test]
-    fn standalone_milestone_keeps_context_without_a_goal() {
+    fn standalone_initiative_keeps_context_without_a_goal() {
         let mut c = cx();
         c.goal_title = None;
         c.goal_detail_md = None;
         for p in [plan_prompt(&c), execute_prompt(&c, "实施步骤", 1, false)] {
-            assert!(p.contains("里程碑：M1 检索"));
+            assert!(p.contains("专项：M1 检索"));
             assert!(p.contains("做一个计数器"));
             assert!(!p.contains("目标："));
         }

@@ -41,8 +41,8 @@ pub use protocol::{
     DagEventBatch, DagEventIn, DagEventView, DagRunView, DagStatusReport,
 };
 pub use spec::{
-    decode_spec, decode_spec_str, DagSpec, FailurePolicy, SandboxMode, StepKind, StepSpec,
-    TriggerRule, MAX_HOW_APPEND_BYTES,
+    decode_spec, decode_spec_str, DagSpec, FailurePolicy, StepKind, StepSpec, TriggerRule,
+    MAX_HOW_APPEND_BYTES,
 };
 pub use transitions::{transition_allowed, DagRunStatus, StepOutcome};
 
@@ -57,11 +57,11 @@ mod tests {
         serde_json::from_value(json!({
             "name": "etl",
             "steps": [
-                { "name": "fetch", "kind": { "type": "wasm", "command": "tool.wasm" } },
+                { "name": "fetch", "kind": { "type":"binary","resource":"tool","args":[] } },
                 { "name": "review", "depends_on": ["fetch"],
                   "kind": { "type": "agent", "prompt": "review fetch output" } },
                 { "name": "load", "depends_on": ["review"],
-                  "kind": { "type": "wasm", "command": "tool.wasm --step 2" } }
+                  "kind": { "type":"binary","resource":"tool","args":["--step", "2"] } }
             ]
         }))
         .unwrap()
@@ -90,6 +90,4 @@ mod tests {
     }
 }
 
-pub mod devices;
 pub mod dynamic;
-pub mod ui_cases;

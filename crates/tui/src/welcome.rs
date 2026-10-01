@@ -27,16 +27,39 @@ const TUTORIAL: &str = "\
   💡 开始对话后本教程自动消失，开启你的编码之旅吧！
 ";
 
+const REMOTE_TUTORIAL: &str = "\
+  👋 Server 任务已准备好，在下方输入框中开始提问。
+
+  🎮 常用操作：
+    • 回车  发送；执行中回车追加指令，Tab 排队
+    • Alt+回车  换行
+    • 连按两次 Esc 或 /stop  打断当前执行
+    • /agent  选择 Server 注册的 Agent / Operator 并新建任务
+    • /agent self  新建本地任务，进入空白上下文
+    • /task  查看、切换和恢复任务
+    • Ctrl+F  强制重绘屏幕
+
+  💡 切换任务或退出 TUI 后，Server 任务仍会继续执行。
+";
+
+pub fn render_remote_tutorial_in_body(f: &mut Frame, inner: Rect) {
+    render_text(f, inner, REMOTE_TUTORIAL);
+}
+
 /// Render the tutorial directly inside `inner` (the body's inner area).
 /// No overlay/popup: the text lives within the normal body block and is
 /// replaced by real conversation content as soon as the first block appears.
 pub fn render_tutorial_in_body(f: &mut Frame, inner: Rect) {
+    render_text(f, inner, TUTORIAL);
+}
+
+fn render_text(f: &mut Frame, inner: Rect, text: &str) {
     let header_st = Style::default()
         .fg(theme::ok_color())
         .add_modifier(Modifier::BOLD);
     let op_st = Style::default().fg(theme::accent());
     let hint_st = Style::default().fg(theme::muted());
-    let lines: Vec<Line> = TUTORIAL
+    let lines: Vec<Line> = text
         .lines()
         .map(|s| {
             if s.contains('\u{2022}') {
@@ -56,4 +79,27 @@ pub fn render_tutorial_in_body(f: &mut Frame, inner: Rect) {
             .wrap(Wrap { trim: false }),
         inner,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn remote_welcome_shows_server_controls_and_detach_behavior() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|f| super::render_remote_tutorial_in_body(f, f.area()))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        for expected in ["/agent self", "/task", "/stop", "Server"] {
+            assert!(text.contains(expected));
+        }
+        assert!(!text.contains("Ctrl+T"));
+    }
 }

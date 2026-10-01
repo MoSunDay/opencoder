@@ -23,12 +23,12 @@ export const palette = {
   border: '#eef1f5', // --oc-border — hairline dividers and table borders
   borderStrong: '#d3dae2', // --oc-border-strong — control borders, DAG nodes
   fillSubtle: '#fafbfc', // --oc-fill-subtle — table head / label backgrounds
-  // Transcript role accents + the DAG editor's wasm-node icon. Each hex is
+  // Transcript role accents + the DAG editor's binary-node icon. Each hex is
   // written once here; cssVars reads it for both the hex var and its `-rgb`
   // triplet twin (RoleAvatar composes a 10% wash that a var() cannot express).
   accentUser: '#13c2c2', // --oc-accent-user — user bubble / avatar (cyan-6)
   accentAi: '#9254de', // --oc-accent-ai — ai bubble / avatar (purple-5)
-  accentWasm: '#722ed1', // --oc-accent-wasm — DAG wasm-node icon (purple-6)
+  accentBinary: '#722ed1', // --oc-accent-binary — DAG binary-node icon (purple-6)
 };
 
 /// Soft elevation for surfaces floating on the canvas. Note antd applies
@@ -89,9 +89,9 @@ export const cssVars = {
   '--oc-accent-user-rgb': rgbTriplet(palette.accentUser),
   '--oc-accent-ai': palette.accentAi,
   '--oc-accent-ai-rgb': rgbTriplet(palette.accentAi),
-  // DAG editor wasm-node icon, consumed by the raw-CSS rule
-  // .dag-edit-node--wasm .dag-edit-node-head .anticon in app.css.
-  '--oc-accent-wasm': palette.accentWasm,
+  // DAG editor binary-node icon, consumed by the raw-CSS rule
+  // .dag-edit-node--binary .dag-edit-node-head .anticon in app.css.
+  '--oc-accent-binary': palette.accentBinary,
   // Markdown heading green (antd green-7). No token twin: colorSuccessText is
   // the lighter #52c41a, which is too pale for a heading on white.
   '--oc-heading': '#389e0d',

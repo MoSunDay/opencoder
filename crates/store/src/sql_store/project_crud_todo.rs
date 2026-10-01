@@ -2,7 +2,7 @@
 //!
 //! The todo half of the project tables; companion of
 //! [`super::project_crud_runs`] (todo runs) and [`super::project_crud`]
-//! (goals & milestones). Behavior mirrors `libsql_store::project_runs`:
+//! (goals & initiatives). Behavior mirrors `libsql_store::project_runs`:
 //! dynamic SET patches with `Option<Option<String>>` clearing and
 //! expected-status CAS claims.
 
@@ -14,62 +14,18 @@ use super::{
 };
 use crate::project_types::{ProjectExecutorKind, ProjectTodoRecord, ProjectTodoStatus};
 
-const TODO_COLS: &str = "id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
-
-// A single UPDATE keeps a cross-column drop and destination order together.
-pub async fn reorder_todos(
-    pool: &MySqlPool,
-    starrocks: bool,
-    board_status: &str,
-    ids: &[String],
-    now_ms: i64,
-) -> Result<()> {
-    anyhow::ensure!(
-        !ids.is_empty() && ids.len() <= 1000,
-        "invalid TODO reorder size"
-    );
-    let mut seen = std::collections::HashSet::new();
-    anyhow::ensure!(ids.iter().all(|id| seen.insert(id)), "duplicate TODO id");
-    let mut args = vec![Arg::Text(board_status.to_string())];
-    let mut cases = Vec::new();
-    for (index, id) in ids.iter().enumerate() {
-        cases.push("WHEN id = ? THEN ?");
-        args.push(Arg::Text(id.clone()));
-        args.push(Arg::Int((index + 1) as i64 * 1000));
-    }
-    args.push(Arg::Int(now_ms));
-    args.extend(ids.iter().cloned().map(Arg::Text));
-    let marks = vec!["?"; ids.len()].join(",");
-    let count_sql = format!("SELECT COUNT(*) AS count FROM project_todos WHERE id IN ({marks})");
-    let count_rows = exec_read_all(
-        pool,
-        starrocks,
-        &count_sql,
-        &ids.iter().cloned().map(Arg::Text).collect::<Vec<_>>(),
-    )
-    .await?;
-    let count: i64 = count_rows[0].try_get("count")?;
-    anyhow::ensure!(
-        count == ids.len() as i64,
-        "TODO reorder contains missing id"
-    );
-    let sql = format!("UPDATE project_todos SET board_status = ?, position = CASE {} END, updated_at = ? WHERE id IN ({marks})", cases.join(" "));
-    exec_write(pool, starrocks, &sql, args).await?;
-    Ok(())
-}
+const TODO_COLS: &str = "id, initiative_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id";
 
 // ---- todos ----
 
-pub async fn create_todo(pool: &MySqlPool, starrocks: bool, rec: &ProjectTodoRecord) -> Result<()> {
-    exec_write(
-        pool,
-        starrocks,
+pub(super) fn create_statement(rec: &ProjectTodoRecord) -> (String, Vec<Arg>) {
+    (
         "INSERT INTO project_todos \
-         (id, milestone_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+         (id, initiative_id, title, draft, plan_md, status, agent, active_session_id, created_at, updated_at, executor_kind, executor_ref, executor_spec, board_status, position, capability_id) \
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)".into(),
         vec![
             Arg::Text(rec.id.clone()),
-            Arg::TextOrNull(rec.milestone_id.clone()),
+            Arg::TextOrNull(rec.initiative_id.clone()),
             Arg::Text(rec.title.clone()),
             Arg::Text(rec.draft.clone()),
             Arg::TextOrNull(rec.plan_md.clone()),
@@ -86,16 +42,13 @@ pub async fn create_todo(pool: &MySqlPool, starrocks: bool, rec: &ProjectTodoRec
             Arg::TextOrNull(rec.capability_id.clone()),
         ],
     )
-    .await
-    .context("insert project todo")?;
-    Ok(())
 }
 
 /// The `SET` fragments + bound args shared by `patch_todo` and its
 /// expected-status CAS variant — pure projection of the patch's `Some`
 /// fields, no I/O. `Option<Option<String>>` fields distinguish "leave
 /// unchanged" (outer `None`) from "clear to NULL" (`Some(None)`).
-fn todo_set_fragment(
+pub(super) fn todo_set_fragment(
     patch: &crate::project_types::ProjectTodoPatch,
 ) -> (Vec<&'static str>, Vec<Arg>) {
     let mut sets: Vec<&'static str> = Vec::new();
@@ -144,8 +97,8 @@ fn todo_set_fragment(
         sets.push("executor_spec = ?");
         args.push(Arg::TextOrNull(v.clone())); // Some(None) -> NULL
     }
-    if let Some(v) = patch.milestone_id.as_ref() {
-        sets.push("milestone_id = ?");
+    if let Some(v) = patch.initiative_id.as_ref() {
+        sets.push("initiative_id = ?");
         args.push(Arg::TextOrNull(v.clone()));
     }
     if let Some(v) = patch.active_session_id.as_ref() {
@@ -153,26 +106,6 @@ fn todo_set_fragment(
         args.push(Arg::TextOrNull(v.clone()));
     }
     (sets, args)
-}
-
-/// Dynamic `SET` from the patch's `Some` fields; always stamps
-/// `updated_at = now_ms`. Returns `false` when the id does not exist.
-pub async fn patch_todo(
-    pool: &MySqlPool,
-    starrocks: bool,
-    id: &str,
-    patch: &crate::project_types::ProjectTodoPatch,
-    now_ms: i64,
-) -> Result<bool> {
-    let (mut sets, mut args) = todo_set_fragment(patch);
-    sets.push("updated_at = ?");
-    args.push(Arg::Int(now_ms));
-    args.push(Arg::Text(id.to_string()));
-    let sql = format!("UPDATE project_todos SET {} WHERE id = ?", sets.join(", "));
-    let n = exec_write(pool, starrocks, &sql, args)
-        .await
-        .context("patch project todo")?;
-    Ok(n > 0)
 }
 
 /// Cascade: the todo's runs, then the todo. `false` when the id does not
@@ -189,6 +122,10 @@ pub async fn delete_todo(pool: &MySqlPool, starrocks: bool, id: &str) -> Result<
         return Ok(false);
     }
     let stmts = [
+        (
+            "DELETE FROM project_todo_tags WHERE todo_id = ?",
+            id.to_string(),
+        ),
         (
             "DELETE FROM project_todo_executions WHERE todo_id = ?",
             id.to_string(),
@@ -226,7 +163,7 @@ pub async fn get_todo_summary(
     let row = exec_read_opt(
         pool,
         starrocks,
-        "SELECT id,milestone_id,title, \
+        "SELECT id,initiative_id,title, \
          CASE WHEN OCTET_LENGTH(draft)<=65536 THEN draft END AS draft, \
          OCTET_LENGTH(draft) AS draft_bytes, \
          CASE WHEN OCTET_LENGTH(plan_md)<=65536 THEN plan_md END AS plan_md, \
@@ -297,17 +234,17 @@ pub async fn patch_todo_when(
     Ok(n > 0)
 }
 
-/// `milestone_id == None` lists ALL todos (backlog included); ordered by
+/// `initiative_id == None` lists ALL todos (backlog included); ordered by
 /// `created_at`.
 pub async fn list_todos(
     pool: &MySqlPool,
     starrocks: bool,
-    milestone_id: Option<&str>,
+    initiative_id: Option<&str>,
 ) -> Result<Vec<ProjectTodoRecord>> {
     let mut sql = format!("SELECT {TODO_COLS} FROM project_todos");
     let mut args: Vec<Arg> = Vec::new();
-    if let Some(m) = milestone_id {
-        sql.push_str(" WHERE milestone_id = ?");
+    if let Some(m) = initiative_id {
+        sql.push_str(" WHERE initiative_id = ?");
         args.push(Arg::Text(m.to_string()));
     }
     sql.push_str(" ORDER BY board_status, position, created_at, id");
@@ -315,12 +252,12 @@ pub async fn list_todos(
     rows.iter().map(row_to_todo).collect()
 }
 
-fn row_to_todo(r: &sqlx::mysql::MySqlRow) -> Result<ProjectTodoRecord> {
+pub(super) fn row_to_todo(r: &sqlx::mysql::MySqlRow) -> Result<ProjectTodoRecord> {
     let status: String = r.try_get("status")?;
     let executor_kind: String = r.try_get("executor_kind")?;
     Ok(ProjectTodoRecord {
         id: r.try_get("id")?,
-        milestone_id: r.try_get::<Option<String>, _>("milestone_id")?,
+        initiative_id: r.try_get::<Option<String>, _>("initiative_id")?,
         title: r.try_get("title")?,
         draft: r.try_get("draft")?,
         plan_md: r.try_get::<Option<String>, _>("plan_md")?,
@@ -347,7 +284,7 @@ fn row_to_todo_summary(r: &sqlx::mysql::MySqlRow) -> Result<crate::ProjectTodoSu
     let executor_kind: String = r.try_get("executor_kind")?;
     Ok(crate::ProjectTodoSummary {
         id: id.clone(),
-        milestone_id: r.try_get("milestone_id")?,
+        initiative_id: r.try_get("initiative_id")?,
         title: r.try_get("title")?,
         draft: todo_text(r.try_get("draft")?, r.try_get("draft_bytes")?, &id, "draft")
             .ok_or_else(|| anyhow::anyhow!("corrupt project todo: null draft"))?,

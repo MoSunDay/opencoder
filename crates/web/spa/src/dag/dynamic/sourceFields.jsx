@@ -12,7 +12,7 @@ export function SourceFields({ step, allNames, onChange }) {
     <Form.Item label="数组路径 (JSON pointer)"><Input aria-label="数组路径" value={source.pointer}
       onChange={(e) => update({ ...source, pointer: e.target.value })} /></Form.Item>
     <Form.Item label="实例模板类型"><Select aria-label="实例模板类型" value={step.kind.template?.type || 'agent'}
-      options={[{ value: 'agent', label: 'Agent' }, { value: 'wasm', label: 'Wasm' }]}
-      onChange={(type) => onChange({ ...step, kind: { ...step.kind, template: type === 'agent' ? { type, prompt: '' } : { type, command: '' } } })} /></Form.Item>
+      options={[{ value: 'agent', label: 'Agent' }, { value: 'binary', label: 'Binary' }]}
+      onChange={(type) => onChange({ ...step, kind: { ...step.kind, template: type === 'agent' ? { type, prompt: '' } : { type, resource: '' } } })} /></Form.Item>
   </>;
 }

@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 # OpenCoder 仓库规则索引
 
@@ -9,6 +9,8 @@ Commit: (working-tree, pre-initial-commit)
 | 01 | [mandatory-tests.md](01-mandatory-tests.md) | 每个业务功能必须有对应测试用例；禁止"只构造对象"的表面测试 |
 | 02 | [regression-gate.md](02-regression-gate.md) | 每轮迭代结束前必须全量回归 `cargo test --workspace` |
 | 03 | [test-pyramid.md](03-test-pyramid.md) | 测试分层规范：纯函数内联 / 集成放 tests/ / e2e 放 scripts/ |
+| 04 | [dag-execution-contract.md](04-dag-execution-contract.md) | DAG 单节点单容器、只读 NFS 源工作区、节点本地写层与原生步骤约定 |
+| 05 | [ui-acceptance.md](05-ui-acceptance.md) | 全站功能、四种屏宽、Server TUI 与成套构建的 UI 验收约定 |
 
 ## 快速检查清单（每次 PR / commit 前）
 

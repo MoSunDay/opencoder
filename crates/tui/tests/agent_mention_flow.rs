@@ -1,20 +1,6 @@
-//! Integration tests for the `/agent` switch surface (TUI side).
-//!
-//! Two layers are pinned, both through the production worker path
-//! (`process_cmd(UiCmd::Prompt, ...)` -- the same route the composer submit
-//! takes):
-//!
-//! 1. Control head: `/agent <name>` rides the runner's control prefix
-//!    (`opencoder_session::control_cmd::split_control_prefix` + `apply`),
-//!    swaps the session's whole agent struct, emits
-//!    `SessionEvent::AgentSwitch`, and persists the agent on the session
-//!    row. A name that resolves to nothing is rejected with an `Error`
-//!    event and leaves the session agent untouched.
-//! 2. Picker key path: the custom-only catalog (`available_primary_agents`),
-//!    the real keystroke handler (`handle_agent_key`) and `pick_token` produce the
-//!    `/agent <name> ` composer text; submitting it applies the switch --
-//!    so a picker that drops its control head (tokens silently stop
-//!    switching) fails here, not just in unit tests.
+//! Shared runner control tests and the TUI self task chooser.
+//! The TUI intercepts /agent before prompt admission; runner controls remain
+//! independently usable by other frontends.
 
 use std::sync::Arc;
 use tokio::sync::{Mutex, MutexGuard};
@@ -25,9 +11,7 @@ use opencoder_core::{AgentKind, Config};
 use opencoder_llm::MockChatClient;
 use opencoder_session::{SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
-use opencoder_tui::agent_menu::{
-    available_primary_agents, handle_agent_key, pick_token, AgentMenu, AgentOutcome,
-};
+use opencoder_tui::agent_menu::{handle_agent_key, AgentMenu, AgentOutcome};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 
 /// Serializes tests touching the process-global agents-root override.
@@ -218,95 +202,24 @@ async fn unknown_agent_name_errors_and_keeps_current_agent() {
     );
 }
 
-/// Picker key path: `/agent` opens the picker over the real catalog, a
-/// fuzzy-filtered Enter pick fills the composer with the control head, and
-/// submitting it through the worker applies the switch.
 #[tokio::test]
-async fn picker_pick_fills_control_head_and_switches() {
-    let (dir, _g) = scoped_agents().await;
-    write_file_agent(dir.path(), "writer", "Writer soul: drafts docs.");
-
-    // Catalog side: only the registered file card is offered.
-    let cards = available_primary_agents();
-    let names: Vec<&str> = cards.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, vec!["writer"], "builtin roles stay hidden");
-    let writer = cards
-        .iter()
-        .find(|c| c.name == "writer")
-        .expect("file agent must be listed");
-    assert!(
-        writer.description.contains("Writer soul"),
-        "the card carries the soul's first line, got {:?}",
-        writer.description
-    );
-
-    // Key path: filter "wr", Enter picks it, the composer gets the token.
-    let mut slot = Some(AgentMenu::new(available_primary_agents()));
-    for ch in "wr".chars() {
-        handle_agent_key(
-            &mut slot,
-            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-        );
-    }
-    let picked =
-        match handle_agent_key(&mut slot, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)) {
-            AgentOutcome::Pick(name) => name,
-            other => panic!("expected a pick, got {other:?}"),
-        };
-    assert!(slot.is_none(), "pick closes the menu");
-    assert_eq!(
-        picked, "writer",
-        "the fuzzy hit resolves to the writer card"
-    );
-    let token = pick_token(&picked);
-    assert_eq!(token, "/agent writer ");
-
-    // Submit side: the control head applies the switch for real.
-    let store = mem_store().await;
-    store
-        .create_session(&SessionMeta {
-            id: "agent-picker-flow".into(),
-            agent: Some("act".into()),
-            ..Default::default()
-        })
+async fn disabled_server_picker_offers_only_self_and_selects_a_new_task() {
+    let cards = opencoder_tui::remote::catalog(&Config::default())
         .await
         .unwrap();
-
-    let mock = Arc::new(MockChatClient::new());
-    let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(64);
-    let mut sess = session_with_dir(
-        "agent-picker-flow",
-        "act",
-        dir.path(),
-        mock.clone(),
-        store.clone(),
-        std::path::Path::new("."),
-    );
-
-    let quit = process_cmd(UiCmd::Prompt(token, vec![]), &mut sess, &tx).await;
-    assert!(!quit, "submitting the picker token must not quit");
-
-    assert_eq!(sess.agent.name, "writer", "the pick switched the agent");
-    assert!(
-        sess.agent.prompt.contains("Writer soul"),
-        "the switched agent carries the file card prompt"
-    );
-    let row = store
-        .get_session("agent-picker-flow")
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].name, "self");
+    let mut slot = Some(AgentMenu::new(cards));
+    let pick = handle_agent_key(&mut slot, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(pick, AgentOutcome::Pick("self".into()));
+    assert!(slot.is_none());
+    assert!(matches!(
+        opencoder_tui::remote::select(&Config::default(), "self")
+            .await
+            .unwrap(),
+        opencoder_tui::task::TaskPick::New
+    ));
+    assert!(opencoder_tui::remote::select(&Config::default(), "ops")
         .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(row.agent.as_deref(), Some("writer"), "persisted agent");
-    let events = drain_events(rx).await;
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::AgentSwitch(n) if n == "writer")),
-        "AgentSwitch(writer) must be forwarded, got {events:?}"
-    );
-    // No LLM round ran: a bare control command never reaches the model.
-    assert!(
-        mock.requests().is_empty(),
-        "control head must not call the model"
-    );
+        .is_err());
 }

@@ -9,12 +9,14 @@ use std::{
 };
 
 pub(super) async fn drain(
+    root: &Path,
     path: &Path,
     offset: &mut u64,
     store: &dyn Store,
     session: &str,
+    log: Option<&super::logs::StepLog>,
 ) -> Result<()> {
-    let mut file = match std::fs::File::open(path) {
+    let mut file = match super::native::files::read(root, path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e.into()),
@@ -25,9 +27,41 @@ pub(super) async fn drain(
     let (records, consumed) = parse(&bytes, session)?;
     if !records.is_empty() {
         store.append_events(&records).await?;
+        if let Some(log) = log {
+            for record in &records {
+                if let Some(kind @ ("text_delta" | "reasoning_delta" | "tool_start" | "tool_end")) =
+                    record.sse_kind.as_deref()
+                {
+                    log.session_event(kind, &record.payload);
+                }
+            }
+        }
     }
     *offset += consumed as u64;
     Ok(())
+}
+
+pub(super) async fn import_messages(
+    root: &Path,
+    path: &Path,
+    store: &dyn Store,
+    session: &str,
+) -> Result<bool> {
+    let bytes = match super::native::files::read_bounded(root, path, 8 * 1024 * 1024) {
+        Ok(bytes) => bytes,
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            return Ok(false)
+        }
+        Err(error) => return Err(error),
+    };
+    let messages: Vec<opencoder_core::Message> =
+        serde_json::from_slice(&bytes).context("invalid Agent messages")?;
+    store.append_messages(session, &messages).await?;
+    Ok(true)
 }
 
 fn parse(bytes: &[u8], session: &str) -> Result<(Vec<SessionEventRecord>, usize)> {
@@ -75,5 +109,33 @@ mod tests {
         assert_eq!(records[0].session_id, "instance-session");
         assert_eq!(records[0].payload["text"], "hello");
         assert!(parse(b"invalid\n", "s").is_err());
+    }
+
+    #[test]
+    fn reasoning_and_tool_logs_preserve_typed_payload_and_instance() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let log = super::super::logs::StepLog::new("review".into(), sender).with_instance(Some(2));
+        for event in [
+            SessionEvent::ReasoningDelta("inspect input".into()),
+            SessionEvent::ToolStart {
+                id: "call-1".into(),
+                name: "bash".into(),
+                input: serde_json::json!({"command":"pwd"}),
+            },
+            SessionEvent::ToolEnd {
+                id: "call-1".into(),
+                name: "bash".into(),
+                output: "/workspace/review".into(),
+                is_error: false,
+                images: vec![],
+            },
+        ] {
+            log.session_event(event.sse_kind(), &event.sse_data());
+            let frame = receiver.try_recv().unwrap();
+            assert_eq!(frame.step.as_deref(), Some("review"));
+            assert_eq!(frame.payload["event"], event.sse_kind());
+            assert_eq!(frame.payload["data"], event.sse_data());
+            assert_eq!(frame.payload["index"], 2);
+        }
     }
 }

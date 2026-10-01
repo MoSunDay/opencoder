@@ -30,14 +30,14 @@
   --oc-success-bg: #f6ffed;
   --oc-error: #ff4d4f;
   --oc-error-bg: #fff2f0;
-  /* Transcript role accents, the DAG wasm-node icon accent + markdown heading
+  /* Transcript role accents, the DAG binary-node icon accent + markdown heading
      green. The -rgb twins feed rgba() washes (RoleAvatar); see theme.js
      cssVars for why. */
   --oc-accent-user: #13c2c2;
   --oc-accent-user-rgb: 19, 194, 194;
   --oc-accent-ai: #9254de;
   --oc-accent-ai-rgb: 146, 84, 222;
-  --oc-accent-wasm: #722ed1;
+  --oc-accent-binary: #722ed1;
   --oc-heading: #389e0d;
   /* Monospace stack for id / uuid / session columns (raw identifiers, not
      prose). Referenced as var(--oc-mono, monospace) from inline styles. */
@@ -370,7 +370,7 @@ body {
   padding: 0 4px;
 }
 .dag-edit-node--agent .dag-edit-node-head .anticon { color: var(--oc-primary); }
-.dag-edit-node--wasm .dag-edit-node-head .anticon { color: var(--oc-accent-wasm); }
+.dag-edit-node--binary .dag-edit-node-head .anticon { color: var(--oc-accent-binary); }
 .dag-edit-node-deps {
   margin-top: 6px;
   color: var(--oc-text-secondary);

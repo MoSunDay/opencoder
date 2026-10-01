@@ -1,4 +1,4 @@
-//! Project-data backend selection. The project module (goals / milestones /
+//! Project-data backend selection. The project module (goals / initiatives /
 //! todos / runs) is the only subsystem allowed to live outside the embedded
 //! libsql store, so picking its backend is a dedicated factory instead of the
 //! generic store opening path.
@@ -13,7 +13,7 @@ use crate::{LibsqlStore, ProjectStore};
 /// Pick the project-data backend. libsql shares the SAME store instance
 /// (one connection, one db_lock); the optional mysql/starrocks backends are
 /// feature-gated: with the feature compiled in the sql_store backend serves
-/// the four project tables, without it the request refuses cleanly instead
+/// project data, without it the request refuses cleanly instead
 /// of silently falling back to libsql.
 pub async fn open_project_store(
     storage: &StorageConfig,

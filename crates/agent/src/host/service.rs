@@ -49,12 +49,11 @@ impl Host {
                 if runtime.mode == "staged" {
                     continue;
                 }
-                if *command == NodeAdmissionCommand::Status
-                    && self
-                        .store
-                        .definition("runtime_sleep", &runtime.id)
-                        .await?
-                        .is_some_and(|v| !v.is_null())
+                if self
+                    .store
+                    .definition("runtime_sleep", &runtime.id)
+                    .await?
+                    .is_some_and(|v| !v.is_null())
                 {
                     continue;
                 }

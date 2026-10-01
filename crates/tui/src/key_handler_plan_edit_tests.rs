@@ -60,8 +60,6 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     // Shift+I (uppercase I) on empty input while idle in the plan agent
     // enters the plan-text editor.
@@ -86,8 +84,6 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(matches!(action, KeyAction::EnterPlanEdit));
@@ -109,8 +105,6 @@ fn shift_i_in_act_mode_does_not_enter_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     // Shift+I in act mode is a plain char insertion, not plan-edit entry.
     let action = handle_key(
@@ -134,8 +128,6 @@ fn shift_i_in_act_mode_does_not_enter_plan_edit() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
@@ -154,8 +146,6 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     // Even in plan mode, Shift+I while running just inserts the char.
     let action = handle_key(
@@ -179,8 +169,6 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
@@ -199,8 +187,6 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     // Once the user has started typing, Shift+I resumes normal insertion.
     let action = handle_key(
@@ -224,8 +210,6 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
@@ -244,8 +228,6 @@ fn lowercase_i_in_plan_mode_inserts_normally() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     // Lowercase 'i' is unaffected by the plan-edit intercept: plain insert.
     let action = handle_key(
@@ -269,8 +251,6 @@ fn lowercase_i_in_plan_mode_inserts_normally() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(matches!(action, KeyAction::None));
@@ -293,8 +273,6 @@ fn up_down_navigate_soft_wrapped_rows() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
     // narrow width (inner_w=10) forces wrapping into multiple rows
     let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
     let res = handle_key(
@@ -318,8 +296,6 @@ fn up_down_navigate_soft_wrapped_rows() {
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
     assert!(matches!(res, KeyAction::None));
@@ -342,8 +318,6 @@ fn enter_produces_steer_when_subagent_focused() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     // Enter with a running subagent focused steers the CHILD session and
     // clears the input line (parent steer/queue untouched).
@@ -368,8 +342,6 @@ fn enter_produces_steer_when_subagent_focused() {
         false,           // subagent_focused
         &mut undo_state, // input_disabled
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
 
@@ -392,8 +364,6 @@ fn enter_produces_steer_when_running_and_not_subagent_focused() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
-    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
-    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -416,8 +386,6 @@ fn enter_produces_steer_when_running_and_not_subagent_focused() {
         false,           // subagent_focused
         &mut undo_state, // input_disabled
         &mut queue_scroll,
-        &mut file_menu,
-        workdir,
         &mut None,
     );
 

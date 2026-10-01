@@ -1,18 +1,4 @@
-//! Agent picker for the `/agent` slash command -- a dropdown anchored just
-//! above the composer (same geometry as `file_menu::render_file_popup`).
-//!
-//! Lists only custom file-based cards from `opencoder_core::list_agents`,
-//! excluding every builtin name even if a same-named directory exists.
-//! Runtime mode switching has its own `/act` and `/plan` commands.
-//! Each card carries its one-line identity from
-//! [`opencoder_core::agent_description`] (prompt-pool soul.md first line).
-//! Rows filter through the same fuzzy matcher the `$` skill picker uses
-//! (`menu::fuzzy_score`), name first with the description as fallback --
-//! 1:1 with the SPA `@` agent menu. A pick fills the composer with
-//! `/agent <name> ` (trailing space): the text then rides the normal submit
-//! path and the runner's control head applies the switch
-//! (`opencoder_session::control_cmd::split_control_prefix`), so the picker
-//! itself owns no I/O.
+//! Server Agent/Operator picker for /agent; self is always available.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
@@ -31,36 +17,6 @@ pub struct AgentCard {
     pub description: String,
 }
 
-/// Custom agent cards in directory-name order. Builtin roles stay out of
-/// this picker, including file cards whose names would resolve to builtins.
-pub fn available_primary_agents() -> Vec<AgentCard> {
-    let builtins = opencoder_core::builtin_agents();
-    opencoder_core::agent::list_agents()
-        .into_iter()
-        .filter(|name| !builtins.iter().any(|agent| agent.name == *name))
-        .map(|name| {
-            let description = opencoder_core::agent::agent_description(&name)
-                .unwrap_or_else(|| format!("Custom agent {name}"));
-            AgentCard { name, description }
-        })
-        .collect()
-}
-
-/// Use the same configured resource root as the session that applies a pick.
-/// The scope is local to this catalog read and never changes another session.
-pub fn available_primary_agents_for(config: &opencoder_core::Config) -> Vec<AgentCard> {
-    opencoder_core::agent::scope::with_root_sync(
-        config.agent.agents_dir.clone(),
-        available_primary_agents,
-    )
-}
-
-/// The composer text a pick produces: the runner's `/agent <name>` control
-/// head with a trailing space (args may follow as a compound prompt).
-pub fn pick_token(name: &str) -> String {
-    format!("/agent {name} ")
-}
-
 /// Outcome of a keystroke while the agent menu is open. `Quit` propagates
 /// Ctrl+D; `Pick` carries the chosen agent name.
 #[derive(Debug, PartialEq, Eq)]
@@ -74,6 +30,7 @@ pub enum AgentOutcome {
 #[derive(Debug)]
 pub struct AgentMenu {
     agents: Vec<AgentCard>,
+    pending_catalog: Option<tokio::sync::oneshot::Receiver<anyhow::Result<Vec<AgentCard>>>>,
     /// Visible row indices into `agents`, best fuzzy score first.
     rows: Vec<usize>,
     selected: usize,
@@ -84,12 +41,42 @@ impl AgentMenu {
     pub fn new(agents: Vec<AgentCard>) -> Self {
         let mut m = Self {
             agents,
+            pending_catalog: None,
             rows: Vec::new(),
             selected: 0,
             query: String::new(),
         };
         m.refilter();
         m
+    }
+
+    pub(crate) fn configured(config: opencoder_core::Config) -> Self {
+        let mut menu = Self::new(vec![AgentCard {
+            name: "self".into(),
+            description: "本地执行 · 新建任务".into(),
+        }]);
+        if config.opencoder_server.enabled {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            menu.pending_catalog = Some(rx);
+            tokio::spawn(async move {
+                let _ = tx.send(crate::remote::catalog(&config).await);
+            });
+        }
+        menu
+    }
+
+    pub(crate) fn poll_catalog(&mut self) -> Option<anyhow::Result<()>> {
+        let receiver = self.pending_catalog.as_mut()?;
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return None,
+            Err(error) => Err(error.into()),
+        };
+        self.pending_catalog = None;
+        Some(result.map(|cards| {
+            self.agents = cards;
+            self.refilter();
+        }))
     }
 
     pub fn visible_count(&self) -> usize {
@@ -201,7 +188,7 @@ pub fn handle_agent_key(menu: &mut Option<AgentMenu>, k: KeyEvent) -> AgentOutco
 }
 
 /// Draw the picker: box + rows + `/query` footer, bottom edge above the
-/// composer (file-mention picker geometry).
+/// composer.
 pub fn render_agent_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &AgentMenu) {
     let want_box = menu.visible_count() as u16 + 4;
     let want_total = want_box.saturating_add(1);
@@ -215,7 +202,7 @@ pub fn render_agent_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &A
     f.render_widget(Clear, popup);
 
     let block = theme::rounded_block(
-        "/agent (\u{2191}/\u{2193} move, type to filter, Enter/Tab=switch, Esc=cancel)",
+        "/agent (\u{2191}/\u{2193} move, type to filter, Enter/Tab=new task, Esc=cancel)",
     );
 
     let items: Vec<ListItem> = menu
@@ -223,12 +210,15 @@ pub fn render_agent_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &A
         .map(|c| {
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!(" {} ", c.name),
+                    format!(" {} ", crate::terminal_text::sanitize_single_line(&c.name)),
                     Style::default()
                         .fg(theme::accent())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(c.description.clone(), Style::default().fg(theme::muted())),
+                Span::styled(
+                    crate::terminal_text::sanitize_single_line(&c.description).into_owned(),
+                    Style::default().fg(theme::muted()),
+                ),
             ]))
         })
         .collect();
@@ -236,7 +226,7 @@ pub fn render_agent_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &A
     let items = if items.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             if menu.agents.is_empty() {
-                "  no custom agents available"
+                "  no capabilities available"
             } else {
                 "  no matching agent"
             },

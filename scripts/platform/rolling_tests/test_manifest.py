@@ -13,6 +13,26 @@ import json
 
 
 class ResourceTests(unittest.TestCase):
+    def test_container_cutover_rejects_unpinned_active_dags_without_mutating_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'dag/active/execution.json'
+            path.parent.mkdir(parents=True)
+            record = {'assignment': {'request': {'id': 'active', 'kind': 'dag'}, 'index': {'status': 'running'}}}
+            path.write_text(json.dumps(record))
+            settings = Settings(root, root, root, root, root / 'token')
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'DAG migration blocked.*active'):
+                brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(root)}])
+            self.assertEqual(path.read_bytes(), original)
+            record['annotations'] = {'dag_parent': str(root / 'runs/1970-01-01/active')}
+            path.write_text(json.dumps(record))
+            brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(root)}])
+            record.pop('annotations')
+            record['assignment']['index']['status'] = 'done'
+            path.write_text(json.dumps(record))
+            brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(root)}])
+
     def test_active_supported_brain_runs_allow_release_without_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

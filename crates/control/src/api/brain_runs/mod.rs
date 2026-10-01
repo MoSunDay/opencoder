@@ -1,10 +1,10 @@
 mod attachments;
 pub(crate) mod catalog;
 pub(crate) mod effects;
-pub(crate) mod pc_issue;
 mod plan_capabilities;
 mod plans;
 pub(crate) mod runs;
+mod tui;
 pub(crate) mod v4;
 use crate::AppState;
 use axum::{
@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/brain/pc-issue/plan", post(pc_issue::install))
         .route(
             "/api/brain/attachments",
             post(attachments::upload).layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)),
@@ -31,6 +30,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/brain/plan-defs/:id/stable", post(plans::stable))
         .route("/api/brain/plan-defs/:id/diff", get(plans::diff))
         .route("/api/brain/library", get(catalog::list))
+        .route("/api/tui/agent-capabilities", get(tui::list))
         .route("/api/brain/library/:id/stable", post(catalog::stable))
         .route("/api/brain/runs", get(runs::list).post(runs::create))
         .route("/api/brain/runs/:id", get(runs::snapshot))

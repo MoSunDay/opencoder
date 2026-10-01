@@ -116,7 +116,7 @@ impl Store for FailingAdmitStore {
 async fn actor_failure_path_flashes_and_removes_row() {
     let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let store: Arc<dyn Store> = Arc::new(FailingAdmitStore(inner));
-    let (tx, mut done_rx) = spawn_admitter(store);
+    let (tx, mut done_rx) = spawn_admitter(store, None);
     let mut st = AdmitUiState::default();
     let mut queue_items = vec![(-100, "other".to_string())];
     let mut pending = vec![("img.png".to_string(), "alt".to_string())];

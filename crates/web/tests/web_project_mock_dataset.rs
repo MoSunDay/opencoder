@@ -1,15 +1,14 @@
 //! `/api/project/*` 全矩阵特征化（characterization）数据集测试：`seed`
 //! 出一个混合数据集（HTTP 建的常规行 + store 直写的悬空/时间敏感行），
 //! 驱动三个契约断言——总览树投影、todo 列表对四种 executor 的序列化、
-//! run 分页游标。断言的是「当前语义」：悬空引用在总览投影里被静默丢弃
-//! （行本身仍在平铺列表里）这类行为一旦改变，这里会先红。
+//! run 分页游标。断言的是「当前语义」：悬空项目归属会转为独立专项，悬空专项归属的 TODO 会进入未归属表。
 
 mod support;
 
 use axum::http::StatusCode;
 use serde_json::Value;
 use support::project_app::{call, harness};
-use support::project_mock::{seed, Dataset, DANGLING_MILESTONE};
+use support::project_mock::{seed, Dataset, DANGLING_INITIATIVE};
 
 /// 从 JSON 数组字段收集 id（借用原字符串）。
 fn ids_of(list: &Value) -> Vec<&str> {
@@ -53,11 +52,11 @@ async fn overview_full_projection_contract() {
     // sort_key 升序：归档目标(0) → 目标一(1) → 目标二(2)。
     assert_eq!(goals[0]["id"], ds.g0);
     assert_eq!(goals[0]["status"], "archived", "归档状态原样带入投影");
-    assert_eq!(goals[0]["milestones"].as_array().unwrap().len(), 0);
+    assert_eq!(goals[0]["initiatives"].as_array().unwrap().len(), 0);
 
-    // g1：两个里程碑，m1a planned / m1b in_progress。
+    // g1：两个专项，m1a planned / m1b in_progress。
     assert_eq!(goals[1]["id"], ds.g1);
-    let g1_ms = goals[1]["milestones"].as_array().unwrap();
+    let g1_ms = goals[1]["initiatives"].as_array().unwrap();
     assert_eq!(g1_ms.len(), 2);
     assert_eq!(g1_ms[0]["id"], ds.m1a);
     assert_eq!(g1_ms[0]["status"], "planned");
@@ -70,43 +69,46 @@ async fn overview_full_projection_contract() {
     assert!(m1a_todos.contains(&ds.t_planned.as_str()), "{m1a_todos:?}");
     assert_eq!(ids_of(&g1_ms[1]["todos"]), [ds.t_running.as_str()]);
 
-    // g2：done 里程碑挂完成任务。
+    // g2：done 专项挂完成任务。
     assert_eq!(goals[2]["id"], ds.g2);
-    let g2_ms = goals[2]["milestones"].as_array().unwrap();
+    let g2_ms = goals[2]["initiatives"].as_array().unwrap();
     assert_eq!(g2_ms.len(), 1);
     assert_eq!(g2_ms[0]["id"], ds.m2);
     assert_eq!(g2_ms[0]["status"], "done");
     assert_eq!(ids_of(&g2_ms[0]["todos"]), [ds.t_done.as_str()]);
 
     // 独立专项不带 goal；brain todo 挂在它下面。
-    let standalone = tree["standalone_milestones"].as_array().unwrap();
-    assert_eq!(standalone.len(), 1);
+    let standalone = tree["standalone_initiatives"].as_array().unwrap();
+    assert_eq!(standalone.len(), 2);
     assert_eq!(standalone[0]["id"], ds.ms);
     assert_eq!(ids_of(&standalone[0]["todos"]), [ds.t_failed.as_str()]);
 
-    // backlog：store 直写的精确时间戳 → 顺序确定；全部无里程碑。
+    // backlog：store 直写的精确时间戳 → 顺序确定；全部无专项。
     assert_eq!(
         ids_of(&tree["backlog"]),
-        [ds.b_early.as_str(), ds.b_late.as_str()]
+        [
+            ds.t_orphan.as_str(),
+            ds.b_early.as_str(),
+            ds.b_late.as_str()
+        ]
     );
     assert!(tree["backlog"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|t| t["milestone_id"].is_null()));
+        .all(|t| t["initiative_id"].is_null()));
 
-    // 悬空引用在投影里静默消失（当前语义的特征化）：整体序列化后不含
-    // 这两个悬空 id（id 是唯一串，串匹配即精确）。
+    // 悬空归属仍展示实际专项与 TODO。
     let flat = tree.to_string();
     assert!(
-        !flat.contains(DANGLING_MILESTONE),
-        "dangling milestone leaked: {flat}"
+        flat.contains(DANGLING_INITIATIVE),
+        "dangling initiative missing: {flat}"
     );
-    assert!(!flat.contains(&ds.t_orphan), "orphan todo leaked: {flat}");
+    assert!(flat.contains(&ds.t_orphan), "orphan todo missing: {flat}");
 
-    // 但平铺列表仍承载它们：行还在，只是不进投影。
-    let (_, milestones) = call(&h.app, "GET", "/api/project/milestones", None).await;
-    assert!(ids_of(&milestones["milestones"]).contains(&DANGLING_MILESTONE));
+    // 平铺列表同样保留这些记录。
+    let (_, initiatives) = call(&h.app, "GET", "/api/project/initiatives", None).await;
+    assert!(ids_of(&initiatives["initiatives"]).contains(&DANGLING_INITIATIVE));
     let (_, todos) = call(&h.app, "GET", "/api/project/todos", None).await;
     assert!(ids_of(&todos["todos"]).contains(&ds.t_orphan.as_str()));
 }
@@ -162,11 +164,11 @@ async fn todos_list_serializes_all_executor_kinds() {
     assert!(t["executor_ref"].is_null(), "{t}");
     assert!(t["executor_spec"].is_null(), "{t}");
 
-    // milestone_id 过滤：只返回该里程碑下的两条（顺序同上不敏感）。
+    // initiative_id 过滤：只返回该专项下的两条（顺序同上不敏感）。
     let (status, filtered) = call(
         &h.app,
         "GET",
-        &format!("/api/project/todos?milestone_id={}", ds.m1a),
+        &format!("/api/project/todos?initiative_id={}", ds.m1a),
         None,
     )
     .await;

@@ -16,7 +16,6 @@ fn press(code: KeyCode, text: &str, running: bool, sidecar_focused: bool) -> (Ke
     let mut skill_menu = None;
     let mut undo_state = crate::undo::init(&input, cursor);
     let mut queue_scroll = 0;
-    let mut file_menu = None;
     let action = handle_key(
         KeyEvent::new(code, KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -38,8 +37,6 @@ fn press(code: KeyCode, text: &str, running: bool, sidecar_focused: bool) -> (Ke
         false,
         &mut undo_state,
         &mut queue_scroll,
-        &mut file_menu,
-        Path::new("."),
         &mut None,
     );
     (action, input)

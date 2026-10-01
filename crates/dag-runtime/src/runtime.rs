@@ -31,7 +31,7 @@ mod scheduler;
 pub struct RunDeps {
     /// Bearer-authenticated uplink for event batches + the terminal status report.
     pub uplink: Arc<Uplink>,
-    /// Shared per-step executor dependencies (store/client/workdir/config).
+    /// Shared per-step executor dependencies (store/workdir/config).
     pub exec: ExecDeps,
     /// Artifact root: `<workflow_root>/<run_id>/<step>/...`.
     pub workflow_root: PathBuf,
@@ -75,7 +75,7 @@ async fn execute_run_inner(
     resume: bool,
 ) -> Result<DagRunStatus> {
     let sink = RunEventSink::new(Arc::clone(&deps.uplink), run.run_id.clone());
-    let exec = Arc::new(deps.exec);
+    let mut exec = deps.exec;
 
     if let Err(errs) = validate(&run.spec) {
         let error = format!("invalid spec snapshot: {}", errs.join("; "));
@@ -109,17 +109,89 @@ async fn execute_run_inner(
     );
     sink.emit(run_started_event(&run.spec.name));
 
-    let (states, step_errors, user_cancelled) = match scheduler::schedule(
-        exec,
-        &deps.workflow_root,
-        &run,
-        &sink,
-        cancel_rx,
-        resume,
-    )
-    .await
+    let root = deps.workflow_root.join(&run.run_id);
+    if let Err(error) = crate::sandbox::run::preflight(&exec.config) {
+        return fail_run(
+            &deps.uplink,
+            run,
+            sink,
+            format!("DAG preflight failed: {error:#}"),
+        )
+        .await;
+    }
+    if !root.join("resources.json").exists()
+        && run
+            .spec
+            .steps
+            .iter()
+            .any(|step| matches!(step.kind.executable(), StepKind::Binary { .. }))
     {
-        Ok(result) => result,
+        let checked = exec
+            .config
+            .dag
+            .binary_dir
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("DAG binary pool is required"))
+            .and_then(crate::nfs::read_only_mount);
+        if let Err(error) = checked {
+            return fail_run(
+                &deps.uplink,
+                run,
+                sink,
+                format!("DAG binary pool unavailable: {error:#}"),
+            )
+            .await;
+        }
+    }
+    if let Err(error) = crate::resources::freeze(&root, &exec.config, &run.spec) {
+        return fail_run(
+            &deps.uplink,
+            run,
+            sink,
+            format!("DAG resource preparation failed: {error:#}"),
+        )
+        .await;
+    }
+    exec.config = match crate::resources::execution_config(&root, &exec.config, &run.spec) {
+        Ok(config) => config,
+        Err(error) => {
+            return fail_run(
+                &deps.uplink,
+                run,
+                sink,
+                format!("DAG resource configuration failed: {error:#}"),
+            )
+            .await
+        }
+    };
+    let exec = Arc::new(exec);
+    let container = match crate::sandbox::run::RunContainer::start(&root, &exec.config, &run).await
+    {
+        Ok(container) => container,
+        Err(error) => {
+            return fail_run(
+                &deps.uplink,
+                run,
+                sink,
+                format!("DAG container preparation failed: {error:#}"),
+            )
+            .await
+        }
+    };
+    let scheduled =
+        scheduler::schedule(exec, &deps.workflow_root, &run, &sink, cancel_rx, resume).await;
+    let cleaned = container.cleanup().await;
+    let (states, step_errors, user_cancelled) = match scheduled {
+        Ok(result) if cleaned.is_ok() => result,
+        Ok(_) => {
+            return fail_run(
+                &deps.uplink,
+                run,
+                sink,
+                format!("DAG cleanup failed: {:#}", cleaned.unwrap_err()),
+            )
+            .await
+        }
         Err(error) => {
             return fail_run(
                 &deps.uplink,
@@ -175,9 +247,9 @@ async fn ensure_run_session(store: &Arc<dyn opencoder_store::Store>, run: &DagCl
 /// Dispatch one step by kind, wrapped in its per-step wall-clock budget.
 /// A timeout cancels the step token and folds to `Error("step timeout")`.
 async fn execute_step(ctx: &StepCtx, exec: &ExecDeps, cancel: CancellationToken) -> StepResult {
-    // Wasm owns its budget and cancellation so process/container cleanup
+    // Binary owns its budget and cancellation so process/container cleanup
     // completes before the runtime publishes the step's terminal status.
-    if matches!(&ctx.step.kind, StepKind::Wasm { .. }) {
+    if matches!(&ctx.step.kind, StepKind::Binary { .. }) {
         // Mirror the step's output into the node store as it is produced
         // (`step_output` events on the run's session). The tail batch is
         // flushed BEFORE the result is returned, so the console never sees a
@@ -189,15 +261,19 @@ async fn execute_step(ctx: &StepCtx, exec: &ExecDeps, cancel: CancellationToken)
             &ctx.step.name,
             ctx.instance,
         );
-        let result =
-            crate::exec::wasm::execute_wasm_step_logged(ctx, cancel, Some(output.clone())).await;
+        let result = crate::exec::native::binary::execute_binary_step_logged(
+            ctx,
+            cancel,
+            Some(output.clone()),
+        )
+        .await;
         output.close().await;
         return result;
     }
     let fut = async {
         match &ctx.step.kind {
             StepKind::Agent { .. } => execute_agent_step(ctx, exec, cancel.clone()).await,
-            StepKind::Wasm { .. } | StepKind::Dynamic { .. } => {
+            StepKind::Binary { .. } | StepKind::Dynamic { .. } => {
                 unreachable!("only executable steps are dispatched")
             }
         }

@@ -1,8 +1,6 @@
 import { Alert, Button, Collapse, Empty, Space, Table, Tag, Typography } from 'antd';
 import { KIND_LABELS } from '../../../fleet/model.js';
 import { LAYERED_STATUS } from '../layered/model.js';
-import { ProblemView } from '../problem/view.jsx';
-import { ProblemResults } from '../problem/results.jsx';
 
 export function roundRows(history) {
   const rounds = new Map();
@@ -34,7 +32,6 @@ export function RunDetails({ view, plan, history, onExecution }) {
     {plan.objective && <Typography.Paragraph>{plan.objective}</Typography.Paragraph>}
     {view.run.summary && <Typography.Paragraph>交付摘要：{view.run.summary}</Typography.Paragraph>}
     {view.run.reflection && <Alert type="info" title="当前反思上下文" description={view.run.reflection} />}
-    <ProblemView problem={view.problem} /><ProblemResults results={view.problem_results} />
     <Collapse items={roundRows(history).map(({ round, visits, operations, layerCount }) => ({
       key: String(round), label: `第 ${round} 轮 · ${layerCount} 层 · ${visits.reduce((count, visit) => count + visit.operations.length, 0)} 项执行`,
       children: <>

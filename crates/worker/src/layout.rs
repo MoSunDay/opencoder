@@ -1,3 +1,5 @@
+pub(crate) mod dag;
+
 use anyhow::{bail, Result};
 use opencoder_core::fleet::{valid_id, ExecutionKind};
 use std::path::{Path, PathBuf};

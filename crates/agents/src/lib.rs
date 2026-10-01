@@ -20,6 +20,7 @@ pub mod references;
 pub mod resources;
 pub mod rollback;
 pub mod serve;
+pub mod snapshot;
 pub mod write;
 
 pub use io::{atomic_write, atomic_write_json, now_rfc3339};

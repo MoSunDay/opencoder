@@ -19,6 +19,8 @@ def service(command, description, runtime=False, user="root", workdir=None):
     directory = str(workdir or "/")
     if not directory.startswith("/") or any(c in directory for c in "\n\r"):
         raise ValueError("service working directory must be an absolute path")
+    if runtime:
+        command = ['/usr/bin/unshare', '--mount', '--propagation', 'private', '--', *command]
     return f"""[Unit]
 Description={description}
 After=network-online.target remote-fs.target opencoder-resources.service
@@ -101,10 +103,16 @@ def prepare(settings, bundle, record):
         raise ValueError("runtime node identity differs from the stable host")
     atomic_bytes(runtime_data / "node-id", node_id.encode())
     write(runtime_data / "host-binding.json", {"database": str(settings.state_dir / "host/host.db"), "runtime_id": record["id"]})
-    freeze_rootfs(record)
+    from .native import effective_config, runtime_config
+    config = effective_config(settings.agent_workdir)
+    source = config.get('dag', {}).get('rootfs_dir')
+    if not source:
+        raise ValueError('dag.rootfs_dir is required for every Runtime release')
+    rootfs = freeze_rootfs(record, Path(source), installed / 'bin')
+    workdir = runtime_config(settings, record, rootfs)
     agent = installed / "bin/opencoder-agent"
     commands = {
-        record["runtime_unit"]: [agent, "--workdir", settings.agent_workdir, "--data-dir", runtime_data,
+        record["runtime_unit"]: [agent, "--workdir", workdir, "--data-dir", runtime_data,
             "--max-runs", 65535, "--token-file", settings.token_file, "runtime", "--port", record["runtime_port"]],
     }
     for unit, command in commands.items():
@@ -123,11 +131,12 @@ def prepare(settings, bundle, record):
     prepare_server(settings, record)
 
 
-def freeze_rootfs(record):
-    source = Path(record.get("resource_source",record["runtime_data"])) / "dag/rootfs"
+def freeze_rootfs(record, source, binaries=None):
     target = Path(record["runtime_data"]) / "dag/rootfs"
-    if source == target or not source.exists():
-        return
+    if not source.is_absolute() or not source.exists():
+        raise ValueError('configured DAG rootfs is unavailable')
+    if source == target:
+        raise ValueError('DAG image source must be outside its Runtime data')
     if source.is_symlink() or not source.is_dir():
         raise ValueError("OCI image source must be a real directory")
     if (source / 'workspace').is_symlink():
@@ -135,7 +144,11 @@ def freeze_rootfs(record):
     if target.exists():
         if target.is_symlink() or not target.is_dir():
             raise ValueError("Runtime OCI image must be a real directory")
-        return
+        if binaries:
+            for name in ['dag-runner', 'agent-step-runner']:
+                if (target / 'usr/bin' / name).read_bytes() != (binaries / name).read_bytes():
+                    raise ValueError('retained DAG runner differs from the candidate release')
+        return target
     target.parent.mkdir(parents=True,exist_ok=True)
     stage = target.parent / (".rootfs-stage-" + uuid.uuid4().hex)
     def ignored(directory, names):
@@ -143,6 +156,9 @@ def freeze_rootfs(record):
         omitted = {'dev','proc','sys','tmp'} if relative == Path('.') else {'context'} if relative == Path('workspace') else set()
         return set(names) & omitted
     shutil.copytree(source,stage,symlinks=True,ignore=ignored)
+    if binaries:
+        for name in ['dag-runner', 'agent-step-runner']:
+            shutil.copy2(binaries / name, stage / 'usr/bin' / name)
     for name in ['dev','proc','sys','tmp','workspace/context']:
         directory = stage / name
         if directory.is_symlink():
@@ -164,6 +180,7 @@ def freeze_rootfs(record):
         os.fsync(fd)
     finally:
         os.close(fd)
+    return target
 
 
 def prepare_server(settings, record):

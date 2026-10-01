@@ -20,7 +20,7 @@ async fn fresh() -> Arc<dyn ProjectStore> {
 fn todo(id: &str, created_at: i64) -> ProjectTodoRecord {
     ProjectTodoRecord {
         id: id.to_string(),
-        milestone_id: None,
+        initiative_id: None,
         title: format!("todo {id}"),
         draft: format!("draft {id}"),
         plan_md: None,

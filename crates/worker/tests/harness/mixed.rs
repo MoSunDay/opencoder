@@ -97,7 +97,7 @@ async fn project_switch(root: &Path) {
     project(&node).await;
     assert_eq!(client.call_count(), 0);
     let before = settled(&node, "project-matrix-todo").await["result"]["run"]["session_id"].clone();
-    fixture::card(&root.join("agents"), "act", "opencoder");
+    fixture::card(&fixture::agents(root), "act", "opencoder");
     let reply = node
         .handle(NodeOperation::Command {
             execution: ExecutionRef {
@@ -119,12 +119,12 @@ async fn project_switch(root: &Path) {
         "MATRIX_NATIVE_PROJECT"
     );
     assert_eq!(client.call_count(), 1);
-    fixture::card(&root.join("agents"), "act", "codex");
+    fixture::card(&fixture::agents(root), "act", "codex");
     node.shutdown().await.unwrap();
 }
 async fn plan_preflight(root: &Path) {
     // Planning executes plan, even when the todo's eventual executor is native.
-    fixture::card(&root.join("agents"), "act", "opencoder");
+    fixture::card(&fixture::agents(root), "act", "opencoder");
     let node = fixture::node(&root.join("plan-only"), None).await;
     let result = create(
         &node,
@@ -151,7 +151,7 @@ async fn plan_preflight(root: &Path) {
         reply.status, 400,
         "native execution must still validate credentials: {reply:?}"
     );
-    fixture::card(&root.join("agents"), "act", "codex");
+    fixture::card(&fixture::agents(root), "act", "codex");
     node.shutdown().await.unwrap();
 }
 
@@ -167,7 +167,7 @@ async fn mixed_todos(root: &Path) {
         };
         let client = Arc::new(client);
         fixture::card(
-            &root.join("agents"),
+            &fixture::agents(root),
             "workflow",
             if parent_native { "opencoder" } else { "codex" },
         );
@@ -188,5 +188,5 @@ async fn mixed_todos(root: &Path) {
         );
         node.shutdown().await.unwrap();
     }
-    fixture::card(&root.join("agents"), "workflow", "codex");
+    fixture::card(&fixture::agents(root), "workflow", "codex");
 }

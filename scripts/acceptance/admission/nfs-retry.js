@@ -9,13 +9,14 @@ const resources = process.argv[2] || '/mnt/opencoder-agents';
 assert(path.isAbsolute(resources) && fs.statSync(resources).isDirectory(), 'NFS agent pool must exist');
 let runtime;
 async function main() {
-  const h = await harness.open(() => 'snapshot accepted', { withBrowser: false });
+  const h = await harness.open(() => 'snapshot accepted', { withBrowser: false, dag: true, rootfs: process.argv[3] });
   console.log(JSON.stringify({stage: 'ready', evidence: h.root}));
   const work = path.join(h.root, 'runtime-work');
   const data = path.join(h.root, 'runtime-data');
   fs.mkdirSync(work);
   const config = JSON.parse(fs.readFileSync(path.join(h.root, 'node-work/opencoder.json')));
   config.agent = { ...config.agent, agents_dir: resources };
+  config.dag.data_dir = path.join(data, 'dag/runs');
   fs.writeFileSync(path.join(work, 'opencoder.json'), JSON.stringify(config), { mode: 0o600 });
   const token = crypto.randomBytes(24).toString('hex');
   const tokenFile = path.join(h.root, 'runtime-token');
@@ -58,19 +59,16 @@ async function main() {
   console.log(JSON.stringify({stage: 'replayed', seconds, evidence: h.root}));
   assert.equal(replay.status, 200);
   assert.equal(replay.body.id, first.assignment.index.id);
-  const modules = path.join(data, 'dag/_modules');
-  fs.mkdirSync(modules, { recursive: true });
-  fs.writeFileSync(path.join(modules, 'quick.wasm'), Buffer.from('0061736d0100000001040160000003020100070a01065f737461727400000a040102000b', 'hex'));
-  const fastId = 'dag-nfs-independent-wasi';
+  const fastId = 'dag-nfs-independent-native';
   const fast = { operation: 'create', assignment: {
     index: { id: fastId, kind: 'dag', created_at: Date.now(), node_id: inventory.registration.id, status: 'pending' },
     request: { id: fastId, kind: 'dag', input: {} },
-    definition: { name: 'independent', steps: [{ name: 'run', kind: { type: 'wasm', command: 'quick.wasm' } }] },
+    definition: { name: 'independent', steps: [{ name: 'run', kind: { type: 'binary', resource: 'stdout', args: [] } }] },
   }};
   const fastStart = performance.now();
   assert.equal((await api('/rpc', fast)).status, 200);
   const newSeconds = (performance.now() - fastStart) / 1000;
-  console.log(JSON.stringify({stage: 'new_wasi', seconds: newSeconds}));
+  console.log(JSON.stringify({stage: 'new_native', seconds: newSeconds}));
   const freezeStart = performance.now();
   assert.equal((await api('/rpc', { operation: 'admission', command: 'freeze' })).status, 200);
   const freezeSeconds = (performance.now() - freezeStart) / 1000;
@@ -101,11 +99,11 @@ async function main() {
   assert(!fs.existsSync(marker));
   assert.equal((await api('/inventory')).indexes.filter(i => i.id === second.assignment.index.id).length, 1);
   await h.until(async () => (await api('/inventory')).indexes.some(i => i.id === second.assignment.index.id && ['done', 'idle'].includes(i.status)), 'recovered request finished', 120000);
-  assert(newSeconds < 1, `new WASI blocked by NFS: ${newSeconds}s`);
+  assert(newSeconds < 1, `new binary blocked by NFS: ${newSeconds}s`);
   assert(freezeSeconds < 1, `admission freeze blocked by NFS: ${freezeSeconds}s`);
-  const result = { result: seconds < 1 ? 'PASS' : 'FAIL', replay_seconds: seconds, new_wasi_seconds: newSeconds, freeze_seconds: freezeSeconds, restart_recovery: true, cold_duplicate: true, source: resources, evidence: h.root, ids: [first.assignment.index.id, second.assignment.index.id] };
+  const result = { result: seconds < 1 ? 'PASS' : 'FAIL', replay_seconds: seconds, new_native_seconds: newSeconds, freeze_seconds: freezeSeconds, restart_recovery: true, cold_duplicate: true, source: resources, evidence: h.root, ids: [first.assignment.index.id, second.assignment.index.id] };
   fs.writeFileSync(path.join(h.root, 'nfs-replay.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
   assert(seconds < 1, `durable replay stalled behind cold NFS preparation: ${seconds}s`);
 }
-main().catch(error => { console.error(error.message); process.exitCode = 1; }).finally(async () => { if (runtime) runtime.kill('SIGKILL'); await harness.close(); });
+main().catch(error => { console.error(error.message); process.exitCode = 1; }).finally(async () => { if (runtime && runtime.exitCode === null && !runtime.signalCode) { const stopped = new Promise(resolve => runtime.once('exit', resolve)); runtime.kill('SIGTERM'); await stopped; } await harness.close(); });

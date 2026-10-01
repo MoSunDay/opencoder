@@ -70,6 +70,7 @@ const installRouter = () => {
     const url = typeof input === 'string' ? input : String((input && input.url) || '');
     const method = String(opts.method || 'GET').toUpperCase();
     hits.push({ method, url, body: opts.body || '' });
+    if (url === '/api/me') return jsonResponse({ role: 'admin', name: 'fixture-admin' });
     // Node dialog index — must match before the generic /api/nodes route.
     if (url.includes('/nodes/node-local/dialogs')) {
       return jsonResponse({ dialogs: fixtures.localSessions.map((row) => ({ session_id: row.id, title: row.title, first_created_at: row.created_at, last_created_at: row.updated_at })) });

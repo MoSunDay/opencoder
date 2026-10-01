@@ -12,7 +12,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use opencoder_core::fleet::RpcReply;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
@@ -85,32 +85,6 @@ pub async fn get(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> 
         Ok(None) => error_404("image not found"),
         Err(e) => error_500(e.to_string()),
     }
-}
-
-pub(super) async fn images(state: &Arc<AppState>, problem: &Value) -> Result<Vec<String>> {
-    opencoder_core::brain::pc_issue::validate_problem(problem)?;
-    let mut images = vec![];
-    for reference in problem["images"].as_array().unwrap() {
-        let object = state
-            .fleet
-            .definition("brain_attachment", reference["id"].as_str().unwrap())
-            .await?
-            .context("problem image not found")?;
-        ensure!(
-            &object["reference"] == reference,
-            "problem image reference changed"
-        );
-        let url = object["data_url"]
-            .as_str()
-            .context("problem image content missing")?;
-        let (_, bytes) = decode(url)?;
-        ensure!(
-            format!("{:x}", Sha256::digest(&bytes)) == reference["sha256"].as_str().unwrap(),
-            "problem image integrity mismatch"
-        );
-        images.push(url.to_owned());
-    }
-    Ok(images)
 }
 
 #[cfg(test)]

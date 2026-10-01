@@ -33,12 +33,17 @@ pub fn client_for(
 
 /// 运行前置：加载 workdir 配置、关掉 autopilot（项目运行是显式触发，
 /// 不允许代理自动续跑）、解析 LLM 客户端。
-pub fn runtime_setup(deps: &Deps) -> Result<(Config, Arc<dyn ChatStream>)> {
+pub fn runtime_config(deps: &Deps) -> Result<Config> {
     let mut config = Config::load(&deps.workdir).context("load config")?;
     config.autopilot.mode = opencoder_core::ApMode::Off;
     if let Some(root) = opencoder_core::agent::scope::current_root() {
         config.agent.agents_dir = Some(root);
     }
+    Ok(config)
+}
+
+pub fn runtime_setup(deps: &Deps) -> Result<(Config, Arc<dyn ChatStream>)> {
+    let config = runtime_config(deps)?;
     let client = client_for(&config, deps.client_override.clone())?;
     Ok((config, client))
 }
@@ -377,7 +382,7 @@ mod tests {
         let now = 1000;
         p.create_todo(&opencoder_store::ProjectTodoRecord {
             id: id.into(),
-            milestone_id: None,
+            initiative_id: None,
             title: format!("待办 {id}"),
             draft: "草稿".into(),
             plan_md: Some("# 旧方案".into()),

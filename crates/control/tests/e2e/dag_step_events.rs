@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::support::{Harness, TOKEN};
 
-/// One wasm-step frame in the locked node contract shape.
+/// One binary-step frame in the locked node contract shape.
 fn frame(seq: i64, text: &str) -> Value {
     json!({"seq": seq, "kind": "step_output",
            "data": {"step": "fetch", "stream": "stdout", "text": text, "at_ms": seq},

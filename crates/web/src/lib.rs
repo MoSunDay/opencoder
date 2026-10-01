@@ -5,8 +5,9 @@ pub mod api_agents;
 pub mod api_brain;
 pub mod api_control;
 pub mod api_dag;
-pub mod api_dag_wasm;
-pub mod api_dag_wasm_nfs;
+pub mod api_dag_binaries;
+pub mod api_dag_binaries_nfs;
+pub mod api_dag_workspace_nfs;
 pub mod api_events;
 pub mod api_inputs;
 pub mod api_meta;
@@ -17,6 +18,7 @@ pub mod api_ops;
 pub mod api_project;
 pub mod api_project_initiatives;
 pub mod api_project_runs;
+pub mod api_project_tags;
 pub mod api_project_todos;
 pub mod api_project_util;
 pub mod api_questions;
@@ -29,6 +31,7 @@ pub mod api_todo_runs;
 pub mod api_todo_template_versions;
 pub mod api_todo_templates;
 pub mod api_todo_util;
+pub mod api_transcript;
 pub mod auth_mw;
 pub mod cmd;
 pub mod control_state;
@@ -195,8 +198,9 @@ pub async fn serve(
     // `agent.nfs.enabled`) before the HTTP listener binds, so the API is
     // live from the first request. Failures only log — never fatal.
     api_agent_nfs::autostart(&workdir).await;
-    // Second named export: the DAG wasm pool (`dag.nfs.enabled`).
-    api_dag_wasm_nfs::autostart(&workdir).await;
+    // Second named export: the DAG binary pool (`dag.nfs.enabled`).
+    api_dag_binaries_nfs::autostart(&workdir).await?;
+    api_dag_workspace_nfs::autostart(&workdir).await?;
 
     let app = build_app(state, Some(token), web);
 
@@ -225,7 +229,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
     // Captured before the builder chain consumes `state`: the bearer
     // middleware resolves platform users through the same store.
     let auth_store = state.store.clone();
-    // Captured before `with_state` consumes the Arc: the DAG wasm pool
+    // Captured before `with_state` consumes the Arc: the DAG binary pool
     // scope middleware resolves the pool root from the same workdir.
     let scope_state = state.clone();
     let mut app = Router::<Arc<AppState>>::new();
@@ -246,6 +250,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
             get(api::get_session).delete(api::delete_session),
         )
         .route("/api/sessions/:id/messages", get(api::get_messages))
+        .route("/api/sessions/:id/transcript", get(api_transcript::get))
         .route("/api/sessions/:id/prompt", post(api::post_prompt))
         .route("/api/sessions/:id/events", get(api::get_events))
         .route("/api/sessions/:id/seq", get(api::get_event_seq))
@@ -415,20 +420,20 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         // ── project 模块（goals → milestones → todos → plan/execute runs）──
         .route("/api/project/overview", get(api_project_runs::get_overview))
         .route(
+            "/api/project/tags",
+            get(api_project_tags::list).post(api_project_tags::create),
+        )
+        .route(
+            "/api/project/tags/:id",
+            patch(api_project_tags::rename).delete(api_project_tags::delete),
+        )
+        .route(
             "/api/project/goals",
             get(api_project::list_goals).post(api_project::create_goal),
         )
         .route(
             "/api/project/goals/:id",
             patch(api_project::patch_goal).delete(api_project::delete_goal),
-        )
-        .route(
-            "/api/project/milestones",
-            get(api_project::list_milestones).post(api_project::create_milestone),
-        )
-        .route(
-            "/api/project/milestones/:id",
-            patch(api_project::patch_milestone).delete(api_project::delete_milestone),
         )
         .route(
             "/api/project/initiatives",
@@ -533,25 +538,32 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/dag/runs/:id", get(api_dag::get_run))
         .route("/api/dag/runs/:id/cancel", post(api_dag::cancel_run))
         .route("/api/dag/runs/:id/events", get(sse_dag::get_dag_run_events))
-        // ── DAG wasm-module pool (versioned, NFS-exported) ────────────
+        // ── DAG binary-module pool (versioned, NFS-exported) ────────────
         .route(
-            "/api/dag/wasm",
-            get(api_dag_wasm::list).post(api_dag_wasm::create),
+            "/api/dag/binaries",
+            get(api_dag_binaries::list).post(api_dag_binaries::create),
         )
         .route(
-            "/api/dag/wasm/nfs",
-            get(api_dag_wasm_nfs::nfs_get).post(api_dag_wasm_nfs::nfs_post),
+            "/api/dag/binaries/nfs",
+            get(api_dag_binaries_nfs::nfs_get).post(api_dag_binaries_nfs::nfs_post),
         )
         .route(
-            "/api/dag/wasm/:name",
-            get(api_dag_wasm::get)
-                .put(api_dag_wasm::put_version)
-                .delete(api_dag_wasm::delete),
+            "/api/dag/binaries/:name",
+            get(api_dag_binaries::get)
+                .put(api_dag_binaries::put_version)
+                .delete(api_dag_binaries::delete),
         )
-        .route("/api/dag/wasm/:name/rollback", post(api_dag_wasm::rollback))
         .route(
-            "/api/dag/wasm/:name/versions/:v/wasm.bin",
-            get(api_dag_wasm::download),
+            "/api/dag/binaries/:name/rollback",
+            post(api_dag_binaries::rollback),
+        )
+        .route(
+            "/api/dag/workspace/nfs",
+            get(api_dag_workspace_nfs::get_status).post(api_dag_workspace_nfs::set_status),
+        )
+        .route(
+            "/api/dag/binaries/:name/versions/:v/binary.bin",
+            get(api_dag_binaries::download),
         )
         .route("/api/nodes/dag/claim", get(api_nodes_dag::claim))
         .route(
@@ -571,14 +583,14 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
     // Captured before `with_state` consumes the Arc: the bearer middleware
     // resolves platform users through the same store.
 
-    // DAG wasm pool scope: inject the resolved pool root (config
-    // `dag.wasm_dir` or the per-workdir data-dir default; an existing
-    // scope/override wins) into every /api/dag/wasm* request. Added
+    // DAG binary pool scope: inject the resolved pool root (config
+    // `dag.binary_dir` or the per-workdir data-dir default; an existing
+    // scope/override wins) into every /api/dag/binaries* request. Added
     // BEFORE the bearer layer below, so it runs INSIDE it (layers added
     // later wrap the earlier ones).
     app = app.layer(axum::middleware::from_fn_with_state(
         scope_state,
-        api_dag_wasm_nfs::configured_dag_wasm,
+        api_dag_binaries_nfs::configured_dag_binary,
     ));
 
     if let Some(t) = token {

@@ -203,6 +203,8 @@ async fn messages_response(state: &AppState, id: &str) -> Response {
 #[derive(Deserialize)]
 pub struct PromptBody {
     pub prompt: String,
+    /// Verbatim user input when the execution adds an internal preamble.
+    pub display: Option<String>,
     /// Optional idempotency key scoped to this session. An identical retry
     /// returns the first admitted row; reusing it for another prompt is 409.
     pub input_id: Option<String>,
@@ -340,6 +342,7 @@ pub async fn post_prompt(
         config,
         body.input_id,
         body.skill,
+        body.display,
         agent_override,
     )
     .await

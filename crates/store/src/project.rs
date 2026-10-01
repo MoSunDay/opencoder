@@ -1,5 +1,5 @@
 //! Project-module persistence trait — the seam that lets the project tables
-//! (goals / milestones / todos / runs) live in libsql today and in an
+//! (goals / initiatives / todos / runs) live in libsql today and in an
 //! external MySQL / StarRocks tomorrow without touching upper layers.
 //!
 //! Upper-layer code depends on `Arc<dyn ProjectStore>`; the concrete libsql
@@ -10,6 +10,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub mod overview;
+pub mod tags;
+pub use tags::{ProjectTag, ProjectTodoTag};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectAssignment {
@@ -31,23 +33,23 @@ pub struct ProjectAssignmentState {
 }
 
 #[derive(Debug)]
-pub struct MilestoneNotEmpty;
+pub struct InitiativeNotEmpty;
 
-impl std::fmt::Display for MilestoneNotEmpty {
+impl std::fmt::Display for InitiativeNotEmpty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("milestone contains TODOs; move or unlink them before deleting")
+        f.write_str("initiative contains TODOs; move or unlink them before deleting")
     }
 }
 
-impl std::error::Error for MilestoneNotEmpty {}
+impl std::error::Error for InitiativeNotEmpty {}
 
 use crate::project_types::{
-    ProjectGoalPatch, ProjectGoalRecord, ProjectMilestonePatch, ProjectMilestoneRecord,
+    ProjectGoalPatch, ProjectGoalRecord, ProjectInitiativePatch, ProjectInitiativeRecord,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPatch, ProjectTodoRunRecord,
     ProjectTodoRunStatus, ProjectTodoRunSummary, ProjectTodoStatus, ProjectTodoSummary,
 };
 
-/// CRUD for the project module's four tables.
+/// CRUD for the project catalog and execution records.
 ///
 /// Conventions shared by all implementations:
 /// - `patch_*` returns `false` when the id does not exist (0 rows affected).
@@ -55,7 +57,7 @@ use crate::project_types::{
 ///   only; a patch with every field `None` is a caller bug (it would produce
 ///   an invalid empty `SET`).
 /// - `delete_*` returns `false` when the id does not exist.
-/// - Goal deletion detaches milestones; nonempty milestones reject deletion.
+/// - Goal deletion detaches initiatives; nonempty initiatives reject deletion.
 ///   TODO deletion also removes its runs. libsql/MySQL use transactions;
 ///   StarRocks performs the statements sequentially.
 /// - Status/kind strings round-trip exactly; an unrecognized status on read is
@@ -65,40 +67,61 @@ pub trait ProjectStore: Send + Sync {
     /// Backend identifier for diagnostics ("libsql", "mysql", ...).
     fn project_backend_name(&self) -> &'static str;
 
+    async fn list_tags(&self) -> Result<Vec<ProjectTag>> {
+        Ok(vec![])
+    }
+    async fn list_todo_tags(&self) -> Result<Vec<ProjectTodoTag>> {
+        Ok(vec![])
+    }
+    async fn write_tag(&self, _tag: &ProjectTag) -> Result<()> {
+        anyhow::bail!("project tags are unsupported by this store")
+    }
+    async fn delete_tag(&self, _id: &str) -> Result<bool> {
+        anyhow::bail!("project tags are unsupported by this store")
+    }
+    async fn create_todo_tagged(&self, rec: &ProjectTodoRecord, tags: &[String]) -> Result<()> {
+        anyhow::ensure!(
+            tags.is_empty(),
+            "project tags are unsupported by this store"
+        );
+        self.create_todo(rec).await
+    }
+    async fn patch_todo_tagged(
+        &self,
+        id: &str,
+        patch: &ProjectTodoPatch,
+        tags: Option<&[String]>,
+        now: i64,
+    ) -> Result<bool> {
+        anyhow::ensure!(
+            tags.is_none_or(|tags| tags.is_empty()),
+            "project tags are unsupported by this store"
+        );
+        self.patch_todo(id, patch, now).await
+    }
+
     // ---- goals ----
 
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> Result<()>;
     /// `false` = id not found. Always stamps `updated_at = now_ms`.
     async fn patch_goal(&self, id: &str, patch: &ProjectGoalPatch, now_ms: i64) -> Result<bool>;
-    /// Detach milestones and initiatives; preserve their TODOs.
+    /// Detach initiatives and initiatives; preserve their TODOs.
     async fn delete_goal(&self, id: &str) -> Result<bool>;
     /// Ordered by `sort` then `created_at`.
     async fn list_goals(&self) -> Result<Vec<ProjectGoalRecord>>;
 
-    // ---- milestones ----
+    // ---- initiatives ----
 
-    async fn create_milestone(&self, rec: &ProjectMilestoneRecord) -> Result<()>;
-    async fn patch_milestone(
-        &self,
-        id: &str,
-        patch: &ProjectMilestonePatch,
-        now_ms: i64,
-    ) -> Result<bool>;
-    /// Delete an empty milestone. Returns `MilestoneNotEmpty` for linked TODOs.
-    async fn delete_milestone(&self, id: &str) -> Result<bool>;
-    /// `goal_id == None` lists across all goals; ordered by `sort` then
-    /// `created_at`.
-    async fn list_milestones(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>>;
-
-    async fn create_initiative(&self, rec: &ProjectMilestoneRecord) -> Result<()>;
+    async fn create_initiative(&self, rec: &ProjectInitiativeRecord) -> Result<()>;
     async fn patch_initiative(
         &self,
         id: &str,
-        patch: &ProjectMilestonePatch,
+        patch: &ProjectInitiativePatch,
         now_ms: i64,
     ) -> Result<bool>;
     async fn delete_initiative(&self, id: &str) -> Result<bool>;
-    async fn list_initiatives(&self, goal_id: Option<&str>) -> Result<Vec<ProjectMilestoneRecord>>;
+    async fn list_initiatives(&self, goal_id: Option<&str>)
+        -> Result<Vec<ProjectInitiativeRecord>>;
 
     // ---- todos ----
 
@@ -106,6 +129,7 @@ pub trait ProjectStore: Send + Sync {
     async fn patch_todo(&self, id: &str, patch: &ProjectTodoPatch, now_ms: i64) -> Result<bool>;
     async fn reorder_todos(
         &self,
+        _initiative_id: Option<&str>,
         _board_status: &str,
         _ids: &[String],
         _now_ms: i64,
@@ -151,9 +175,9 @@ pub trait ProjectStore: Send + Sync {
     async fn get_todo_summary(&self, _id: &str) -> Result<Option<ProjectTodoSummary>> {
         anyhow::bail!("bounded project todo inspection is unsupported by this store")
     }
-    /// `milestone_id == None` lists ALL todos (backlog included); ordered by
+    /// `initiative_id == None` lists ALL todos (backlog included); ordered by
     /// `created_at`.
-    async fn list_todos(&self, milestone_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>>;
+    async fn list_todos(&self, initiative_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>>;
     async fn list_todo_assignments(&self, todo_id: &str) -> Result<Vec<ProjectAssignment>>;
     async fn latest_todo_assignment_states(&self) -> Result<Vec<ProjectAssignmentState>>;
     async fn link_todo_execution(&self, assignment: &ProjectAssignment) -> Result<()>;

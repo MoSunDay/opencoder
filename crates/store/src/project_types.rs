@@ -1,4 +1,4 @@
-//! Project-module domain types (goals / milestones / todos / runs).
+//! Project-module domain types (goals / initiatives / todos / runs).
 //!
 //! Status and kind enums serialize as snake_case strings so the JSON wire form
 //! matches the DB columns byte-for-byte (no mapping layer needed). `parse`
@@ -37,36 +37,36 @@ impl ProjectGoalStatus {
     }
 }
 
-/// Lifecycle of a milestone within a goal.
+/// Lifecycle of a initiative within a goal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProjectMilestoneStatus {
+pub enum ProjectInitiativeStatus {
     Planned,
     InProgress,
     Done,
 }
 
-impl ProjectMilestoneStatus {
+impl ProjectInitiativeStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ProjectMilestoneStatus::Planned => "planned",
-            ProjectMilestoneStatus::InProgress => "in_progress",
-            ProjectMilestoneStatus::Done => "done",
+            ProjectInitiativeStatus::Planned => "planned",
+            ProjectInitiativeStatus::InProgress => "in_progress",
+            ProjectInitiativeStatus::Done => "done",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "planned" => Some(ProjectMilestoneStatus::Planned),
-            "in_progress" => Some(ProjectMilestoneStatus::InProgress),
-            "done" => Some(ProjectMilestoneStatus::Done),
+            "planned" => Some(ProjectInitiativeStatus::Planned),
+            "in_progress" => Some(ProjectInitiativeStatus::InProgress),
+            "done" => Some(ProjectInitiativeStatus::Done),
             _ => None,
         }
     }
 
     /// Terminal states accept no further transitions.
     pub fn is_terminal(&self) -> bool {
-        matches!(self, ProjectMilestoneStatus::Done)
+        matches!(self, ProjectInitiativeStatus::Done)
     }
 }
 
@@ -201,27 +201,27 @@ pub struct ProjectGoalPatch {
     pub sort: Option<i64>,
 }
 
-/// A milestone or initiative group, optionally belonging to a project.
+/// An initiative, optionally belonging to a project.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectMilestoneRecord {
+pub struct ProjectInitiativeRecord {
     pub id: String,
     pub goal_id: Option<String>,
     pub title: String,
     pub detail_md: Option<String>,
-    pub status: ProjectMilestoneStatus,
+    pub status: ProjectInitiativeStatus,
     pub sort: i64,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-/// Partial update for [`ProjectMilestoneRecord`]; `None` fields stay
+/// Partial update for [`ProjectInitiativeRecord`]; `None` fields stay
 /// unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProjectMilestonePatch {
+pub struct ProjectInitiativePatch {
     pub goal_id: Option<Option<String>>,
     pub title: Option<String>,
     pub detail_md: Option<String>,
-    pub status: Option<ProjectMilestoneStatus>,
+    pub status: Option<ProjectInitiativeStatus>,
     pub sort: Option<i64>,
 }
 
@@ -262,8 +262,8 @@ impl ProjectExecutorKind {
     }
 }
 
-/// A project todo (`project_todos` row). `milestone_id == None` is the
-/// milestone-less backlog. The executor dimension says WHO drives the todo:
+/// A project todo (`project_todos` row). `initiative_id == None` is the
+/// initiative-less backlog. The executor dimension says WHO drives the todo:
 /// `agent` keeps the single-agent flow (`agent` names it), while
 /// team/dag/brain carry the target in `executor_ref` (team/dag name or
 /// pinned brain capability id) and/or the inline JSON spec in
@@ -271,7 +271,7 @@ impl ProjectExecutorKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectTodoRecord {
     pub id: String,
-    pub milestone_id: Option<String>,
+    pub initiative_id: Option<String>,
     pub title: String,
     pub draft: String,
     pub plan_md: Option<String>,
@@ -311,7 +311,7 @@ pub struct ProjectTodoPatch {
     pub executor_kind: Option<ProjectExecutorKind>,
     pub executor_ref: Option<Option<String>>,
     pub executor_spec: Option<Option<String>>,
-    pub milestone_id: Option<Option<String>>,
+    pub initiative_id: Option<Option<String>>,
     pub active_session_id: Option<Option<String>>,
 }
 
@@ -370,7 +370,7 @@ pub enum ProjectRunText {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectTodoSummary {
     pub id: String,
-    pub milestone_id: Option<String>,
+    pub initiative_id: Option<String>,
     pub title: String,
     pub draft: ProjectRunText,
     pub plan_md: Option<ProjectRunText>,
@@ -460,11 +460,11 @@ mod tests {
             assert_eq!(ProjectGoalStatus::parse(v.as_str()), Some(v));
         }
         for v in [
-            ProjectMilestoneStatus::Planned,
-            ProjectMilestoneStatus::InProgress,
-            ProjectMilestoneStatus::Done,
+            ProjectInitiativeStatus::Planned,
+            ProjectInitiativeStatus::InProgress,
+            ProjectInitiativeStatus::Done,
         ] {
-            assert_eq!(ProjectMilestoneStatus::parse(v.as_str()), Some(v));
+            assert_eq!(ProjectInitiativeStatus::parse(v.as_str()), Some(v));
         }
         for v in [
             ProjectTodoStatus::Draft,
@@ -506,7 +506,7 @@ mod tests {
         // Forward-compat: a status string written by a newer version must
         // surface as None, never silently coerce.
         assert_eq!(ProjectGoalStatus::parse("deleted"), None);
-        assert_eq!(ProjectMilestoneStatus::parse("active"), None);
+        assert_eq!(ProjectInitiativeStatus::parse("active"), None);
         assert_eq!(ProjectTodoStatus::parse("in_progress"), None);
         assert_eq!(ProjectTodoRunKind::parse("review"), None);
         assert_eq!(ProjectTodoRunStatus::parse("paused"), None);
@@ -519,7 +519,7 @@ mod tests {
     fn serde_snake_case_round_trips_match_db_strings() {
         // JSON wire form must equal the DB column strings exactly.
         assert_eq!(
-            serde_json::to_string(&ProjectMilestoneStatus::InProgress).unwrap(),
+            serde_json::to_string(&ProjectInitiativeStatus::InProgress).unwrap(),
             "\"in_progress\""
         );
         assert_eq!(
@@ -534,8 +534,8 @@ mod tests {
             serde_json::to_string(&ProjectExecutorKind::Team).unwrap(),
             "\"team\""
         );
-        let back: ProjectMilestoneStatus = serde_json::from_str("\"in_progress\"").unwrap();
-        assert_eq!(back, ProjectMilestoneStatus::InProgress);
+        let back: ProjectInitiativeStatus = serde_json::from_str("\"in_progress\"").unwrap();
+        assert_eq!(back, ProjectInitiativeStatus::InProgress);
         let back: ProjectExecutorKind = serde_json::from_str("\"dag\"").unwrap();
         assert_eq!(back, ProjectExecutorKind::Dag);
     }
@@ -545,7 +545,7 @@ mod tests {
         // Rows written before the executor dimension existed deserialize to
         // the agent flow with all optional refs absent.
         let todo: ProjectTodoRecord = serde_json::from_str(
-            "{\"id\":\"t\",\"milestone_id\":null,\"title\":\"t\",\"draft\":\"d\",\
+            "{\"id\":\"t\",\"initiative_id\":null,\"title\":\"t\",\"draft\":\"d\",\
              \"plan_md\":null,\"status\":\"draft\",\"agent\":\"act\",\
              \"active_session_id\":null,\"created_at\":1,\"updated_at\":1}",
         )
@@ -571,8 +571,8 @@ mod tests {
     fn terminal_states() {
         assert!(!ProjectGoalStatus::Active.is_terminal());
         assert!(ProjectGoalStatus::Archived.is_terminal());
-        assert!(!ProjectMilestoneStatus::InProgress.is_terminal());
-        assert!(ProjectMilestoneStatus::Done.is_terminal());
+        assert!(!ProjectInitiativeStatus::InProgress.is_terminal());
+        assert!(ProjectInitiativeStatus::Done.is_terminal());
         assert!(!ProjectTodoStatus::Running.is_terminal());
         assert!(ProjectTodoStatus::Done.is_terminal());
         assert!(ProjectTodoStatus::Failed.is_terminal());

@@ -11,6 +11,8 @@
 //! executable stale. Missing or mismatched siblings fail fast.
 
 use std::path::PathBuf;
+#[allow(dead_code)]
+pub mod native;
 
 /// Remediation when no fleet sibling binary is found. A fixture-level
 /// constant (not inline panic text) so the prerequisite stays single-source
@@ -26,11 +28,11 @@ pub const FLEET_BINS_HINT: &str = "build the workspace binaries first: \
 /// `allow(dead_code)`: every test file pulls in this whole module, and not
 /// every file spawns both fleet binaries.
 #[allow(dead_code)]
-pub const SERVER_BIN: &[&str] = &["opencoder-server", "opencoder-server"];
+pub const SERVER_BIN: &[&str] = &["opencoder-server"];
 
 /// Candidate names for the fleet worker binary, in priority order.
 #[allow(dead_code)]
-pub const AGENT_BIN: &[&str] = &["opencoder-agent", "opencoder-agent"];
+pub const AGENT_BIN: &[&str] = &["opencoder-agent"];
 
 /// Candidate names for the control-plane CLI binary (DAG e2e drives the
 /// real CLI face at least once per feature).
@@ -65,15 +67,16 @@ pub mod llm_stub;
 /// their compiled source metadata so cached executables cannot validate an
 /// older revision while the test harness reports the current source.
 ///
-/// Candidates (not a single name) because the fleet binaries carry the
-/// package spelling (`opencoder-server`/`opencoder-agent`, matching the
-/// `opencoder daemon` migration hint) while some docs spell them without
-/// the `r` (`opencoder-server`/`opencoder-agent`). Probing the package
-/// spelling first with the documented one as fallback keeps these tests
-/// green whichever way the naming settles.
 pub fn sibling_bin(candidates: &[&str]) -> PathBuf {
     let own = PathBuf::from(env!("CARGO_BIN_EXE_opencoder"));
-    let dir = own.parent().expect("test binary has a parent dir");
+    let dir = std::env::var_os("PLATFORM_BIN_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            own.parent()
+                .expect("test binary has a parent dir")
+                .to_path_buf()
+        });
+    assert!(dir.is_absolute(), "PLATFORM_BIN_DIR must be absolute");
     for name in candidates {
         let path = dir.join(name);
         if path.is_file() {
@@ -85,14 +88,12 @@ pub fn sibling_bin(candidates: &[&str]) -> PathBuf {
             let actual: serde_json::Value =
                 serde_json::from_slice(&output.stdout).expect(FLEET_BINS_HINT);
             let expected = serde_json::to_value(opencoder_core::version::build_info()).unwrap();
-            for key in ["git_commit", "git_dirty", "protocol_version"] {
-                assert_eq!(
-                    actual[key],
-                    expected[key],
-                    "{} has stale {key}; {FLEET_BINS_HINT}",
-                    path.display()
-                );
-            }
+            assert_eq!(
+                actual,
+                expected,
+                "{} has stale build metadata; {FLEET_BINS_HINT}",
+                path.display()
+            );
             return path;
         }
     }

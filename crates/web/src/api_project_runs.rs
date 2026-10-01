@@ -14,8 +14,8 @@ use serde_json::json;
 use crate::api_project_util::{error_400, error_500, map_start_err, require_deps};
 use crate::AppState;
 
-/// GET /api/project/overview — full goal → milestone → todo tree plus the
-/// milestone-less backlog, built by the service.
+/// GET /api/project/overview — full goal → initiative → todo tree plus the
+/// initiative-less backlog, built by the service.
 pub async fn get_overview(State(state): State<Arc<AppState>>) -> Response {
     if let Err(r) = require_deps(&state) {
         return *r;

@@ -1,5 +1,8 @@
-"""Loopback model and releasable WASI workload for process handoff tests."""
+"""Loopback model and releasable native workload for process handoff tests."""
 import json
+from pathlib import Path
+import subprocess
+import tempfile
 import shlex
 import threading
 import time
@@ -80,32 +83,39 @@ def todo_spec():
             for name, depends in [('first',[]),('second',['first'])]]}
 
 
-def release_wasi_gate(runtime_root, identifier, seconds=120):
-    # A lost Create reply can precede the journal and the step context. Wait
-    # for admission, but not context.json: precreating an execution directory
-    # would correctly be rejected by the node's orphan-directory guard.
-    run = runtime_root / 'dag' / identifier
+def release_native_gate(runtime_root, identifier, seconds=120):
+    journal = runtime_root / 'dag' / identifier / 'execution.json'
     deadline = time.monotonic() + seconds
-    while not (run / 'execution.json').is_file():
+    while True:
+        if journal.is_file():
+            record = json.loads(journal.read_text())
+            run = Path(record['annotations']['dag_parent']) / identifier
+            gate = run / 'workspace/hold/release'
+            if gate.parent.is_dir():
+                gate.touch()
+                return
         if time.monotonic() >= deadline:
-            raise TimeoutError('cannot release unconfirmed WASI admission: ' + identifier)
+            raise TimeoutError('cannot release unconfirmed native admission: ' + identifier)
         time.sleep(.1)
-    (run / 'release').touch()
 
 
-# A real WASI invocation remains inside its original Runtime until the test
-# creates `release` in this DAG's context root. Each poll sleeps for 10ms.
-HOLD_WASM = '''(module
- (import "wasi_snapshot_preview1" "path_filestat_get" (func $stat (param i32 i32 i32 i32 i32) (result i32)))
- (import "wasi_snapshot_preview1" "poll_oneoff" (func $poll (param i32 i32 i32 i32) (result i32)))
- (import "wasi_snapshot_preview1" "fd_write" (func $write (param i32 i32 i32 i32) (result i32)))
- (memory (export "memory") 1)
- (data (i32.const 512) "release") (data (i32.const 520) "kept-running\\0a")
- (func (export "_start")
-  (i32.store (i32.const 256) (i32.const 520)) (i32.store (i32.const 260) (i32.const 13))
-  (drop (call $write (i32.const 1) (i32.const 256) (i32.const 1) (i32.const 264)))
-  (i32.store (i32.const 16) (i32.const 1)) (i64.store (i32.const 24) (i64.const 10000000))
-  (block $done (loop $again
-   (br_if $done (i32.eqz (call $stat (i32.const 3) (i32.const 0) (i32.const 512) (i32.const 7) (i32.const 128))))
-   (drop (call $poll (i32.const 0) (i32.const 64) (i32.const 1) (i32.const 112))) (br $again)))
-  (drop (call $write (i32.const 1) (i32.const 256) (i32.const 1) (i32.const 264)))))'''
+HOLD_SOURCE = r'''#include <stdio.h>
+#include <unistd.h>
+int main(void) {
+    puts("kept-running");
+    fflush(stdout);
+    while (access("release", F_OK) != 0) usleep(10000);
+    puts("kept-running");
+    return 0;
+}
+'''
+
+
+def publish_hold(environment):
+    from rolling.native import publish_binary
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / 'hold.c'
+        binary = Path(directory) / 'hold'
+        source.write_text(HOLD_SOURCE)
+        subprocess.run(['cc','-O2','-static','-s','-Wl,--build-id=none',str(source),'-o',str(binary)], check=True)
+        return publish_binary(environment.settings.resource_url, 'release-hold', binary.read_bytes(), environment)

@@ -146,6 +146,15 @@ macro_rules! store_implementation_0 {
         messages::load_page(&conn, session_id, cursor, chunk_bytes, raw_budget).await
     }
 
+    async fn load_transcript_page(
+        &self, session_id: &str, cursor: opencoder_core::fleet::MessageCursor,
+        chunk_bytes: usize, raw_budget: usize,
+    ) -> Result<MessageChunkPage> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        messages::load_transcript_page(&conn, session_id, cursor, chunk_bytes, raw_budget).await
+    }
+
     async fn admit_input(&self, input: &SessionInput) -> Result<i64> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;

@@ -71,7 +71,6 @@ pub(crate) fn render<B: Backend + 'static>(
     skill_menu: Option<&SkillMenu>,
     task_picker: Option<&TaskPicker>,
     command_menu: Option<&CommandMenu>,
-    file_menu: Option<&crate::file_menu::FileMenu>,
     agent_menu: Option<&crate::agent_menu::AgentMenu>,
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
@@ -303,7 +302,6 @@ pub(crate) fn render<B: Backend + 'static>(
             hits,
             task_picker,
             command_menu,
-            file_menu,
             agent_menu,
             model_menu,
             mcp_menu,
@@ -416,7 +414,11 @@ fn render_body(
     // It vanishes automatically once the first block appears.
     if is_top_level && chat.blocks.is_empty() && !chat.submitted {
         f.render_widget(block, area);
-        crate::welcome::render_tutorial_in_body(f, inner);
+        if chat.remote {
+            crate::welcome::render_remote_tutorial_in_body(f, inner);
+        } else {
+            crate::welcome::render_tutorial_in_body(f, inner);
+        }
         return;
     }
 

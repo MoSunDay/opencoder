@@ -9,24 +9,33 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const assert = require('assert/strict');
-const { stageWasm } = require('./harness/wasm');
+const { prepareNative } = require('./harness/native');
+const { resources } = require('./ui/scenarios/resources');
+const { schedules } = require('./ui/scenarios/schedules');
+const { teamAnswer, teams } = require('./ui/scenarios/teams');
+const { exportsStatus } = require('./ui/scenarios/exports');
+const { chat } = require('./ui/scenarios/chat');
+require('./harness/namespace').isolateFixture();
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-platform-browser-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../target/debug');
 const token = crypto.randomBytes(24).toString('hex');
 const children = [];
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let native;
 let browser;
 let page;
 let mock;
 let base;
 let llmDelay = 0;
+let timedOut = false;
 const errors = [];
 const llmRequests = [];
 
-async function until(check, label) {
-  const deadline = Date.now() + 30000;
+async function until(check, label, timeout = 30000) {
+  const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
+    if (timedOut) throw new Error('acceptance exceeded its time budget');
     if (await check()) return;
     await pause(150);
   }
@@ -57,16 +66,30 @@ function start(name, args, workdir) {
 async function stop(child) {
   if (child.exitCode !== null || child.signalCode) return;
   child.kill('SIGTERM');
-  await until(async () => child.exitCode !== null || child.signalCode, 'child exit');
+  const end = Date.now() + 30000;
+  while (child.exitCode === null && !child.signalCode && Date.now() < end) await pause(100);
+  if (child.exitCode === null && !child.signalCode) {
+    child.kill('SIGKILL');
+    const killed = Date.now() + 5000;
+    while (child.exitCode === null && !child.signalCode && Date.now() < killed) await pause(100);
+    assert(child.exitCode !== null || child.signalCode, 'fixture child did not stop');
+  }
 }
 async function main() {
   mock = http.createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
-    llmRequests.push(JSON.parse(raw));
+    const request = JSON.parse(raw);
+    llmRequests.push(request);
+    if (req.url.endsWith('/embeddings')) {
+      const inputs = Array.isArray(request.input) ? request.input : [request.input];
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ object: 'list', data: inputs.map((_, index) => ({ object: 'embedding', index, embedding: [1, 0, 0] })), model: request.model, usage: { prompt_tokens: 1, total_tokens: 1 } }));
+      return;
+    }
     if (llmDelay) await pause(llmDelay);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     for (const chunk of [
-      { choices: [{ index: 0, delta: { role: 'assistant', content: 'browser node-owned answer' }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: { role: 'assistant', content: teamAnswer(request) }, finish_reason: null }] },
       { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } },
     ]) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     res.end('data: [DONE]\n\n');
@@ -81,7 +104,7 @@ async function main() {
     }));
     return dir;
   });
-  for (const directory of dirs.slice(1)) stageWasm(path.join(directory, 'state'));
+  native = await prepareNative(root, dirs[0], dirs.slice(1), process.argv[2]);
   const server = start('opencoder-server', ['--workdir', dirs[0], '--port', '0', '--token', token], dirs[0]);
   await until(async () => {
     if (server.exitCode !== null) throw new Error(`server exited: ${fs.readFileSync(server.logPath, 'utf8')}`);
@@ -90,6 +113,7 @@ async function main() {
     return false;
   }, 'server listening');
   console.log('server ready');
+  native.mount();
   for (const dir of dirs.slice(1)) start('opencoder-agent', ['--remote', base, '--token', token, '--name', path.basename(dir), '--workdir', dir, '--data-dir', path.join(dir, 'state')], dir);
   await until(async () => (await api('GET', '/api/nodes')).nodes.filter((n) => n.online && n.snapshot.ready).length === 2, 'registered nodes');
   assert.deepEqual((await api('GET', '/api/executions')).executions, [], 'maintenance must not run automatically');
@@ -123,16 +147,23 @@ async function main() {
   const indexes = (await api('GET', '/api/executions')).executions;
   const run = indexes.find((i) => i.id.startsWith('agent-'));
   assert(run);
-  assert.deepEqual(Object.keys(run).sort(), ['created_at', 'id', 'kind', 'node_id', 'status']);
+  assert.deepEqual(Object.keys(run).sort(), ['created_at', 'id', 'kind', 'name', 'node_id', 'status']);
   const detail = await api('GET', `/api/executions/${run.id}`);
   const messages = await api('GET', `/api/executions/${run.id}/messages`);
   assert(messages.chunks.map(chunk => Buffer.from(chunk.bytes_b64, 'base64').toString()).join('').includes('browser node-owned answer'));
   await page.locator('.ant-drawer-close').click();
-  await api('POST', '/api/executions', { id: 'dag-browser', kind: 'dag', input: { definition: { name: 'browser-artifact', steps: [{ name: 'python', kind: { type: 'wasm', command: 'stdout.wasm' } }] } } });
-  await until(async () => (await api('GET', '/api/executions/dag-browser')).execution.status === 'done', 'DAG completion');
+  await api('POST', '/api/executions', { id: 'dag-browser', kind: 'dag', input: { definition: { name: 'browser-artifact', steps: [{ name: 'python', kind: { type: 'binary', resource: 'stdout' } }] } } });
+  await until(async () => (await api('GET', '/api/executions/dag-browser')).execution.status === 'done', 'DAG completion', 120000);
   const artifact = await api('POST', '/api/executions/dag-browser/commands', { action: 'artifact', input: { step: 'python', file: 'output.txt' } });
   assert.equal(Buffer.from(artifact.bytes_b64, 'base64').toString(), 'node artifact\n');
   assert.equal(artifact.eof, true);
+  console.log('CASE NFS exports');
+  await exportsStatus({ page, api, root, until });
+  console.log('CASE native binary resources');
+  await resources({ page, api, root, until });
+  console.log('CASE native schedules');
+  await schedules({ page, api, root, until });
+  await page.getByRole('menuitem', { name: '全部执行' }).click();
   const todo = await api('POST', '/api/project/todos', { title: 'browser project', draft: 'draft one' });
   const projectId = `project-${todo.id}`;
   const project = await api('POST', `/api/project/todos/${todo.id}/plan`, {});
@@ -142,15 +173,16 @@ async function main() {
   await page.getByRole('button', { name: projectId, exact: true }).click();
   const planRequestsBefore = llmRequests.length;
   llmDelay = 1500;
-  await page.getByRole('button', { name: '生成计划', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '生成计划', exact: true }).count(), 0);
+  await api('POST', `/api/project/todos/${todo.id}/plan`, {});
   await until(async () => (await api('GET', `/api/executions/${projectId}`)).execution.status === 'running', 'Plan started');
-  assert(await page.getByRole('button', { name: '生成计划', exact: true }).isDisabled());
   await until(async () => (await api('GET', `/api/executions/${projectId}`)).execution.status === 'idle', 'latest project plan');
   llmDelay = 0;
   const planned = await api('GET', `/api/executions/${projectId}`);
   assert.equal(planned.todo.draft, 'latest browser draft');
   assert.equal(planned.execution.node_id, project.node_id);
   await page.getByRole('button', { name: '刷新明细', exact: true }).click();
+  await page.getByRole('button', { name: 'v2 · plan · done', exact: true }).waitFor();
   await page.locator('.ant-drawer .ant-tag').filter({ hasText: /^等待继续$/ }).waitFor();
   assert(llmRequests.slice(planRequestsBefore).some(request => JSON.stringify(request).includes('latest browser draft')));
   await page.locator('.ant-drawer').getByText('browser node-owned answer', { exact: true }).waitFor();
@@ -166,15 +198,14 @@ async function main() {
   await page.screenshot({ path: path.join(root, 'mobile-nodes.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await api('POST', '/api/teams', { name: 'acceptance-team', captain: 'default',
-    members: [{ agent: 'default' }] });
-  await page.getByRole('menuitem', { name: '团队组队' }).click();
-  await page.getByText('acceptance-team', { exact: true }).waitFor();
-  await page.screenshot({ path: path.join(root, 'teams.png') });
+  console.log('CASE Team execution');
+  await teams({ page, api, root, until });
   await page.getByRole('menuitem', { name: '大脑调度' }).click();
-  await page.getByRole('button', { name: '开始新任务' }).waitFor();
-  await page.getByText('能力库', { exact: true }).waitFor();
+  await page.getByRole('tab', { name: '计划库', exact: true }).click();
+  await page.getByRole('button', { name: '新建计划', exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'brain.png') });
+  console.log('CASE chat continuation');
+  await chat({ page, api, root, until });
   // An offline owner must expose an error without creating a replacement run.
 
   const owner = (await api('GET', '/api/nodes')).nodes.find((node) => node.id === project.node_id);
@@ -182,10 +213,10 @@ async function main() {
   const ownerDir = path.join(root, owner.name);
   await api('POST', '/api/executions', { id: 'dag-crash', kind: 'dag', node_id: owner.id,
     input: { definition: { name: 'crash-lifecycle', steps: [{ name: 'loop', kind: {
-      type: 'wasm', command: 'spin.wasm' } }] } } });
-  await until(async () => (await api('GET', '/api/executions/dag-crash')).execution.status === 'running', 'Wasm running');
+      type: 'binary', resource: 'spin' } }] } } });
+  await until(async () => (await api('GET', '/api/executions/dag-crash')).execution.status === 'running', 'native step running');
   ownerChild.kill('SIGKILL');
-  await until(async () => ownerChild.signalCode === 'SIGKILL', 'Wasm owner process exits');
+  await until(async () => ownerChild.signalCode === 'SIGKILL', 'native owner process exits');
   const restarted = start('opencoder-agent', ownerChild.spawnargs.slice(1), ownerDir);
   await until(async () => (await api('GET', '/api/nodes')).nodes.some((node) => node.id === owner.id && node.online && node.snapshot.ready), 'owner restarted');
   assert.equal((await api('GET', '/api/executions/dag-crash')).execution.status, 'interrupted');
@@ -201,10 +232,17 @@ async function main() {
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'PASS', nodes: 2, execution_id: run.id, owner: run.node_id, artifacts: root }));
 }
-const deadline = setTimeout(() => { for (const child of children) child.kill('SIGKILL'); console.error(`acceptance exceeded 180s: ${root}`); process.exit(1); }, 180000);
+const deadline = setTimeout(() => {
+  timedOut = true;
+  process.exitCode = 1;
+  console.error(`acceptance exceeded 600s: ${root}`);
+  for (const child of children) child.kill('SIGTERM');
+  if (browser) browser.close().catch(console.error);
+}, 600000);
 main().catch(async (error) => { console.error(error); if (page) { await page.screenshot({ path: path.join(root, 'failure.png') }); console.error(await page.locator('body').innerText()); } console.error(`artifacts: ${root}`); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
   for (const child of children.reverse()) await stop(child);
+  if (native) native.close();
   if (mock) mock.close();
   clearTimeout(deadline);
 });

@@ -66,7 +66,6 @@ fn draw_frame(
         None,
         None,
         None,
-        None,
         keymap_menu,
         None,
         hits,
@@ -341,7 +340,6 @@ async fn notepad_fullscreen_hides_chat_and_clears_hits() {
         None,
         None,
         None,
-        None, // file_menu
         None, // agent_menu
         &mut hits,
         &mut viewport,

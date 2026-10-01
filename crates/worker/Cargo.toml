@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+opencoder-agents.workspace = true
 opencoder-core.workspace = true
 opencoder-brain.workspace = true
 opencoder-node.workspace = true
@@ -16,7 +17,7 @@ opencoder-team.workspace = true
 opencoder-todos.workspace = true
 opencoder-project.workspace = true
 opencoder-dag.workspace = true
-opencoder-dag-wasm.workspace = true
+opencoder-dag-binary.workspace = true
 opencoder-dag-runtime.workspace = true
 base64.workspace = true
 anyhow.workspace = true
@@ -35,9 +36,7 @@ sha2 = "0.10"
 libc = "0.2"
 
 [dev-dependencies]
-opencoder-agents.workspace = true
 tempfile.workspace = true
-wat = "1.254"
 opencoder-control.workspace = true
 reqwest.workspace = true
 

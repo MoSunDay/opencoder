@@ -39,11 +39,11 @@ impl StepLog {
         self.push(stream, &text);
     }
 
-    pub(crate) fn text_delta(&self, text: &str) {
+    pub(crate) fn session_event(&self, event: &str, data: &serde_json::Value) {
         let _ = self.tx.send(DagEventIn {
             kind: "step_log".into(),
             step: Some(self.step.clone()),
-            payload: json!({"event": "text_delta", "data": {"text": text}, "index": self.instance}),
+            payload: json!({"event": event, "data": data, "index": self.instance}),
             at_ms: opencoder_core::message::now_ms(),
         });
     }

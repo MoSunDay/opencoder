@@ -59,13 +59,13 @@ async fn project_indexes_replay_all_attempts_with_pagination_and_large_fields() 
     let milestone = fleet
         .call(
             "POST",
-            "/api/project/milestones",
+            "/api/project/initiatives",
             json!({"title":"replay milestone","goal_id":goal.body["id"]}),
         )
         .await;
     assert_eq!(milestone.status, 200);
     let draft = "large input 界".repeat(6000);
-    let todo = fleet.call("POST", "/api/project/todos", json!({"title":"trace every attempt","draft":draft,"milestone_id":milestone.body["id"],"agent":"act"})).await;
+    let todo = fleet.call("POST", "/api/project/todos", json!({"title":"trace every attempt","draft":draft,"initiative_id":milestone.body["id"],"agent":"act"})).await;
     assert_eq!(todo.status, 200);
     let todo = todo.body["id"].as_str().unwrap();
     let root = format!("project-{todo}");

@@ -141,13 +141,31 @@ async fn codex_malformed_stream_and_missing_terminal_fail() {
         let root = tempfile::tempdir().unwrap();
         let (mut session, _) = fixtures::session(root.path()).await;
         session.harness.envs.insert("FAIL_MODE".into(), mode.into());
-        let mut events = Vec::new();
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            run(&mut session, "test".into(), |e| events.push(e)),
-        )
+        let capture = root.path().join("capture.jsonl");
+        let execution = tokio::spawn(async move {
+            let mut events = Vec::new();
+            let result = run(&mut session, "test".into(), |e| events.push(e)).await;
+            (result, events)
+        });
+        // Interpreter startup is separate from the five-second malformed
+        // stream / missing-terminal failure budget, including on macOS.
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                if tokio::fs::metadata(&capture)
+                    .await
+                    .is_ok_and(|metadata| metadata.len() > 0)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
         .await
-        .unwrap();
+        .expect("Codex fixture must report process readiness");
+        let (result, events) = tokio::time::timeout(std::time::Duration::from_secs(5), execution)
+            .await
+            .expect("invalid Codex stream must fail within five seconds of readiness")
+            .unwrap();
         assert!(result.is_err(), "{mode}");
         assert!(!events.iter().any(|e| matches!(e, SessionEvent::Done)));
     }

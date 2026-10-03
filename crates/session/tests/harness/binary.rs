@@ -9,6 +9,8 @@ pub fn fake_binary(root: &Path) -> std::path::PathBuf {
 import json, os, sys, time
 if '--version' in sys.argv:
     print('codex-cli fixture'); sys.exit(0)
+# Readiness tests must allow a slow interpreter before timing failure cleanup.
+if os.environ.get('FAIL_MODE') in ('malformed', 'missing_end'): time.sleep(6)
 prompt = sys.stdin.read()
 with open(os.environ['CAPTURE'], 'a') as f:
     f.write(json.dumps({'args':sys.argv[1:], 'prompt':prompt, 'env':os.environ.get('EXAMPLE'), 'cwd':os.getcwd(), 'home':os.environ.get('HOME'), 'codex_home':os.environ.get('CODEX_HOME')})+'\n')

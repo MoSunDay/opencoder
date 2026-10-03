@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 mod support;
 use opencoder_core::fleet::*;
 use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient};

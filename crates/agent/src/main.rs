@@ -155,6 +155,7 @@ fn init_logging() {
 /// `dag prepare-rootfs`: write the shared-rootfs scaffold and print the
 /// created tree. Pure filesystem work — deliberately reachable without
 /// any network, store, or LLM setup.
+#[cfg(not(windows))]
 fn prepare_rootfs(out: &std::path::Path) -> Result<()> {
     opencoder_dag_runtime::sandbox::oci::write_rootfs_template(out)
         .with_context(|| format!("write rootfs template under {}", out.display()))?;
@@ -171,6 +172,7 @@ fn prepare_rootfs(out: &std::path::Path) -> Result<()> {
 
 /// Depth-first listing of a freshly created directory tree (children
 /// sorted per directory so the output is deterministic).
+#[cfg(not(windows))]
 fn print_tree(root: &std::path::Path) {
     fn walk(dir: &std::path::Path, prefix: &str) {
         let mut names: Vec<String> = std::fs::read_dir(dir)
@@ -197,6 +199,11 @@ fn print_tree(root: &std::path::Path) {
     }
     println!("{}", root.display());
     walk(root, "");
+}
+
+#[cfg(windows)]
+fn prepare_rootfs(_out: &std::path::Path) -> Result<()> {
+    anyhow::bail!("DAG rootfs tooling requires Linux")
 }
 
 fn main() -> Result<()> {
@@ -238,6 +245,15 @@ fn main() -> Result<()> {
 
 async fn run(args: Args) -> Result<()> {
     init_logging();
+    #[cfg(windows)]
+    if args.command.is_none()
+        || matches!(
+            args.command,
+            Some(AgentCommand::Run | AgentCommand::Runtime { .. })
+        )
+    {
+        opencoder_session::tools::command::host::program().await?;
+    }
 
     // Offline tooling short-circuits BEFORE the server/token/store/LLM
     // wiring below: `dag prepare-rootfs` only touches the local filesystem.
@@ -313,7 +329,7 @@ async fn run(args: Args) -> Result<()> {
             data_dir,
             workflow_root: args.workflow_root,
             max_runs: args.max_runs,
-            dag: !args.no_dag,
+            dag: !args.no_dag && !cfg!(windows),
         },
         None,
     )

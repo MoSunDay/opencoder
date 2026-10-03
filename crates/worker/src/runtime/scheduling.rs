@@ -37,7 +37,9 @@ impl SchedulingState {
         value.validate().map_err(anyhow::Error::msg)?;
         crate::migration_io::reject_symlink(&self.path, "node scheduling")?;
         opencoder_core::atomic_write(&self.path, &serde_json::to_vec(&value)?)?;
-        std::fs::File::open(self.path.parent().context("scheduling parent")?)?.sync_all()?;
+        opencoder_core::platform::fs::sync_directory(
+            self.path.parent().context("scheduling parent")?,
+        )?;
         *self.value.lock().unwrap() = value;
         Ok(())
     }

@@ -115,7 +115,7 @@ describe('agent pick', () => {
     fireEvent.change(input, { target: { value: '开工' } });
     fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 });
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions',
-      { id: expect.stringMatching(/^operator-/), node_id: 'n1', agent: 'writer' }));
+      { id: expect.stringMatching(/^operator-/), node_id: 'n1', agent: 'writer', prompt: '开工' }));
     expect(apiPost.mock.calls.filter(([p]) => p.endsWith('/agent'))).toHaveLength(0);
   });
 

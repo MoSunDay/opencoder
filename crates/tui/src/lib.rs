@@ -48,6 +48,10 @@ pub mod scope_dialog;
 pub mod scrollbar;
 pub mod session_ui;
 pub mod sidecar_ui;
+#[cfg(unix)]
+pub mod signal_guard;
+#[cfg(windows)]
+#[path = "windows_console.rs"]
 pub mod signal_guard;
 pub mod skill_display;
 pub mod skill_menu;
@@ -135,5 +139,7 @@ pub fn fresh_agent_name(opts: &TuiOpts, config: &Config) -> String {
 }
 
 pub async fn run_tui(opts: &TuiOpts) -> Result<()> {
+    #[cfg(windows)]
+    opencoder_session::tools::command::host::program().await?;
     app::run(opts).await
 }

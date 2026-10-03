@@ -69,6 +69,8 @@ impl Stream {
 
 /// Persistence seam so tests can record (or fail) appends without a store.
 #[async_trait::async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait EventWriter: Send + Sync {
     async fn append(&self, rows: &[SessionEventRecord]) -> Result<()>;
 }

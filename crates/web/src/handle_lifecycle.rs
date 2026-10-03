@@ -50,14 +50,19 @@ pub(crate) async fn lock_session_lifecycle(
 }
 
 fn release_subscriber_slot(handle: &SessionHandle) -> usize {
-    match handle
-        .subscribers
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
-            (value > 0).then_some(value.saturating_sub(1))
-        }) {
-        Ok(previous) => previous,
-        Err(current) => current,
+    let mut current = handle.subscribers.load(Ordering::SeqCst);
+    while current > 0 {
+        match handle.subscribers.compare_exchange(
+            current,
+            current - 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(previous) => return previous,
+            Err(actual) => current = actual,
+        }
     }
+    current
 }
 
 async fn release_events_subscriber_async(handles: HandleMap, id: String) {

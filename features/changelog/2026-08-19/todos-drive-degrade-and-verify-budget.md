@@ -16,7 +16,7 @@
   （远端 generation 不同且 Suspended → 采纳远端状态）补 `tracing::info!`
   （workflow_id、本地/远端 generation），便于排查双 runner 接管。
 - **VERIFY 快照预算改 `min(主窗, judge 窗)`**
-  （`crates/session/src/autopilot/verify.rs` + `crates/core/src/config/autopilot.rs`）：
+  （`crates/session/src/autopilot/verify.rs` + `crates/core/src/config/runtime/autopilot.rs`）：
   `build_snapshot` 原预算 `context_limit() - VERIFY_RESERVED_TOKENS` 用的是主模型
   窗口，但 verify 实际调用 `small_model`——小窗更小时快照溢出其窗口
   （HTTP 400 → Malformed 降级重试）。新增 `AutoPilotConfig.verify_context_limit:
@@ -41,7 +41,7 @@
     传播 + store 中 workflow 仍 Suspended + 末事件 `runtime_error`）。
     说明：现有 harness 无法注入 load 失败，故造委托包装；`persistence::load` 走
     `store.get_todo_workflow`。
-- **core**（`src/config/autopilot.rs` 单元）：`verify_context_limit_defaults_none_and_merges`
+- **core**（`src/config/runtime/autopilot.rs` 单元）：`verify_context_limit_defaults_none_and_merges`
   （Default/空对象 None、300 覆盖、后写覆盖 4000→300）。
 - **session 单元**（`src/autopilot/verify.rs`）：
   - `narrow_verify_context_limit_truncates_snapshot_to_judge_window`（红：

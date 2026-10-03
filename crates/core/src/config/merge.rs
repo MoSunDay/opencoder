@@ -8,7 +8,8 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         Some(o) => o,
         None => return false,
     };
-    if obj.contains_key("model")
+    if obj.contains_key("ontology")
+        || obj.contains_key("model")
         || obj.contains_key("opencoder_server")
         || obj.contains_key("small_model")
         || obj.contains_key("embedding_model")
@@ -50,8 +51,7 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     if obj
         .get("agent")
         .and_then(|v| v.as_object())
-        // `agent.default` (string) is the only subkey merge_into applies, but
-        // any non-empty `agent` object signals user-intended config here.
+        // Any non-empty `agent` object signals user-intended config here.
         .is_some_and(|a| !a.is_empty())
     {
         return true;
@@ -292,6 +292,16 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
         }
         if let Some(a) = obj.get("agent").and_then(|v| v.as_object()) {
+            if let Some(value) = a.get("codex") {
+                if let Some(settings) = super::agent::merge_codex(&cfg.agent.codex, value) {
+                    cfg.agent.codex = settings;
+                }
+            }
+            if let Some(value) = a.get("runtime") {
+                if let Some(settings) = super::agent::merge_runtime(&cfg.agent.runtime, value) {
+                    cfg.agent.runtime = settings;
+                }
+            }
             if let Some(d) = a.get("default").and_then(|v| v.as_str()) {
                 cfg.agent.default = d.to_string();
             }
@@ -317,6 +327,26 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         // DAG block mirrors the agent one: `binary_dir` + a partial `nfs`
         // object whose serde defaults fill the rest
         // (`{"dag":{"nfs":{"port":0}}}` only overrides the port).
+        if let Some(ontology) = obj.get("ontology") {
+            let mut merged = serde_json::to_value(&cfg.ontology).unwrap_or_default();
+            if let (Some(target), Some(patch)) = (merged.as_object_mut(), ontology.as_object()) {
+                for (key, value) in patch {
+                    if key == "nfs" {
+                        if let (Some(base), Some(overrides)) = (
+                            target.get_mut(key).and_then(|v| v.as_object_mut()),
+                            value.as_object(),
+                        ) {
+                            base.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+                        }
+                    } else {
+                        target.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            if let Ok(value) = serde_json::from_value(merged) {
+                cfg.ontology = value;
+            }
+        }
         if let Some(d) = obj.get("dag").and_then(|v| v.as_object()) {
             if let Some(dir) = d.get("binary_dir").and_then(|v| v.as_str()) {
                 cfg.dag.binary_dir = Some(std::path::PathBuf::from(dir));
@@ -638,5 +668,27 @@ mod tests {
         assert!(cfg.local_memory);
         merge_into(&mut cfg, serde_json::json!({"local_memory": false}));
         assert!(!cfg.local_memory);
+    }
+    #[test]
+    fn ontology_nested_overlays_keep_files_and_other_export_settings() {
+        let mut config = Config::default();
+        merge_into(
+            &mut config,
+            serde_json::json!({"ontology":{"files_dir":"/ontology","nfs":{"enabled":true,"port":2059}}}),
+        );
+        merge_into(
+            &mut config,
+            serde_json::json!({"ontology":{"nfs":{"host":"0.0.0.0"}}}),
+        );
+        assert_eq!(
+            config.ontology.files_dir.as_deref(),
+            Some(std::path::Path::new("/ontology"))
+        );
+        assert!(config.ontology.nfs.enabled);
+        assert_eq!(config.ontology.nfs.port, 2059);
+        assert_eq!(config.ontology.nfs.host, "0.0.0.0");
+        assert_eq!(config.agent.nfs.port, 2049);
+        assert_eq!(config.dag.nfs.port, 2050);
+        assert_eq!(config.dag.workspace_nfs.port, 2051);
     }
 }

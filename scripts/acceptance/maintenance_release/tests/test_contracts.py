@@ -10,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 from evidence import source_inventory, unchanged_source, authentication
-from inputs import debug_manifest, package_debug, NAMES
+from inputs import corrective_input, debug_manifest, package_debug, NAMES
 from rolling import manifest
 from rolling.maintenance import configuration
 from fixture import configuration_scope, create_settings
@@ -18,7 +18,7 @@ from fixture import configuration_scope, create_settings
 
 class ContractsTests(unittest.TestCase):
     def test_candidate_choice_is_required_and_exclusive(self):
-        required = ['--rootfs', '/image', '--old-bundle', '/old']
+        required = ['--rootfs', '/image', '--old-bundle', '/old', '--corrective-bundle', '/fix']
         with patch('sys.stderr'), self.assertRaises(SystemExit):
             main.arguments(required)
         with patch('sys.stderr'), self.assertRaises(SystemExit):
@@ -26,6 +26,13 @@ class ContractsTests(unittest.TestCase):
         args = main.arguments([*required, '--bin-dir', '/bin'])
         self.assertEqual(args.bin_dir, Path('/bin'))
         self.assertIsNone(args.platform_bundle)
+
+    def test_corrective_alias_cannot_replace_a_different_compiled_commit(self):
+        candidate = {'commit': 'a' * 40, 'release_id': 'primary'}
+        alias = {**candidate, 'release_id': 'alias'}
+        with patch.object(manifest, 'verify', return_value=alias):
+            with self.assertRaisesRegex(ValueError, 'different compiled commit'):
+                corrective_input(Path('/fix'), candidate)
 
     def test_source_inventory_rejects_changed_bytes_and_same_bytes_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -73,6 +80,19 @@ class ContractsTests(unittest.TestCase):
             self.assertEqual(actual[0]['dag'], {'old': 1})
             self.assertEqual(desired[0]['dag'], {'workspace_dir': '/private'})
             self.assertEqual(desired[1], actual[1])
+
+    def test_resource_authentication_can_be_empty_but_is_still_fingerprinted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'definitions.db'
+            with sqlite3.connect(path) as connection:
+                connection.execute('CREATE TABLE platform_users (name TEXT, token_hash BLOB)')
+            before = path.read_bytes()
+            with self.assertRaisesRegex(AssertionError, 'authentication rows'):
+                authentication(path)
+            result = authentication(path, require_users=False)
+            self.assertEqual(result['platform_users']['rows'], 0)
+            self.assertEqual(len(result['platform_users']['sha256']), 64)
+            self.assertEqual(path.read_bytes(), before)
 
     def test_debug_manifest_preserves_dirty_and_unknown_provenance(self):
         info = {'git_commit': 'a' * 40, 'version': 'test', 'version_long': 'test-dirty',

@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
 
 # OpenCoder 逻辑地图
 
@@ -6,9 +6,11 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 抽象口子：`Arc<dyn Store>`、`Arc<dyn ChatStream>`。细节见各模块索引，代码是最终事实。
 
+仓库只实现通用执行、调度、资源管理和交互能力。业务工作流通过注册能力、定义、输入和私有任务文件使用平台；核心配置、运行器和界面不内置具体业务系统的协议或流程。
+
 ## 仓库记忆范围
 
-`agents.md`、`agents/` 和 `features/`（含 changelog）只记录 OpenCoder 本身的模块、通用基建能力、接口契约及其演进。外部业务系统的需求、业务逻辑、数据结论、部署现场、巡检结果和一次性执行回执不得写入本仓库记忆。涉及外部系统的工作，仅在解释 OpenCoder 自身接口或能力边界所必需时记录通用事实，不沉淀具体业务状态。
+`repo-memory.md`、`agents/` 和 `features/`（含 changelog）只记录 OpenCoder 本身的模块、通用基建能力、接口契约及其演进。外部业务系统的需求、业务逻辑、数据结论、部署现场、巡检结果和一次性执行回执不得写入本仓库记忆。涉及外部系统的工作，仅在解释 OpenCoder 自身接口或能力边界所必需时记录通用事实，不沉淀具体业务状态。
 
 ## 模块索引
 
@@ -20,6 +22,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/tui](agents/tui/index.md) — ratatui 交互界面。
 - [agents/local](agents/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA。
+- [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面与不可变正文。
 - [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
 - [agents/dag-binary](agents/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 单 DAG 单容器、共享写时复制工作区与原生步骤调度；Server 不链接。
@@ -34,6 +37,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/server](agents/server/index.md) — 版本 Server 与独立只读资源服务入口。
 - [agents/agent](agents/agent/index.md) — 稳定 Host、独立版本 Runtime 与兼容节点入口。
 - [agents/ctl](agents/ctl/index.md) — `opencoder-cli`：Server API + Bearer + 退出码约定。
+- [agents/computer-use](agents/computer-use/index.md) — 可选 `opencoder-computer`：Cua 桌面任务 CLI、独立模型与运行产物。
 
 OpenCoder 能力入口见 [features/index.md](features/index.md)。
 

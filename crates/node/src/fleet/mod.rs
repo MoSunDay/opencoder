@@ -12,6 +12,8 @@ pub struct NodeReport {
 }
 
 #[async_trait::async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait NodeService: Send + Sync {
     async fn reconnect_allowed(&self, _remote: &str) -> anyhow::Result<bool> {
         Ok(!self.retiring())

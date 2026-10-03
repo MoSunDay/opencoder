@@ -45,7 +45,7 @@ def schema(path, immutable=False):
         return connection.execute('SELECT version FROM schema_version LIMIT 1').fetchone()[0]
 
 
-def authentication(path):
+def authentication(path, require_users=True):
     with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
         names = [row[0] for row in connection.execute(
             "SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")]
@@ -56,7 +56,7 @@ def authentication(path):
                 rows = connection.execute('SELECT * FROM ' + quoted).fetchall()
                 tables[name] = {'rows': len(rows), 'sha256': hashlib.sha256(
                     repr(sorted(map(repr, rows))).encode()).hexdigest()}
-        if not tables or not tables.get('platform_users', {}).get('rows'):
+        if not tables or (require_users and not tables.get('platform_users', {}).get('rows')):
             raise AssertionError('fixture has no real authentication rows')
         return tables
 

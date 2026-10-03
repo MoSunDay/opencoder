@@ -55,18 +55,15 @@ def main():
                 if not args.bundle:
                     parser.error("--bundle is required")
                 if args.stage or args.signal:
-                    result = (controller.stage(settings, args.bundle, maintenance=True) if args.maintenance
-                              else controller.stage(settings, args.bundle))
+                    result = controller.stage(settings, args.bundle, maintenance=args.maintenance,
+                                              wait_seconds=args.wait_seconds)
                     controller.install(settings, args.config, operations)
                 else:
-                    current = Journal(settings.state_dir).data
-                    stopped = args.maintenance or (args.migrate and current['current']
-                                and current.get('migration_stage') != 'switching')
-                    if not stopped:
+                    if not args.maintenance:
                         controller.install(settings, args.config, operations)
                     action = maintenance.deploy if args.maintenance else migration.migrate if args.migrate else deployment.deploy
                     result = action(settings, args.bundle, operations, args.wait_seconds)
-                    if stopped:
+                    if args.maintenance:
                         controller.install(settings, args.config, operations)
         if args.signal:
             target = result["release_id"] if result else None

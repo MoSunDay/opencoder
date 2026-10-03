@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 mod support;
 use base64::Engine;
 use opencoder_node::fleet::NodeService;

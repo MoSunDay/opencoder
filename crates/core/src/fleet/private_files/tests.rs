@@ -1,5 +1,5 @@
 use super::*;
-use std::os::unix::fs::PermissionsExt;
+
 fn fixture() -> PrivateExecutionContext {
     PrivateExecutionContext {
         expires_at_ms: 1000,
@@ -26,18 +26,8 @@ fn materialization_is_private_immutable_and_replayable() {
     let root = tempfile::tempdir().unwrap();
     let value = fixture();
     let path = materialize(root.path(), "dag-example", &value, 1).unwrap();
-    assert_eq!(
-        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-        0o700
-    );
-    assert_eq!(
-        std::fs::metadata(path.join("credential"))
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
+    assert!(crate::platform::fs::private_access(&path).unwrap());
+    assert!(crate::platform::fs::private_access(&path.join("credential")).unwrap());
     assert_eq!(
         materialize(root.path(), "dag-example", &value, 1).unwrap(),
         path
@@ -50,6 +40,7 @@ fn materialization_is_private_immutable_and_replayable() {
         "fixture-private-grant"
     );
 }
+#[cfg(unix)]
 #[test]
 fn private_file_symlinks_are_rejected() {
     let root = tempfile::tempdir().unwrap();

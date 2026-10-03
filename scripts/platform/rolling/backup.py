@@ -1,13 +1,14 @@
 """SQLite online backups; independent files are never labelled one snapshot."""
 from pathlib import Path
 from contextlib import closing
-import hashlib
 import json
 import os
 import shutil
 import sqlite3
 import tempfile
 from .state import write
+from .native import ontology
+from .backup_files import tree
 
 
 def database(source, target):
@@ -37,6 +38,9 @@ def snapshot(settings, output, stopped=False):
     destination = output
     output = Path(tempfile.mkdtemp(prefix=f".{output.name}.incomplete-", dir=output.parent))
     roots = {"server": settings.server_data}
+    resources = settings.state_dir / "resources"
+    if resources.exists():
+        roots["resources"] = resources
     if settings.legacy_agent_data:
         roots["legacy-node"] = settings.legacy_agent_data
     host = settings.state_dir / "host"
@@ -49,20 +53,27 @@ def snapshot(settings, output, stopped=False):
         if output.is_relative_to(root):
             raise ValueError("backup output cannot be inside a source tree")
         if stopped:
-            shutil.copytree(root, output / name, symlinks=True,
+            tree.copy_tree(root, output / name,
                 ignore=shutil.ignore_patterns("*.db", "*.db-wal", "*.db-shm", "*.lock"))
         for source in root.rglob("*.db"):
             if not source.is_symlink():
                 database(source, output / name / source.relative_to(root))
+    # Copy files after the pinned DB snapshot: immutable versions referenced by
+    # that snapshot already exist. NFS path bindings must match their hashes too.
+    ontology_root = ontology.files_root(output / 'server')
+    if ontology_root is not None:
+        if output.is_relative_to(ontology_root):
+            raise ValueError('backup output cannot be inside Ontology files')
+        tree.copy_tree(ontology_root, output / 'ontology-files')
+        ontology.verify_files(output / 'server/ontology.db', output / 'ontology-files')
     files = {}
     for path in output.rglob("*"):
+        item = tree.metadata(path)
+        if item is not None:
+            files[str(path.relative_to(output))] = item
         if path.is_file() and not path.is_symlink():
-            digest = hashlib.sha256()
             with path.open("rb") as stream:
-                for block in iter(lambda: stream.read(1024 * 1024), b""):
-                    digest.update(block)
                 os.fsync(stream.fileno())
-            files[str(path.relative_to(output))] = digest.hexdigest()
     for directory in sorted((p for p in output.rglob("*") if p.is_dir() and not p.is_symlink()),key=lambda p:len(p.parts),reverse=True):
         fd = os.open(directory,os.O_RDONLY | os.O_DIRECTORY)
         try:
@@ -71,7 +82,8 @@ def snapshot(settings, output, stopped=False):
             os.close(fd)
     write(output / "backup-manifest.json", {
         "kind": "stopped-consistent-copy" if stopped else "independent-online-database-backups",
-        "cross_database_snapshot": stopped, "files": files})
+        "cross_database_snapshot": stopped, "files": files,
+        "ontology_files_root": str(ontology_root) if ontology_root else None})
     os.rename(output, destination)
     with_parent = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:

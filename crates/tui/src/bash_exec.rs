@@ -1,6 +1,6 @@
 //! Local non-interactive command execution for the TUI.
 //!
-//! Pure functions: `run_command` runs `sh -c <cmd>` synchronously (with a
+//! Pure functions: `run_command` runs the host shell synchronously (with a
 //! timeout), `spawn` offloads it to a background task so the UI stays
 //! responsive. No state is held here.
 
@@ -11,25 +11,22 @@ use tokio::sync::oneshot;
 
 const TIMEOUT_SECS: u64 = 10;
 
-/// Run `cmd` via `sh -c` in `workdir`, merging stdout and stderr.
+/// Run `cmd` via the host shell in `workdir`, merging stdout and stderr.
 ///
 /// Returns the combined output string. Special cases:
 /// - empty output → `(no output)`
 /// - timeout → `timeout (Ns)`
 /// - spawn error → `error: <message>`
 pub async fn run_command(cmd: &str, workdir: &Path) -> String {
-    let output = tokio::time::timeout(
+    let output = opencoder_session::tools::command::host::run(
+        cmd,
+        Some(workdir),
         Duration::from_secs(TIMEOUT_SECS),
-        tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .current_dir(workdir)
-            .output(),
     )
     .await;
 
     match output {
-        Ok(Ok(out)) => {
+        Ok(out) => {
             let mut text = String::new();
             use std::fmt::Write;
             let _ = write!(&mut text, "{}", String::from_utf8_lossy(&out.stdout));
@@ -41,8 +38,8 @@ pub async fn run_command(cmd: &str, workdir: &Path) -> String {
                 text
             }
         }
-        Ok(Err(e)) => format!("error: {e}"),
-        Err(_) => format!("timeout ({TIMEOUT_SECS}s)"),
+        Err(e) if e.to_string().contains("timed out") => format!("timeout ({TIMEOUT_SECS}s)"),
+        Err(e) => format!("error: {e}"),
     }
 }
 
@@ -61,7 +58,7 @@ pub fn spawn(cmd: &str, workdir: &Path) -> oneshot::Receiver<String> {
     rx
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

@@ -92,8 +92,8 @@ pub fn drain_runtime(low: Arc<AtomicBool>) -> WorkerRuntime {
             Ok(StorageCapacity {
                 available_blocks: if low.load(Ordering::SeqCst) { 9 } else { 80 },
                 total_blocks: 100,
-                available_inodes: 80,
-                total_inodes: 100,
+                available_inodes: Some(80),
+                total_inodes: Some(100),
             })
         }),
     }

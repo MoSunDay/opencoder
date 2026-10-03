@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import sys
 import time
+from rolling.native import ontology
 
 STATUSES = {"pending", "running", "idle", "cancelling", "interrupted", "done", "error", "cancelled"}
 ACTIVE = {"pending", "running", "idle", "cancelling"}
@@ -242,7 +243,11 @@ def verify_archive(root: pathlib.Path) -> dict:
         raise ArchiveError("invalid backup node inventory")
     if {path.name for path in (root / "nodes").iterdir()} != set(nodes):
         raise ArchiveError("backup node directories do not match manifest")
-    for database in [root / "server/control.db", root / "server/definitions.db"] + [
+    databases = [root / "server/control.db", root / "server/definitions.db"]
+    if (root / "server/ontology.db").exists():
+        databases.append(root / "server/ontology.db")
+        ontology.verify_files(root / "server/ontology.db", root / "ontology-files")
+    for database in databases + [
         root / "nodes" / name / "runtime.db" for name in nodes
     ]:
         uri = database.resolve(strict=True).as_uri() + "?mode=ro&immutable=1"
@@ -277,6 +282,11 @@ def backup(server: pathlib.Path, nodes: dict[str, pathlib.Path], output: pathlib
                 lock_node(stack, node)
             control = open_locked_database(stack, server / "control.db")
             definitions = open_locked_database(stack, server / "definitions.db")
+            ontology_root = ontology.files_root(server)
+            if ontology_root:
+                if output.is_relative_to(ontology_root):
+                    raise ArchiveError("backup output cannot be inside Ontology files")
+                open_locked_database(stack, server / "ontology.db")
             require_server_executions_drained(control)
             stage.mkdir()
             (stage / "server").mkdir()
@@ -284,6 +294,9 @@ def backup(server: pathlib.Path, nodes: dict[str, pathlib.Path], output: pathlib
             copy_file(server / "admission.json", stage / "server/admission.json")
             sqlite_backup(server / "control.db", stage / "server/control.db")
             sqlite_backup(server / "definitions.db", stage / "server/definitions.db")
+            if ontology_root:
+                sqlite_backup(server / "ontology.db", stage / "server/ontology.db")
+                copy_tree(real_directory(ontology_root, "Ontology files"), stage / "ontology-files")
             for name, node in nodes.items():
                 target = stage / "nodes" / name
                 copy_tree(

@@ -2,6 +2,7 @@
 pub mod admission;
 pub mod api;
 mod bootstrap;
+mod ontology;
 pub mod release;
 mod resource_scope;
 pub mod role_gate;
@@ -59,7 +60,9 @@ use std::{path::PathBuf, sync::Arc};
 
 pub struct AppState {
     pub lifecycle: Arc<release::Lifecycle>,
+    pub ontology: Option<opencoder_ontology::AppState>,
     pub workdir: PathBuf,
+    pub(crate) data_dir: PathBuf,
     pub store: Arc<dyn Store>,
     pub projects: Arc<dyn ProjectStore>,
     pub fleet: Arc<FleetStore>,

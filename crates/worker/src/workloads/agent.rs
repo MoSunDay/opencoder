@@ -201,7 +201,7 @@ pub(super) async fn run(
     // linked project TODOs. Maintenance keeps the session-pointer result.
     if status == ExecutionStatus::Idle {
         if let Some(delta) = how_append.as_deref().filter(|d| !d.trim().is_empty()) {
-            match opencoder_dag_runtime::exec::how_append::append_to_how_md(agent, delta) {
+            match opencoder_agents::resources::how_append::append_to_how_md(agent, delta) {
                 Ok(version) => {
                     tracing::info!(%id, %agent, version, "how_append persisted to agent prompt pool")
                 }
@@ -220,7 +220,7 @@ pub(super) async fn run(
             let text =
                 opencoder_session::handoff::last_assistant_text(&messages).unwrap_or_default();
             let text = transcript_tail(&text, OUTPUT_TAIL_BYTES);
-            let output_json = opencoder_dag_runtime::exec::agent::extract_output_json_from(&text);
+            let output_json = opencoder_session::harness::output::extract_output_json_from(&text);
             return Ok((status, agent_result(id, &text, output_json)));
         }
     }

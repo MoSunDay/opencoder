@@ -7,6 +7,7 @@ const CASES = [
   { name: 'todo', script: 'todo_workbench/main.js', pages: ['todos', 'topics'] },
   { name: 'todo-initialization', script: 'todo_initialization_ui.js', pages: ['todos'] },
   { name: 'brain', cargo: true, pages: ['brain', 'topics'] },
+  { name: 'ontology', python: 'ontology/main.py', pages: ['ontologyGraph', 'ontologyEntities', 'ontologyTypes', 'ontologyRelationships', 'ontologyEnvironments'] },
   { name: 'tui', terminal: true, pages: [] },
 ];
 

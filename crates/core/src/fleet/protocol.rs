@@ -427,6 +427,10 @@ impl TeamDefinition {
 pub struct CapabilityTarget {
     pub kind: ExecutionKind,
     pub target: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_inputs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_outputs: Vec<String>,
 }
 
 #[cfg(test)]

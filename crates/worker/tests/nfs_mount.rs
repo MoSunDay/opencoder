@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 mod support;
 use opencoder_agents::serve::{spawn_nfs_server, NfsServerHandle, NfsServerOpts};
 use opencoder_core::fleet::*;

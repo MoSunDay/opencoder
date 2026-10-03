@@ -9,7 +9,7 @@ use super::super::bg;
 /// registry. Timeout handoff moves the guard into the background supervisor.
 pub(crate) struct ProcessGroupGuard {
     pid: u32,
-    pgid: libc::pid_t,
+    pgid: i32,
     supervisor: Option<crate::process::OwnedSupervisor>,
     armed: bool,
 }
@@ -19,7 +19,7 @@ impl ProcessGroupGuard {
         self.supervisor.is_some()
     }
 
-    pub(crate) fn registered(pid: u32, pgid: libc::pid_t, session_id: String) -> Self {
+    pub(crate) fn registered(pid: u32, pgid: i32, session_id: String) -> Self {
         bg::register(pid, pgid, session_id);
         Self {
             pid,
@@ -38,7 +38,7 @@ impl ProcessGroupGuard {
         bg::register_supervised(pid, signal, session_id);
         Ok(Self {
             pid,
-            pgid: pid as libc::pid_t,
+            pgid: pid as i32,
             supervisor: Some(supervisor),
             armed: true,
         })
@@ -56,6 +56,7 @@ impl ProcessGroupGuard {
         } else {
             // SAFETY: direct bash starts with `setsid`, so its pid is a
             // private process group id. ESRCH means it already exited.
+            #[cfg(unix)]
             unsafe {
                 let _ = libc::kill(-self.pgid, libc::SIGKILL);
             }

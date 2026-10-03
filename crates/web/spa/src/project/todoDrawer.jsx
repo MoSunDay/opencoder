@@ -36,27 +36,43 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
   const [indexes, setIndexes] = useState({});
   const [busy, setBusy] = useState(false);
   const guidanceAttempt = useRef(null);
+  const navigation = useRef(0);
+  const pendingRead = useRef(null);
+  const mounted = useRef(true);
   const [error, setError] = useState('');
 
-  const loadLinks = useCallback(async () => {
+  const navigate = (next) => { navigation.current += 1; setMode(next); };
+  const loadLinks = useCallback(async (force = false) => {
+    if (!mounted.current) return null;
+    if (pendingRead.current && !force) return null;
+    pendingRead.current?.abort();
+    const request = new AbortController();
+    pendingRead.current = request;
     try {
-      const result = await apiGet(linkPath(todoId));
+      const result = await apiGet(linkPath(todoId), { signal: request.signal });
+      if (request.signal.aborted) return null;
       const assignments = result.assignments || (result.execution_ids || []).map((execution_id) => ({ execution_id, kind: '', name: '', sync_state: 'pending' }));
       setLinks(assignments);
       const found = await Promise.all(assignments.map(async (assignment) => {
         const id = assignment.execution_id;
-        try { return [id, await apiGet(`/api/executions/${encodeURIComponent(id)}/index`)]; }
+        try { return [id, await apiGet(`/api/executions/${encodeURIComponent(id)}/index`, { signal: request.signal })]; }
         catch { return [id, { id, missing: true }]; }
       }));
       const resolved = Object.fromEntries(found);
+      if (request.signal.aborted) return null;
       setIndexes(resolved);
       return resolved;
-    } catch (failure) { setError(failure.message); return null; }
+    } catch (failure) { if (!request.signal.aborted) setError(failure.message); return null; }
+    finally { if (pendingRead.current === request) pendingRead.current = null; }
   }, [todoId]);
   useEffect(() => {
+    mounted.current = true;
     loadLinks();
     const timer = setInterval(loadLinks, 5000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer); pendingRead.current?.abort(); pendingRead.current = null;
+      mounted.current = false; navigation.current += 1;
+    };
   }, [loadLinks]);
 
   const save = async () => {
@@ -76,6 +92,7 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
   const link = async (id, retryIndex = false) => {
     const execution = id.trim();
     if (!execution) return;
+    const attempt = navigation.current;
     setBusy(true);
     try {
       for (let attempt = 0; ; attempt += 1) {
@@ -85,9 +102,10 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
       }
-      setPendingId('');
-      setLinkInput('');
-      const resolved = await loadLinks();
+      setPendingId((current) => current === execution ? '' : current);
+      setLinkInput((current) => current.trim() === execution ? '' : current);
+      const resolved = await loadLinks(true);
+      if (navigation.current !== attempt) return;
       if (resolved?.[execution]?.kind) {
         setError('');
         setExecutionId(execution);
@@ -105,7 +123,7 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     setBusy(true);
     try {
       await apiDel(`${linkPath(todoId)}/${encodeURIComponent(id)}`);
-      await loadLinks();
+      await loadLinks(true);
       setError('');
     } catch (failure) { setError(failure.message); }
     finally { setBusy(false); }
@@ -116,14 +134,14 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     { title: '执行 ID', key: 'id', width: '25%', searchValue: (r) => r.id, dataIndex: 'id', render: (id) => <Typography.Text copyable={{ text: id }}><TableText>{id}</TableText></Typography.Text> },
     { title: '状态', key: 'status', width: '18%', kind: 'enum', searchValue: (r) => r.result_md ? '结论已回写' : ({ error: '失败', cancelled: '已取消', empty: '已结束，无结论' }[r.sync_state] || r.status || '等待执行'), render: (_, row) => row.result_md ? '结论已回写' : ({ error: '失败', cancelled: '已取消', empty: '已结束，无结论' }[row.sync_state] || row.status || '等待执行') },
     { title: '操作', key: 'actions', width: '17%', render: (_, row) => <Space>
-      <Button type="link" disabled={!row.kind || row.missing} onClick={() => { setExecutionId(row.id); setMode('execution'); }}>查看</Button>
+      <Button type="link" disabled={!row.kind || row.missing} onClick={() => { setExecutionId(row.id); navigate('execution'); }}>查看</Button>
       <Button danger type="link" disabled={busy} onClick={() => unlink(row.id)}>解除关联</Button>
     </Space> },
   ];
   return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" styles={{ wrapper: { maxWidth: 1000 } }} destroyOnHidden>
     <Space style={{ marginBottom: 16 }}>
-      {mode !== 'overview' && <Button onClick={() => setMode('overview')}>返回 TODO</Button>}
-      {mode === 'overview' && <Button type="primary" disabled={!kind} loading={busy} onClick={async () => { if (await save()) setMode('launch'); }}>指派所选能力</Button>}
+      {mode !== 'overview' && <Button onClick={() => navigate('overview')}>返回 TODO</Button>}
+      {mode === 'overview' && <Button type="primary" disabled={!kind} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</Button>}
     </Space>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
     {pendingId && <Button loading={busy} onClick={() => link(pendingId)}>重试关联 {pendingId}</Button>}

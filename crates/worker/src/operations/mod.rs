@@ -130,9 +130,9 @@ mod fork;
 
 mod artifacts;
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod admission_tests;
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod create_retry_tests;
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod sandbox_session;

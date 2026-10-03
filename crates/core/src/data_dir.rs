@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 /// current directory — the same algorithm used by [`data_dir_for`] cannot
 /// drift from it.
 pub fn data_root() -> PathBuf {
-    let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut base = crate::platform::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     base.push("opencoder");
     base
 }
@@ -88,7 +88,7 @@ mod tests {
     fn workdir_hash_canonicalizes_and_is_stable_hex() {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().canonicalize().unwrap();
-        let with_slash: PathBuf = format!("{}/", real.to_string_lossy()).into();
+        let with_slash: PathBuf = format!("{}{}", real.display(), std::path::MAIN_SEPARATOR).into();
         assert_eq!(workdir_hash(&real), workdir_hash(&with_slash));
         #[cfg(unix)]
         {
@@ -114,7 +114,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().canonicalize().unwrap();
         // A trailing slash on the input must NOT change the data dir.
-        let with_slash: PathBuf = format!("{}/", real.to_string_lossy()).into();
+        let with_slash: PathBuf = format!("{}{}", real.display(), std::path::MAIN_SEPARATOR).into();
         assert_eq!(
             data_dir_for(&real),
             data_dir_for(&with_slash),

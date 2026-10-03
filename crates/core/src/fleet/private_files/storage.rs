@@ -2,9 +2,8 @@
 use super::PrivateExecutionContext;
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io::{Read, Write},
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::OnceLock,
 };
@@ -14,8 +13,13 @@ pub fn runtime_image_digest() -> Result<String, String> {
     static DIGEST: OnceLock<Result<String, String>> = OnceLock::new();
     DIGEST
         .get_or_init(|| {
-            let mut file = File::open("/proc/self/exe")
-                .map_err(|_| "runtime image unavailable".to_string())?;
+            let image = if cfg!(target_os = "linux") {
+                PathBuf::from("/proc/self/exe")
+            } else {
+                std::env::current_exe().map_err(|_| "runtime image unavailable")?
+            };
+            let mut file =
+                File::open(image).map_err(|_| "runtime image unavailable".to_string())?;
             let mut digest = Sha256::new();
             let mut buffer = [0u8; 65536];
             loop {
@@ -54,19 +58,22 @@ pub fn materialize(
 fn private_directory(path: &Path) -> Result<(), String> {
     for parent in path.ancestors() {
         if let Ok(meta) = std::fs::symlink_metadata(parent) {
-            if meta.file_type().is_symlink() {
+            if crate::platform::fs::is_link(&meta) {
                 return Err("symlink in private task path".into());
             }
         }
     }
     if !path.exists() {
-        let result = std::fs::DirBuilder::new().mode(0o700).create(path);
+        let result = crate::platform::fs::create_private_directory(path);
         if result.is_err() && !path.is_dir() {
             return Err("private directory creation failed".into());
         }
     }
     let meta = std::fs::symlink_metadata(path).map_err(|_| "private directory unavailable")?;
-    if !meta.is_dir() || meta.permissions().mode() & 0o077 != 0 {
+    if !meta.is_dir()
+        || !crate::platform::fs::private_access(path)
+            .map_err(|_| "private permission check failed")?
+    {
         return Err("private directory must have owner-only access".into());
     }
     Ok(())
@@ -78,23 +85,17 @@ fn seal(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("private path has no parent")?;
     let temp = parent.join(format!(".private-{}", ulid::Ulid::new()));
     let result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temp)
+        let mut file = crate::platform::fs::create_private_file(&temp)
             .map_err(|_| "private file creation failed")?;
         file.write_all(bytes)
             .map_err(|_| "private file write failed")?;
         file.sync_all().map_err(|_| "private file sync failed")?;
-        match std::fs::hard_link(&temp, path) {
+        match crate::platform::fs::publish_new(&temp, path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => return Err("private file publication failed".to_string()),
         }
-        File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|_| "private directory sync failed")?;
+        crate::platform::fs::sync_directory(parent).map_err(|_| "private directory sync failed")?;
         verify(path, bytes)
     })();
     let _ = std::fs::remove_file(temp);
@@ -102,7 +103,10 @@ fn seal(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 fn verify(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let meta = std::fs::symlink_metadata(path).map_err(|_| "private file missing")?;
-    if !meta.is_file() || meta.permissions().mode() & 0o077 != 0 || meta.len() != bytes.len() as u64
+    if !meta.is_file()
+        || !crate::platform::fs::private_access(path)
+            .map_err(|_| "private permission check failed")?
+        || meta.len() != bytes.len() as u64
     {
         return Err("private file shape or permission mismatch".into());
     }

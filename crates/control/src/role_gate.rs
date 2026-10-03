@@ -45,6 +45,10 @@ fn non_admin_allowed(method: &Method, path: &str) -> bool {
     {
         return true;
     }
+    if path.starts_with("/api/ontology/") {
+        return method == Method::GET
+            || (method == Method::POST && path.ends_with("/vector-search"));
+    }
     if path == "/api/executions" {
         return method == Method::GET || method == Method::POST;
     }
@@ -114,6 +118,18 @@ mod tests {
     #[test]
     fn non_admins_read_identity_nodes_and_executions() {
         for role in [Role::User, Role::Root] {
+            assert!(allow(role, "GET", "/api/ontology/environments"));
+            assert!(allow(role, "GET", "/api/ontology/envs/debug/graph"));
+            assert!(allow(role, "GET", "/api/ontology/nfs"));
+            assert!(allow(
+                role,
+                "POST",
+                "/api/ontology/envs/debug/vector-search"
+            ));
+            for method in ["POST", "PATCH", "PUT", "DELETE"] {
+                assert!(!allow(role, method, "/api/ontology/envs/debug/entities"));
+                assert!(!allow(role, method, "/api/ontology/nfs"));
+            }
             assert!(allow(role, "GET", "/api/me"));
             assert!(allow(role, "GET", "/api/tui/agent-capabilities"));
             assert!(!allow(role, "POST", "/api/tui/agent-capabilities"));

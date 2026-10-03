@@ -49,7 +49,8 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
         let mut value = json!(capability.capability);
         value["kind"] = target["kind"].clone();
         value["target"] = target["target"].clone();
-        value["required_inputs"] = json!([]);
+        value["required_inputs"] = target.get("required_inputs").cloned().unwrap_or(json!([]));
+        value["required_outputs"] = target.get("required_outputs").cloned().unwrap_or(json!([]));
         match registered_definition(state, &target).await {
             Ok(definition) => value["definition"] = definition,
             Err(error) => {

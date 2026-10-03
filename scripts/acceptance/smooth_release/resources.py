@@ -8,7 +8,7 @@ class Resources:
         self.mounts = {}
         self.ports = {}
         self.mounted = []
-        for section in ['agent','dag','workspace']:
+        for section in ['agent','dag','workspace','ontology']:
             source = root / 'exports' / section
             mount = root / 'mounts' / section
             source.mkdir(parents=True)
@@ -23,6 +23,7 @@ class Resources:
             for section,key in [('agent','agents_dir'),('dag','binary_dir')]}
         config['dag'].update(workspace_dir=str(self.roots['workspace']), workspace_nfs={
             'enabled':True,'host':'127.0.0.1','port':self.ports['workspace']})
+        config['ontology'] = {'files_dir':str(self.roots['ontology']), 'nfs':{'enabled':True,'host':'127.0.0.1','port':self.ports['ontology']}}
         return config
 
     def client_config(self):
@@ -31,7 +32,7 @@ class Resources:
         return config
 
     def mount(self):
-        for section in ['agent','dag','workspace']:
+        for section in ['agent','dag','workspace','ontology']:
             port = self.ports[section]
             subprocess.run(['mount','-t','nfs','-o',
                 f'ro,vers=3,tcp,port={port},mountport={port},nolock,soft,retrans=1,timeo=50,actimeo=0,lookupcache=none',

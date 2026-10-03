@@ -52,7 +52,7 @@ override 实现——后续任何全局 config reload 都不会冲掉 session �
 
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
-| ApMode parse/as_str 与 serde 一致 | `parse_and_as_str_round_trip_all_wire_keys` | `crates/core/src/config/autopilot.rs` |
+| ApMode parse/as_str 与 serde 一致 | `parse_and_as_str_round_trip_all_wire_keys` | `crates/core/src/config/runtime/autopilot.rs` |
 | 列 round-trip（set/patch/clear） | `autopilot_mode_column_round_trips` | `crates/store/tests/store_integration.rs` |
 | Some+clear 互斥拒绝 | `field_and_clear_combinations_are_rejected`（扩用例） | `crates/store/tests/session_patch_conflict.rs` |
 | v10→v11 迁移（旧行 NULL、patch 生效、版本 pin） | `schema_migration_v10_to_v11_adds_autopilot_mode` | `crates/store/tests/store_migrations.rs` |

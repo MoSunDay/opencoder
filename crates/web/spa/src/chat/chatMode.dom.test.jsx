@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // chat 页「模式 Segmented」创建链路分流：
-//   - Operator 模式（缺省）：newId('operator')，POST /api/sessions body 不带
-//     kind / how_append（现状 wire 形状）；
+//   - Operator 模式（缺省）：newId('operator')，首条指令随创建提交，body 不带
+//     kind / how_append；
 //   - Agent 模式：newId('agent') + body.kind='agent' + first prompt + concrete agent；
 //     首条需求随创建请求提交，并由 worker 追加到该 Agent 的 how；
 //     「执行 Agent」下拉只列 Agent 配置（GET /api/agents）的 primary 注册卡，
@@ -160,16 +160,29 @@ describe('creation lanes', () => {
     expect(apiPost.mock.calls.some(([path]) => path === '/api/sessions/operator-delayed/prompt')).toBe(false);
   });
 
-  it('Operator mode keeps the legacy body: no kind, no how_append', async () => {
+  it('Operator mode admits its first prompt with creation: no kind, no how_append', async () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
     await send(container, 'operator lane');
     await waitFor(() => expect(createHits()).toHaveLength(1));
     expect(createHits()[0][1]).toEqual({
-      id: expect.stringMatching(/^operator-/), node_id: 'n1', agent: 'act',
+      id: expect.stringMatching(/^operator-/), node_id: 'n1', agent: 'act', prompt: 'operator lane',
     });
     expect(createHits()[0][1].kind).toBeUndefined();
     expect(createHits()[0][1].how_append).toBeUndefined();
+  });
+
+  it('keeps the first Operator instruction when its launcher closes on creation', async () => {
+    let unmount;
+    const onCreated = vi.fn(() => unmount());
+    const rendered = render(<ChatPanel launchKind="operator" onCreated={onCreated} />);
+    unmount = rendered.unmount;
+    await pick('n1');
+    await send(rendered.container, 'instruction before leaving TODO');
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('s1'));
+    expect(createHits()[0][1]).toMatchObject({ prompt: 'instruction before leaving TODO' });
+    expect(apiGet.mock.calls.some(([path]) => path.endsWith('/seq'))).toBe(false);
+    expect(apiPost.mock.calls.some(([path]) => path.endsWith('/prompt'))).toBe(false);
   });
 
   it('Operator mode creates a Codex session with injected env', async () => {

@@ -73,9 +73,9 @@ pub fn pin_selected(
             }
         }
     }
-    std::fs::File::open(&staging)?.sync_all()?;
+    opencoder_core::platform::fs::sync_directory(&staging)?;
     std::fs::rename(staging, destination)?;
-    std::fs::File::open(destination.parent().unwrap())?.sync_all()?;
+    opencoder_core::platform::fs::sync_directory(destination.parent().unwrap())?;
     tracing::info!(entries, elapsed_ms = started.elapsed().as_millis(), path = %destination.display(), "agent resource snapshot frozen");
     Ok(Some(destination.into()))
 }

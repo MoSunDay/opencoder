@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 #[path = "scheduler_v4/client.rs"]
 mod client;
 mod support;
@@ -21,19 +22,19 @@ struct ControlledClient {
     planning_calls: AtomicUsize,
     child_calls: AtomicUsize,
     hold_first_planning: bool,
-    hold_first_child: bool,
+    children_to_hold: usize,
     planning_gate: Arc<Semaphore>,
     child_gate: Arc<Semaphore>,
 }
 
 impl ControlledClient {
-    fn new(hold_first_planning: bool, hold_first_child: bool) -> Arc<Self> {
+    fn new(hold_first_planning: bool, children_to_hold: usize) -> Arc<Self> {
         Arc::new(Self {
             layered: LayeredClient::new(),
             planning_calls: AtomicUsize::new(0),
             child_calls: AtomicUsize::new(0),
             hold_first_planning,
-            hold_first_child,
+            children_to_hold,
             planning_gate: Arc::new(Semaphore::new(0)),
             child_gate: Arc::new(Semaphore::new(0)),
         })
@@ -51,7 +52,7 @@ impl ChatStream for ControlledClient {
         let mut upstream = self.layered.chat_stream(request)?;
         let gate = if ordinal == 0 && self.hold_first_planning && planning {
             Some(self.planning_gate.clone())
-        } else if ordinal == 0 && self.hold_first_child && !planning {
+        } else if ordinal < self.children_to_hold && !planning {
             Some(self.child_gate.clone())
         } else {
             None
@@ -156,7 +157,7 @@ async fn completed(fleet: &support::Fleet, id: &str, expected: usize) -> Vec<Val
 
 #[tokio::test]
 async fn server_restart_preserves_running_parallel_children_and_resumes_brain() {
-    let model = ControlledClient::new(false, true);
+    let model = ControlledClient::new(false, 2);
     let mut fleet = support::Fleet::new(1, model.clone()).await;
     let root = "brain-restart-running";
     let created = fleet
@@ -193,18 +194,17 @@ async fn server_restart_preserves_running_parallel_children_and_resumes_brain() 
         .unwrap()
         .to_string();
     fleet.stop_server().await;
-    let running = fleet.nodes[0]
-        .indexes()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|index| index.id == running_id)
-        .unwrap();
-    assert_eq!(
-        running.status,
-        opencoder_core::fleet::ExecutionStatus::Running
-    );
-    model.child_gate.add_permits(1);
+    // Hold both children until this check: the brain projection may still
+    // report an unblocked child as running after its node has completed it.
+    let indexes = fleet.nodes[0].indexes().await.unwrap();
+    for id in &before_ids {
+        let running = indexes.iter().find(|index| &index.id == id).unwrap();
+        assert_eq!(
+            running.status,
+            opencoder_core::fleet::ExecutionStatus::Running
+        );
+    }
+    model.child_gate.add_permits(before_ids.len());
     until(async || {
         fleet.nodes[0].indexes().await.unwrap().iter().any(|index| {
             index.id == running_id && index.status == opencoder_core::fleet::ExecutionStatus::Done
@@ -224,7 +224,7 @@ async fn server_restart_preserves_running_parallel_children_and_resumes_brain() 
 
 #[tokio::test]
 async fn server_restart_replays_a_decision_committed_while_offline() {
-    let model = ControlledClient::new(true, false);
+    let model = ControlledClient::new(true, 0);
     let mut fleet = support::Fleet::new(1, model.clone()).await;
     let root = "brain-restart-undelivered";
     let created = fleet

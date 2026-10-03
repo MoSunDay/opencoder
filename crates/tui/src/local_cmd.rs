@@ -57,7 +57,7 @@ fn format_ps(procs: &[bg::BgInfo]) -> Vec<Line<'static>> {
     }
     let mut lines = Vec::with_capacity(procs.len() + 1);
     lines.push(Line::from(Span::styled(
-        format!("[ps] background bash ({}):", procs.len()),
+        format!("[ps] background commands ({}):", procs.len()),
         theme::local_style(),
     )));
     for p in procs {
@@ -93,7 +93,7 @@ mod tests {
     fn format_ps_one() {
         let lines = format_ps(&[info(111)]);
         assert_eq!(lines.len(), 2);
-        assert_eq!(render(&lines[0]), "[ps] background bash (1):");
+        assert_eq!(render(&lines[0]), "[ps] background commands (1):");
         assert_eq!(render(&lines[1]), "  111  /tmp/opencoder_bg_111.output");
     }
 
@@ -101,7 +101,7 @@ mod tests {
     fn format_ps_many() {
         let lines = format_ps(&[info(1), info(22), info(333)]);
         assert_eq!(lines.len(), 4);
-        assert_eq!(render(&lines[0]), "[ps] background bash (3):");
+        assert_eq!(render(&lines[0]), "[ps] background commands (3):");
         assert_eq!(render(&lines[1]), "  1  /tmp/opencoder_bg_1.output");
         assert_eq!(render(&lines[2]), "  22  /tmp/opencoder_bg_22.output");
         assert_eq!(render(&lines[3]), "  333  /tmp/opencoder_bg_333.output");

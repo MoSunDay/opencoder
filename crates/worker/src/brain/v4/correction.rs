@@ -10,6 +10,15 @@ use tokio_util::sync::CancellationToken;
 const MAX_ATTEMPTS: u64 = 3;
 const BUDGET_MS: i64 = 300_000;
 
+fn remaining_budget(deadline_ms: i64, now: i64) -> Result<std::time::Duration> {
+    let remaining = deadline_ms.saturating_sub(now);
+    anyhow::ensure!(
+        remaining > 0,
+        "brain decision exceeded five-minute correction budget"
+    );
+    Ok(std::time::Duration::from_millis(remaining as u64))
+}
+
 async fn mark(
     worker: &Worker,
     context: &LayeredContext,
@@ -70,12 +79,7 @@ pub(super) async fn decide(
                 .context("decision context has no run state")?;
             run.error = Some(format!("Previous decision rejected: {feedback}. Correct only the decision; no capability was dispatched."));
         }
-        let remaining = std::time::Duration::from_millis(
-            deadline_ms.saturating_sub(opencoder_core::message::now_ms()) as u64,
-        );
-        if remaining.is_zero() {
-            anyhow::bail!("brain decision exceeded five-minute correction budget");
-        }
+        let remaining = remaining_budget(deadline_ms, opencoder_core::message::now_ms())?;
         // Let the container's cancellation path reap runc and remove its bundle.
         // Dropping that future via timeout would bypass its cleanup.
         let attempt_cancel = cancel.child_token();
@@ -116,4 +120,17 @@ pub(super) async fn decide(
     Err(anyhow!(
         "layered decision invalid after {MAX_ATTEMPTS} attempts: {feedback}"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expired_recovery_deadline_never_becomes_an_unsigned_wait() {
+        assert_eq!(remaining_budget(1000, 999).unwrap().as_millis(), 1);
+        assert!(remaining_budget(1000, 1000).is_err());
+        assert!(remaining_budget(1000, 1001).is_err());
+        assert!(remaining_budget(i64::MIN, i64::MAX).is_err());
+    }
 }

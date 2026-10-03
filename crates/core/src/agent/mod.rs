@@ -170,7 +170,7 @@ pub fn default_agent_name() -> &'static str {
 }
 
 pub fn builtin_agents() -> Vec<Agent> {
-    vec![
+    let mut agents = vec![
         Agent {
             name: "act".into(),
             kind: AgentKind::Act,
@@ -238,11 +238,24 @@ pub fn builtin_agents() -> Vec<Agent> {
             prompt: "You are the scheduler and acceptance brain for a durable TODO workflow. Return exactly one JSON object matching the operation schema in the user prompt. Never emit markdown or prose outside JSON. Use only the supplied state and references; never invent execution evidence.".into(),
             tools: ToolFilter::Allow(Vec::new()),
         },
-    ]
+    ];
+    if cfg!(windows) {
+        for agent in &mut agents {
+            if let ToolFilter::Allow(tools) = &mut agent.tools {
+                for tool in tools {
+                    if tool == "bash" {
+                        *tool = "powershell".into();
+                    }
+                }
+            }
+            agent.description = agent.description.replace("bash", "PowerShell 7");
+        }
+    }
+    agents
 }
 
 pub fn base_prompt_act() -> String {
-    BASE_PROMPT.to_string()
+    crate::platform::shell::prompt(BASE_PROMPT)
 }
 
 /// Bash + subagent usage preamble appended to a custom `--prompt-file` prompt.
@@ -252,13 +265,26 @@ pub fn base_prompt_act() -> String {
 /// The `'build'` delegation clause matches the substring targeted by
 /// `base_prompt_plan` for build-stripping in plan mode.
 pub fn tool_preamble() -> &'static str {
-    "## Tools
+    #[cfg(windows)]
+    {
+        "## Tools
+- You have two tools: powershell (terminal ops: git, builds, tests, running scripts) and task (to spawn subagents).
+- For file operations, delegate to subagents: use 'explore' (read-only) for investigation, 'build' (full tools) for implementation.
+- Run tool calls in parallel when none needs the other's output; otherwise run sequentially. You MAY emit multiple `task` blocks in a single response -- independent subagents dispatched this way run concurrently, so prefer batching independent investigations.
+- Keep responses concise and friendly. Do not dump large files; reference paths only.
+- When a tool errors, read the error, fix the approach, and retry; do not loop on the same failing command.
+"
+    }
+    #[cfg(not(windows))]
+    {
+        "## Tools
 - You have two tools: bash (terminal ops: git, builds, tests, running scripts) and task (to spawn subagents).
 - For file operations, delegate to subagents: use 'explore' (read-only) for investigation, 'build' (full tools) for implementation.
 - Run tool calls in parallel when none needs the other's output; otherwise run sequentially. You MAY emit multiple `task` blocks in a single response -- independent subagents dispatched this way run concurrently, so prefer batching independent investigations.
 - Keep responses concise and friendly. Do not dump large files; reference paths only.
 - When a tool errors, read the error, fix the approach, and retry; do not loop on the same failing command.
 "
+    }
 }
 
 /// The BASE_PROMPT / `tool_preamble` clause advertising the 'build' (full
@@ -292,7 +318,7 @@ pub fn base_prompt_plan() -> String {
     // delegation clause from the shared base prompt before appending the
     // plan suffix. Act mode keeps the full BASE_PROMPT unchanged.
     let base = strip_build_delegation(BASE_PROMPT);
-    format!("{base}\n\n{}", PLAN_SUFFIX)
+    crate::platform::shell::prompt(&format!("{base}\n\n{}", PLAN_SUFFIX))
 }
 
 pub fn base_prompt_explore() -> String {
@@ -304,16 +330,16 @@ pub fn base_prompt_explore() -> String {
 }
 
 pub fn base_prompt_build() -> String {
-    "You are an implementation subagent. You have bash (terminal ops; use cat/grep/sed to read files) \
+    crate::platform::shell::prompt("You are an implementation subagent. You have bash (terminal ops; use cat/grep/sed to read files) \
      and edit (precise string replacement) tools. Complete the specific task delegated to you: \
      inspect code, make edits, run bash commands, and verify your work. \
      Do not ask questions; infer reasonable defaults and proceed. \
      After finishing, briefly state what you changed and the key file paths."
-        .to_string()
+    )
 }
 
 pub fn base_prompt_sidecar() -> String {
-    "You are the sidecar observer of a main agent session: a temporary bypass loop that answers \
+    crate::platform::shell::prompt("You are the sidecar observer of a main agent session: a temporary bypass loop that answers \
      questions about the main task's progress, status, or plan. The user message carries a \
      snapshot of the main session's conversation context as background - treat it as read-only \
      reference material. You have read, search, and ls tools, plus bash for read-only \
@@ -321,7 +347,7 @@ pub fn base_prompt_sidecar() -> String {
      state-changing bash command is intercepted and refused - do not retry or look for \
      another write path. You CANNOT edit or write files and must never claim any change was made. \
      Answer concisely and progress-oriented: what is done, what is in flight, what comes next."
-        .to_string()
+    )
 }
 
 const PLAN_SUFFIX: &str = "\

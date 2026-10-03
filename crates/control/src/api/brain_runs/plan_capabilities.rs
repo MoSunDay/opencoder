@@ -79,6 +79,8 @@ pub fn validate(
                 "unavailable capability: {}",
                 cap.capability_id
             );
+            opencoder_brain::contracts::validate_fields(&cap.required_inputs)?;
+            opencoder_brain::contracts::validate_fields(&cap.required_outputs)?;
             if cap.kind != ExecutionKind::Brain {
                 continue;
             }
@@ -118,9 +120,11 @@ mod tests {
                 ExecutionKind::Agent
             },
             target: id.into(),
+            summary: "capability purpose".into(),
             input_desc: "inputs".into(),
             output_desc: "result".into(),
             required_inputs: vec![],
+            required_outputs: vec![],
             definition: child.map(|plan| json!({"plan":plan})).unwrap_or(json!({})),
             version: "1".into(),
         }

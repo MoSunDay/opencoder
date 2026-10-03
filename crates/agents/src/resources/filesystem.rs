@@ -113,7 +113,7 @@ pub fn write_files(dir: &Path, files: &[FileEntry]) -> io::Result<()> {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&target, fs::Permissions::from_mode(file.mode))?;
         }
-        fs::File::open(&target)?.sync_all()?;
+        opencoder_core::platform::fs::sync_file(&target)?;
         let mut ancestor = Some(parent);
         while let Some(path) = ancestor.filter(|p| p.starts_with(dir)) {
             sync_dir_best_effort(path);

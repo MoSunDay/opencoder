@@ -1,5 +1,6 @@
 //! Environment detection: is tmux installed / are we inside a tmux client?
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -8,6 +9,7 @@ pub fn tmux_available() -> bool {
     which_tmux().is_some()
 }
 
+#[cfg(unix)]
 pub(crate) fn which_tmux() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -30,4 +32,9 @@ pub(crate) fn which_tmux() -> Option<PathBuf> {
 /// every pane). Mirrors `crates/tui/src/selection.rs`.
 pub fn inside_tmux() -> bool {
     std::env::var_os("TMUX").is_some()
+}
+
+#[cfg(windows)]
+pub(crate) fn which_tmux() -> Option<PathBuf> {
+    None
 }

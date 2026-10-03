@@ -9,6 +9,8 @@ export function capabilityForm(entry, target) {
     eng_inputs: (entry?.eng_inputs || []).map((input) => input.content || ''),
     target_kind: target?.kind || DEFAULT_TARGET.kind,
     target: target?.target || DEFAULT_TARGET.target,
+    required_inputs: target?.required_inputs || [],
+    required_outputs: target?.required_outputs || [],
   };
 }
 
@@ -25,6 +27,18 @@ export function capabilityBody(values) {
 }
 
 export function needsTargetSave(original, target) {
-  const previous = original || DEFAULT_TARGET;
-  return previous.kind !== target.kind || previous.target !== target.target;
+  if (!original) return true;
+  const previous = original;
+  return previous.kind !== target.kind || previous.target !== target.target
+    || JSON.stringify(previous.required_inputs || []) !== JSON.stringify(target.required_inputs || [])
+    || JSON.stringify(previous.required_outputs || []) !== JSON.stringify(target.required_outputs || []);
+}
+
+export function capabilityTarget(values) {
+  const target = { kind: values.target_kind, target: values.target.trim() };
+  for (const field of ['required_inputs', 'required_outputs']) {
+    const names = (values[field] || []).map((name) => name.trim()).filter(Boolean);
+    if (names.length) target[field] = names;
+  }
+  return target;
 }

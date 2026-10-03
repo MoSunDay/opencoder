@@ -17,17 +17,24 @@ pub fn descriptors(raw: &[Value]) -> Vec<BrainCapabilityDescriptor> {
                     .into(),
                 kind: serde_json::from_value(value.get("kind")?.clone()).ok()?,
                 target: value["target"].as_str().unwrap_or("").into(),
+                summary: value["summary"].as_str().unwrap_or("").into(),
                 input_desc: value["input_desc"].as_str().unwrap_or("").into(),
                 output_desc: value["output_desc"].as_str().unwrap_or("").into(),
-                required_inputs: value["required_inputs"]
-                    .as_array()
-                    .map(|v| {
-                        v.iter()
-                            .filter_map(|x| x.as_str().map(str::to_owned))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                required_inputs: serde_json::from_value(
+                    value
+                        .get("required_inputs")
+                        .cloned()
+                        .unwrap_or(serde_json::json!([])),
+                )
+                .ok()?,
                 definition: value.get("definition").cloned().unwrap_or(Value::Null),
+                required_outputs: serde_json::from_value(
+                    value
+                        .get("required_outputs")
+                        .cloned()
+                        .unwrap_or(serde_json::json!([])),
+                )
+                .ok()?,
                 version: value["version"].as_str().unwrap_or("").into(),
             })
         })

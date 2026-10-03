@@ -13,7 +13,7 @@
   <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue" />
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-orange?logo=rust" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
-  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" />
   <img alt="status" src="https://img.shields.io/badge/status-active%20development-yellow" />
 </p>
 
@@ -57,6 +57,8 @@ OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它�
 - **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；libsql WAL 并发读写，千条消息追加 30 ms。
 
 ## 🚀 快速开始
+
+Windows 11 x64 支持原生 TUI 和 operator 节点，使用稳定版 PowerShell 7.4 及以上（7.x）。安装、构建与支持范围见 [Windows 使用说明](docs/windows.md)。
 
 > 👉 新用户上手（TUI 键位、notepad 浏览/编辑文件、任务附加备注等）见 [**快速上手指南**](docs/quickstart.md)。
 
@@ -119,6 +121,8 @@ TUI 事件命令可写在 `~/.opencoder/hooks.json`：`turn_done` 在最终回�
 `model` 格式为 `"{provider}/{model_id}"`，provider 名匹配 `providers` map 的 key（未匹配则回退到默认 `provider`）。`api_key` / header `value` 支持 `{ENV_VAR}` 环境变量间接引用。
 
 接入 GPT-5/6 时，在对应 provider 中设置 `"protocol": "responses"`，并填写服务端提供的模型 ID。未设置协议的旧配置默认使用 `chat_completions`。两种协议可以混用，支持流式推理、工具/MCP、图片、子代理和会话恢复。配置示例与验收范围见 [Responses API](features/responses/index.md)。
+
+需要操作桌面应用或浏览器时，可安装可选的 [`opencoder-computer`](tools/computer-use/README.md)，通过 `/cli` 注册接入。它使用独立配置的桌面模型，由 Cua 的 Agent 操作已有远程桌面；平台能力沿用 Cua。
 
 ### 三种使用方式
 

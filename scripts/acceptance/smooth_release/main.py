@@ -24,6 +24,8 @@ from metrics import verify as verify_traffic
 from rolling import probes
 from ingress_requests import LateRequest
 from ingress_requests.node import NodeChannel
+from domain_checks import ontology
+from domain_checks.observation import observe
 
 
 def done(env, identifier):
@@ -34,13 +36,14 @@ def done(env, identifier):
     return value if status in ['done','idle'] else None
 
 
-def exercise(env):
+def exercise(env, observe_seconds=0):
     first = env.warm('r1')
     probe = probes.spec(probes.publish_probe(env.settings, first, env))
     first_skill = Path(first['runtime_data']) / 'global-skills/release-reference/SKILL.md'
     assert 'first release bytes' in first_skill.read_text()
     env.switch(first)
     print('first release ready',flush=True)
+    ontology_proof = ontology.seed(env)
     probes.public(env.settings,first,env,90)
     todo = {'id':'todos-release-chain','kind':'todos','input':{'spec':todo_spec()}}
     receipt = env.api('/api/executions','POST',todo)
@@ -98,6 +101,8 @@ def exercise(env):
         late = LateRequest(env, {'id':late_id,'kind':'dag','input':{'definition':probe}})
         node_channel = NodeChannel(env, f"http://127.0.0.1:{first['host_port']}")
         env.switch(second)
+        ontology.verify(env, ontology_proof)
+        ontology_proof = ontology.update(env, ontology_proof)
         print('second release active',flush=True)
         assert env.retire(first), 'Server cannot retire while ingress still owns accepted requests'
         env.http(env.settings.host_url,'/servers/r1','POST',{
@@ -127,6 +132,7 @@ def exercise(env):
             assert error.code == 409
         third = env.warm('r3')
         env.switch(third)
+        ontology.verify(env, ontology_proof)
         print('third release active',flush=True)
         assert env.runtime_pid(first) == pid
         unchanged_shell()
@@ -140,6 +146,7 @@ def exercise(env):
         third_pid = env.runtime_pid(third)
         env.reopen(second)
         env.switch(second)
+        ontology.verify(env, ontology_proof)
         print('rollback active with both old and new work running',flush=True)
         env.api('/api/executions','POST',{'id':'dag-return','kind':'dag','input':{'definition':probe}})
         until(lambda:done(env,'dag-return'),'rollback new task')
@@ -194,16 +201,20 @@ def exercise(env):
     assert env.runtime_pid(first) != 0
     assert not failures, failures
     assert traffic, 'traffic fixture never submitted'
+    observation = observe(env, ontology_proof, probe, observe_seconds, done, until) if observe_seconds else None
     result = {'result':'PASS','build':env.info,'cases':['three-runtime-processes','two-host-handovers',
         'native-dag-continues','shell-process-continues','pinned-global-skills','todo-dependency-chain','continuous-submission','request-replay-conflict',
         'sse-cursor-reconnect','hibernate-history-wake','rollback-with-live-new-work','server-sigkill-recovery',
-        'independent-readonly-nfs','accepted-ingress-request-before-reload','node-channel-releases-ingress-worker'],'traffic':traffic,'failures':failures,
+        'independent-readonly-nfs','ontology-text-and-aspect-survive-switch-and-rollback','accepted-ingress-request-before-reload','node-channel-releases-ingress-worker'],'traffic':traffic,'failures':failures,
         'todo_calls':env.model.calls,'sse_ids':stream.ids,'sse_resume_seconds':stream.resume_delays,
         'continuity':continuity['metrics'],
         'runtime_pid_before':pid,'shell_pid':shell_pid,'shell_start':shell_start}
     if container:
         result['cases'].append('real-oci-container-continues')
         result['container'] = container
+    if observation:
+        result['cases'].append('post-rollback-observation')
+        result['observation'] = observation
     (env.root / 'result.json').write_text(json.dumps(result,indent=2))
     print(json.dumps({'result':'PASS','evidence':str(env.root),'submissions':len(traffic),
         'max_accept_seconds':max(t['seconds'] for t in traffic)}),flush=True)
@@ -216,6 +227,8 @@ def main():
     parser.add_argument('--data-parent',type=Path,
         help='Optional isolated fixture storage; production latency acceptance must use production storage')
     parser.add_argument('--rootfs',type=Path,required=True,help='Verified native DAG image')
+    parser.add_argument('--observe-seconds',type=int,default=0,
+        help='Live observation after rollback; use 900 for the repository acceptance gate')
     parser.add_argument('--inside',action='store_true',help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not args.inside:
@@ -223,7 +236,9 @@ def main():
             sys.executable, str(Path(__file__).resolve()), *sys.argv[1:], '--inside'])
     env = Environment(args.bin_dir.resolve(),args.nginx.resolve(),args.rootfs.resolve(),args.data_parent)
     try:
-        exercise(env)
+        if args.observe_seconds < 0:
+            raise ValueError('observe-seconds must not be negative')
+        exercise(env, args.observe_seconds)
     except BaseException:
         (env.root / 'failure.txt').write_text(traceback.format_exc())
         env.diagnose()

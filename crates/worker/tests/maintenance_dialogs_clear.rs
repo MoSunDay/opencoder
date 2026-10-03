@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 //! `dialogs_clear` maintenance command: terminal operator sessions are deleted
 //! from the node store together with their journal records (so the next full
 //! index report cannot resurrect them), while a still-running execution is

@@ -242,14 +242,23 @@ impl NFSFileSystem for ReadOnlyAgentsFs {
         if !meta.is_file() {
             return Err(nfsstat3::NFS3ERR_ACCES);
         }
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.custom_flags(0x00200000);
+        }
+        let mut file = options
             .open(self.root.join(&rel))
             .map_err(|_| nfsstat3::NFS3ERR_IO)?;
         let metadata = file.metadata().map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        if !metadata.is_file() {
+        if !metadata.is_file() || opencoder_core::platform::fs::is_link(&metadata) {
             return Err(nfsstat3::NFS3ERR_ACCES);
         }
         file.seek(SeekFrom::Start(offset))

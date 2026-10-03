@@ -439,6 +439,9 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     } else {
         write_version(conn, SCHEMA_VERSION).await?;
     }
+    // Historical v32 catalogs can retain milestone columns despite their
+    // watermark. Converge the actual shape before creating current indexes.
+    catalog::upgrade(conn).await?;
     // The task_type index depends on a column that only physically exists in
     // fresh databases (via CREATE TABLE) or after the v5 migration adds it for
     // older databases, so it must run AFTER `migrate` rather than in the

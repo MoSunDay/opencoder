@@ -267,30 +267,65 @@ async fn cancel(
                     },
                 )
                 .await;
-            ensure!(reply.status < 300, "child cancellation: {}", reply.body);
+            if reply.status == 404
+                && current.status == LayeredOperationStatus::Creating
+                && current.cancel_requested
+            {
+                // A timed-out admission may retain a control index without
+                // ever accepting the child. Only a frozen, quiescent owner
+                // can prove that its 404 will not race a later acceptance.
+                let admission = state
+                    .hub
+                    .call(
+                        &index.node_id,
+                        NodeOperation::Admission {
+                            command: NodeAdmissionCommand::Status,
+                        },
+                    )
+                    .await;
+                ensure!(
+                    (200..300).contains(&admission.status)
+                        && admission.body["mode"] == "frozen"
+                        && admission.body["active_runs"] == 0
+                        && admission.body["owned_processes"] == 0,
+                    "missing child cancellation requires a frozen, quiescent owner"
+                );
+                cancel_unadmitted(state, source, current).await?;
+            } else {
+                ensure!(reply.status < 300, "child cancellation: {}", reply.body);
+            }
         } else {
             // Admission never committed an index. Make that durable fact a
             // cancelled terminal operation so a cancelled run cannot wait.
-            let notice = LayeredTerminalEvent {
-                run_id: source.id.clone(),
-                operation_id: current.operation_id.clone(),
-                execution_kind: current.execution_kind,
-                execution_id: current.execution_id.clone(),
-                status: LayeredOperationStatus::Cancelled,
-                source_sequence: 0,
-            };
-            let reply = runs::call(state, &source.id, "layered_terminal", json!(notice)).await;
-            ensure!(
-                reply.status < 300,
-                "synthetic cancellation receipt: {}",
-                reply.body
-            );
+            cancel_unadmitted(state, source, current).await?;
         }
     }
     let reply = runs::call(state, &source.id, "layered_cancel_ack", json!(current)).await;
     ensure!(
         reply.status < 300,
         "layered cancel acknowledgement: {}",
+        reply.body
+    );
+    Ok(())
+}
+
+async fn cancel_unadmitted(
+    state: &Arc<AppState>,
+    source: &ExecutionRef,
+    operation: &LayeredOperation,
+) -> Result<()> {
+    let notice = LayeredTerminalEvent {
+        run_id: source.id.clone(),
+        operation_id: operation.operation_id.clone(),
+        execution_kind: operation.execution_kind,
+        execution_id: operation.execution_id.clone(),
+        status: LayeredOperationStatus::Cancelled,
+        source_sequence: 0,
+    };
+    let reply = runs::call(state, &source.id, "layered_terminal", json!(notice)).await;
+    ensure!(
+        reply.status < 300,
+        "synthetic cancellation receipt: {}",
         reply.body
     );
     Ok(())

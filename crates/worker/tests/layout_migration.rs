@@ -1,3 +1,4 @@
+#![cfg(unix)]
 use opencoder_core::fleet::ExecutionKind;
 use opencoder_worker::{migrate_layout, Worker, WorkerOptions};
 use serde_json::{json, Value};

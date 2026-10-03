@@ -14,6 +14,7 @@ pub struct Running {
     stderr: JoinHandle<std::io::Result<String>>,
     stdin: JoinHandle<std::io::Result<()>>,
     owner: Option<OwnedSupervisor>,
+    #[cfg(unix)]
     pid: u32,
 }
 
@@ -113,6 +114,7 @@ pub fn spawn(
     let mut child = cmd
         .spawn()
         .context("cannot start Codex binary on execution node")?;
+    #[cfg(unix)]
     let pid = child.id().context("Codex process missing PID")?;
     let owner = lease.map(|l| l.spawned(child.id())).transpose()?;
     let mut input = child.stdin.take().context("Codex stdin missing")?;
@@ -143,6 +145,7 @@ pub fn spawn(
         stderr,
         stdin,
         owner,
+        #[cfg(unix)]
         pid,
     })
 }

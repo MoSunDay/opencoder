@@ -61,9 +61,9 @@ fn isolated_home() -> Option<PathBuf> {
 }
 
 /// Resolve the home dir for config discovery: the thread-local override when a
-/// test set it, otherwise the real `dirs::home_dir()`.
+/// test set it, otherwise the real `crate::platform::home_dir()`.
 fn config_home_dir() -> Option<PathBuf> {
-    isolated_home().or_else(dirs::home_dir)
+    isolated_home().or_else(crate::platform::home_dir)
 }
 
 /// The binary's own config home (`~/.opencoder`): the directory that owns
@@ -88,9 +88,9 @@ pub(super) fn primary_global_config_path() -> Option<PathBuf> {
 
 /// Resolve the XDG config dir: the thread-local override when a test set it
 /// (mirrors the tests that pointed both `HOME` and `XDG_CONFIG_HOME` at one
-/// tempdir), otherwise the real `dirs::config_dir()`.
+/// tempdir), otherwise the real `crate::platform::config_dir()`.
 fn config_xdg_dir() -> Option<PathBuf> {
-    isolated_home().or_else(dirs::config_dir)
+    isolated_home().or_else(crate::platform::config_dir)
 }
 
 /// Read an env var, *unless* a test isolation override is active on this

@@ -12,6 +12,7 @@ import { FleetTeamsPanel as TeamPanel } from '../fleet/teams.jsx';
 import { ProjectPanel } from '../project/project.jsx';
 import { SchedulePanel } from '../schedule/panel.jsx';
 import { TodoPanel } from '../todoPanel.jsx';
+import { OntologyGraphPanel, OntologyEntitiesPanel, OntologyTypesPanel, OntologyRelationshipsPanel, OntologyEnvironmentsPanel } from '../ontology/panels.tsx';
 
 /// Page components keyed by store `page` — one map instead of a ternary chain
 /// so adding a page stays one line. Keys must equal nav.js ALL_PAGES exactly
@@ -27,4 +28,9 @@ export const PANELS = {
   agents: AgentsPanel,
   nodes: NodesPanel,
   brain: BrainPanel,
+  ontologyGraph: OntologyGraphPanel,
+  ontologyEntities: OntologyEntitiesPanel,
+  ontologyTypes: OntologyTypesPanel,
+  ontologyRelationships: OntologyRelationshipsPanel,
+  ontologyEnvironments: OntologyEnvironmentsPanel,
 };

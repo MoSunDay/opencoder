@@ -62,15 +62,10 @@ pub(super) fn durable_json(path: &Path, value: &Record) -> Result<()> {
     let parent = path.parent().context("journal path has no parent")?;
     opencoder_core::share_fs::durable_create_dir_all(parent)?;
     let temp = parent.join(format!(".execution.tmp-{}", ulid::Ulid::new()));
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temp)?;
+    let mut file = opencoder_core::platform::fs::create_private_file(&temp)?;
     file.write_all(&serde_json::to_vec(value)?)?;
     file.sync_all()?;
-    std::fs::rename(&temp, path)?;
-    std::fs::File::open(parent)?.sync_all()?;
+    opencoder_core::platform::fs::replace(&temp, path)?;
+    opencoder_core::platform::fs::sync_directory(parent)?;
     Ok(())
 }

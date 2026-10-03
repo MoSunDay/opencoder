@@ -1,8 +1,8 @@
 """Stop every retained writer; replace the independent resource service."""
 import shutil
-from pathlib import Path
-import time
 import subprocess
+import time
+from pathlib import Path
 from .. import probes, units
 from ..state import atomic_bytes
 from .configuration import actual_configs as configs
@@ -20,32 +20,48 @@ def service_names(settings, journal):
 def states(settings, journal, operations):
     result = {}
     for name in service_names(settings, journal):
-        raw = operations.output('systemctl', 'show', name, '-p', 'ActiveState', '-p', 'UnitFileState')
+        raw = operations.output('systemctl', 'show', name, '-p', 'ActiveState', '-p', 'UnitFileState', '-p', 'LoadState')
         values = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
-        result[name] = {'active': values.get('ActiveState') == 'active',
+        result[name] = {'loaded': values.get('LoadState') != 'not-found',
+                        'active': values.get('ActiveState') == 'active',
                         'enabled': values.get('UnitFileState') == 'enabled'}
     return result
 
 
+def stopped_state(name, status):
+    return (status.get('ActiveState') in ('inactive', 'failed')
+            and (name.endswith('.mount') or status.get('MainPID') == '0'))
+
+
 def stop_unit(name, operations, seconds):
     operations.run('systemctl', '--no-block', 'stop', name)
-    last_signal = time.monotonic()
+    started = last_signal = time.monotonic()
+    forced = False
     def stopped():
-        nonlocal last_signal
+        nonlocal last_signal, forced
         raw = operations.output('systemctl', 'show', name, '-p', 'ActiveState', '-p', 'MainPID')
         status = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
-        if status.get('ActiveState') in ('inactive', 'failed'):
+        if stopped_state(name, status):
             return True
         now = time.monotonic()
-        if (status.get('ActiveState') == 'deactivating' and
-                int(status.get('MainPID', '0')) > 0 and now - last_signal >= 1):
-            # An old process may have missed the first signal while replacing
-            # its listener. Repeat the graceful signal for this exact unit.
+        # The maintenance caller has already frozen admission and captured
+        # idle inventories. A legacy service may wait forever on its channel
+        # tasks (TimeoutStopSec=infinity); finish this explicit unit stop while
+        # retaining time to confirm that systemd actually reaped the process.
+        if name.endswith('.service') and status.get('ActiveState') == 'deactivating' and not forced and now - started >= max(1, seconds - 5):
+            try:
+                operations.run('systemctl', 'kill', '--kill-who=all', '--signal=SIGKILL', name)
+            except subprocess.CalledProcessError:
+                current = operations.output('systemctl', 'show', name, '-p', 'ActiveState', '-p', 'MainPID')
+                actual = dict(line.split('=', 1) for line in current.splitlines() if '=' in line)
+                if stopped_state(name, actual):
+                    return True
+                raise
+            forced = True
+        elif status.get('ActiveState') == 'deactivating' and int(status.get('MainPID', '0')) and now - last_signal >= 1:
             try:
                 operations.run('systemctl', 'kill', '--kill-who=main', '--signal=SIGTERM', name)
             except subprocess.CalledProcessError:
-                # Exit can race the MainPID read. Accept it only after checking
-                # the terminal systemd state again.
                 state = operations.output('systemctl', 'show', name, '-p', 'ActiveState', '--value').strip()
                 if state in ('inactive', 'failed'):
                     return True
@@ -61,15 +77,30 @@ def stop(settings, journal, operations, seconds=90):
     for record in journal['releases'].values():
         servers.add(record['server_unit'])
         servers.update(item['unit'] for item in record.get('previous_servers', []))
-    # Admission is closed and every task is idle. Close Server node channels
-    # first so old Hosts can finish shutdown; keep NFS alive until all consumers
-    # have stopped and released their mounts.
+    # Closed, idle Servers release node channels before old Hosts shut down.
+    # Keep exporters alive until every consumer has stopped.
     order = sorted(names, key=lambda n: (2 if n == 'opencoder-resources.service'
-                                        else 0 if n in servers else 1, n))
+                                       else 0 if n in servers else 1, n))
     for name in order:
         if operations.output('systemctl', 'show', name, '-p', 'LoadState', '--value').strip() == 'not-found':
             continue
         stop_unit(name, operations, seconds)
+
+
+def resume(scope, operations, seconds):
+    """A restored Host requires its formerly active Runtimes to answer first."""
+    import json
+    names = [name for name, state in scope['services'].items() if state['active']]
+    inventories = {json.loads(item['config']).get('unit'): json.loads(item['config'])['endpoint']
+                   for item in scope.get('inventories', {}).values()}
+    for name in sorted(names, key=lambda n: ('resources' not in n, 'runtime' not in n,
+                                            'host' not in n, n)):
+        operations.run('systemctl', 'start', name)
+        if name == 'opencoder-resources.service':
+            from .mounts import resume_existing
+            resume_existing(scope.get('mounts', {}).get('native', []), operations)
+        if name in inventories:
+            operations.wait(lambda: operations.http(inventories[name].rstrip('/'), '/inventory'), seconds)
 
 
 def resource_upgrade(settings, bundle, operations):

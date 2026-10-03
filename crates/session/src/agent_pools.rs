@@ -72,6 +72,8 @@ mod tests {
     /// under the shared env lock so concurrent env-flipping tests serialize.
     struct RootsGuard {
         prev_home: Option<std::ffi::OsString>,
+        #[cfg(windows)]
+        prev_profile: Option<std::ffi::OsString>,
         _home: tempfile::TempDir,
         _env: MutexGuard<'static, ()>,
     }
@@ -87,9 +89,15 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let prev_home = std::env::var_os("HOME");
         std::env::set_var("HOME", home.path());
+        #[cfg(windows)]
+        let prev_profile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", home.path());
         set_agents_dir_override(Some(agents.path().to_path_buf()));
         let guard = RootsGuard {
             prev_home,
+            #[cfg(windows)]
+            prev_profile,
             _home: home,
             _env,
         };
@@ -102,6 +110,11 @@ mod tests {
             match self.prev_home.take() {
                 Some(h) => std::env::set_var("HOME", h),
                 None => std::env::remove_var("HOME"),
+            }
+            #[cfg(windows)]
+            match self.prev_profile.take() {
+                Some(profile) => std::env::set_var("USERPROFILE", profile),
+                None => std::env::remove_var("USERPROFILE"),
             }
         }
     }

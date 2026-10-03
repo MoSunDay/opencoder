@@ -4,10 +4,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import sqlite3
 import tempfile
 from .. import backup
+from ..backup_files import tree
 from ..state import atomic_bytes, write
 
 
@@ -20,14 +20,7 @@ def digest(path):
 
 
 def inventory(root):
-    files = {}
-    for path in sorted(root.rglob('*')):
-        name = path.relative_to(root).as_posix()
-        if path.is_symlink():
-            files[name] = {'link': os.readlink(path)}
-        elif path.is_file():
-            files[name] = {'sha256': digest(path), 'mode': path.stat().st_mode & 0o777}
-    return files
+    return tree.inventory(root)
 
 
 def verify(root):
@@ -42,13 +35,13 @@ def verify(root):
     return metadata
 
 
-def managed_units(settings):
-    paths = [*settings.systemd_dir.glob('opencoder*.service'),
-                   *settings.systemd_dir.glob('opencoder*.service.d'),
-                   *settings.systemd_dir.glob('mnt-opencoder*.mount')]
-    paths.extend(settings.systemd_dir / suffix for name in
-                 (settings.legacy_server_unit, settings.legacy_agent_unit)
-                 for suffix in (name, name + '.d') if (settings.systemd_dir / suffix).exists())
+def managed_units(settings, original, scope):
+    from .services import service_names
+    from .mounts import name as mount_name
+    from signal_release.controller import prefix
+    names = [*service_names(settings, original), prefix(settings) + '@.service',
+             *(mount_name(p['path']) for p in scope.get('mounts', {}).get('native', []))]
+    paths = [settings.systemd_dir / suffix for name in names for suffix in (name, name + '.d')]
     return sorted(set(paths))
 
 
@@ -62,9 +55,12 @@ def capture_file(stage, path, name):
                           for p in members}
         destination.parent.mkdir(parents=True, exist_ok=True)
         if path.is_dir() and not path.is_symlink():
-            shutil.copytree(path, destination, symlinks=True)
+            tree.copy_tree(path, destination)
         else:
-            shutil.copy2(path, destination, follow_symlinks=False)
+            if path.is_symlink():
+                destination.symlink_to(path.readlink())
+            else:
+                tree.copy_leaf(path, destination)
     return item
 
 
@@ -77,7 +73,7 @@ def create(settings, output, original, scope):
     output.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix='.maintenance-incomplete-', dir=output.parent))
     backup.snapshot(settings, stage / 'data', stopped=True)
-    paths = [*managed_units(settings), settings.nginx_include,
+    paths = [*managed_units(settings, original, scope), settings.nginx_include,
              settings.state_dir / 'services', settings.state_dir / 'resources',
              settings.state_dir / 'host/deployment.json']
     for workdir in (settings.server_workdir, settings.agent_workdir):
@@ -110,7 +106,14 @@ def create(settings, output, original, scope):
                     atomic_bytes(saved, base64.b64decode(prior['content']), 0o644)
                 elif saved.exists():
                     saved.unlink()
-    metadata = {'original': original, 'scope': scope, 'control': controls}
+    owners = {}
+    for name, root in [('server', settings.server_data), ('host', settings.state_dir / 'host'),
+                       ('resources', settings.state_dir / 'resources')]:
+        for path in root.rglob('*.db'):
+            if not path.is_symlink():
+                info = path.stat()
+                owners[str(Path(name) / path.relative_to(root))] = [info.st_uid, info.st_gid, info.st_mode & 0o777]
+    metadata = {'original': original, 'scope': scope, 'control': controls, 'data_owners': owners}
     for record in original['releases'].values():
         bundle = settings.state_dir / 'releases' / record['id'] / 'bundle'
         if bundle.is_dir():
@@ -143,6 +146,12 @@ def quote(name):
     return '"' + name.replace('"', '""') + '"'
 
 
+def snapshot_uri(path):
+    # Completed SQLite backup files have no live WAL. Immutable reads also
+    # prevent SQLite from creating WAL/SHM files inside the sealed backup.
+    return path.resolve().as_uri() + '?mode=ro&immutable=1'
+
+
 def project_table(name):
     return name.startswith('project_') or name == 'schema_version'
 
@@ -162,7 +171,7 @@ def unrelated(conn, schema='main'):
 def restore_projects(source, target):
     """Restore project DDL, indexes and schema version without writing auth data."""
     with closing(sqlite3.connect(target.resolve().as_uri() + '?mode=rw', uri=True)) as conn:
-        conn.execute('ATTACH DATABASE ? AS saved', (source.resolve().as_uri() + '?mode=ro&immutable=1',))
+        conn.execute('ATTACH DATABASE ? AS saved', (snapshot_uri(source),))
         before = unrelated(conn)
         if before != unrelated(conn, 'saved'):
             raise ValueError('non-project data changed; refusing backup restoration')

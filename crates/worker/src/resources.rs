@@ -1,6 +1,10 @@
 //! NFS resource snapshotting for agent execution.
-use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
+use anyhow::bail;
+use anyhow::{Context, Result};
+use std::path::Path;
+#[cfg(not(windows))]
+use std::path::PathBuf;
 
 pub(crate) use opencoder_agents::snapshot::{pin, pin_selected};
 
@@ -63,7 +67,11 @@ pub(crate) fn check_mount(path: Option<&Path>) -> Result<()> {
         }
         std::fs::read_dir(path)?;
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        std::fs::read_dir(&path)?;
+    }
+    #[cfg(all(not(target_os = "linux"), not(windows)))]
     {
         bail!(
             "read-only NFS mount verification for {} requires Linux /proc/self/mountinfo",

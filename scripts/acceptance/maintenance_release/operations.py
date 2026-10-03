@@ -14,7 +14,7 @@ from evidence import unchanged_source
 def systemctl_command(args):
     values = list(args)
     while values and values[0].startswith('--'):
-        if values.pop(0) != '--no-block':
+        if values.pop(0) not in ('--no-block', '--no-reload'):
             raise ValueError('unsupported systemctl prefix')
     if not values or values[0] not in ('show', 'start', 'stop', 'enable', 'disable', 'kill', 'daemon-reload', 'reload'):
         raise ValueError('unsupported private systemctl action')
@@ -25,6 +25,23 @@ def unit_fields(path):
     return dict(line.split('=', 1) for line in path.read_text().splitlines()
                 if line.startswith(('ExecStart=', 'WorkingDirectory=', 'Where=', 'What=', 'Options=', 'Type=',
                                     'Restart=', 'RestartSec=')))
+
+
+def show_arguments(values):
+    names, properties = [], []
+    iterator = iter(values)
+    for value in iterator:
+        if value == '-p':
+            properties.append(next(iterator, ''))
+        elif value.startswith('--property='):
+            properties.append(value.split('=', 1)[1])
+        elif value != '--value':
+            if value.startswith('-'):
+                raise ValueError('unsupported private show option')
+            names.append(value)
+    if len(names) != 1 or not all(properties):
+        raise ValueError('private show requires one unit and valid properties')
+    return names[0], properties
 
 
 class PrivateOperations(Operations):
@@ -170,7 +187,11 @@ class PrivateOperations(Operations):
         action, values = systemctl_command(args[1:])
         if action != 'show' or not values:
             raise ValueError('only private systemctl show is readable')
-        name = values[0]
+        name, requested = show_arguments(values)
+        if name == 'nginx':
+            if requested != ['MainPID'] or '--value' not in values:
+                raise ValueError('only the private Nginx PID is readable')
+            return (self.root / 'nginx.pid').read_text().strip() + '\n'
         if '/' in name:
             raise ValueError('invalid unit name')
         path = self.settings.systemd_dir / name
@@ -181,8 +202,6 @@ class PrivateOperations(Operations):
         properties = {'LoadState': 'loaded' if path.exists() or name in self.children else 'not-found',
                       'ActiveState': state, 'MainPID': str(self.children[name].pid if self.alive(name) else 0),
                       'UnitFileState': 'enabled' if name in self.enabled else 'disabled'}
-        requested = [values[index + 1] for index, value in enumerate(values) if value == '-p']
-        requested.extend(value.split('=', 1)[1] for value in values if value.startswith('--property='))
         if '--value' in values:
             return '\n'.join(properties[key] for key in requested) + '\n'
         return ''.join(key + '=' + properties[key] + '\n' for key in requested or properties)

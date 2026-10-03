@@ -93,7 +93,17 @@ jobs:
       - name: clippy
         run: cargo clippy --locked -p opencoder -p opencoder-agent -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --all-targets -- -D warnings
       - name: shared platform contracts
-        run: cargo test --locked -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --lib
+        run: |
+          $log = "$env:RUNNER_TEMP/platform-contracts.log"
+          & cargo test --locked -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --lib 2>&1 | Tee-Object -FilePath $log
+          $result = $LASTEXITCODE
+          if ($result -ne 0) {
+            $tail = [string](@(Get-Content $log -Tail 120) -join "`n")
+            $annotation = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows platform contract failure::$annotation"
+            @('### Windows platform contract failure', '```text', $tail, '```') | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+          exit $result
       - name: embedded database teardown and native file ownership
         run: cargo test --locked -p opencoder-store --test connection_lifecycle
       - name: Windows private ACL and durable files

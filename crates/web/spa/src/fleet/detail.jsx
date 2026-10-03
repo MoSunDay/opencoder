@@ -12,7 +12,7 @@ import { turnsFromMessages } from '../reduce.js';
 import { useExecutionTranscript } from './detail/liveTranscript.js';
 import { Artifacts } from './artifacts.jsx';
 import { DetailFields, PayloadWindows } from './detail/fields.jsx';
-import { WorkloadDetail } from './detail/workloads.jsx';
+import { WorkloadDetail, todoInitializationNotice } from './detail/workloads.jsx';
 import { BrainRunEmbed } from './detail/brainRun.jsx';
 import { TodoRunEmbed } from './detail/todoFiles.jsx';
 import { Markdown } from '../project/markdown.jsx';
@@ -81,6 +81,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   const index = detail?.execution || summary || null;
   const kind = detail?.request?.kind || index?.kind;
   const detailReady = detail?.execution?.id === id;
+  const todoInitialization = kind === 'todos' && !detail?.workflow && todoInitializationNotice(detail);
   const hasMessages = detailReady && ['agent', 'maintenance', 'operator'].includes(kind);
   useEffect(() => {
     if (!detailReady || !id || !kind || ['agent', 'maintenance', 'dag', 'operator'].includes(kind)) return undefined;
@@ -174,7 +175,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       <Button disabled={busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
       <Button danger disabled={busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
     </Space>}
-    {detail?.error && <Alert type="error" title={detail.error} />}
+    {detail?.error && !todoInitialization && <Alert type="error" title={detail.error} />}
     {hasMessages && <div className="execution-messages">
       <Typography.Title level={5}>会话消息</Typography.Title>
       {!messages.messages.length && !messages.partial && !messagesBusy ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息" /> : null}
@@ -206,7 +207,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
         ~380px 窄列）不嵌 PlanCanvas/TODO 画布与第二条 SSE，内联仍由下方 Transcript/
         WorkloadDetail 等轻量块承载过程信息。 */}
     {mode === 'full' && kind === 'brain' && <BrainRunEmbed id={id} onNotice={onNotice} />}
-    {mode === 'full' && kind === 'todos' && <TodoRunEmbed id={id} />}
+    {mode === 'full' && kind === 'todos' && detailReady && detail.workflow && <TodoRunEmbed id={id} />}
     <WorkloadDetail id={id} detail={detail} kind={kind} onOpen={setChildId} />
     <DetailFields id={id} detail={detail} />
     {kind !== 'dag' && <Collapse style={{ marginTop: 16 }} items={[

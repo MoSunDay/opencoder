@@ -13,6 +13,8 @@ on:
     # Linux-only crates merely cost a redundant green run.
     paths:
       - "crates/**"
+      - "AGENTS.md"
+      - "repo-memory.md"
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
@@ -31,6 +33,8 @@ on:
     # Linux-only crates merely cost a redundant green run.
     paths:
       - "crates/**"
+      - "AGENTS.md"
+      - "repo-memory.md"
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"

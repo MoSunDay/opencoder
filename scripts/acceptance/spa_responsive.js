@@ -6,7 +6,7 @@ function arg(flag, fallback) { const index = process.argv.indexOf(`--${flag}`); 
 const WIDTH = Number(arg('width', '390'));
 const HEIGHT = Number(arg('height', '1080'));
 const TOKEN = 'fixture-token';
-const SEGMENT = WIDTH < 768 ? '.ant-segmented.fleet-mobile-nav .ant-segmented-item' : '.fleet-nav-category .ant-segmented-item';
+const SEGMENT = WIDTH < 768 ? '.fleet-mobile-nav[role="tablist"] [role="tab"]' : '.fleet-nav-category [role="tab"]';
 const SELECT = '.ant-select.fleet-mobile-nav';
 const OPTIONS = '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option';
 const TABS = '.fleet-content .ant-tabs-tab';

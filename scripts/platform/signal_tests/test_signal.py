@@ -131,7 +131,7 @@ class SignalTests(unittest.TestCase):
                 patch.object(controller.manifest, 'compatible'), patch.object(controller.manifest, 'resources'), \
                 patch.object(controller.manifest._installer, 'stage_bundle', return_value=installed):
             self.assertEqual(controller.stage(self.settings, Path('/bundle')),
-                             {'release_id':'r2', 'bundle':str(installed)})
+                             {'release_id':'r2', 'bundle':str(installed), 'wait_seconds':90})
         self.assertEqual(controller.status(self.settings)['pending']['release_id'], 'r2')
         with controller.request_lock(self.settings):
             with self.assertRaises(BlockingIOError), controller.request_lock(self.settings):

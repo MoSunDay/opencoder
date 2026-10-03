@@ -36,9 +36,9 @@ describe('explicit conversation node selection', () => {
     expect(apiGet).not.toHaveBeenCalledWith('/api/sessions?limit=50');
     await pick('n2');
     await send(container, 'do work');
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions', { id: expect.stringMatching(/^operator-/), node_id: 'n2', agent: 'act' }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions', { id: expect.stringMatching(/^operator-/), node_id: 'n2', agent: 'act', prompt: 'do work' }));
     expect(apiGet).toHaveBeenCalledWith('/api/nodes/n2/dialogs?kind=operator');
-    expect(apiPost).toHaveBeenCalledWith('/api/sessions/operator-created/prompt', { prompt: 'do work', delivery: 'steer' });
+    expect(apiPost.mock.calls.some(([path]) => path.endsWith('/prompt'))).toBe(false);
   });
 
   it('preserves the chosen node, draft and request ID after uncertain creation', async () => {
@@ -80,14 +80,18 @@ describe('explicit conversation node selection', () => {
     expect(apiPost).not.toHaveBeenCalled();
   });
 
-  it('retains the draft and does not submit when the event cursor cannot be read', async () => {
+  it('retains an existing conversation draft when the event cursor cannot be read', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes };
+      if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs: [{ session_id: 'operator-existing', title: 'existing conversation' }] };
       if (path.endsWith('/seq')) throw new Error('cursor unavailable');
       return { dialogs: [] };
     });
     const { container } = render(<ChatPanel />);
-    await pick('n1'); await send(container, 'preserve this draft');
+    await pick('n1');
+    fireEvent.click(await screen.findByText('existing conversation'));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/sessions/operator-existing'));
+    await send(container, 'preserve this draft');
     await screen.findByText('error: cursor unavailable');
     expect(container.querySelector('textarea.ant-sender-input').value).toBe('preserve this draft');
     expect(apiPost.mock.calls.some(([path]) => path.endsWith('/prompt'))).toBe(false);

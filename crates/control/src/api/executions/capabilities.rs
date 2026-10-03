@@ -24,6 +24,7 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
         || request.input.get("brain_layered").is_some()
     {
         features.push(MILESTONE_BRAIN);
+        features.push(opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY);
     }
     features
 }
@@ -120,7 +121,11 @@ mod tests {
 
     #[test]
     fn old_positive_probes_do_not_advertise_new_protocol_operations() {
-        for feature in [DYNAMIC_DAG, MILESTONE_BRAIN] {
+        for feature in [
+            DYNAMIC_DAG,
+            MILESTONE_BRAIN,
+            opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,
+        ] {
             assert!(!supports(
                 &RpcReply::ok(json!({"compatible":true})),
                 feature
@@ -149,7 +154,13 @@ mod tests {
             input: json!({"schema_version":7,"layered_request":{}}),
             node_id: None,
         };
-        assert_eq!(required(&layered, None), vec![MILESTONE_BRAIN]);
+        assert_eq!(
+            required(&layered, None),
+            vec![
+                MILESTONE_BRAIN,
+                opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY
+            ]
+        );
         let nested = CreateExecution {
             id: "brain-nested".into(),
             kind: ExecutionKind::Agent,
@@ -157,7 +168,13 @@ mod tests {
             input: json!({"brain_layered":{}}),
             node_id: None,
         };
-        assert_eq!(required(&nested, None), vec![MILESTONE_BRAIN]);
+        assert_eq!(
+            required(&nested, None),
+            vec![
+                MILESTONE_BRAIN,
+                opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY
+            ]
+        );
         let scheduler = CreateExecution {
             id: "brain-v3".into(),
             kind: ExecutionKind::Brain,

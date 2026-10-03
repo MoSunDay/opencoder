@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 async function projectPage(page) {
   await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
-  await page.getByRole('tab', { name: '项目', exact: true }).waitFor();
+  await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).waitFor();
 }
 async function openBrowser(h, errors) {
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage', '--no-proxy-server'] });
@@ -33,7 +33,7 @@ async function createHierarchy(page) {
     if (!saved.ok()) throw new Error(`browser create ${route}: ${await saved.text()}`);
     return saved.json();
   }
-  await page.getByRole('tab', { name: '项目', exact: true }).click();
+  await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
   await page.getByPlaceholder('一句话标题').fill('Project replay acceptance');
   const goal = await save('/api/project/goals', /保\s*存/);

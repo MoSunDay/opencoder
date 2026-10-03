@@ -45,7 +45,7 @@ autopilot 引入一个**可选的**自驱动循环：在初始任务完成后，
 | `phases.rs` | `run_plan_phase` / `run_act_phase`：切换 agent 并跑一个 turn |
 | `mod.rs` | `drive()`：主循环编排，emit `SessionEvent::AutoPilot` 进度事件 |
 
-### 配置（`crates/core/src/config/autopilot.rs`）
+### 配置（`crates/core/src/config/runtime/autopilot.rs`）
 
 新增 `AutoPilotConfig`（拆入子模块以满足行数限制）：
 

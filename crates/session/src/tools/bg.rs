@@ -78,9 +78,23 @@ impl BgState {
             return false;
         }
         let (buffer, label) = if stdout {
-            (&mut self.stdout_buf, "bash stdout")
+            (
+                &mut self.stdout_buf,
+                if cfg!(windows) {
+                    "powershell stdout"
+                } else {
+                    "bash stdout"
+                },
+            )
         } else {
-            (&mut self.stderr_buf, "bash stderr")
+            (
+                &mut self.stderr_buf,
+                if cfg!(windows) {
+                    "powershell stderr"
+                } else {
+                    "bash stderr"
+                },
+            )
         };
         let accepted = data.len().min(STREAM_OUTPUT_LIMIT_BYTES - buffer.len());
         buffer.extend_from_slice(&data[..accepted]);
@@ -127,10 +141,12 @@ pub async fn drain_output<R>(
     mut pipe: R,
     state: std::sync::Arc<Mutex<BgState>>,
     stream: OutputStream,
-    pgid: libc::pid_t,
+    pgid: i32,
 ) where
     R: AsyncRead + Unpin,
 {
+    #[cfg(not(unix))]
+    let _ = pgid;
     let mut chunk = [0u8; 8192];
     loop {
         let count = match pipe.read(&mut chunk).await {
@@ -160,7 +176,7 @@ pub fn output_path(pid: u32) -> PathBuf {
 }
 
 struct BgEntry {
-    pgid: libc::pid_t,
+    pgid: i32,
     supervisor: Option<crate::process::SignalTarget>,
     #[allow(dead_code)]
     session_id: String,
@@ -280,17 +296,14 @@ async fn handoff_with_limit(
     if !reserved {
         cleanup_unaccepted(child, stdout_task, stderr_task, process_group).await;
         return Err(format!(
-            "background_process_limit_exceeded: at most {active_limit} handed-off bash commands may run"
+            "background_process_limit_exceeded: at most {active_limit} handed-off {} commands may run",
+            opencoder_core::platform::shell::tool_name()
         ));
     }
 
     // Open/truncate + flush captured buffers + activate file mode.
     let opened = (|| {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&path)
+        let mut file = opencoder_core::platform::fs::create_private_file(&path)
             .map_err(|error| format!("cannot create background output: {error}"))?;
         let mut st = state.lock().unwrap();
         file.write_all(&st.stdout_buf)
@@ -322,7 +335,14 @@ async fn handoff_with_limit(
         if start_rx.await.is_err() {
             return;
         }
-        let exit_status = child.wait().await;
+        let limit = state.lock().unwrap().output_limit_token();
+        let exit_status = tokio::select! {
+            status = child.wait() => status,
+            _ = limit.cancelled() => {
+                process_group.terminate();
+                child.wait().await
+            }
+        };
 
         // Terminate lingering descendants and unregister before draining, so
         // inherited pipe writers cannot keep the drain tasks alive.
@@ -403,7 +423,7 @@ pub fn list() -> Vec<BgInfo> {
 /// (the tool future owns the `Child` and `wait()`s directly); the entry is
 /// removed by [`unregister`] when `wait()` returns, or by [`stop`]/[`kill_all`]
 /// when the user intervenes.
-pub fn register(pid: u32, pgid: libc::pid_t, session_id: String) {
+pub fn register(pid: u32, pgid: i32, session_id: String) {
     registry().lock().unwrap().insert(
         pid,
         BgEntry {
@@ -423,7 +443,7 @@ pub(crate) fn register_supervised(
     registry().lock().unwrap().insert(
         pid,
         BgEntry {
-            pgid: pid as libc::pid_t,
+            pgid: pid as i32,
             supervisor: Some(supervisor),
             session_id,
             output_path: output_path(pid),
@@ -438,7 +458,7 @@ pub fn unregister(pid: u32) {
     registry().lock().unwrap().remove(&pid);
 }
 
-pub(crate) fn unregister_group(pid: u32, pgid: libc::pid_t) {
+pub(crate) fn unregister_group(pid: u32, pgid: i32) {
     let mut registry = registry().lock().unwrap();
     if registry.get(&pid).is_some_and(|entry| entry.pgid == pgid) {
         registry.remove(&pid);
@@ -518,7 +538,7 @@ pub fn cleanup_all() {
 
 fn terminate_entry(entry: &BgEntry) {
     if let Some(supervisor) = &entry.supervisor {
-        let _ = supervisor.signal(libc::SIGTERM);
+        let _ = supervisor.terminate();
     } else {
         #[cfg(unix)]
         unsafe {
@@ -638,15 +658,15 @@ pub(crate) fn test_registry_mutex() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn all_task_handles_len_for_test() -> usize {
     supervisor_tasks().lock().unwrap().len()
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn retained_outputs_len_for_test() -> usize {
     completed_outputs().lock().unwrap().entries.len()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "bash/background_tests.rs"]
 mod tests;

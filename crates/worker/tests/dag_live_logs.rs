@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 //! Real Node WebSocket -> control SSE, observed before the Binary step exits.
 mod support;
 use futures::StreamExt;

@@ -14,6 +14,11 @@ pub async fn bind(
     Path(id): Path<String>,
     Json(target): Json<CapabilityTarget>,
 ) -> Response {
+    if let Err(error) = opencoder_brain::contracts::validate_fields(&target.required_inputs)
+        .and_then(|_| opencoder_brain::contracts::validate_fields(&target.required_outputs))
+    {
+        return error_400(error.to_string());
+    }
     if !matches!(
         target.kind,
         ExecutionKind::Agent

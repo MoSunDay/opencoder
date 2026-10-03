@@ -61,6 +61,7 @@ impl DirectoryLayout {
         self.root.join(kind.prefix())
     }
 
+    #[cfg(not(windows))]
     pub(crate) fn checked_kind_root(&self, kind: ExecutionKind) -> Result<PathBuf> {
         self.contained(self.kind_root(kind))
     }
@@ -142,7 +143,7 @@ impl DirectoryLayout {
         for component in relative.components() {
             cursor.push(component);
             match std::fs::symlink_metadata(&cursor) {
-                Ok(metadata) if metadata.file_type().is_symlink() => {
+                Ok(metadata) if opencoder_core::platform::fs::is_link(&metadata) => {
                     bail!("execution path contains a symlink: {}", cursor.display());
                 }
                 Ok(_) => {}
@@ -156,7 +157,7 @@ impl DirectoryLayout {
 
 pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
     match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
+        Ok(metadata) if opencoder_core::platform::fs::is_link(&metadata) => {
             bail!("{label} cannot be a symlink: {}", path.display())
         }
         Ok(_) => Ok(()),
@@ -170,7 +171,7 @@ fn reject_symlink_chain(path: &Path, label: &str) -> Result<()> {
     for component in path.components() {
         cursor.push(component);
         match std::fs::symlink_metadata(&cursor) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if opencoder_core::platform::fs::is_link(&metadata) => {
                 bail!("{label} contains a symlink: {}", cursor.display())
             }
             Ok(_) => {}
@@ -182,7 +183,7 @@ fn reject_symlink_chain(path: &Path, label: &str) -> Result<()> {
 }
 
 fn validate_id(id: &str) -> Result<()> {
-    if !valid_id(id) {
+    if !valid_id(id) || !opencoder_core::platform::fs::valid_component(id) {
         bail!("invalid execution id");
     }
     Ok(())
@@ -194,12 +195,13 @@ mod tests {
 
     #[test]
     fn typed_paths_are_contained_without_prefix_inference() {
-        let layout = DirectoryLayout::new(PathBuf::from("/node"), None).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let layout = DirectoryLayout::new(root.path().to_path_buf(), None).unwrap();
         assert_eq!(
             layout
                 .record_path(ExecutionKind::Team, "historical_name")
                 .unwrap(),
-            PathBuf::from("/node/team/historical_name/execution.json")
+            root.path().join("team/historical_name/execution.json")
         );
         assert!(layout
             .record_path(ExecutionKind::Agent, "../escape")

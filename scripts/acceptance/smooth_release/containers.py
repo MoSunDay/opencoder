@@ -6,14 +6,15 @@ from rolling.units import freeze_rootfs
 
 
 class Containers:
-    def __init__(self, rootfs):
+    def __init__(self, rootfs, binaries):
         self.rootfs = Path(rootfs).resolve()
+        self.binaries = Path(binaries).resolve()
         for name in ['dag-runner', 'agent-step-runner']:
             if not (self.rootfs / 'usr/bin' / name).is_file():
                 raise ValueError('native DAG rootfs is missing ' + name)
 
     def prepare(self, data):
-        return freeze_rootfs({'runtime_data': str(data)}, self.rootfs)
+        return freeze_rootfs({'runtime_data': str(data)}, self.rootfs, self.binaries)
 
     def state(self, runtime_data, execution):
         journal = Path(runtime_data) / 'dag' / execution / 'execution.json'

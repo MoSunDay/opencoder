@@ -37,10 +37,10 @@
 
 use crate::{journal::Record, Worker};
 use anyhow::{bail, Result};
+use opencoder_agents::resources::how_append;
 use opencoder_core::agent::{builtin_agents, read_agent_meta, scope, RunMode};
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use opencoder_core::{Config, Message};
-use opencoder_dag_runtime::exec::how_append;
 use opencoder_dag_runtime::sandbox::oci::{write_bundle, BundleSpec};
 use opencoder_dag_runtime::sandbox::runc::{run_step_streamed, runc_available};
 use opencoder_session::handoff;
@@ -334,7 +334,7 @@ pub(super) async fn run_round(
     let messages = worker.inner.state.store.load_messages(&id).await?;
     let text = handoff::last_assistant_text(&messages).unwrap_or_default();
     let text = transcript_tail(&text, OUTPUT_TAIL_BYTES);
-    let output_json = opencoder_dag_runtime::exec::agent::extract_output_json_from(&text);
+    let output_json = opencoder_session::harness::output::extract_output_json_from(&text);
     Ok((status, agent_result(&id, &text, output_json)))
 }
 

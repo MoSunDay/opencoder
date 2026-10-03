@@ -1,6 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 import pwd
+import copy
 import stat
 import subprocess
 import sys
@@ -21,6 +22,27 @@ def inventory(root):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_preflight_protects_source_from_launcher_service_and_ingress_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            ingress_source = fixture.settings.nginx_include.parent / 'source-nginx'
+            for source in (fixture.settings.bin_dir, fixture.settings.systemd_dir, ingress_source):
+                with self.subTest(source=source):
+                    source.mkdir(exist_ok=True)
+                    settings = (replace(fixture.settings, nginx_include=source / 'ingress.conf')
+                                if source == ingress_source else fixture.settings)
+                    agent, server = copy.deepcopy(fixture.desired)
+                    server['dag']['workspace_dir'] = str(source)
+                    before = inventory(source)
+                    paths = {'rootfs_dir': fixture.rootfs, 'binary_dir': Path('/mnt/binaries'),
+                             'workspace_dir': Path('/mnt/workspace'), 'agents_dir': Path('/mnt/agents')}
+                    with patch.object(preflight, 'configs', return_value=(agent, server)), \
+                         patch.object(preflight, 'configuration', return_value=paths), \
+                         patch.object(preflight.shutil, 'which', return_value='/usr/bin/runc'):
+                        with self.assertRaisesRegex(ValueError, 'must be outside Server source workspace'):
+                            preflight.check(settings, fixture.candidate, fixture)
+                    self.assertEqual(inventory(source), before)
+
     def test_source_inside_service_state_is_rejected_before_any_upgrade_writes(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory))

@@ -17,7 +17,7 @@
 // no extra .ant-app div between #root and .fleet-root, so the 100vh flex
 // chain and every existing landmark query stay byte-identical.
 
-import { Alert, App as AntdApp, Badge, Button, ConfigProvider, Layout, Menu, Segmented, Select, Tooltip, Typography } from 'antd';
+import { Alert, App as AntdApp, Badge, Button, ConfigProvider, Layout, Menu, Select, Tooltip, Typography } from 'antd';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
@@ -38,6 +38,7 @@ import {
   visibleCategories,
 } from './nav.js';
 import { PANELS } from './shell/panels.jsx';
+import { CategoryTabs } from './shell/categoryTabs.jsx';
 import { clearCredentials, setState, setIdentity, useStore } from './store.js';
 import { UsersDrawer } from './admin/usersDrawer.jsx';
 import { normalizeNotice } from './notice.js';
@@ -200,7 +201,7 @@ function App() {
               theme="light"
             >
               <div className="fleet-nav-category" aria-hidden={navCollapsed}>
-                <Segmented block
+                <CategoryTabs
                   value={category.key}
                   options={categoryOptions}
                   onChange={(v) => goPage(categoryHome(v))}
@@ -229,7 +230,7 @@ function App() {
               </Button>
             </Sider>}
             <Content className={SHEET_PAGES.has(shownPage) ? 'fleet-content fleet-content--flush' : 'fleet-content'}>
-              {identity && <Segmented block
+              {identity && <CategoryTabs
                 className="fleet-mobile-nav"
                 value={category.key}
                 options={categoryOptions}

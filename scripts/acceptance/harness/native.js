@@ -4,12 +4,24 @@ const net = require('node:net');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
-async function port() {
-  const listener = net.createServer();
-  await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
-  const value = listener.address().port;
-  await new Promise((resolve) => listener.close(resolve));
-  return value;
+async function port(excluded = new Set()) {
+  // Linux may reuse a released ephemeral port for an outgoing fixture
+  // connection before the NFS exporter binds it. Select outside that range
+  // and keep the two exporter ports distinct even before either starts.
+  const [first, last] = fs.readFileSync('/proc/sys/net/ipv4/ip_local_port_range', 'utf8').trim().split(/\s+/).map(Number);
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const value = crypto.randomInt(1024, 65536);
+    if ((value >= first && value <= last) || excluded.has(value)) continue;
+    const listener = net.createServer();
+    const available = await new Promise((resolve, reject) => {
+      listener.once('error', (error) => error.code === 'EADDRINUSE' ? resolve(false) : reject(error));
+      listener.listen(value, '127.0.0.1', () => resolve(true));
+    });
+    if (!available) continue;
+    await new Promise((resolve) => listener.close(resolve));
+    return value;
+  }
+  throw new Error('no available NFS fixture port outside the ephemeral range');
 }
 
 function compile(directory, name, source) {
@@ -52,7 +64,7 @@ async function prepareNative(root, server, nodes, rootfs, message = 'node artifa
   stage(binaries, 'stdout', compile(path.join(root, 'native-build'), 'stdout', `#include <stdio.h>\nint main(void) { puts(${JSON.stringify(message)}); return 0; }`));
   stage(binaries, 'spin', compile(path.join(root, 'native-build'), 'spin', '#include <unistd.h>\nint main(void) { for (;;) pause(); }'));
   const binaryPort = await port();
-  const workspacePort = await port();
+  const workspacePort = await port(new Set([binaryPort]));
   updateConfig(server, { binary_dir: binaries, workspace_dir: workspace,
     nfs: { enabled: true, host: '127.0.0.1', port: binaryPort, read_only: true },
     workspace_nfs: { enabled: true, host: '127.0.0.1', port: workspacePort } });

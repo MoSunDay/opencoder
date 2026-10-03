@@ -1,43 +1,56 @@
-import json
 from pathlib import Path
+import json
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rolling.maintenance import configuration
 from fixtures import Fixture
+from rolling.maintenance import configuration
 
 
 class ConfigurationTests(unittest.TestCase):
-    def test_pending_configuration_is_private_and_installed_only_from_fixed_snapshot(self):
+    def test_overlay_preserves_provider_credentials_and_replaces_obsolete_dag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'candidate.json'
+            path.write_text(json.dumps({'dag': {'rootfs_dir': '/images/new'},
+                                        'llm': {'model': 'new-model'}}))
+            original = {'dag': {'wasm_dir': '/old'},
+                        'llm': {'api_key': 'fixture-private', 'model': 'old-model'}}
+            result = configuration.overlay(original, path)
+            self.assertEqual(result['dag'], {'rootfs_dir': '/images/new'})
+            self.assertEqual(result['llm'], {'api_key': 'fixture-private', 'model': 'new-model'})
+            self.assertEqual(original['dag'], {'wasm_dir': '/old'})
+
+    def test_freeze_leaves_working_configuration_unchanged_and_rejects_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory))
-            settings = fixture.settings
-            for workdir in (settings.agent_workdir, settings.server_workdir):
-                workdir.mkdir()
-                (workdir / 'opencoder.json').write_text('old configuration')
-            old = {'dag': {'obsolete': True}, 'api_key': 'isolated-fixture'}
-            pending = Path(directory) / 'pending.json'
-            pending.write_text(json.dumps({'dag': {'binary_dir': '/new/binaries'}}))
-            object.__setattr__(settings, 'agent_config', pending)
-            object.__setattr__(settings, 'server_config', pending)
-            with patch.object(configuration, 'actual_configs', return_value=(old, old)):
-                configs = configuration.desired_configs(settings)
-                snapshots = configuration.freeze(settings, 'new', configuration.hashes(configs))
-            self.assertEqual((settings.server_workdir / 'opencoder.json').read_text(), 'old configuration')
-            for item in snapshots.values():
-                path = Path(item['path'])
-                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-                self.assertNotIn('obsolete', json.loads(path.read_text())['dag'])
-            pending.write_text('changed after acceptance')
-            configuration.install(settings, snapshots)
-            for workdir in (settings.agent_workdir, settings.server_workdir):
-                value = json.loads((workdir / 'opencoder.json').read_text())
-                self.assertEqual(value['dag']['binary_dir'], '/new/binaries')
-                self.assertEqual(value['api_key'], 'isolated-fixture')
-            Path(snapshots['server']['path']).write_text('tampered')
-            (settings.agent_workdir / 'opencoder.json').write_text('unchanged on checksum failure')
+            old = (fixture.settings.agent_workdir / 'opencoder.json').read_bytes()
+            expected = configuration.hashes(fixture.desired)
+            with patch.object(configuration, 'desired_configs', return_value=fixture.desired):
+                snapshots = configuration.freeze(fixture.settings, 'new', expected)
+                self.assertEqual(configuration.freeze(fixture.settings, 'new', expected), snapshots)
+            self.assertEqual((fixture.settings.agent_workdir / 'opencoder.json').read_bytes(), old)
+            with patch.object(configuration, 'desired_configs', return_value=({}, {})):
+                with self.assertRaisesRegex(ValueError, 'changed after preflight'):
+                    configuration.freeze(fixture.settings, 'new', expected)
+
+    def test_install_verifies_every_snapshot_before_any_shared_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            expected = configuration.hashes(fixture.desired)
+            with patch.object(configuration, 'desired_configs', return_value=fixture.desired):
+                snapshots = configuration.freeze(fixture.settings, 'new', expected)
+            paths = [fixture.settings.agent_workdir / 'opencoder.json',
+                     fixture.settings.server_workdir / 'opencoder.json']
+            before = [path.read_bytes() for path in paths]
+            server_snapshot = Path(snapshots['server']['path'])
+            original = server_snapshot.read_bytes()
+            server_snapshot.write_bytes(b'corrupted')
             with self.assertRaisesRegex(ValueError, 'checksum differs'):
-                configuration.install(settings, snapshots)
-            self.assertEqual((settings.agent_workdir / 'opencoder.json').read_text(), 'unchanged on checksum failure')
+                configuration.install(fixture.settings, snapshots)
+            self.assertEqual([path.read_bytes() for path in paths], before)
+            server_snapshot.write_bytes(original)
+            configuration.install(fixture.settings, snapshots)
+            self.assertEqual([json.loads(path.read_text()) for path in paths], list(fixture.desired))

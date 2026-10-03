@@ -65,7 +65,7 @@ class Environment:
         self.records = []
         self.nginx = nginx
         self.model = Model(self.root)
-        self.containers = Containers(rootfs)
+        self.containers = Containers(rootfs, binaries)
         self.shared_skill = self.root / '.opencoder/skills/release-reference/SKILL.md'
         self.shared_skill.parent.mkdir(parents=True)
         self.shared_skill.write_text('---\nname: release-reference\ndescription: fixture\n---\nfirst release bytes\n')

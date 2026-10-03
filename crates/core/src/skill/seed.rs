@@ -292,7 +292,7 @@ fn seed_skill_packs(
 /// Write `install-skills-dep.sh` into `~/.opencoder/` so the user can discover
 /// and run it. Idempotent: skips if the file already exists.
 pub fn write_install_script() {
-    let dir = match dirs::home_dir() {
+    let dir = match crate::platform::home_dir() {
         Some(h) => h.join(".opencoder"),
         None => return,
     };

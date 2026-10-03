@@ -90,7 +90,7 @@ pub(in crate::operations) fn begin(
     match fs::symlink_metadata(&root) {
         Ok(meta) => {
             ensure!(
-                meta.is_dir() && !meta.file_type().is_symlink(),
+                meta.is_dir() && !opencoder_core::platform::fs::is_link(&meta),
                 "execution preparation root must be a real directory"
             );
             let file = root.join(FILE);
@@ -105,7 +105,7 @@ pub(in crate::operations) fn begin(
                 Err(error) => return Err(error.into()),
             };
             ensure!(
-                metadata.is_file() && !metadata.file_type().is_symlink(),
+                metadata.is_file() && !opencoder_core::platform::fs::is_link(&metadata),
                 "execution preparation must be a regular file"
             );
             let saved: PendingCreate = serde_json::from_slice(&fs::read(&file)?)
@@ -181,25 +181,20 @@ pub(in crate::operations) fn begin(
     let result = (|| {
         if let Some(resources) = &empty_resources {
             fs::create_dir(resources)?;
-            fs::File::open(resources)?.sync_all()?;
+            opencoder_core::platform::fs::sync_directory(resources)?;
         }
-        let mut options = fs::OpenOptions::new();
-        options.create_new(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(stage.join(FILE))?;
+        let mut file = opencoder_core::platform::fs::create_private_file(&stage.join(FILE))?;
         file.write_all(&serde_json::to_vec(&PendingCreate {
             schema_version: 1,
             assignment: assignment.clone(),
             rejected: false,
         })?)?;
         file.sync_all()?;
-        fs::File::open(&stage)?.sync_all()?;
-        fs::rename(&stage, &root)?;
-        fs::File::open(parent)?.sync_all()?;
+        drop(file);
+        opencoder_core::platform::fs::sync_directory(&stage)?;
+        opencoder_core::platform::fs::replace(&stage, &root)
+            .context("publish execution preparation directory")?;
+        opencoder_core::platform::fs::sync_directory(parent)?;
         Ok::<_, anyhow::Error>(())
     })();
     if result.is_err() && stage.exists() {
@@ -227,9 +222,10 @@ pub(in crate::operations) fn discard_empty_resources(
     }
     let resources = resource_root(worker, assignment, false)?;
     match fs::remove_dir(&resources) {
-        Ok(()) => fs::File::open(resources.parent().context("resource parent missing")?)?
-            .sync_all()
-            .map_err(Into::into),
+        Ok(()) => opencoder_core::platform::fs::sync_directory(
+            resources.parent().context("resource parent missing")?,
+        )
+        .map_err(Into::into),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
@@ -259,18 +255,14 @@ pub(in crate::operations) fn reject_project(
 
 fn replace(path: &Path, pending: &PendingCreate) -> Result<()> {
     let temporary = path.with_extension(format!("tmp-{}", ulid::Ulid::new()));
-    let mut options = fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temporary)?;
+    let mut file = opencoder_core::platform::fs::create_private_file(&temporary)?;
     file.write_all(&serde_json::to_vec(pending)?)?;
     file.sync_all()?;
-    fs::rename(temporary, path)?;
-    fs::File::open(path.parent().context("preparation parent missing")?)?.sync_all()?;
+    drop(file);
+    opencoder_core::platform::fs::replace(&temporary, path)?;
+    opencoder_core::platform::fs::sync_directory(
+        path.parent().context("preparation parent missing")?,
+    )?;
     Ok(())
 }
 

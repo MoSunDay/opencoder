@@ -87,7 +87,19 @@ mount -t nfs -o ro,vers=3,tcp,port=2050,mountport=2050,nolock,soft,retrans=1,tim
 
 节点受理前强制校验只读 NFS 挂载和资源摘要。`tool` 取池当前版本，`tool@v3` 固定显式版本；缺失资源直接拒绝，不支持本机投放或宿主执行。每次运行仅固定需要的二进制、Agent 及其依赖；恢复只读取已固定版本，之后发布或回滚不影响已受理运行。
 
-本机部署可使用 `scripts/platform/systemd/` 的只读挂载单元及 Agent 依赖配置；跨主机部署调整 `What` 为实际 Server。每个挂载点只保留一个挂载，关闭目录与属性缓存使资源发布及时对新任务生效。回滚不支持长句柄的旧 Server 时，先停止依赖该挂载的 Node，再受控重新挂载。
+本机部署可使用 `scripts/platform/systemd/` 的只读挂载模板（`*.mount.in`）及 Agent 依赖配置；跨主机部署调整 `What` 为实际 Server。每个挂载点只保留一个挂载，关闭目录与属性缓存使资源发布及时对新任务生效。回滚不支持长句柄的旧 Server 时，先停止依赖该挂载的 Node，再受控重新挂载。
+
+在 Linux 上安装模板时，目标文件名必须由挂载路径生成，不能直接使用模板名：
+
+```bash
+for template in scripts/platform/systemd/*.mount.in; do
+  mount_path=$(sed -n 's/^Where=//p' "$template")
+  unit=$(systemd-escape --path --suffix=mount "$mount_path")
+  sudo install -m 0644 "$template" "/etc/systemd/system/$unit"
+done
+sudo systemctl daemon-reload
+```
+
 
 每次新执行复制当前版本到节点资源快照，包含实际文件。显式资源源路径消失或复制失败时拒绝接受，不生成空快照；只有未配置资源的内置 Agent 可以使用空资源池。资源后续发布、回滚或移除不会改变已接受的执行。缺失引用、不可读资源和版本内符号链接在接受前报错。已有执行的继续或恢复使用已固定快照，NFS 断开不阻止这些操作；新执行需要共享目录可用。仅使用内置 agent 时可以不配置共享目录。
 

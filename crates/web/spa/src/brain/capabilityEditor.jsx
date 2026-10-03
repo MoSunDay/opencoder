@@ -2,7 +2,7 @@ import { Alert, Button, Drawer, Form, Input, Select, Space, Spin } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost, apiPut } from '../api.js';
 import { KINDS } from '../fleet/model.js';
-import { capabilityBody, capabilityForm, needsTargetSave } from './model.js';
+import { capabilityBody, capabilityForm, capabilityTarget, needsTargetSave } from './model.js';
 import { fetchTargetOptions } from './targetOptions.js';
 
 const required = [{ required: true, whitespace: true, message: '请填写此项' }];
@@ -74,7 +74,7 @@ function CapabilityEditorSession({ entry, onClose, onSaved }) {
         setId(savedId);
       }
       contentSaved = true;
-      const target = { kind: values.target_kind, target: values.target.trim() };
+      const target = capabilityTarget(values);
       if (needsTargetSave(originalTarget.current, target)) {
         await apiPut(`/api/brain/capabilities/${encodeURIComponent(savedId)}/target`, target);
         originalTarget.current = target;
@@ -102,6 +102,12 @@ function CapabilityEditorSession({ entry, onClose, onSaved }) {
         <Form.Item name="summary" label="一句话描述" rules={required}><Input placeholder="这个能力做什么" /></Form.Item>
         <Form.Item name="input_desc" label="输入描述" rules={required}><Input.TextArea rows={3} placeholder="期望的输入是什么" /></Form.Item>
         <Form.Item name="output_desc" label="输出描述" rules={required}><Input.TextArea rows={3} placeholder="产出的结果是什么" /></Form.Item>
+        <Form.Item name="required_inputs" label="必填输入字段" extra="执行前检查这些字段已提供，且不是空值或空白文本。">
+          <Select mode="tags" tokenSeparators={[',', '，']} placeholder="输入字段名后按回车，例如 task、revision" />
+        </Form.Item>
+        <Form.Item name="required_outputs" label="必填输出字段" extra="检查结果最外层的字段；DAG 结果最外层是步骤名称。测试是否通过仍由大脑结合完整结果判断。">
+          <Select mode="tags" tokenSeparators={[',', '，']} placeholder="例如 passed、failures、revision" />
+        </Form.Item>
         <Form.Item label="工程输入（示例输入）">
           <Form.List name="eng_inputs">{(fields, { add, remove }) => <>
             {fields.map((field) => <div key={field.key} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>

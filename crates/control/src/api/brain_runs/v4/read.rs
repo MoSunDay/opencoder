@@ -89,16 +89,16 @@ pub(super) async fn output(
     state: &Arc<AppState>,
     index: &ExecutionIndex,
     path: &str,
-) -> Result<Value> {
+) -> Result<Value, RpcReply> {
     let reply = child(state, index, "layered_output", json!({"path":path})).await;
     if reply.status >= 300 {
-        anyhow::bail!("referenced execution output unavailable: {}", reply.body);
+        return Err(reply);
     }
     reply
         .body
         .get("value")
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("referenced output response has no value"))
+        .ok_or_else(|| RpcReply::error(502, "referenced output response has no value"))
 }
 
 pub(super) fn internal(error: impl std::fmt::Display) -> RpcReply {

@@ -88,8 +88,8 @@ impl AdmissionState {
                 mode,
             })?)?;
             file.sync_all()?;
-            std::fs::rename(&temp, &self.path)?;
-            std::fs::File::open(parent)?.sync_all()?;
+            opencoder_core::platform::fs::replace(&temp, &self.path)?;
+            opencoder_core::platform::fs::sync_directory(parent)?;
             Ok(())
         })();
         if result.is_err() {

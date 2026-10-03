@@ -10,6 +10,10 @@ pub struct SignalTarget {
 }
 
 impl SignalTarget {
+    pub fn terminate(&self) -> Result<()> {
+        self.signal(libc::SIGTERM)
+    }
+
     pub fn open(pid: u32) -> Result<Self> {
         let before = start_time(pid).context("owned process disappeared before pidfd open")?;
         let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as libc::c_int;

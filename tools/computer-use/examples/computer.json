@@ -1,0 +1,11 @@
+{
+  "model": {
+    "name": "anthropic/claude-sonnet-4-5-20250929",
+    "api_key_file": "secrets/desktop-model.key"
+  },
+  "targets": {
+    "linux": { "os": "linux", "url": "http://127.0.0.1:18000" },
+    "windows": { "os": "windows", "url": "http://127.0.0.1:18001" },
+    "mac": { "os": "macos", "url": "http://127.0.0.1:18002" }
+  }
+}

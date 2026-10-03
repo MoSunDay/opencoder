@@ -72,14 +72,43 @@ fn tools_and_agent_text_still_require_active_turn() {
 }
 
 #[test]
-fn fatal_errors_are_not_converted_to_startup_notifications() {
-    for value in [
-        json!({"type":"error","message":"fatal"}),
+fn terminal_failure_stays_fatal() {
+    let (state, out) = event(
+        thread(),
         json!({"type":"turn.failed","error":{"message":"fatal"}}),
+    )
+    .unwrap();
+    assert_eq!(state.failed.as_deref(), Some("fatal"));
+    assert!(matches!(&out.events[0],SessionEvent::Error(e) if e=="fatal"));
+    assert!(event(state, warning("item.completed")).is_err());
+}
+
+#[test]
+fn reconnect_errors_leave_the_turn_open_until_success_or_failure() {
+    let (mut state, _) = event(thread(), json!({"type":"turn.started"})).unwrap();
+    for text in [
+        "Reconnecting... 2/5 (workspace routing discovery failed)",
+        "Reconnecting... 5/5 (stream interrupted)",
     ] {
-        let (state, out) = event(thread(), value).unwrap();
-        assert_eq!(state.failed.as_deref(), Some("fatal"));
-        assert!(matches!(&out.events[0],SessionEvent::Error(e) if e=="fatal"));
-        assert!(event(state, warning("item.completed")).is_err());
+        let (next, out) = event(state, json!({"type":"error","message":text})).unwrap();
+        state = next;
+        assert!(state.failed.is_none());
+        assert!(!state.completed);
+        assert!(matches!(&out.events[0],SessionEvent::Status(value) if value.contains(text)));
+        assert!(out.messages.is_empty());
     }
+    let (completed, _) = event(
+        state.clone(),
+        json!({"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}),
+    )
+    .unwrap();
+    assert!(completed.completed);
+    assert!(completed.failed.is_none());
+    let (failed, _) = event(
+        state,
+        json!({"type":"turn.failed","error":{"message":"retries exhausted"}}),
+    )
+    .unwrap();
+    assert_eq!(failed.failed.as_deref(), Some("retries exhausted"));
+    assert!(event(thread(), json!({"type":"error"})).is_err());
 }

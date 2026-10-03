@@ -16,7 +16,7 @@ pub(crate) fn parent(worker: &Worker, config: &Config, assignment: &Assignment) 
             .kind_root(opencoder_core::fleet::ExecutionKind::Dag)
             .join("runs")
     });
-    opencoder_dag_runtime::layout::run_parent(&data, dag, assignment.index.created_at)
+    opencoder_dag::layout::run_parent(&data, dag, assignment.index.created_at)
 }
 
 pub(crate) fn accepted_parent(record: &Record) -> Result<PathBuf> {

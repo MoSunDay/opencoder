@@ -38,7 +38,7 @@ pub(super) fn advertise_v4(h: &Harness) {
     h.node
         .set_capability_reply(opencoder_core::fleet::RpcReply::ok(json!({
             "compatible": true,
-            "features": ["dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7"]
+            "features": ["dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7", "brain_contracts_v1"]
         })));
 }
 
@@ -113,6 +113,17 @@ async fn layered_admission_requires_the_v4_advertisement_and_freezes_the_scope()
         body.to_string().contains("brain_scheduler_v7"),
         "a v3-only node must not accept a v4 run: {body}"
     );
+    assert!(h.state.fleet.index(RUN).await.unwrap().is_none());
+
+    h.node
+        .set_capability_reply(opencoder_core::fleet::RpcReply::ok(json!({
+            "compatible":true,"features":["brain_scheduler_v7"]
+        })));
+    let (status, body) = h
+        .req(Method::POST, "/api/brain/runs", Some(request()))
+        .await;
+    assert_eq!(status, 503, "{body}");
+    assert!(body.to_string().contains("brain_contracts_v1"));
     assert!(h.state.fleet.index(RUN).await.unwrap().is_none());
 
     advertise_v4(&h);

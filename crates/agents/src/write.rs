@@ -124,7 +124,7 @@ pub fn save_shared_version(
             }
             atomic_write(&target, &file.bytes)?;
         }
-        std::fs::rename(&temp, &dest)
+        opencoder_core::platform::fs::replace(&temp, &dest)
     };
     if let Err(e) = build() {
         let _ = std::fs::remove_dir_all(&temp);

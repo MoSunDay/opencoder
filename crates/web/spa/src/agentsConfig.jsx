@@ -78,6 +78,7 @@ export function AgentsPanel({ onNotice }) {
       <AgentNfsCard onNotice={onNotice} />
       <AgentNfsCard onNotice={onNotice} endpoint="/api/dag/binaries/nfs" title="二进制只读导出" label="binary-nfs" />
       <AgentNfsCard onNotice={onNotice} endpoint="/api/dag/workspace/nfs" title="工作区只读导出" label="workspace-nfs" />
+      <AgentNfsCard onNotice={onNotice} endpoint="/api/ontology/nfs" title="Ontology 正文只读导出" label="ontology-nfs" />
       <Typography.Text type="secondary">源路径由 Server 配置指定，界面不会创建、移动源目录或修改其权限。容器写入发生在节点本地写层。</Typography.Text>
     </Space> },
   ]} /></PageShell>;

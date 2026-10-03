@@ -161,7 +161,7 @@ fn execution_input(input: &Value) -> &Value {
 }
 
 fn apply_input(spec: &mut opencoder_dag::DagSpec, input: &Value) -> Result<()> {
-    let arguments: Vec<String> = input
+    let arguments: Vec<String> = execution_input(input)
         .get("args")
         .map(|value| serde_json::from_value(value.clone()))
         .transpose()?
@@ -222,6 +222,32 @@ mod tests {
         assert_eq!(args, &["with space", "quoted \"value\"", ""]);
         assert!(apply_input(&mut spec, &json!({"args":"shell string"})).is_err());
         assert!(apply_input(&mut spec, &json!({"args":["nul\u{0000}"]})).is_err());
+    }
+
+    #[test]
+    fn brain_bound_binary_arguments_reach_the_registered_dag() {
+        let mut spec = opencoder_dag::decode_spec(&json!({"name":"bound","steps":[
+            {"name":"run","kind":{"type":"binary","resource":"tool","args":["fixed"]}}
+        ]}))
+        .unwrap();
+        apply_input(
+            &mut spec,
+            &json!({"brain_layered":{"run_id":"brain-bound"},
+            "layered_inputs":{"args":["exact code revision", "failed test evidence"]}}),
+        )
+        .unwrap();
+        let opencoder_dag::StepKind::Binary { args, .. } = &spec.steps[0].kind else {
+            panic!("binary expected")
+        };
+        assert_eq!(
+            args,
+            &["fixed", "exact code revision", "failed test evidence"]
+        );
+        assert!(apply_input(
+            &mut spec,
+            &json!({"brain_layered":{},"layered_inputs":{"args":"invalid"}})
+        )
+        .is_err());
     }
 
     #[test]

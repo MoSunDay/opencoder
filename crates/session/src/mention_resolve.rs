@@ -120,7 +120,10 @@ mod tests {
     fn expands_existing_file_and_keeps_surrounding_text() {
         let (_d, abs) = setup();
         let out = expand_mentions("read @notes.md please", &abs);
-        assert_eq!(out, format!("read {}/notes.md please", abs.display()));
+        assert_eq!(
+            out,
+            format!("read {} please", abs.join("notes.md").display())
+        );
     }
 
     #[test]
@@ -128,11 +131,11 @@ mod tests {
         let (_d, abs) = setup();
         assert_eq!(
             expand_mentions("@src/main.rs", &abs),
-            format!("{}/src/main.rs", abs.display())
+            abs.join("src/main.rs").display().to_string()
         );
         assert_eq!(
             expand_mentions("@src", &abs),
-            format!("{}/src", abs.display())
+            abs.join("src").display().to_string()
         );
     }
 
@@ -143,9 +146,9 @@ mod tests {
         assert_eq!(
             out,
             format!(
-                "{}/notes.md and {}/src/main.rs",
-                abs.display(),
-                abs.display()
+                "{} and {}",
+                abs.join("notes.md").display(),
+                abs.join("src/main.rs").display()
             )
         );
     }
@@ -155,7 +158,7 @@ mod tests {
         let (_d, abs) = setup();
         assert_eq!(
             expand_mentions("@notes.md", &abs),
-            format!("{}/notes.md", abs.display())
+            abs.join("notes.md").display().to_string()
         );
     }
 
@@ -190,9 +193,9 @@ mod tests {
     fn sentence_punctuation_after_mention_is_preserved() {
         let (_d, abs) = setup();
         let out = expand_mentions("see @notes.md.", &abs);
-        assert_eq!(out, format!("see {}/notes.md.", abs.display()));
+        assert_eq!(out, format!("see {}.", abs.join("notes.md").display()));
         let out = expand_mentions("see @notes.md, ok?", &abs);
-        assert_eq!(out, format!("see {}/notes.md, ok?", abs.display()));
+        assert_eq!(out, format!("see {}, ok?", abs.join("notes.md").display()));
     }
 
     #[test]

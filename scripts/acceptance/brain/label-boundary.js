@@ -34,7 +34,7 @@ async function openPlan(browser, includeRetry) {
     await route.fulfill({ json: data });
   });
   await page.goto(settings.public_url, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('radiogroup').getByText('Agent', { exact: true }).click();
+  await page.getByRole('tablist', { name: '导航分类', exact: true }).getByRole('tab', { name: 'Agent', exact: true }).click();
   await page.getByRole('menuitem', { name: '大脑调度' }).click();
   await page.getByRole('tab', { name: '计划库' }).click();
   await page.getByPlaceholder('搜索计划名称').fill(title);

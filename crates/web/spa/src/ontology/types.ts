@@ -1,0 +1,17 @@
+export type Session = { principal: { external_id: string; display_name: string; kind: string }; capabilities: string[] };
+export type Environment = { env_num: number; env_key: string; name: string; description: string; initialization_status: "initializing" | "ready" | "failed"; revision: number; is_deleted: boolean };
+export type EntityType = { id: string; env_num: number; type_key: string; name: string; description: string; is_system: boolean; revision: number; is_deleted: boolean };
+export type AttributeKind = "string" | "integer" | "float" | "boolean" | "datetime" | "json" | "vector" | "text";
+export type AttributeRole = "custom" | "source" | "ext";
+export type StorageMode = "sql" | "markdown" | "nfs_path";
+export type AttributeDefinition = { id: string; env_num: number; entity_type_id: string; attribute_key: string; name: string; description: string; kind: AttributeKind; attribute_role?: AttributeRole; storage_mode?: StorageMode; required: boolean; revision: number; is_deleted: boolean };
+export type Entity = { id: string; env_num: number; entity_type_id: string; name: string; description: string; revision: number; is_deleted: boolean };
+export type RelationshipType = { id: string; env_num: number; type_key: string; name: string; description: string; is_directory_membership: boolean; is_system: boolean; source_entity_type_id?: string; target_entity_type_ids?: string[]; revision: number; is_deleted: boolean };
+export type RelationshipTypeCreate = { key: string; name: string; description?: string; source_entity_type_id: string; target_entity_type_ids: string[] };
+export type RelationshipTypeUpdate = { name: string; description?: string; source_entity_type_id: string | null; target_entity_type_ids: string[]; is_deleted: boolean; expected_revision: number };
+export type EntityTypeAction = { id: string; env_num: number; entity_type_id: string; operation_type: "read" | "write"; operation: string; description: string; revision: number; is_deleted: boolean };
+export type Relationship = { id: string; env_num: number; relationship_type_id: string; source_entity_id: string; target_entity_id: string; description: string; revision: number; is_deleted: boolean; is_pinned: boolean };
+export type DirectoryItem = { id: string; name: string; description: string; parent_id?: string; revision: number; is_deleted: boolean };
+export type GraphData = { nodes: Entity[]; edges: Relationship[] };
+export type GraphResponse = GraphData & { available_relationship_type_ids: string[] };
+export type GraphAspect = { id: string; env_num: number; aspect_key: string; name: string; description: string; entity_type_ids: string[]; relationship_type_ids: string[]; default_center_ids: string[]; default_upstream_depth: number | null; default_downstream_depth: number | null; revision: number; is_deleted: boolean };

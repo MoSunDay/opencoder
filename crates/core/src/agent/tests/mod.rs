@@ -62,7 +62,7 @@ fn sidecar_observer_is_read_only() {
     let sidecar = resolve_agent("sidecar").expect("sidecar agent registered");
     assert_eq!(sidecar.kind, AgentKind::Subagent);
     assert_eq!(sidecar.mode, AgentMode::Subagent);
-    for allowed in &["read", "search", "ls", "bash"] {
+    for allowed in &["read", "search", "ls", crate::platform::shell::tool_name()] {
         assert!(
             sidecar.tools.allows(allowed),
             "sidecar must allow '{allowed}'"
@@ -160,7 +160,10 @@ fn explore_subagent_carries_search_and_read_only() {
 fn build_subagent_carries_bash_and_edit_only() {
     let build = resolve_agent("build").expect("build subagent registered");
     assert_eq!(build.mode, AgentMode::Subagent);
-    assert!(build.tools.allows("bash"), "build must allow 'bash'");
+    assert!(
+        build.tools.allows(crate::platform::shell::tool_name()),
+        "build must allow 'bash'"
+    );
     assert!(build.tools.allows("edit"), "build must allow 'edit'");
     for blocked in &["search", "read", "task", "write", "glob", "grep", "ls"] {
         assert!(

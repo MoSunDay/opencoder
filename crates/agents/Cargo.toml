@@ -9,7 +9,6 @@ opencoder-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-nfsserve.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
@@ -19,6 +18,9 @@ base64.workspace = true
 uuid.workspace = true
 ulid.workspace = true
 libc = "0.2"
+
+[target.'cfg(not(windows))'.dependencies]
+nfsserve.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

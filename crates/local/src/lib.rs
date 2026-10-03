@@ -334,7 +334,7 @@ pub enum TodosSub {
 /// `<data_local_dir>/opencoder/tui.log`. Returns `None` if the data dir is
 /// unavailable; the caller then falls back to a temp file (never stdout).
 pub fn tui_log_path() -> Option<PathBuf> {
-    let mut p = dirs::data_local_dir()?;
+    let mut p = opencoder_core::platform::data_local_dir()?;
     p.push("opencoder");
     p.push("tui.log");
     Some(p)

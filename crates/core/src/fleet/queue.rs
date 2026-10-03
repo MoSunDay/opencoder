@@ -37,12 +37,33 @@ impl NodeScheduling {
             return Err(format!("max_runs must be between 1 and {MAX_NODE_RUNS}"));
         }
         if let Some(dir) = &self.workdir {
-            if !std::path::Path::new(dir).is_absolute() {
+            if !absolute_workdir(dir) {
                 return Err(format!("workdir must be an absolute path: {dir}"));
             }
         }
         Ok(())
     }
+}
+
+// Scheduling crosses OS boundaries: a Linux Server must accept Windows paths.
+fn absolute_workdir(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    if path.starts_with('/') {
+        return true;
+    }
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+    {
+        return true;
+    }
+    let Some(unc) = path.strip_prefix(r"\\") else {
+        return false;
+    };
+    let mut parts = unc.split('\\');
+    matches!(parts.next(), Some(host) if !host.is_empty() && host != "." && host != "?")
+        && matches!(parts.next(), Some(share) if !share.is_empty())
 }
 
 /// Stable ordering independent of client IDs and wall-clock resolution.
@@ -56,6 +77,27 @@ pub fn queue_cmp(order: QueueOrder, left: u64, right: u64) -> std::cmp::Ordering
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scheduling_accepts_remote_os_absolute_paths_and_refuses_relative_paths() {
+        for path in [
+            "/tmp/ws",
+            r"C:\OpenCoder\work",
+            "D:/中文 空格",
+            r"\\server\share\work",
+        ] {
+            assert!(absolute_workdir(path), "{path}");
+        }
+        for path in [
+            "",
+            "relative",
+            r"C:relative",
+            r"\relative",
+            r"\\server",
+            r"\\.\device",
+        ] {
+            assert!(!absolute_workdir(path), "{path}");
+        }
+    }
     #[test]
     fn queue_order_and_capacity_are_explicit() {
         assert!(queue_cmp(QueueOrder::Fifo, 1, 2).is_lt());

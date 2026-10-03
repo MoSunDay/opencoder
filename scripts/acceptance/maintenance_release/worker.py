@@ -35,13 +35,14 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--bundle', type=Path, required=True)
     parser.add_argument('--socket', type=Path, required=True)
-    parser.add_argument('--fault', choices=('installing', 'verification', 'none'), required=True)
+    parser.add_argument('--fault', choices=('installing', 'verification', 'public', 'none'), required=True)
     args = parser.parse_args()
     settings = load(args.config)
     root = args.config.parent
     operations = RemoteOperations(settings.token_file, args.socket)
     checkpoint = flow.checkpoint
     internal = flow.services.internal
+    public = flow.probes.public
     def crash(journal, stage):
         checkpoint(journal, stage)
         if stage == 'installing' and args.fault == 'installing':
@@ -54,9 +55,14 @@ def main():
             gates = closed_gates(current, effects)
             write(root / 'verification-injection.json', {'stage': 'verifying', 'gates': gates, 'pid': os.getpid()})
             raise RuntimeError('injected verification failure after real schema migration')
+    def reject_public(current, record, effects, seconds):
+        public(current, record, effects, seconds)
+        if args.fault == 'public':
+            raise RuntimeError('injected public failure after reopening writes')
     with configuration_scope(settings, root), \
             patch.object(flow, 'checkpoint', side_effect=crash), \
-            patch.object(flow.services, 'internal', side_effect=reject):
+            patch.object(flow.services, 'internal', side_effect=reject), \
+            patch.object(flow.probes, 'public', side_effect=reject_public):
         result = flow.deploy(settings, args.bundle, operations, 120)
     write(root / ('controller-' + args.fault + '.json'), {'phase': result['phase'],
           'stage': result['maintenance']['stage'], 'pid': os.getpid()})

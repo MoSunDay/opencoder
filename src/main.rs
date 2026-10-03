@@ -2,8 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use opencoder_local::{init_logging, Cli, Command};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let internal: Vec<_> = std::env::args_os().skip(1).collect();
     if internal
         .first()
@@ -16,8 +15,13 @@ async fn main() -> Result<()> {
         let code = opencoder_session::process::supervisor_main(internal[2..].to_vec(), None)?;
         std::process::exit(code);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     opencoder_session::process::configure_supervisor_binary(std::env::current_exe()?)?;
+    run()
+}
+
+#[tokio::main]
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     if cli.build_info {
         println!("{}", opencoder_core::version::build_info_json());

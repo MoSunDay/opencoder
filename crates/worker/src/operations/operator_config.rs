@@ -36,6 +36,9 @@ pub(crate) fn dir(layout: &crate::layout::DirectoryLayout) -> std::path::PathBuf
 /// configuration. Missing files are published once; existing ones are kept
 /// byte-for-byte (the plane outlives any single bootstrap attempt).
 pub(crate) fn bootstrap(dir: &std::path::Path, node_workdir: &std::path::Path) -> Result<()> {
+    #[cfg(windows)]
+    opencoder_core::platform::fs::ensure_private_directory(dir)?;
+    #[cfg(not(windows))]
     std::fs::create_dir_all(dir)
         .with_context(|| format!("operator config dir {} creation failed", dir.display()))?;
     let config = dir.join("config.json");

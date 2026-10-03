@@ -69,9 +69,15 @@ pub fn normalize_path(raw: &str) -> String {
     let s = s.trim_matches(|c| c == '\'' || c == '"');
     let s = s.strip_prefix("file://").unwrap_or(s);
     let s = s.strip_prefix("localhost").unwrap_or(s);
+    #[cfg(windows)]
+    let s = if s.as_bytes().get(2) == Some(&b':') && s.starts_with('/') {
+        &s[1..]
+    } else {
+        s
+    };
     if let Some(rest) = s.strip_prefix('~') {
-        if let Some(home) = dirs::home_dir() {
-            let rest = rest.strip_prefix('/').unwrap_or(rest);
+        if let Some(home) = opencoder_core::platform::home_dir() {
+            let rest = rest.trim_start_matches(['/', '\\']);
             return home.join(rest).to_string_lossy().into_owned();
         }
     }
@@ -188,7 +194,7 @@ mod tests {
 
     #[test]
     fn normalize_path_expands_tilde() {
-        let home = dirs::home_dir().unwrap();
+        let home = opencoder_core::platform::home_dir().unwrap();
         let expected = home.join("pics/a.png");
         assert_eq!(normalize_path("~/pics/a.png"), expected.to_string_lossy());
     }

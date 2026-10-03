@@ -151,7 +151,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     // Real interaction flow: open the goals tab, 新建目标 modal, fill the
     // form, submit — the fetch router answers 200 so GoalsTab reports
     // ok('目标已创建') and the shell paints it green (R1 fix).
-    fireEvent.click(await screen.findByRole('tab', { name: '项目', selected: true }));
+    fireEvent.click(await within(document.querySelector('.oc-page')).findByRole('tab', { name: '项目' }));
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     fireEvent.click(await screen.findByText('新建项目'));
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
@@ -187,8 +187,8 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(screen.queryByRole('menuitem')).toBeNull();
     expect(screen.queryByRole('button', { name: '后台管理' })).toBeNull();
     await act(async () => { reply({ ok: true, status: 200, json: async () => ({ name: 'reader', role: 'user' }) }); });
-    expect(await screen.findByRole('menuitem', { name: /全部执行/ })).toBeTruthy();
-    expect(screen.queryByRole('menuitem', { name: /节点列表/ })).toBeNull();
+    expect(await screen.findByRole('menuitem', { name: /全部执行$/ })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /节点列表$/ })).toBeNull();
   });
 
   it('keeps identity failures explicit and retries without showing privileged pages', async () => {
@@ -199,7 +199,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(screen.queryByRole('menuitem')).toBeNull();
     installFetchRouter();
     fireEvent.click(screen.getByRole('button', { name: '重试身份确认' }));
-    expect(await screen.findByRole('menuitem', { name: /节点列表/ })).toBeTruthy();
+    expect(await screen.findByRole('menuitem', { name: /节点列表$/ })).toBeTruthy();
   });
 
   it('rejects malformed identity responses rather than waiting forever', async () => {

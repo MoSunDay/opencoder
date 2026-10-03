@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 9d82393d5ad376511b387d089199a4d845f22b08
 
 # server 模块
 
@@ -6,8 +6,13 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 ## 索引
 - `crates/server/src/` — 二进制装配；复用 control/web 能力
-- [control/release/resources.rs](../../crates/control/src/release/resources.rs) — 独立资源服务持有 Agent、Linux 二进制与源工作区的只读 NFS 导出；经认证的二进制管理接口与版本 Server 使用同一实现和配置池。
+- [control/release/resources.rs](../../crates/control/src/release/resources.rs) — 独立资源服务持有 Agent、Linux 二进制、源工作区与 Ontology 正文的只读 NFS 导出；经认证的资源管理接口与版本 Server 使用同一配置。资源进程不打开 Ontology 数据库，业务 Server 持有域状态并在退休前排空写入。
 - 资源服务的 `GET /api/health` 返回 `role=resources` 与完整构建信息；兼容发布在预热前核对生产资源的版本。旧服务缺少元数据时要求维护升级。
-- [rolling/maintenance](../../scripts/platform/rolling/maintenance/__init__.py) — 不兼容升级的持久阶段：冻结接入、排空、停服、备份、升级资源与挂载、启动迁移、私有验证、复开；迁移启动意图先落盘，此后只允许同一候选续跑或新格式版本修复。
+- [rolling/maintenance](../../scripts/platform/rolling/maintenance/__init__.py) — 不兼容升级的持久阶段：冻结接入、排空、停服、备份、升级资源与挂载、启动迁移、私有验证、复开。迁移启动意图先落盘；复开写入意图持久化前可恢复旧库，此后禁止旧备份恢复，只允许同候选续跑或新格式版本修复。
+- [maintenance/flow.py](../../scripts/platform/rolling/maintenance/flow.py) — 资源 HTTP 就绪后，按发布等待时限轮询导出状态和节点挂载的实际目录读取；成功后才准备候选进程。临时 NFS 读取错误可重试，超时保留 `installing` 阶段、关闭的写入口和原备份，同候选续跑继续核验这份备份。
+- [maintenance/preflight.py](../../scripts/platform/rolling/maintenance/preflight.py)、[services.py](../../scripts/platform/rolling/maintenance/services.py) — 检查源工作区已存在且实际 Server 用户可读、可遍历；拒绝与可写管理路径重叠及软链接别名。资源升级仅置备应用目录，不创建或改动源目录。
+- [maintenance/archive.py](../../scripts/platform/rolling/maintenance/archive.py)、[restore.py](../../scripts/platform/rolling/maintenance/restore.py) — 已停止写入并验证的 SQLite 备份使用只读 immutable URI，检查和恢复不会向备份添加 WAL/SHM 文件；活动数据库仍使用普通只读连接。
+- [rolling/native/ontology.py](../../scripts/platform/rolling/native/ontology.py)、[rolling/backup.py](../../scripts/platform/rolling/backup.py)、[data_archive.py](../../scripts/platform/data_archive.py) — 从 ontology.db 读取实际正文根，备份数据库及正文树并核验引用摘要；维护恢复同时恢复这两部分，支持显式配置的外部正文根。
+- [维护验收入口](../../scripts/acceptance/maintenance_release/README.md) — 私有挂载命名空间内执行实际旧 Server、迁移、崩溃回滚、拒绝旧回滚与同候选续跑；服务命令由专属子进程适配器执行，不操作宿主 systemd 单元。保留原始构建信息并执行严格发布包校验，不把开发二进制伪装成正式包。
 
 常规兼容发布保留资源服务与已有挂载；数据契约升级通过维护流程切换。参见 [发布说明](../../docs/smooth-release.md)、[DAG 执行约定](../../rules/04-dag-execution-contract.md)。

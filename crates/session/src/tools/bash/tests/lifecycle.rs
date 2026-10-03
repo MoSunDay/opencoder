@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 /// A command that exceeds the foreground timeout is handed off to the
 /// background supervisor: the output contains the timeout marker, the pid,

@@ -192,7 +192,17 @@ fn dir_first_visit(e: &ignore::DirEntry, visited: &Mutex<HashSet<(u64, u64)>>) -
             Err(_) => true,
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        match opencoder_core::platform::fs::directory_identity(e.path()) {
+            Ok(identity) => visited
+                .lock()
+                .expect("search walk dedup lock poisoned")
+                .insert(identity),
+            Err(_) => true,
+        }
+    }
+    #[cfg(all(not(unix), not(windows)))]
     {
         let _ = visited;
         true

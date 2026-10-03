@@ -80,7 +80,7 @@ pub(crate) fn leaf_tool_timeout(name: &str) -> Option<Duration> {
         // `question` waits for a human answer: wall-clock budgeting it
         // would cut off slow users. Cancel (double-Esc / turn interrupt)
         // remains the only way out, same as bash.
-        "bash" | "question" => None,
+        "bash" | "powershell" | "question" => None,
         "read" | "edit" | "search" => {
             Some(Duration::from_secs(crate::tools::bash::BASH_TIMEOUT_SECS))
         }
@@ -103,13 +103,15 @@ pub(super) async fn execute_call_with_timeout(
         // (before any child session is created) so a sidecar cannot farm
         // mutations out to a full write-capable subagent. Same denial text
         // as the generic gate for a consistent UX.
-        if let Some(denial) = crate::bash_guard::gate(
+        if let Some(denial) = crate::bash_guard::gate_async(
             &session.agent.kind,
             &session.agent.name,
             "task",
             None,
             &session.working_dir,
-        ) {
+        )
+        .await
+        {
             return ToolOutput::err(denial);
         }
         // The subagent runs as a child session and may legitimately take many
@@ -274,13 +276,15 @@ pub(super) async fn execute_call_with_timeout(
         .and_then(|v| v.as_str())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| session.working_dir.clone());
-    if let Some(denial) = crate::bash_guard::gate(
+    if let Some(denial) = crate::bash_guard::gate_async(
         &session.agent.kind,
         &session.agent.name,
         &tc.name,
         tc.input.get("command").and_then(|v| v.as_str()),
         &effective_workdir,
-    ) {
+    )
+    .await
+    {
         return ToolOutput::err(denial);
     }
     // Latent execution gate (defence in depth): latent tools stay in the
@@ -320,14 +324,45 @@ pub(super) async fn execute_call_with_timeout(
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()
-                .join(":")
+                .join(if cfg!(windows) { ";" } else { ":" })
         }),
     };
     match registry.get(&tc.name) {
         Some(tool) => {
+            let input = tc.input.clone();
+            #[cfg(windows)]
+            let input = if tc.name == "powershell"
+                && (session.agent.kind == opencoder_core::AgentKind::Plan
+                    || session.agent.name == "sidecar")
+            {
+                match crate::tools::command::powershell::prepare_read_only(
+                    input
+                        .get("command")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or(""),
+                    &effective_workdir,
+                )
+                .await
+                {
+                    Ok(command) => {
+                        let mut prepared = input;
+                        prepared["command"] = serde_json::Value::String(command);
+                        prepared
+                    }
+                    Err(error) => {
+                        return ToolOutput::err(if session.agent.name == "sidecar" {
+                            crate::bash_guard::sidecar_denial(&tc.name, &error.to_string())
+                        } else {
+                            crate::bash_guard::plan_denial(&tc.name, &error.to_string())
+                        })
+                    }
+                }
+            } else {
+                input
+            };
             let mut cancel_fut = std::pin::pin!(await_cancel(session));
             let mut turn_cancel_fut = std::pin::pin!(await_turn_cancel(session));
-            let exec = tool.execute(tc.input.clone(), &ctx);
+            let exec = tool.execute(input, &ctx);
             // `None` exempts the tool from the safety net: the deadline future
             // never resolves, so only a cancel or the tool's own completion ends
             // the call. `bash` uses this — it runs in the foreground until it

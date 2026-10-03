@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const HANDOFF_PROTOCOL: u32 = 1;
-// Native DAG journals and project schema v32 require a stopped migration.
-pub const HANDOFF_DATA_FORMAT: u32 = 2;
+// Ontology storage and its independent resource export require a maintenance upgrade.
+pub const HANDOFF_DATA_FORMAT: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

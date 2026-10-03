@@ -71,7 +71,7 @@ fn launch_environment(
         .transpose()?
         .unwrap_or_default();
     if let Some(text) = how_append {
-        envs.extend(opencoder_dag_runtime::exec::how_append::env_pairs(Some(
+        envs.extend(opencoder_agents::resources::how_append::env_pairs(Some(
             text,
         )));
     }

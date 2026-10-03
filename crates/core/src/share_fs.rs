@@ -154,12 +154,10 @@ pub fn durable_create_dir_all(path: &Path) -> Result<()> {
     }
     std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
     for directory in missing.iter().rev() {
-        std::fs::File::open(directory)
-            .and_then(|file| file.sync_all())
+        crate::platform::fs::sync_directory(directory)
             .with_context(|| format!("fsync {}", directory.display()))?;
         if let Some(parent) = directory.parent() {
-            std::fs::File::open(parent)
-                .and_then(|file| file.sync_all())
+            crate::platform::fs::sync_directory(parent)
                 .with_context(|| format!("fsync {}", parent.display()))?;
         }
     }
@@ -181,14 +179,13 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .with_context(|| format!("write {}", tmp.display()))?;
     file.sync_all()
         .with_context(|| format!("fsync {}", tmp.display()))?;
-    if let Err(error) = std::fs::rename(&tmp, path) {
+    if let Err(error) = crate::platform::fs::replace(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(error)
             .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()));
     }
     if let Some(parent) = path.parent() {
-        std::fs::File::open(parent)
-            .and_then(|directory| directory.sync_all())
+        crate::platform::fs::sync_directory(parent)
             .with_context(|| format!("fsync {}", parent.display()))?;
     }
     Ok(())

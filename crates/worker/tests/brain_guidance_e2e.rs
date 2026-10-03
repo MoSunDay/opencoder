@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 //! Human input travels through Control, the durable Brain event, and the
 //! running child session without crossing the current layer barrier.
 #[path = "scheduler_v4/client.rs"]

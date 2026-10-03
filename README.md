@@ -13,7 +13,7 @@
   <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue" />
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-orange?logo=rust" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
-  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" />
   <img alt="status" src="https://img.shields.io/badge/status-active%20development-yellow" />
 </p>
 
@@ -57,6 +57,8 @@ OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它�
 - **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；libsql WAL 并发读写，千条消息追加 30 ms。
 
 ## 🚀 快速开始
+
+Windows 11 x64 支持原生 TUI 和 operator 节点，使用稳定版 PowerShell 7.4 及以上（7.x）。安装、构建与支持范围见 [Windows 使用说明](docs/windows.md)。
 
 > 👉 新用户上手（TUI 键位、notepad 浏览/编辑文件、任务附加备注等）见 [**快速上手指南**](docs/quickstart.md)。
 

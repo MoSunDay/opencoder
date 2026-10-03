@@ -26,6 +26,8 @@ use crate::{
 macro_rules! store_contract_finish {
     ($($methods:tt)*) => {
         #[async_trait]
+        // async_trait adds must_use to Future, already must-use on Rust 1.99.
+        #[allow(clippy::double_must_use)]
         pub trait Store: Send + Sync { $($methods)* }
     };
 }

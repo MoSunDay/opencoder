@@ -6,6 +6,7 @@ use serde_json::Value;
 
 pub mod bash;
 pub mod bg;
+pub mod command;
 pub mod edit;
 pub mod image_data;
 pub mod latent;

@@ -20,6 +20,48 @@ Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0});
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('执行明细内嵌运行视图', () => {
+  it.each([
+    ['initializing', 'TODO 工作流正在初始化'],
+    ['stopping', 'TODO 工作流正在停止'],
+    ['stopped', 'TODO 工作流未启动'],
+    ['failed', 'TODO 工作流初始化失败'],
+  ])('TODO %s 时只展示初始化状态，不读取尚未创建的工作台', async (state, title) => {
+    const failure = 'fixture todo initialization failed';
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/executions/todos-init') return {
+        execution: { id: 'todos-init', kind: 'todos', status: state === 'failed' ? 'error' : 'running' },
+        request: { kind: 'todos' }, workflow_initialization: state,
+        ...(state === 'failed' ? { error: failure } : {}),
+      };
+      throw new Error(`unexpected request: ${path}`);
+    });
+    render(<ExecutionView executionRef={{ id: 'todos-init', kind: 'todos' }} />);
+    expect(await screen.findByText(title)).toBeTruthy();
+    expect(apiGet.mock.calls.map(([path]) => path)).toEqual(['/api/executions/todos-init']);
+    if (state === 'failed') expect(screen.getAllByText(failure)).toHaveLength(1);
+    expect(screen.queryByText('状态同步失败')).toBeNull();
+  });
+
+  it('TODO 初始化完成后自动打开工作台，保留真实的读取错误', async () => {
+    let ready = false;
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/executions/todos-ready') return {
+        execution: { id: 'todos-ready', kind: 'todos', status: 'running' }, request: { kind: 'todos' },
+        ...(ready ? { workflow: { workflow: { status: 'running' }, items: [] } }
+          : { workflow_initialization: 'initializing' }),
+      };
+      throw new Error('ready workflow store unavailable');
+    });
+    render(<ExecutionView executionRef={{ id: 'todos-ready', kind: 'todos' }} />);
+    expect(await screen.findByText('TODO 工作流正在初始化')).toBeTruthy();
+    expect(apiGet.mock.calls.map(([path]) => path)).toEqual(['/api/executions/todos-ready']);
+    ready = true;
+    fireEvent.click(screen.getByRole('button', { name: '刷新明细' }));
+    expect(await screen.findByText('ready workflow store unavailable')).toBeTruthy();
+    expect(apiGet.mock.calls.some(([path]) => path.startsWith('/api/todo/workflows/todos-ready/review'))).toBe(true);
+    expect(screen.queryByText('TODO 工作流正在初始化')).toBeNull();
+  });
+
   it('unmanaged Team detail sends guidance through the provided callback', async () => {
     apiGet.mockResolvedValue({ execution: { id: 'team-guided', kind: 'team', status: 'running', created_at: 1 }, request: { kind: 'team', input: {} } });
     const onGuidance = vi.fn().mockResolvedValue(true);

@@ -101,7 +101,7 @@ function asyncPath(prefix, rowsKey, nextKey) {
   };
 }
 
-function todoInitializationNotice(detail) {
+export function todoInitializationNotice(detail) {
   const state = detail?.workflow_initialization || (detail?.workflow_initializing ? 'initializing' : '');
   return {
     initializing: ['info', 'TODO 工作流正在初始化', '节点已接受任务，详情准备完成后会自动刷新。'],

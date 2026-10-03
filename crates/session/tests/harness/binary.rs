@@ -18,6 +18,15 @@ def emit(v): print(json.dumps(v), flush=True)
 thread = 'fork-thread' if 'fork' in sys.argv else 'fixture-thread'
 emit({'type':'thread.started','thread_id':thread})
 emit({'type':'turn.started'})
+mode = os.environ.get('FAIL_MODE')
+if mode == 'reconnect':
+    emit({'type':'error','message':'Reconnecting... 2/5 (stream interrupted)'})
+    emit({'type':'error','message':'Reconnecting... 5/5 (stream interrupted)'})
+    emit({'type':'item.completed','item':{'id':'fallback','type':'error','message':'Falling back from WebSockets to HTTPS transport.'}})
+if mode == 'stream_error_eof':
+    emit({'type':'error','message':'stream failed'}); sys.exit(0)
+if mode == 'turn_failed':
+    emit({'type':'turn.failed','error':{'message':'retries exhausted'}}); time.sleep(20); sys.exit(1)
 if os.environ.get('FAIL_MODE') == 'malformed':
     print('invalid-json', flush=True); time.sleep(20); sys.exit(1)
 emit({'type':'item.completed','item':{'id':'r1','type':'reasoning','text':'inspect first'}})
@@ -42,6 +51,7 @@ emit({'type':'item.completed','item':{'id':'c1','type':'command_execution','comm
 emit({'type':'item.completed','item':{'id':'a1','type':'agent_message','text':'answer'}})
 if os.environ.get('FAIL_MODE') == 'missing_end': sys.exit(0)
 emit({'type':'turn.completed','usage':{'input_tokens':12,'output_tokens':5,'cached_input_tokens':3}})
+if mode == 'exit_failure': sys.exit(1)
 "##).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     bin

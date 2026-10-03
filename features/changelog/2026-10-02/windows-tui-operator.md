@@ -74,3 +74,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 - [Windows 支持范围](../../windows/index.md)、[安装与验收](../../../docs/windows.md)
 - [core](../../../agents/core/index.md)、[session](../../../agents/session/index.md)、[TUI](../../../agents/tui/index.md)、[worker](../../../agents/worker/index.md)
+
+- 子任务持续进展验收使用虚拟时间和六次模型增量，验证总时长超过空闲时限仍成功结束；取消和停滞验收继续检查实际存储状态。对应 `sustained_activity_does_not_timeout`、`timeout_marks_subagent_cancelled`、`stalled_single_step_times_out`。
+
+- 原生 Codex 的重连 `error` 事件继续显示状态并允许重试和传输切换；`turn.failed`、非零退出、缺少完成事件仍失败关闭。对应 `reconnect_errors_leave_the_turn_open_until_success_or_failure`、`terminal_failure_stays_fatal`、`codex_reconnect_and_transport_fallback_finish_and_resume`、`codex_malformed_stream_and_missing_terminal_fail`。

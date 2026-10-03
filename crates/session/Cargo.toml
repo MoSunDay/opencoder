@@ -37,4 +37,5 @@ name = "mcp_mock_server"
 path = "bin/mcp_mock_server.rs"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true

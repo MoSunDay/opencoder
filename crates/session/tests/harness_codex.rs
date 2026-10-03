@@ -100,6 +100,50 @@ async fn codex_binary_stream_persistence_resume_and_fork() {
 }
 
 #[tokio::test]
+async fn codex_reconnect_and_transport_fallback_finish_and_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut session, store) = fixtures::session(root.path()).await;
+    session
+        .harness
+        .envs
+        .insert("FAIL_MODE".into(), "reconnect".into());
+    let mut events = Vec::new();
+    run(&mut session, "recover".into(), |event| events.push(event))
+        .await
+        .unwrap();
+    assert!(events.iter().any(
+        |event| matches!(event, SessionEvent::Status(text) if text.contains("Reconnecting..."))
+    ));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SessionEvent::Status(text) if text.contains("Falling back"))));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SessionEvent::Done)));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, SessionEvent::Error(_))));
+    assert_eq!(
+        store
+            .harness_runtime(&session.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .thread_id
+            .as_deref(),
+        Some("fixture-thread")
+    );
+    run(&mut session, "follow up".into(), |_| {}).await.unwrap();
+    let records: Vec<Value> = std::fs::read_to_string(root.path().join("capture.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records[1]["args"][1], "resume");
+    assert_eq!(records[1]["args"][2], "fixture-thread");
+}
+
+#[tokio::test]
 async fn codex_reads_pinned_agent_files_and_executable_tools() {
     let root = tempfile::tempdir().unwrap();
     let resources = tempfile::tempdir().unwrap();
@@ -137,7 +181,13 @@ async fn codex_reads_pinned_agent_files_and_executable_tools() {
 
 #[tokio::test]
 async fn codex_malformed_stream_and_missing_terminal_fail() {
-    for mode in ["malformed", "missing_end"] {
+    for mode in [
+        "malformed",
+        "missing_end",
+        "stream_error_eof",
+        "turn_failed",
+        "exit_failure",
+    ] {
         let root = tempfile::tempdir().unwrap();
         let (mut session, _) = fixtures::session(root.path()).await;
         session.harness.envs.insert("FAIL_MODE".into(), mode.into());

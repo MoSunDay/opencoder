@@ -14,7 +14,7 @@ bug #14 语义：两个 MCP server 名若经 `[-.]→_` 归一化后相同（`a-
 
 ## 变更
 
-- **`crates/core/src/config/mcp_guard.rs`（新）**：纯函数守卫模块——
+- **`crates/core/src/config/runtime/mcp_guard.rs`（新）**：纯函数守卫模块——
   - `normalized_server_name`：`[-.]→_` 一行函数，与 `crates/session/src/mcp/tool.rs::sanitize_server_name`（注册侧）、`crates/tui/src/mcp_menu/patch.rs::normalized_server_name`（表单预检侧）按现有惯例三处复制、注释互引、各自带表驱动 pinning 测试。
   - `mcp_name_collision(&Map)`：对**非 null** 键两两归一化碰撞检测，返回 `(offending, existing)`。在 merge 后的视图上检查：rename 的旧键已被同 patch 的 `null` 删除、原地更新只留一个键，故 TUI 预检的 `renamed_from`/原地更新豁免在 save 时机**天然等价成立**（doc 注释已说明）。
   - `conflict_message`：错误文案含两个原始名与归一化前缀（`…"a-b" collides with existing "a.b" (both normalize to mcp__a_b__…)`）。
@@ -33,7 +33,7 @@ bug #14 语义：两个 MCP server 名若经 `[-.]→_` 归一化后相同（`a-
   - `save_rejects_mcp_servers_normalized_collision` — 红→绿：修复前 `Config::save` 接受 `{"a-b":…, "a.b":…}`（写入 `.opencoder/mcp.json`），修复后 Err（文案含两名 + `mcp__a_b__`）且所有 mcp.json 候选位置零污染。
   - `save_allows_rename_via_null_delete_marker` / `save_allows_intra_patch_rename_on_fresh_file` — rename（`a-b`→`a.b`，同 patch 带 `a: null`）与全新文件上的 intra-patch rename 均 Ok。
   - `save_without_mcp_servers_key_is_unaffected` — 无 mcp_servers 的 patch 不受影响。
-- core 单测（`crates/core/src/config/mcp_guard.rs` 内嵌）：`normalized_server_name_is_table_driven`（pinning）、`collision_detects_normalized_twins`、`collision_ignores_null_delete_markers`、`collision_ignores_disjoint_and_single_entries`、`collision_catches_three_way_normalized_clash`、`conflict_message_names_both_and_normalized_prefix`。
+- core 单测（`crates/core/src/config/runtime/mcp_guard.rs` 内嵌）：`normalized_server_name_is_table_driven`（pinning）、`collision_detects_normalized_twins`、`collision_ignores_null_delete_markers`、`collision_ignores_disjoint_and_single_entries`、`collision_catches_three_way_normalized_clash`、`conflict_message_names_both_and_normalized_prefix`。
 - web 集成测试（`crates/web/tests/web_api_ops.rs`）：`patch_config_mcp_name_collision_returns_400` — 红→绿：修复前 PATCH 碰撞返回 500（断言 400 失败），修复后 400 + body 含两名与 `mcp__a_b__`、mcp.json 候选零污染，随后合法单 server PATCH → 200 且落盘。
 - 回归：`cargo test -p opencoder-core -p opencoder-web` 全量 34 个测试二进制 0 失败；`cargo test -p opencoder-tui --lib -- mcp` 40 通过（在 HEAD+本次改动的隔离 worktree 上验证，排除同仓并行任务的在途改动干扰），含 `handle_mcp_outcome_refuses_save_colliding_after_normalization`（TUI 预检不回归）；`cargo clippy -p opencoder-core -p opencoder-web --all-targets` 0 warning。
 

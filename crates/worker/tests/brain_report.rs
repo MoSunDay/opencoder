@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 //! A separate test process keeps the node's process-global change watch local
 //! to this fixture, so another fleet cannot mask a self-triggering report.
 mod support;

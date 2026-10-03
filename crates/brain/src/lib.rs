@@ -25,3 +25,4 @@ pub mod types;
 pub use error::{BrainNotFound, EmbeddingFailed};
 pub use runtime::Runtime;
 pub use types::CapabilityInput;
+pub mod contracts;

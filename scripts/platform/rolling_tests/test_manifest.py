@@ -28,10 +28,32 @@ class ResourceTests(unittest.TestCase):
             record['annotations'] = {'dag_parent': str(root / 'runs/1970-01-01/active')}
             path.write_text(json.dumps(record))
             brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(root)}])
+            record['annotations'] = None
+            path.write_text(json.dumps(record))
+            with self.assertRaisesRegex(ValueError, 'DAG migration blocked.*active'):
+                brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(root)}])
             record.pop('annotations')
             record['assignment']['index']['status'] = 'done'
             path.write_text(json.dumps(record))
             brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(root)}])
+
+    def test_bootstrap_history_is_preserved_but_only_registered_runtime_roots_block_cutover(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = root / 'legacy'
+            runtime = root / 'runtime'
+            path = legacy / 'dag/stale/execution.json'
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({'annotations': None, 'assignment': {
+                'request': {'id': 'stale', 'kind': 'dag'}, 'index': {'status': 'interrupted'}}}))
+            original = path.read_bytes()
+            settings = Settings(root, root, root, root, root / 'token', legacy_agent_data=legacy)
+            brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(runtime)}])
+            self.assertEqual(path.read_bytes(), original)
+            for releases in ([], [{'runtime_data': str(legacy)}]):
+                with self.subTest(releases=releases), self.assertRaisesRegex(ValueError, 'DAG migration blocked.*stale'):
+                    brain_preflight(settings, {'protocol_version': 10}, releases)
+            self.assertEqual(path.read_bytes(), original)
 
     def test_active_supported_brain_runs_allow_release_without_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -120,11 +142,11 @@ class ResourceTests(unittest.TestCase):
             with patch('rolling.manifest.shutil.disk_usage', return_value=SimpleNamespace(free=2**40)):
                 for output in ['ext4\n', 'ext4\next4\n', 'ext4\nxfs\n']:
                     with self.subTest(output=output), patch('subprocess.run', return_value=SimpleNamespace(stdout=output)):
-                        resources(settings, {'files': {}})
+                        resources(settings, {'release_id': 'candidate', 'files': {}})
                 for output in ['', 'nfs4\n', 'ext4\nnfs4\n', 'ext4\nunknown\n']:
                     with self.subTest(output=output), patch('subprocess.run', return_value=SimpleNamespace(stdout=output)):
                         with self.assertRaisesRegex(ValueError, 'verified local storage'):
-                            resources(settings, {'files': {}})
+                            resources(settings, {'release_id': 'candidate', 'files': {}})
 
 
 if __name__ == '__main__':

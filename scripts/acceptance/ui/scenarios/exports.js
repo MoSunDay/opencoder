@@ -6,7 +6,7 @@ async function exportsStatus({ page, api, root, until }) {
   await page.getByRole('menuitem', { name: /Agent 配置$/ }).click();
   await page.getByRole('tab', { name: 'NFS 配置', exact: true }).click();
   const states = [];
-  for (const [route, label] of [['/api/agents/nfs', 'nfs'], ['/api/dag/binaries/nfs', 'binary-nfs'], ['/api/dag/workspace/nfs', 'workspace-nfs']]) {
+  for (const [route, label] of [['/api/agents/nfs', 'nfs'], ['/api/dag/binaries/nfs', 'binary-nfs'], ['/api/dag/workspace/nfs', 'workspace-nfs'], ['/api/ontology/nfs', 'ontology-nfs']]) {
     const value = await api('GET', route);
     const toggle = page.getByRole('switch', { name: `${label}-enabled`, exact: true });
     await toggle.waitFor();

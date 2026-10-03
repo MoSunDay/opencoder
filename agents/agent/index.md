@@ -4,6 +4,8 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 稳定 Host 与独立版本 Runtime 的节点入口。
 
+Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点，启动前要求 PowerShell 7；不提供 Windows 服务、Server 或滚动发布。安装与运行见 [Windows](../../features/windows/index.md)。以下 Host 发布机制用于现有 Linux 部署。
+
 ## 索引
 - `crates/agent/src/` — Host/Runtime 装配与兼容入口
 - `crates/agent/src/host/service.rs` — 节点级维护命令中继

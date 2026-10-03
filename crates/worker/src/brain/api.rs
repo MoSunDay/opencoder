@@ -9,6 +9,12 @@ pub async fn handle(
     action: &str,
     input: Value,
 ) -> Result<RpcReply> {
+    if cfg!(windows) {
+        return Ok(RpcReply::error(
+            400,
+            "Windows nodes do not offer Brain or DAG capabilities",
+        ));
+    }
     ensure!(valid_id(&reference.id), "invalid execution id");
     if action == "capability_probe" {
         let config = worker.configuration()?;
@@ -29,7 +35,7 @@ pub async fn handle(
         if let Err(error) = matches {
             return Ok(RpcReply::error(412, error.to_string()));
         }
-        let mut body = json!({"compatible":true,"features":["dag_container_v1","dag_dynamic_v1","brain_scheduler_v7",opencoder_core::fleet::private_files::CAPABILITY]});
+        let mut body = json!({"compatible":true,"features":["dag_container_v1","dag_dynamic_v1","brain_scheduler_v7",opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,opencoder_core::fleet::private_files::CAPABILITY]});
         if input["private_files"] == true {
             body["image_digest"] = json!(tokio::task::spawn_blocking(
                 opencoder_core::fleet::private_files::runtime_image_digest

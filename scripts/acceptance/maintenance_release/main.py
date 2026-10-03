@@ -15,7 +15,7 @@ from rolling import manifest
 from rolling.state import write
 from evidence import source_inventory, unchanged_source, fingerprint
 from fixture import prepare, source_configs, launch, configuration_scope
-from inputs import old_input, binary_inventory, image_input, package_debug
+from inputs import old_input, corrective_input, binary_inventory, image_input, package_debug
 import scenarios
 
 
@@ -26,40 +26,37 @@ def arguments(argv=None):
     candidate.add_argument('--platform-bundle', type=Path, help='verified immutable release bundle')
     parser.add_argument('--rootfs', type=Path, required=True)
     parser.add_argument('--old-bundle', type=Path, required=True, help='actual retained data-format1 platform bundle')
+    parser.add_argument('--corrective-bundle', type=Path, required=True, help='verified compatible bundle from a different compiled commit')
     parser.add_argument('--data-parent', type=Path, default=Path('/root/.cache/opencoder-e2e'))
-    parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
-def private_namespace(args):
+def require_root():
     if os.geteuid() != 0:
         raise ValueError('root is required for private mounts, NFS and runc')
-    if not args.inside:
-        os.execv('/usr/bin/unshare', ['unshare', '--mount', '--propagation', 'private', '--',
-                 sys.executable, str(Path(__file__).resolve()), *sys.argv[1:], '--inside'])
-    if os.readlink('/proc/self/ns/mnt') == os.readlink('/proc/1/ns/mnt'):
-        raise ValueError('refusing execution in the host mount namespace')
+
 
 
 def main():
     args = arguments()
-    private_namespace(args)
+    require_root()
     parent = args.data_parent.resolve()
     if any(parent.is_relative_to(Path(path)) for path in ('/var/lib/opencoder-platform', '/etc', '/run/systemd')):
         raise ValueError('data-parent must be outside production state and system configuration')
     if any(parent.is_relative_to(path.resolve()) for path in
-           (args.rootfs, args.old_bundle, args.platform_bundle or args.bin_dir)):
+           (args.rootfs, args.old_bundle, args.corrective_bundle, args.platform_bundle or args.bin_dir)):
         raise ValueError('data-parent must be outside the immutable input directories')
     parent.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix='mr-', dir=parent))
+    root.chmod(0o755)
     print(json.dumps({'evidence': str(root), 'stage': 'starting'}), flush=True)
     receipt = {'passed': False, 'release_bundle': args.platform_bundle is not None, 'evidence': str(root),
                'controller_source': str(Path(__file__).resolve().parents[3]),
                'isolation': {'namespace': os.readlink('/proc/self/ns/mnt'),
-                  'host_namespace': os.readlink('/proc/1/ns/mnt'), 'private_mount_namespace': True,
-                  'services': 'generated units executed by private process adapter; Host systemctl uses private socket',
-                  'real': ['Nginx', 'NFS', 'runc', 'old Server', 'candidate Server/Host/Runtime']},
-               'limitations': ['Old registered Host/Runtime and independent NFS exporter use candidate binaries; no full old Runtime/exporter evidence.',
+                  'host_namespace': os.readlink('/proc/1/ns/mnt'), 'owned_global_mount_paths': True,
+                  'services': 'real systemd units with remapped private service dependencies',
+                  'real': ['Nginx', 'NFS', 'runc', 'old Server/Host/Runtime/resources', 'candidate Server/Host/Runtime']},
+               'limitations': ['Only this run-owned systemd units, mounts, ports, credentials and data are changed.',
                   'Schema 31 -> 32 is covered separately by Store catalog_maintenance and project_tags tests; this harness reports the actual old schema.',
                   'This fixture creates its own token/data/config and never reads production state, tokens or config.']}
     operations = control = None
@@ -69,6 +66,13 @@ def main():
         if args.platform_bundle:
             bundle = args.platform_bundle.absolute()
             initial_files, info = binary_inventory(bundle / 'bin')
+            import subprocess
+            source = Path(__file__).resolve().parents[3]
+            commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
+            dirty = subprocess.check_output(['git', '-C', str(source), 'status', '--porcelain'], text=True).strip()
+            if dirty or info['git_commit'] != commit:
+                raise ValueError('formal acceptance requires the clean controller commit packaged in the bundle')
+            receipt['controller_commit'] = commit
         else:
             if args.bin_dir.is_symlink():
                 raise ValueError('bin-dir must be a real immutable directory')
@@ -80,7 +84,10 @@ def main():
                        old_bundle=str(args.old_bundle), candidate_input=str(args.platform_bundle or args.bin_dir),
                        binary_inventory=initial_files, rootfs=str(args.rootfs.absolute()))
         candidate = manifest.verify(bundle)
+        corrective, corrective_files, corrective_info = corrective_input(args.corrective_bundle, candidate)
         receipt['candidate_manifest'] = candidate
+        receipt.update(corrective_manifest=corrective, corrective_build=corrective_info,
+                       corrective_binary_inventory=corrective_files)
         receipt['input_rootfs_builds'] = image_input(args.rootfs)
         nginx = shutil.which('nginx') or '/usr/local/sbin/nginx'
         if not Path(nginx).is_file() or not shutil.which('runc'):
@@ -95,10 +102,12 @@ def main():
             old = launch(settings, operations, args.old_bundle, old_manifest, bundle / 'bin',
                          args.rootfs.absolute(), targets, ports)
             print(json.dumps({'evidence': str(root), 'stage': 'old-ready'}), flush=True)
-            scenarios.run(settings, operations, old, bundle, candidate, control, receipt)
+            scenarios.run(settings, operations, old, bundle, candidate, args.corrective_bundle, control, receipt)
         actual_files, actual_info = binary_inventory(args.bin_dir or (args.platform_bundle / 'bin'))
         if actual_files != initial_files or actual_info != info:
             raise AssertionError('candidate input changed during acceptance')
+        if binary_inventory(args.corrective_bundle / 'bin') != (corrective_files, corrective_info):
+            raise AssertionError('corrective input changed during acceptance')
         mounts = {name: json.loads(operations.output('findmnt', '-J', '--mountpoint', str(target),
                   '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS'))['filesystems'][0] for name, target in targets.items()}
         if any(value['fstype'] not in ('nfs', 'nfs4') or 'ro' not in value['options'].split(',') for value in mounts.values()):

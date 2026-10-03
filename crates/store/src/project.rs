@@ -63,6 +63,8 @@ use crate::project_types::{
 /// - Status/kind strings round-trip exactly; an unrecognized status on read is
 ///   corruption and propagates as an error.
 #[async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait ProjectStore: Send + Sync {
     /// Backend identifier for diagnostics ("libsql", "mysql", ...).
     fn project_backend_name(&self) -> &'static str;

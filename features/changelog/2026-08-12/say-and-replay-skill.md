@@ -47,7 +47,7 @@
 ## Validation
 
 > 注：当前工作区存在**先于本任务、范围外的未完成 MCP 集成 WIP**（`crates/session`/`crates/tui`/
-> `crates/core/src/config/mcp.rs`），使 `opencoder-tui` 无法编译（`build_system` 形参不匹配、
+> `crates/core/src/config/runtime/mcp.rs`），使 `opencoder-tui` 无法编译（`build_system` 形参不匹配、
 > `SlashAction::Mcp` 未覆盖）。该 WIP 非本任务引入，不计入本变更。故 go-live 验证以**隔离后**
 > （仅本变更、MCP WIP 暂存）的 workspace 构建与 `opencoder-core` 全套为准。
 

@@ -21,6 +21,8 @@ use tokio::sync::{mpsc, Mutex};
 /// the implementation appends one).  `recv` blocks until the next complete
 /// message arrives and returns its raw JSON string.
 #[async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait McpTransport: Send + Sync {
     async fn send(&self, msg: &str) -> Result<()>;
     async fn recv(&self) -> Result<String>;

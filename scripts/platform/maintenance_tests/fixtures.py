@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from rolling.config import Settings
 from rolling.deployment import record_for
 from rolling.state import Journal
-from rolling.maintenance import flow
+from rolling.maintenance import flow, configuration
 
 
 def legacy_database(path):
@@ -47,11 +47,13 @@ class Fixture:
         (self.settings.state_dir / 'host').mkdir()
         (self.settings.state_dir / 'host/node-id').write_text('node')
         with sqlite3.connect(self.settings.state_dir / 'host/host.db') as conn:
-            conn.execute('CREATE TABLE handoff(id TEXT)')
-            conn.execute('CREATE TABLE host_runtimes(id TEXT PRIMARY KEY,config TEXT,mode TEXT)')
-            conn.execute('CREATE TABLE fleet_definitions(kind TEXT,id TEXT,body TEXT,PRIMARY KEY(kind,id))')
-            conn.execute('CREATE TABLE capacity_queue(phase TEXT)')
-            conn.execute('INSERT INTO host_runtimes VALUES (?,?,?)', ('old', '{"endpoint":"http://127.0.0.1:3001"}', 'active'))
+            conn.executescript('''CREATE TABLE handoff(id TEXT);
+                CREATE TABLE host_runtimes(id TEXT PRIMARY KEY,release_id TEXT,config TEXT,mode TEXT);
+                CREATE TABLE fleet_definitions(kind TEXT,id TEXT,body TEXT,PRIMARY KEY(kind,id));
+                CREATE TABLE capacity_queue(ticket TEXT,phase TEXT);''')
+            conn.execute('INSERT INTO host_runtimes VALUES (?,?,?,?)',
+                         ('old', 'old', json.dumps({'endpoint': 'http://127.0.0.1:3001',
+                                                  'unit': 'opencoder-runtime-old.service'}), 'active'))
         self.db = self.settings.server_data / 'definitions.db'
         legacy_database(self.db)
         self.old = record_for(self.settings, bundle_manifest('old', 1), 0)
@@ -67,6 +69,15 @@ class Fixture:
         self.rootfs = root / 'rootfs'
         (self.rootfs / 'usr/bin').mkdir(parents=True)
         (self.rootfs / 'workspace').mkdir()
+        for workdir in (self.settings.agent_workdir, self.settings.server_workdir):
+            workdir.mkdir()
+            (workdir / 'opencoder.json').write_text(json.dumps({'dag': {'wasm_dir': '/old/wasm'},
+                'llm': {'api_key': 'private-fixture-credential'}}))
+        self.desired = ({'dag': {'rootfs_dir': str(self.rootfs), 'binary_dir': '/mnt/binary',
+                                'workspace_dir': '/mnt/workspace'}, 'agent': {'agents_dir': '/mnt/agents'}},
+                        {'storage': {'backend': 'libsql'}, 'dag': {'binary_dir': str(root / 'exports/binary'),
+                         'workspace_dir': str(root / 'fixture-source')}, 'agent': {'agents_dir': str(root / 'exports/agents')}})
+        (root / 'fixture-source').mkdir()
         self.candidate = bundle_manifest('new', 2)
         self.calls = []
         self.active = {self.old[k] for k in ('server_unit', 'host_unit', 'runtime_unit')}
@@ -88,11 +99,17 @@ class Fixture:
     def run(self, *args):
         self.calls.append(args)
         if args[:3] == ('systemctl', '--no-block', 'stop'):
-            args = ('systemctl', 'stop', *args[3:])
-        if args[:2] == ('systemctl', 'stop'):
+            self.active.difference_update(args[3:])
+        elif args[:2] == ('systemctl', 'stop'):
             self.active.difference_update(args[2:])
         if args[:2] == ('systemctl', 'start'):
+            if self.old['host_unit'] in args[2:] and self.old['runtime_unit'] not in self.active:
+                raise AssertionError('restored Host started before its Runtime')
             self.active.update(args[2:])
+            if any('host-new' in name for name in args[2:]):
+                with sqlite3.connect(self.settings.state_dir / 'host/host.db') as conn:
+                    assert conn.execute("SELECT mode FROM host_runtimes WHERE id='old'").fetchone() == ('retired',)
+                    assert conn.execute("SELECT body FROM fleet_definitions WHERE kind='runtime_sleep' AND id='old'").fetchone()
             if any('server-new' in name for name in args[2:]):
                 if self.old['server_unit'] in self.active:
                     raise AssertionError('old Server is still writing during migration')
@@ -102,6 +119,8 @@ class Fixture:
                 self.migrate()
 
     def output(self, *args):
+        if args[0] == 'findmnt':
+            return '{"filesystems": []}'
         if args[0] == 'chroot':
             return '{}'
         unit = args[2]
@@ -110,19 +129,24 @@ class Fixture:
             return 'loaded'
         if '--value' in args:
             return active
-        return f'ActiveState={active}\nUnitFileState=enabled\n'
+        return f'ActiveState={active}\nMainPID={1 if active == "active" else 0}\nUnitFileState=enabled\n'
 
     def http(self, base, path, method='GET', body=None):
         self.calls.append((base, path, method))
         if path == '/inventory':
-            return {'runtime_id': 'old', 'can_hibernate': True, 'owned_processes': 0, 'indexes': []}
+            return {'runtime_id': 'old', 'registration': {'id': 'node'}, 'can_hibernate': True,
+                    'owned_processes': 0, 'indexes': [], 'snapshot': {
+                        'active_runs': 0, 'pending_runs': 0, 'active_agent_loops': 0}}
         if path == '/api/health':
             return {'ok': True, 'role': 'resources', 'build': {
                 'protocol_version': 10, 'release_compatibility': self.candidate['compatibility']}}
         if path == '/api/nodes':
             return {'nodes': [{'id': 'node', 'online': True}]}
         if path == '/api/admin/drain':
-            return {'drained': True, 'nodes': [{}], 'offline_nodes': []}
+            return {'drained': True, 'server': {'mode': 'frozen', 'inflight_admissions': 0},
+                    'nodes': [{'node_id': 'node', 'status': 200,
+                               'body': {'mode': 'frozen', 'active_runs': 0, 'owned_processes': 0}}],
+                    'offline_nodes': []}
         if path == '/api/admin/release':
             return {'instance_release': 'new'}
         if path == '/api/project/overview':
@@ -147,10 +171,9 @@ class Fixture:
         stack.enter_context(patch.object(flow.manifest, 'verify', return_value=self.candidate))
         stack.enter_context(patch.object(flow.manifest, 'resources'))
         stack.enter_context(patch.object(flow.manifest._installer, 'build_info', return_value={}))
-        stack.enter_context(patch.object(flow.preflight, 'check', return_value={'rootfs': str(self.rootfs), 'release_id': 'new', 'configuration_hashes': {}}))
-        stack.enter_context(patch.object(flow.configuration, 'freeze', return_value={}))
-        stack.enter_context(patch.object(flow.configuration, 'install'))
-        stack.enter_context(patch.object(flow.services, 'configs', return_value=({}, {})))
+        stack.enter_context(patch.object(flow.preflight, 'check', return_value={'rootfs': str(self.rootfs),
+            'release_id': 'new', 'configuration_hashes': configuration.hashes(self.desired)}))
+        stack.enter_context(patch.object(configuration, 'desired_configs', return_value=self.desired))
         stack.enter_context(patch.object(flow.units, 'prepare'))
         stack.enter_context(patch.object(flow.units, 'validate'))
         stack.enter_context(patch.object(flow.units, 'activate_launchers'))

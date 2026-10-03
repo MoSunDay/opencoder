@@ -155,7 +155,7 @@ fn load_instructions(working_dir: &Path) -> Option<String> {
     let mut seen: Vec<PathBuf> = Vec::new();
 
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = opencoder_core::platform::home_dir() {
         candidates.push(home.join(".opencoder"));
     }
     if let Some(root) = find_git_root(working_dir) {

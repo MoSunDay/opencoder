@@ -2,11 +2,11 @@ import copy
 import json
 from pathlib import Path
 import sys
-import unittest
-import tempfile
 import sqlite3
+import tempfile
+from types import SimpleNamespace
+import unittest
 from unittest.mock import Mock, patch
-from fixtures import Fixture
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.maintenance import preflight
 from rolling.manifest import compatible, overlapping
@@ -22,43 +22,41 @@ def configs():
 
 
 class PreflightTests(unittest.TestCase):
-    def test_workspace_export_rejects_fields_that_config_loader_would_ignore(self):
-        agent, server = configs()
-        server['dag']['workspace_nfs']['read_only'] = True
-        with self.assertRaisesRegex(ValueError, 'unsupported Server dag.workspace_nfs fields'):
-            preflight.configuration(agent, server)
-
-    def test_native_mounts_are_planned_before_old_exporter_is_replaced(self):
+    def test_changed_ontology_binding_rejects_before_any_service_operation(self):
         with tempfile.TemporaryDirectory() as directory:
-            fixture = Fixture(Path(directory))
+            root = Path(directory)
+            data = root / 'server'
+            data.mkdir()
+            files = root / 'files'
+            files.mkdir()
+            with sqlite3.connect(data / 'ontology.db') as connection:
+                connection.execute('CREATE TABLE ontology_schema_version(version INTEGER,files_root TEXT)')
+                connection.execute('INSERT INTO ontology_schema_version VALUES(1,?)', (str(files),))
             agent, server = configs()
-            agents = Path(directory) / 'agents'
-            agents.mkdir()
-            agent['agent']['agents_dir'] = str(agents)
-            source = Path(directory) / 'source'
-            source.mkdir()
-            server['dag']['workspace_dir'] = str(source)
-            agent['dag'].update(rootfs_dir=str(fixture.rootfs),
-                                binary_dir=str(Path(directory) / 'future/binaries'),
-                                workspace_dir=str(Path(directory) / 'future/workspace'))
-            fixture.output = lambda *args: json.dumps({'filesystems': [{
-                'target': str(agents), 'source': '127.0.0.1:/', 'fstype': 'nfs',
-                'options': 'ro,vers=3,port=2049'}]})
-            with patch.object(preflight, 'configs', return_value=(agent, server)):
-                receipt = preflight.check(fixture.settings, fixture.candidate, fixture)
-            self.assertTrue(receipt['mounts']['binary_dir']['planned'])
-            self.assertTrue(receipt['mounts']['workspace_dir']['planned'])
-            self.assertEqual(receipt['mounts']['native'], [
-                {'path': agent['dag']['binary_dir'], 'source': server['dag']['binary_dir'], 'port': 2050},
-                {'path': agent['dag']['workspace_dir'], 'source': str(source), 'port': 2051}])
-            self.assertEqual(receipt['database']['schema_version'], 31)
-            self.assertEqual(receipt['database']['tables']['project_todos'], 1)
-            self.assertFalse(Path(agent['dag']['binary_dir']).exists())
-            self.assertEqual(fixture.calls, [('runc', '--version'),
-                ('runuser', '-u', 'root', '--', 'test', '-r', str(source)),
-                ('runuser', '-u', 'root', '--', 'test', '-x', str(source))])
-            with sqlite3.connect(fixture.db) as conn:
-                self.assertEqual(conn.execute('SELECT version FROM schema_version').fetchone(), (31,))
+            original = copy.deepcopy(server)
+            original['ontology'] = {'files_dir': str(files)}
+            settings = SimpleNamespace(server_data=data)
+            for ontology in [{'files_dir': str(root / 'other')}, {'files_dir': None}, {}]:
+                server['ontology'] = ontology
+                operations = Mock()
+                with patch.object(preflight, 'configs', return_value=(agent, server)), \
+                     patch.object(preflight.configuration_files, 'actual_configs', return_value=(agent, original)), \
+                     self.assertRaisesRegex(ValueError, 'Ontology files_dir'):
+                    preflight.check(settings, {}, operations)
+                self.assertEqual(operations.mock_calls, [])
+            preflight.ontology_binding(settings, original)
+
+    def test_unchanged_default_ontology_binding_is_accepted_without_requiring_a_new_config_field(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files = root / 'files'
+            files.mkdir()
+            with sqlite3.connect(root / 'ontology.db') as connection:
+                connection.execute('CREATE TABLE ontology_schema_version(version INTEGER,files_root TEXT)')
+                connection.execute('INSERT INTO ontology_schema_version VALUES(1,?)', (str(files),))
+            settings = SimpleNamespace(server_data=root)
+            with patch.object(preflight.configuration_files, 'actual_configs', return_value=({}, {})):
+                preflight.ontology_binding(settings, {})
 
     def test_complete_config_and_read_only_nfs_are_accepted(self):
         agent, server = configs()
@@ -77,7 +75,7 @@ class PreflightTests(unittest.TestCase):
         for backend in ['mysql', 'starrocks']:
             agent, server = configs()
             server['storage'] = {'backend': backend}
-            with self.assertRaisesRegex(ValueError, 'MySQL/StarRocks'):
+            with self.assertRaisesRegex(ValueError, 'local libsql recovery'):
                 preflight.configuration(agent, server)
         agent, server = configs()
         server['dag']['nfs']['read_only'] = False

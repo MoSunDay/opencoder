@@ -6,7 +6,7 @@
 
 ## Change Summary
 
-- **Core 多选模型**（`crates/core/src/config/cli.rs`）：`InjectionTarget` 由枚举改为 `{parent, explore, build}` 三布尔结构体。序列化为 tag 数组（如 `["explore","build"]`）；反序列化兼容旧值 `"parent"`/`"subagents"`(→explore+build)/`"all"`(→全勾) 且接受数组内混用；parent-only 是 serde 缺省，序列化时省略 `inject_to` 字段。`allows(mode)` 升级为 `allows_agent(name, mode)`：Primary 一律看 `parent` 位，Subagent 按名字精确匹配 `explore`/`build`。`label()` 返回 `parent+explore` 样式 String。两处 `merge()`（cli/mcp）同时接受字符串与数组 patch 值。
+- **Core 多选模型**（`crates/core/src/config/runtime/cli.rs`）：`InjectionTarget` 由枚举改为 `{parent, explore, build}` 三布尔结构体。序列化为 tag 数组（如 `["explore","build"]`）；反序列化兼容旧值 `"parent"`/`"subagents"`(→explore+build)/`"all"`(→全勾) 且接受数组内混用；parent-only 是 serde 缺省，序列化时省略 `inject_to` 字段。`allows(mode)` 升级为 `allows_agent(name, mode)`：Primary 一律看 `parent` 位，Subagent 按名字精确匹配 `explore`/`build`。`label()` 返回 `parent+explore` 样式 String。两处 `merge()`（cli/mcp）同时接受字符串与数组 patch 值。
 - **过滤链路**：`Config::enabled_mcp_servers_for` / `enabled_cli_for` 改收 `(name, mode)`；`runner/llm_call.rs`（cli 段、`mcp_tool_allowed`、`mcp_status_for_agent`）与 `compaction.rs` 全部传入 `session.agent.name`，注入粒度从「父/子两级」细化到「explore 与 build 独立勾选」。workflow 调度 Agent 仍被显式排除。
 - **共享勾选对话框**（新模块 `crates/tui/src/scope_dialog/`）：`[x]/[ ]` 复选列表叠加渲染在表单之上。↑/↓（含 Tab）移动、Space 勾选、Enter 确认（空选无效——必须至少勾一项，否则等同 disable——对话框保持打开并显示提示行）、Esc 取消；对话框打开时粘贴被吞掉。
 - **表单集成**：`McpForm`/`CliForm` 持有 `scope_dialog`；聚焦 InjectTo 字段 Enter/Space 弹出对话框（替换原 cycle 行为）。

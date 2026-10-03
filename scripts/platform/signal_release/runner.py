@@ -30,6 +30,8 @@ def target_for(settings, action, origin, journal):
     resume_deploy = resume_deploy or (action == 'deploy' and stopped.get('origin') == origin
         and stopped.get('target') == pending['release_id']
         and stopped.get('stage') not in ('complete', 'rolled_back'))
+    resume_deploy = resume_deploy or (action == 'deploy' and stopped.get('stage') == 'repairing'
+        and stopped.get('repair_origin') == origin and stopped.get('repair_target') == pending['release_id'])
     resume_rollback = (action == "rollback" and journal.get("rollback_from") == origin
         and journal["phase"] == "rolling_back")
     if journal["current"] != origin and not (resume_deploy or resume_rollback):
@@ -42,7 +44,7 @@ def target_for(settings, action, origin, journal):
     return target, None
 
 
-def run(settings, instance, operations, seconds=90):
+def run(settings, instance, operations, seconds=None):
     action, origin = parse_instance(instance)
     receipt = {"attempt": uuid.uuid4().hex, "action": action, "origin": origin,
         "phase": "starting", "started_at": time.time_ns()}
@@ -55,7 +57,13 @@ def run(settings, instance, operations, seconds=90):
             write(path, receipt)
             mode = (json.loads((settings.state_dir / 'signal-pending.json').read_text()).get('maintenance', False)
                     if action == 'deploy' else False)
+            if seconds is None:
+                pending = settings.state_dir / 'signal-pending.json'
+                seconds = json.loads(pending.read_text()).get('wait_seconds', 90) if pending.exists() else 90
+            if type(seconds) is not int or seconds <= 0:
+                raise ValueError('wait_seconds must be a positive integer')
             receipt['maintenance'] = mode
+            receipt['wait_seconds'] = seconds
             deploy = maintenance.deploy if mode else deployment.deploy
             result = (deploy(settings, bundle, operations, seconds) if action == "deploy"
                       else deployment.rollback(settings, operations, seconds))

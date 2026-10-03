@@ -234,3 +234,5 @@ pub fn read_file(cat: &str, name: &str, version: u32, path: &str) -> io::Result<
     filesystem::check_path(&path)?;
     std::fs::read(path)
 }
+
+pub mod how_append;

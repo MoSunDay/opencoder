@@ -3,7 +3,12 @@
 
 mod agent_drive;
 mod brain_drive;
+#[cfg(not(windows))]
 mod dag_drive;
+#[cfg(not(windows))]
+pub(crate) mod dag_state;
+#[cfg(windows)]
+#[path = "windows_dag.rs"]
 pub(crate) mod dag_state;
 mod team_drive;
 
@@ -139,7 +144,21 @@ pub async fn drive(
             team_drive::drive(deps, run_id, todo, cx, version, resolved, token).await
         }
         ProjectExecutorKind::Dag => {
-            dag_drive::drive(deps, run_id, todo, cx, version, resolved, token).await
+            #[cfg(not(windows))]
+            dag_drive::drive(deps, run_id, todo, cx, version, resolved, token).await;
+            #[cfg(windows)]
+            {
+                crate::plan_gen::close_run(
+                    &deps,
+                    &run_id,
+                    opencoder_store::ProjectTodoRunStatus::Failed,
+                    Some("DAG execution requires Linux".into()),
+                    None,
+                    None,
+                )
+                .await;
+                crate::plan_gen::forget_spawn(&deps, &run_id);
+            }
         }
         ProjectExecutorKind::Brain | ProjectExecutorKind::Playbook => {
             crate::plan_gen::close_run(

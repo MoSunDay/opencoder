@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const capabilityContracts = require('./capability-contracts');
 
 const base = process.argv[2];
 assert(base, 'Fleet base URL required');
@@ -70,10 +71,11 @@ async function main() {
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'browser-fixture'));
     await page.goto(base, { waitUntil: 'networkidle' });
-    await page.getByRole('radiogroup').getByText('Agent', { exact: true }).click();
+    await page.getByRole('tablist', { name: '导航分类', exact: true }).getByRole('tab', { name: 'Agent', exact: true }).click();
     await page.getByRole('menuitem', { name: '大脑调度' }).click();
     await page.getByRole('tab', { name: '工作台' }).waitFor();
     assert.equal(await page.getByRole('button', { name: '创建并执行计划' }).count(), 0);
+    await capabilityContracts(page, artifacts);
     await page.getByRole('tab', { name: '计划库' }).click();
     await page.getByRole('button', { name: '新建计划', exact: true }).click();
 

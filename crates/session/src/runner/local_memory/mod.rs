@@ -80,7 +80,7 @@ pub(super) async fn after_task(
         .find(|pack| pack.name == "repo-local-memory")
         .ok_or_else(|| anyhow!("local-memory is enabled but repo-local-memory skill is missing"))?;
     let mut agent = resolve_agent("act").ok_or_else(|| anyhow!("act agent is unavailable"))?;
-    agent.tools = ToolFilter::Allow(vec!["bash".into()]);
+    agent.tools = ToolFilter::Allow(vec![opencoder_core::platform::shell::tool_name().into()]);
     let mut config = parent.config.clone();
     config.local_memory = false;
     config.autopilot.mode = ApMode::Off;
@@ -204,6 +204,13 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(client.call_count(), 2, "main task followed by memory run");
+            let requests = client.requests();
+            let memory_tools: Vec<_> = requests[1]
+                .tools
+                .iter()
+                .filter_map(|tool| tool["function"]["name"].as_str())
+                .collect();
+            assert_eq!(memory_tools, [opencoder_core::platform::shell::tool_name()]);
             assert_eq!(parent.messages.len(), 2, "memory transcript stays separate");
             assert_eq!(parent.messages[0].role, Role::User);
             assert!(matches!(events.last(), Some(SessionEvent::Done)));

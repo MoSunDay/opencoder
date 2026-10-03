@@ -29,22 +29,11 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     });
     let temp = parent.join(unique_temp_name(path));
     let write = || -> io::Result<()> {
-        #[cfg(unix)]
-        let mut file = {
-            use std::os::unix::fs::OpenOptionsExt;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&temp)?
-        };
-        #[cfg(not(unix))]
-        let mut file = std::fs::File::create(&temp)?;
+        let mut file = opencoder_core::platform::fs::create_private_file(&temp)?;
         io::Write::write_all(&mut file, bytes)?;
         file.sync_all()?;
         drop(file);
-        std::fs::rename(&temp, path)?;
+        opencoder_core::platform::fs::replace(&temp, path)?;
         sync_dir_best_effort(&parent);
         Ok(())
     };

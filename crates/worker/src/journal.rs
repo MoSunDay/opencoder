@@ -273,12 +273,12 @@ impl Journal {
         if !root.exists() {
             return Ok(());
         }
-        if std::fs::symlink_metadata(&root)?.file_type().is_symlink() {
+        if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&root)?) {
             bail!("legacy journal root cannot be a symlink");
         }
         for entry in std::fs::read_dir(root)? {
             let entry = entry?;
-            if entry.file_type()?.is_symlink() {
+            if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?) {
                 bail!(
                     "journal records cannot be symlinks: {}",
                     entry.path().display()
@@ -305,7 +305,7 @@ impl Journal {
             if !root.exists() {
                 continue;
             }
-            if std::fs::symlink_metadata(&root)?.file_type().is_symlink() {
+            if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&root)?) {
                 bail!("execution kind root cannot be a symlink");
             }
             for entry in std::fs::read_dir(root)? {
@@ -313,7 +313,8 @@ impl Journal {
                 if entry.file_name().to_string_lossy().starts_with('.') {
                     continue;
                 }
-                if entry.file_type()?.is_symlink() {
+                if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?)
+                {
                     bail!(
                         "execution directories cannot be symlinks: {}",
                         entry.path().display()

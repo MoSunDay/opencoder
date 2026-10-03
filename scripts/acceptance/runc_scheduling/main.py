@@ -10,6 +10,14 @@ from runtime import Runtime
 from samples import exercise, observe
 
 
+def bundle_binaries(bundle):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
+    from rolling.manifest import verify
+    verify(bundle)
+    return {name: str(bundle.resolve() / 'bin' / name)
+            for name in ('opencoder-server', 'opencoder-agent')}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
@@ -31,9 +39,7 @@ def main():
     if root.exists():
         raise ValueError('The evidence directory must not already exist')
     if args.platform_bundle:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'business'))
-        from validation.bundle import verify_platform
-        _, paths = verify_platform(args.platform_bundle)
+        paths = bundle_binaries(args.platform_bundle)
     else:
         paths = {name: str(args.bin_dir.resolve() / name) for name in ['opencoder-server', 'opencoder-agent']}
     runtime = Runtime(root, paths, args.rootfs.resolve())

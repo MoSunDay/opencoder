@@ -77,7 +77,7 @@ fn freeze(source: Option<&Path>, root: &Path) -> io::Result<()> {
     fs::write(stage.join(".runtime-ready"), b"1\n")?;
     sync_tree(&stage)?;
     fs::rename(&stage, root)?;
-    fs::File::open(parent)?.sync_all()
+    crate::platform::fs::sync_directory(parent)
 }
 
 fn copy_tree(source: &Path, target: &Path, ancestors: &mut HashSet<PathBuf>) -> io::Result<()> {
@@ -121,10 +121,10 @@ fn sync_tree(path: &Path) -> io::Result<()> {
         if path.is_dir() {
             sync_tree(&path)?;
         } else {
-            fs::File::open(path)?.sync_all()?;
+            crate::platform::fs::sync_file(&path)?;
         }
     }
-    fs::File::open(path)?.sync_all()
+    crate::platform::fs::sync_directory(path)
 }
 
 #[cfg(test)]
@@ -134,11 +134,12 @@ mod tests {
     #[test]
     fn two_releases_keep_skill_bytes_when_shared_source_changes() {
         let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("shared");
+        let root = dir.path().canonicalize().unwrap();
+        let source = root.join("shared");
         fs::create_dir_all(source.join("custom")).unwrap();
         fs::write(source.join("custom/SKILL.md"), "first release").unwrap();
-        let first = dir.path().join("r1");
-        let second = dir.path().join("r2");
+        let first = root.join("r1");
+        let second = root.join("r2");
         freeze(Some(&source), &first).unwrap();
         fs::write(source.join("custom/SKILL.md"), "second release").unwrap();
         freeze(Some(&source), &second).unwrap();

@@ -70,6 +70,9 @@ async fn local_status(state: &Arc<AppState>) -> anyhow::Result<serde_json::Value
 }
 
 async fn ready_status(state: &Arc<AppState>) -> anyhow::Result<serde_json::Value> {
+    if let Some(ontology) = &state.ontology {
+        ontology.ready().await?;
+    }
     let admission = state.admission.snapshot().await?;
     if admission.mode != AdmissionMode::Open {
         return local_status(state).await;

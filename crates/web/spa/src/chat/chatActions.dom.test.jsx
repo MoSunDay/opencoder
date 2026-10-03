@@ -85,7 +85,7 @@ describe('chat top bar', () => {
 
     await send(container, '只读规划');
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions',
-      { id: expect.stringMatching(/^operator-/), node_id: 'n1', agent: 'plan' }));
+      { id: expect.stringMatching(/^operator-/), node_id: 'n1', agent: 'plan', prompt: '只读规划' }));
     expect(apiPost.mock.calls.filter(([path]) => path.endsWith('/agent'))).toHaveLength(0);
   });
 

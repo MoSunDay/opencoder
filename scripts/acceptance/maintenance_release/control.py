@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import socket
 import socketserver
+import subprocess
 import sys
 import threading
 from rolling.io import Operations
@@ -16,14 +17,17 @@ def request(path, method, args):
         with connection.makefile('rb') as stream:
             response = json.loads(stream.readline())
     if response.get('error'):
+        if 'returncode' in response:
+            raise subprocess.CalledProcessError(response['returncode'], list(args),
+                output=response.get('stdout'), stderr=response.get('stderr'))
         raise RuntimeError(response['error'])
     return response['value']
 
 
-def client(path, args):
+def client(path, args, command='systemctl'):
     try:
-        method = 'output' if 'show' in args else 'run'
-        value = request(path, method, ['systemctl', *args])
+        method = 'output' if command == 'systemctl' and 'show' in args else 'run'
+        value = request(path, method, [command, *args])
         if value:
             sys.stdout.write(value)
     except Exception as error:
@@ -57,6 +61,9 @@ class Control:
                     with operations.lock:
                         value = getattr(operations, payload['method'])(*payload['args'])
                     response = {'value': value}
+                except subprocess.CalledProcessError as error:
+                    response = {'error': str(error), 'returncode': error.returncode,
+                                'stdout': error.stdout, 'stderr': error.stderr}
                 except Exception as error:
                     response = {'error': str(error)}
                 self.wfile.write((json.dumps(response) + '\n').encode())
@@ -81,8 +88,10 @@ class Control:
         script = ('#!/usr/bin/python3\nimport sys\n' +
                   f'sys.path.insert(0, {str(Path(__file__).parent)!r})\n' +
                   f'sys.path.insert(0, {str(Path(__file__).resolve().parents[2] / "platform")!r})\n' +
-                  'from control import client\n' + f'client({str(self.path)!r}, sys.argv[1:])\n')
-        atomic_bytes(tools / 'systemctl', script.encode(), 0o755)
+                  'from control import client\n')
+        for command in ('systemctl', 'nginx'):
+            body = script + f'client({str(self.path)!r}, sys.argv[1:], {command!r})\n'
+            atomic_bytes(tools / command, body.encode(), 0o755)
         operations.env['PATH'] = str(tools) + ':' + operations.env['PATH']
 
     def close(self):

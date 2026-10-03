@@ -14,7 +14,7 @@ def configs(settings):
 
 def configuration(agent, server):
     if server.get('storage', {}).get('backend', 'libsql') != 'libsql':
-        raise ValueError('maintenance requires verified libsql recovery; MySQL/StarRocks are not accepted')
+        raise ValueError('maintenance requires verified local libsql recovery')
     paths = {}
     allowed = {'binary_dir', 'workspace_dir', 'data_dir', 'rootfs_dir',
                'knowledge_root', 'nfs', 'workspace_nfs'}
@@ -34,17 +34,19 @@ def configuration(agent, server):
             raise ValueError(f'Server {section}.{key} must be an explicit absolute path')
     ports = []
     for section, key, default in [('agent', 'nfs', 2049), ('dag', 'nfs', 2050),
-                                   ('dag', 'workspace_nfs', 2051)]:
+                                   ('dag', 'workspace_nfs', 2051), ('ontology', 'nfs', 2052)]:
+        if section == 'ontology' and not server.get(section, {}).get(key, {}).get('enabled'):
+            continue
         export = server.get(section, {}).get(key, {})
         allowed_export = {'enabled', 'host', 'port'}
-        if key != 'workspace_nfs':
+        if key != 'workspace_nfs' and section != 'ontology':
             allowed_export.add('read_only')
         if set(export) - allowed_export:
             raise ValueError(f'unsupported Server {section}.{key} fields')
         if export.get('enabled') is not True or export.get('read_only', True) is not True:
             raise ValueError(f'Server {section}.{key} must enable a read-only NFS export')
         ports.append(export.get('port', default))
-    if len(set(ports)) != 3 or any(type(p) is not int or not 0 < p < 65536 for p in ports):
+    if len(set(ports)) != len(ports) or any(type(p) is not int or not 0 < p < 65536 for p in ports):
         raise ValueError('resource NFS ports must be valid and distinct')
     return paths
 
@@ -52,7 +54,9 @@ def configuration(agent, server):
 def mount(root, operations):
     rows = json.loads(operations.output('findmnt', '-J', '-T', str(root),
                                        '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS'))['filesystems']
-    if len(rows) != 1 or rows[0]['fstype'] not in ('nfs', 'nfs4'):
+    identities = {(row.get('target'), row.get('source'), row.get('fstype'),
+                   frozenset(row.get('options', '').split(','))) for row in rows}
+    if not rows or len(identities) != 1 or rows[0]['fstype'] not in ('nfs', 'nfs4'):
         raise ValueError(f'resource path must be a verified NFS mount: {root}')
     options = set(rows[0]['options'].split(','))
     if 'ro' not in options or 'rw' in options:
@@ -78,13 +82,26 @@ def workspace_source(path, user, operations, managed_paths=()):
 def check(settings, candidate, operations):
     agent, server = configs(settings)
     paths = configuration(agent, server)
+    ontology_binding(settings, server)
     if shutil.which('runc') is None:
         raise ValueError('runc is required before maintenance')
     operations.run('runc', '--version')
     managed_paths = [Path(server['dag']['binary_dir']), settings.state_dir, settings.server_data,
+                     settings.bin_dir, settings.systemd_dir, settings.nginx_include,
                      settings.server_workdir / 'opencoder.json', settings.agent_workdir / 'opencoder.json',
                      settings.server_workdir / '.opencoder', settings.agent_workdir / '.opencoder',
-                     *(path for key, path in paths.items() if key != 'rootfs_dir')]
+                     *paths.values()]
+    ontology_root = server.get('ontology', {}).get('files_dir')
+    if ontology_root:
+        if not Path(ontology_root).is_absolute():
+            raise ValueError('Ontology files_dir must be absolute')
+        ontology_root = Path(ontology_root).resolve()
+        for protected in [settings.server_data, Path(server['agent']['agents_dir']), Path(server['dag']['binary_dir'])]:
+            protected = protected.resolve()
+            if (protected.is_relative_to(ontology_root)
+                    or (protected != settings.server_data.resolve() and ontology_root.is_relative_to(protected))):
+                raise ValueError('Ontology files overlap a protected resource or database root')
+        managed_paths.append(ontology_root)
     if settings.legacy_agent_data:
         managed_paths.append(settings.legacy_agent_data)
     workspace_source(Path(server['dag']['workspace_dir']), settings.server_user, operations,
@@ -111,20 +128,38 @@ def check(settings, candidate, operations):
                          'port': server['dag'][export].get('port', default)}
                         for key, export, default in [('binary_dir', 'nfs', 2050),
                                                      ('workspace_dir', 'workspace_nfs', 2051)]]
-    size = sum(p.stat().st_size for p in rootfs.rglob('*') if p.is_file() and not p.is_symlink())
+    from .mounts import name as mount_name, mounted, validate
+    for plan in mounts['native']:
+        validate(plan, mounted(plan['path'], operations))
+        raw = operations.output('systemctl', 'show', mount_name(plan['path']),
+                                '-p', 'ActiveState', '-p', 'UnitFileState', '-p', 'LoadState')
+        status = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
+        plan['prior'] = {'loaded': status.get('LoadState') != 'not-found',
+                         'active': status.get('ActiveState') == 'active',
+                         'enabled': status.get('UnitFileState') == 'enabled'}
     database = database_inventory(settings.server_data / 'definitions.db')
-    roots = [settings.server_data, settings.state_dir / 'host', settings.state_dir / 'runtimes',
-             settings.state_dir / 'resources', settings.server_workdir / '.opencoder',
-             settings.agent_workdir / '.opencoder']
-    if settings.legacy_agent_data:
-        roots.append(settings.legacy_agent_data)
-    backup_bytes = sum(p.stat().st_size for root in roots if root.exists()
-                       for p in root.rglob('*') if p.is_file() and not p.is_symlink())
-    if shutil.disk_usage(settings.state_dir).free < size + backup_bytes + database['bytes'] + 256 * 1024 * 1024:
-        raise ValueError('insufficient space for the stopped backup and per-release DAG image')
+    from ..state import Journal
+    from .planning import capacity
+    budget = capacity.check(capacity.plan(settings, candidate, rootfs,
+                                          Journal(settings.state_dir).data, {'mounts': mounts}))
     return {'rootfs': str(rootfs), 'mounts': mounts, 'release_id': candidate['release_id'],
-            'database': database, 'backup_bytes': backup_bytes,
+            'database': database, 'backup_bytes': budget['components']['stopped_backup'], 'capacity': budget,
             'configuration_hashes': configuration_files.hashes((agent, server))}
+
+
+def ontology_binding(settings, desired):
+    from ..native.ontology import files_root
+    bound = files_root(settings.server_data)
+    if bound is None:
+        return
+    requested = desired.get('ontology', {}).get('files_dir')
+    if requested is not None:
+        if not Path(requested).is_absolute() or Path(requested).resolve() != bound:
+            raise ValueError('Ontology files_dir cannot change for an existing database')
+    else:
+        _, original = configuration_files.actual_configs(settings)
+        if original.get('ontology', {}).get('files_dir') is not None:
+            raise ValueError('retain the explicit Ontology files_dir for its existing database')
 
 
 def database_inventory(path):
@@ -149,4 +184,4 @@ def receipt(settings, candidate, operations):
     scope = check(settings, candidate, operations)
     return {**scope, 'current_release': journal.data['current'],
             'maintenance': 'wait for idle; close admission; stop writers; back up; upgrade resources and schema',
-            'rollback': 'compatible new-format releases only after schema migration starts'}
+            'rollback': 'restore old projects and services before writes reopen; use a corrective release afterwards'}

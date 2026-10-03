@@ -1,4 +1,4 @@
-"""Durable maintenance stages; restore is forbidden once migration may start."""
+"""Durable maintenance stages; no automatic backup restore after writes reopen."""
 import base64
 import copy
 from pathlib import Path
@@ -7,7 +7,8 @@ import uuid
 from .. import manifest, probes, units
 from ..deployment import record_for, register_runtime, register_server
 from ..state import Journal
-from . import archive, gates, preflight, restore, services, mounts, configuration, runtimes
+from . import archive, gates, preflight, restore, services, runtimes, configuration, mounts
+from .recovery import forward
 
 
 def checkpoint(journal, stage):
@@ -26,8 +27,8 @@ def deploy(settings, bundle, operations, seconds=90):
     candidate = manifest.verify(bundle)
     state = journal.data.get('maintenance')
     if state and state['stage'] not in ('complete', 'rolled_back'):
-        if state['target'] != candidate['release_id']:
-            raise ValueError('another maintenance upgrade must be resumed or restored first')
+        if state['stage'] == 'repairing' or state['target'] != candidate['release_id']:
+            return forward.deploy(settings, bundle, journal, candidate, operations, seconds)
         if journal.record(state['target'])['manifest'] != candidate:
             raise ValueError('maintenance release ID already belongs to another immutable bundle')
         if state['stage'].startswith('restore'):
@@ -48,7 +49,8 @@ def deploy(settings, bundle, operations, seconds=90):
             raise ValueError('maintenance cannot downgrade a live database; use an unopened rollback or a new corrective release')
         nodes = operations.http(endpoint(old), '/api/nodes')['nodes']
         node_id = (settings.state_dir / 'host/node-id').read_text().strip()
-        if len(nodes) != 1 or nodes[0]['id'] != node_id or not nodes[0].get('online'):
+        online = [node for node in nodes if node.get('online')]
+        if len(online) != 1 or online[0]['id'] != node_id:
             raise ValueError('maintenance requires the single configured local node; remote writers must be stopped separately')
         scope.update(services=services.states(settings, original, operations),
                      nginx=base64.b64encode(settings.nginx_include.read_bytes()).decode()
@@ -93,13 +95,19 @@ def advance(settings, bundle, journal, operations, seconds):
     host_url = f"http://127.0.0.1:{record['host_port']}"
     runtime_url = f"http://127.0.0.1:{record['runtime_port']}"
     if state['stage'] == 'closing':
+        # Recompute after image freezing and on retries. Earlier copies and
+        # interrupted staging consume real free space and cannot be ignored.
+        from .planning import capacity
+        capacity.check(capacity.plan(settings, record['manifest'], Path(state['scope']['rootfs']),
+                                     state['original'], state['scope']))
         gates.close(settings, old, operations)
         operations.http(endpoint(old), '/api/admin/drain', 'POST', {})
         checkpoint(journal, 'waiting')
     if state['stage'] == 'waiting':
-        operations.wait(lambda: gates.drained(operations, endpoint(old)), seconds)
+        node_id = (settings.state_dir / 'host/node-id').read_text().strip()
+        operations.wait(lambda: gates.drained(operations, endpoint(old), node_id), seconds)
         manifest.brain_preflight(settings, record['manifest'], state['original']['releases'].values())
-        state['scope']['runtime_inventories'] = runtimes.capture(settings, operations)
+        state['scope']['inventories'] = runtimes.capture(settings, operations)
         checkpoint(journal, 'stopping')
     if state['stage'] == 'stopping':
         services.stop(settings, state['original'], operations, seconds)
@@ -109,13 +117,15 @@ def advance(settings, bundle, journal, operations, seconds):
         checkpoint(journal, 'installing')
     if state['stage'] == 'installing':
         archive.verify(Path(state['backup']))
-        runtimes.hibernate_stopped(settings, state['scope']['runtime_inventories'])
+        runtimes.install(settings, state['scope']['inventories'])
         configuration.install(settings, state['scope']['configuration'])
         services.resource_upgrade(settings, bundle, operations)
         operations.wait(lambda: operations.http(settings.resource_url, '/api/health'), seconds)
         probes.resource_service(settings, record['manifest'], operations)
         mounts.install(settings, state['scope'].get('mounts', {}).get('native', []), operations)
-        probes.resources(settings, operations)
+        # HTTP readiness precedes recovery of existing kernel NFS clients.
+        # Keep writers stopped until an actual mounted-directory read succeeds.
+        operations.wait(lambda: probes.resources(settings, operations) or True, seconds)
         units.prepare(settings, bundle, record)
         units.validate(settings, record, operations)
         operations.run('systemctl', 'daemon-reload')
@@ -132,8 +142,8 @@ def advance(settings, bundle, journal, operations, seconds):
         register_server(settings, record, operations, host_url=host_url)
         operations.http(host_url, '/activate-host', 'POST', {})
         # Starting the sole Server performs the transactional schema migration.
-        # Persist intent before the command: a lost acknowledgement cannot
-        # permit an old binary to open a database that may already be v32.
+        # Record migration intent before the command. Recovery must restore
+        # the project schema before starting the old Server.
         state['schema_started'] = True
         journal.save()
         operations.run('systemctl', 'start', record['server_unit'])
@@ -175,8 +185,8 @@ def rollback(settings, operations, seconds=90):
     state = journal.data.get('maintenance')
     if not state:
         raise ValueError('no maintenance upgrade is recorded')
-    if state.get('schema_started') or state['writes_open']:
-        raise ValueError('schema migration may have committed; old backup restoration is forbidden; resume this candidate or repair with a new compatible release')
+    if state['writes_open']:
+        raise ValueError('writes may have reopened; old backup restoration is forbidden; repair with a new release')
     if state['stage'] == 'rolled_back':
         return journal.data
     record = journal.record(state['origin'])
@@ -186,6 +196,7 @@ def rollback(settings, operations, seconds=90):
     try:
         if state['stage'] == 'restore_stopping':
             services.stop(settings, journal.data, operations, seconds)
+            mounts.stop_new(settings, state['scope'].get('mounts', {}).get('native', []), operations)
             checkpoint(journal, 'restore_data')
         metadata = archive.verify(backup) if backup.exists() else None
         if state['stage'] == 'restore_data':
@@ -198,10 +209,9 @@ def rollback(settings, operations, seconds=90):
             checkpoint(journal, 'restore_services')
         if state['stage'] == 'restore_services':
             for name, prior in state['scope']['services'].items():
-                operations.run('systemctl', 'enable' if prior['enabled'] else 'disable', name)
-            names = [n for n, s in state['scope']['services'].items() if s['active']]
-            for name in sorted(names, key=lambda n: ('resources' not in n, 'server' not in n, n)):
-                operations.run('systemctl', 'start', name)
+                if prior.get('loaded', True):
+                    operations.run('systemctl', 'enable' if prior['enabled'] else 'disable', name)
+            services.resume(state['scope'], operations, seconds)
             operations.wait(lambda: operations.http(endpoint(record), '/api/health'), seconds)
             operations.http(endpoint(record), '/api/project/overview')
             operations.wait(lambda: operations.http(endpoint(record), '/api/admin/drain', 'DELETE'), seconds)

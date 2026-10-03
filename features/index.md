@@ -1,8 +1,10 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # OpenCoder 能力地图
 ## 平台与编排
 - [Agent 调度平台](agent-platform/index.md) — Server/Node 调度与按 ID 查执行明细。
+- [Ontology](ontology/index.md) — 环境隔离的实体、属性、关系、图谱切面与只读正文共享。
+- [Windows 原生支持](windows/index.md) — Windows 11 x64 的 TUI、Operator 节点与 PowerShell 7.4 及以上的 7.x 稳定版。
 - [DAG 工作流](dag/index.md) — Linux 二进制与 Agent 步骤、单运行共享容器和写时复制工作区。
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。
 - [项目管理](project/index.md) — 项目与专项表格、TODO 状态看板、Tag 管理，通过执行 ID 关联原生能力。
@@ -14,6 +16,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - [Agent Harness](harness/index.md) — opencode/codex 执行器与资源快照。
 - [CLI](../agents/local/index.md)、[TUI](../agents/tui/index.md) — 无头运行与 Turn 阶梯交互。
 - [Web 会话](../agents/web/index.md) — 流式会话、SSE 与模型发现。
+- [Computer use](computer-use/index.md) — 通过可选 CLI 调用 Cua Agent，操作已有远程桌面。
 ## 配置与基础能力
 - [配置和资源作用域](../agents/core/index.md) — 模型/压缩/命名环境与 Skill 注入。
 - [模型客户端](../agents/llm/index.md)、[持久化](../agents/store/index.md) — 流式客户端与本地存储。

@@ -75,6 +75,7 @@ async fn search_empty_pattern_returns_error() {
 /// there is no match cap to short-circuit; without the re-entry guard the
 /// walker explores 2^N paths (2^25 here) and pins a core. With the guard
 /// it must finish in milliseconds and report no matches.
+#[cfg(unix)]
 #[tokio::test]
 async fn search_terminates_on_distinct_hop_link_fanout() {
     let dir = tempfile::tempdir().unwrap();
@@ -106,6 +107,7 @@ async fn search_terminates_on_distinct_hop_link_fanout() {
 }
 
 /// A plain a->b->a symlink cycle must terminate and still find matches.
+#[cfg(unix)]
 #[tokio::test]
 async fn search_terminates_on_symlink_cycle() {
     let dir = tempfile::tempdir().unwrap();
@@ -132,6 +134,7 @@ async fn search_terminates_on_symlink_cycle() {
 
 /// Several sibling links into the same physical directory: links are
 /// followed, but the target must be searched exactly once.
+#[cfg(unix)]
 #[tokio::test]
 async fn search_no_dir_reentry_via_sibling_links() {
     let dir = tempfile::tempdir().unwrap();
@@ -163,6 +166,7 @@ async fn search_no_dir_reentry_via_sibling_links() {
 
 /// Following is preserved: a symlinked directory passed as `path` still
 /// gets searched.
+#[cfg(unix)]
 #[tokio::test]
 async fn search_follows_symlinked_base_dir() {
     let dir = tempfile::tempdir().unwrap();

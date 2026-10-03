@@ -27,7 +27,8 @@ const PROBE = `(() => {
   // nav, so when IT scrolls sideways the nav/toolbar/pagination scroll away
   // with the content -- a page overflow, not an acceptable inner scroller.
   const pageLevel = (n) => n === doc || n === document.body
-    || (n.className || '').toString().split(' ').some((c) => c.startsWith('fleet-'));
+    || (!n.classList.contains('fleet-category-tabs')
+      && (n.className || '').toString().split(' ').some((c) => c.startsWith('fleet-')));
   const clipped = (el) => {
     for (let n = el.parentElement; n; n = n.parentElement) {
       const cs = getComputedStyle(n);

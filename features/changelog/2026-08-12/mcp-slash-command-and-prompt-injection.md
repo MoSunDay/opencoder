@@ -9,7 +9,7 @@ OpenCoder 此前完全没有 MCP（Model Context Protocol）相关代码（`agen
 ## 变更
 
 ### Config 层（core）
-- **`crates/core/src/config/mcp.rs`**（新文件，152 行）：`McpServerConfig` 结构体（`enabled`、`command`+`args`+`env` stdio transport、`url` SSE transport），`#[serde(default)]` 字段，`pub(super) fn merge()` 逐字段 JSON 合并（复用 `providers` 的 `entry().or_default()` 模式，env 值经 `resolve_env` 解析）。
+- **`crates/core/src/config/runtime/mcp.rs`**（新文件，152 行）：`McpServerConfig` 结构体（`enabled`、`command`+`args`+`env` stdio transport、`url` SSE transport），`#[serde(default)]` 字段，`pub(super) fn merge()` 逐字段 JSON 合并（复用 `providers` 的 `entry().or_default()` 模式，env 值经 `resolve_env` 解析）。
 - **`crates/core/src/config.rs`**：`Config` 新增 `mcp_servers: HashMap<String, McpServerConfig>` 字段 + `enabled_mcp_servers()` 辅助方法（返回按名排序的 enabled server 列表）。
 - **`crates/core/src/config/merge.rs`**：`merge_into` 添加 `mcp_servers` 合并块；`has_editable_key` 添加非空 `mcp_servers` 检查。
 

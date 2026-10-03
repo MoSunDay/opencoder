@@ -13,7 +13,7 @@ Commit: (working-tree, pre-initial-commit)
 - **`crates/llm/src/client.rs`**：移除 `handle_event()` 调用上的死代码 `.map_err(OnceError::Connect)?`（该函数不可失败，map_err 永远不触发）
 
 ### core (4 fixes)
-- **`crates/core/src/config/merge.rs`** + **`crates/core/src/config/autopilot.rs`**：`tail_turns`/`max_iterations`/`verify_retries` 的 u64→u32 转换加 `.min(u32::MAX as u64)` clamp，防止 ≥2³² 静默回绕
+- **`crates/core/src/config/merge.rs`** + **`crates/core/src/config/runtime/autopilot.rs`**：`tail_turns`/`max_iterations`/`verify_retries` 的 u64→u32 转换加 `.min(u32::MAX as u64)` clamp，防止 ≥2³² 静默回绕
 - **`crates/core/src/config.rs`**：doc 注释中 tool_guard 默认阈值从错误的 "5" 更正为实际的 "20"
 - **`crates/core/src/tool.rs`**：`head_tail_lines` 加 `saturating_sub` 防 usize 下溢 + 守卫（行数不足 head+tail 时返回全文）
 - **`crates/core/src/lib.rs`** + **`crates/core/src/config.rs`**：新增 `scoped_config_home()` / `ScopedConfigHome` — 线程级配置目录注入，为 TUI flaky test 修复提供基础设施

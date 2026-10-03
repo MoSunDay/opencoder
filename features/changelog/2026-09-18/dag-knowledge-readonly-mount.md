@@ -6,7 +6,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 ## 变更
 
-- `crates/core/src/config/dag.rs`：`DagConfig` 新增
+- `crates/core/src/config/runtime/dag.rs`：`DagConfig` 新增
   `knowledge_root: Option<PathBuf>`（只读知识根，绝对路径）与
   `agent_sandbox: AgentSandbox`（`host` 默认 / `runc`，节点级开关）；
   serde 默认与 merge（`config/merge.rs`）对齐——partial 覆盖不泄漏。

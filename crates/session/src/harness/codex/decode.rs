@@ -100,15 +100,20 @@ pub fn decode(mut state: Decoder, line: &str) -> Result<(Decoder, Projection)> {
             });
             out.events.push(SessionEvent::LlmRoundEnd);
         }
-        "turn.failed" | "error" => {
-            let error = if kind == "turn.failed" {
-                &value["error"]["message"]
-            } else {
-                &value["message"]
-            };
-            let error = error
+        "error" => {
+            // Native Codex also uses top-level error events while reconnecting
+            // and before switching transports. Its SDK keeps consuming these;
+            // only turn.failed or an unsuccessful/incomplete process is fatal.
+            let text = value["message"]
                 .as_str()
-                .context("Codex error missing message")?
+                .context("Codex error missing message")?;
+            out.events
+                .push(SessionEvent::Status(format!("Codex: {text}")));
+        }
+        "turn.failed" => {
+            let error = value["error"]["message"]
+                .as_str()
+                .context("Codex failure missing message")?
                 .to_owned();
             state.failed = Some(error.clone());
             out.events.push(SessionEvent::Error(error));

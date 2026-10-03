@@ -1,7 +1,6 @@
 //! User-configured TUI event commands from ~/.opencoder/hooks.json.
 
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
 
 use opencoder_core::Config;
@@ -39,19 +38,12 @@ async fn load(path: &Path) -> Result<Hooks, Box<dyn std::error::Error + Send + S
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-async fn run(command: &str) -> std::io::Result<std::process::ExitStatus> {
-    tokio::time::timeout(
-        Duration::from_secs(3),
-        tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .status(),
+async fn run(command: &str) -> anyhow::Result<std::process::ExitStatus> {
+    Ok(
+        opencoder_session::tools::command::host::run(command, None, Duration::from_secs(3))
+            .await?
+            .status,
     )
-    .await
-    .map_err(std::io::Error::other)?
 }
 
 pub(crate) fn emit(event: Event) {
@@ -84,6 +76,7 @@ pub(crate) fn emit(event: Event) {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn configured_events_select_commands_and_execute() {
         let dir = tempfile::tempdir().unwrap();
@@ -127,15 +120,41 @@ mod tests {
         let config_dir = dir.path().join(".opencoder");
         std::fs::create_dir(&config_dir).unwrap();
         let output = dir.path().join("question-event");
+        #[cfg(windows)]
+        opencoder_session::process::configure_supervisor_binary(
+            std::env::current_exe()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("opencoder.exe"),
+        )
+        .unwrap();
+        let command = if cfg!(windows) {
+            format!(
+                "Set-Content -LiteralPath '{}' -Value ready -NoNewline",
+                output.display()
+            )
+        } else {
+            format!("printf ready > '{}'", output.display())
+        };
+        #[cfg(windows)]
+        {
+            assert!(run(&command)
+                .await
+                .expect("native hook command failed")
+                .success());
+            std::fs::remove_file(&output).unwrap();
+        }
         std::fs::write(
             config_dir.join("hooks.json"),
-            serde_json::json!({"question": [format!("printf ready > '{}'", output.display())]})
-                .to_string(),
+            serde_json::json!({"question": [command]}).to_string(),
         )
         .unwrap();
         let _home = opencoder_core::scoped_config_home(dir.path().to_path_buf());
         emit(Event::Question);
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(Duration::from_secs(5), async {
             while !output.exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }

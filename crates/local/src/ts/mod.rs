@@ -48,6 +48,10 @@ pub async fn ts_dispatch(
     clean: bool,
     delete: Option<&str>,
 ) -> Result<()> {
+    anyhow::ensure!(
+        !cfg!(windows),
+        "tmux sessions are unavailable on Windows; run opencoder tui"
+    );
     if list {
         actions::ts_list(cli).await
     } else if let Some(id) = resume {

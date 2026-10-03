@@ -445,7 +445,32 @@ body {
 
 /* Keep navigation and controls reachable on narrow consoles. Two-level IA:
    the category switch sits above the scoped Sider menu (fleet-nav-category);
-   the same two levels re-render as Segmented + Select rows on mobile. */
+   the same two levels re-render as scrollable tabs + Select rows on mobile. */
+.fleet-category-tabs {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  gap: 4px;
+  padding: 4px;
+  background: var(--oc-bg-layout);
+  border-radius: 8px;
+}
+.fleet-category-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.fleet-category-tab[aria-selected="true"] { background: var(--oc-bg-container); color: var(--oc-primary); }
+.fleet-category-tab:focus-visible { outline: 2px solid var(--oc-primary); outline-offset: -2px; }
 .fleet-nav-category { padding: 12px 12px 8px; }
 .fleet-content > .fleet-mobile-nav { display: none; }
 @media (max-width: 767px) {

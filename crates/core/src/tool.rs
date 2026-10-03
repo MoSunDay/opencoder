@@ -69,6 +69,8 @@ pub struct ToolSchema {
 }
 
 #[async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;

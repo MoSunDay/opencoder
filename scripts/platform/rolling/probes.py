@@ -72,7 +72,8 @@ def resource_paths(settings):
 def resources(settings, operations):
     config = json.loads((settings.server_workdir / "opencoder.json").read_text())
     for section, key, endpoint in (("agent", "nfs", "/api/agents/nfs"),
-            ("dag", "nfs", "/api/dag/binaries/nfs"), ("dag", "workspace_nfs", "/api/dag/workspace/nfs")):
+            ("dag", "nfs", "/api/dag/binaries/nfs"), ("dag", "workspace_nfs", "/api/dag/workspace/nfs"),
+            ("ontology", "nfs", "/api/ontology/nfs")):
         expected = config.get(section, {}).get(key, {})
         if not expected.get("enabled"):
             continue

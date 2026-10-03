@@ -98,6 +98,7 @@ pub fn build_app_with_metrics(
         .route("/api/agents/resources/:cat/:name/meta", get(api_agent_resources::meta))
         .route("/api/agents/resources/:cat/:name/rollback", post(api_agent_resources::rollback))
         .route("/api/agents/resources/:cat/:name/versions/:v/files/*path", get(api_agent_resources::read_file))
+        .route("/api/ontology/nfs", get(crate::ontology::status).post(crate::ontology::set_status))
         .route("/api/agents/nfs", get(api_agent_nfs::get_status).post(api_agent_nfs::post_set))
         .merge(binary_resources(state.clone()))
         .route("/api/dag/binaries/nfs", get(api_dag_binaries_nfs::nfs_get).post(api_dag_binaries_nfs::nfs_post))
@@ -135,6 +136,12 @@ pub fn build_app_with_metrics(
         .route("/api/brain/agents", get(brain::agents))
         .route("/api/brain/search", post(api_brain::search))
         .fallback(api::session::relay);
+    if let Some(ontology) = &state.ontology {
+        app = app.nest(
+            "/api/ontology",
+            opencoder_ontology::router(ontology.clone()).with_state(()),
+        );
+    }
     if web {
         app = app
             .route("/", get(html::index))

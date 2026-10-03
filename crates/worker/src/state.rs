@@ -102,6 +102,7 @@ impl Worker {
             .map_err(|e| anyhow::anyhow!("node data directory already in use: {e}"))?;
         let lock = NodeLock(lock);
         let admission_state = AdmissionState::load(&data_dir)?;
+        #[cfg(not(windows))]
         opencoder_dag_runtime::sandbox::runc::cleanup_owned_containers(&[
             layout
                 .checked_kind_root(ExecutionKind::Brain)?
@@ -163,18 +164,7 @@ impl Worker {
             brain: opencoder_web::api_brain::degraded_brain(store),
             client_override: client.clone(),
         });
-        let mut kinds = vec![
-            ExecutionKind::Brain,
-            ExecutionKind::Agent,
-            ExecutionKind::Team,
-            ExecutionKind::Todos,
-            ExecutionKind::Project,
-            ExecutionKind::Maintenance,
-            ExecutionKind::Operator,
-        ];
-        if options.dag {
-            kinds.push(ExecutionKind::Dag);
-        }
+        let kinds = opencoder_core::platform::execution_kinds(options.dag);
         let cpu = opencoder_node::fleet::cpu::capacity();
         let max_runs = options.max_runs.unwrap_or(cpu.ceil() as usize).max(1);
         let scheduling = crate::runtime::SchedulingState::load(&data_dir, max_runs)?;
@@ -187,6 +177,7 @@ impl Worker {
         }
         let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
         let journal = Journal::load(layout.clone())?;
+        #[cfg(not(windows))]
         for record in journal.records.values().filter(|record| {
             record.assignment.index.kind == ExecutionKind::Dag
                 && record.annotations.get("dag_parent").is_some()

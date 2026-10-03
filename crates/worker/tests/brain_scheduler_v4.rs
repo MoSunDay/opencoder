@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 //! V4 layered roots: one wake per generation, one decision per layer context,
 //! attempt identities that retry without re-deciding, and a closing context that
 //! finalizes the root.

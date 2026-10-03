@@ -77,13 +77,9 @@ describe('App shell navigation and layout', () => {
     await screen.findByText('smoke · 管理员');
     // The old always-on page Segmented (fleet-desktop-nav) is gone for good.
     expect(document.querySelector('.fleet-desktop-nav')).toBeNull();
-    // Whatever Segmented remains inside Content is the mobile-only category
-    // switch, tagged with the fleet-mobile-nav show/hide class.
-    const segments = Array.from(document.querySelectorAll('.fleet-content .ant-segmented'));
-    expect(segments.length).toBeGreaterThan(0);
-    for (const el of segments) {
-      expect(el.classList.contains('fleet-mobile-nav')).toBe(true);
-    }
+    const categories = document.querySelector('.fleet-content .fleet-mobile-nav[role="tablist"]');
+    expect(categories).toBeTruthy();
+    expect(within(categories).getByRole('tab', { name: '节点', selected: true })).toBeTruthy();
   });
 
   it('names every menu-only page in the mobile page Select', async () => {

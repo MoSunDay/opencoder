@@ -63,7 +63,7 @@ mod tests {
     use axum::body::Bytes;
 
     async fn body(resp: Response) -> Bytes {
-        axum::body::to_bytes(resp.into_body(), 4 << 20)
+        axum::body::to_bytes(resp.into_body(), 16 << 20)
             .await
             .expect("body must read")
     }

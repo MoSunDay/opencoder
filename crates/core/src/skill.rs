@@ -77,7 +77,7 @@ pub struct Skill {
 pub fn skills_dir() -> Option<PathBuf> {
     runtime::execution_root()
         .or_else(runtime::pinned_root)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".opencoder").join("skills")))
+        .or_else(|| crate::platform::home_dir().map(|h| h.join(".opencoder").join("skills")))
 }
 
 /// Production discovery: scan the global `~/.opencoder/skills` through the

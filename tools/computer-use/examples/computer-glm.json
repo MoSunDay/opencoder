@@ -1,0 +1,14 @@
+{
+  "model": {
+    "name": "openai/glm-5.3-flash",
+    "api_base": "https://your-model-gateway.example/v1",
+    "api_key_file": "secrets/computer-model.key",
+    "native_tool_calls": true
+  },
+  "targets": {
+    "win-11": {
+      "os": "windows",
+      "url": "http://127.0.0.1:18000"
+    }
+  }
+}

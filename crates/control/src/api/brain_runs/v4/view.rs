@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub(super) fn capability_metadata(cap: &BrainCapabilityDescriptor) -> Value {
-    json!({"capability_id":cap.capability_id,"kind":cap.kind,"target":cap.target,"version":cap.version,"input_desc":cap.input_desc,"output_desc":cap.output_desc})
+    json!({"capability_id":cap.capability_id,"kind":cap.kind,"target":cap.target,"version":cap.version,"summary":cap.summary,"input_desc":cap.input_desc,"output_desc":cap.output_desc,"required_inputs":cap.required_inputs,"required_outputs":cap.required_outputs})
 }
 
 pub async fn view(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {

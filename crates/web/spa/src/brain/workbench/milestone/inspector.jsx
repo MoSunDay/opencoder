@@ -21,7 +21,7 @@ export function MilestoneInspector({ plan, selection, capabilities, onLayerChang
       <h3>并行执行节点</h3>
       <label>所属里程碑<Select aria-label="所属里程碑" value={node.layer_id} options={plan.layers.map((item) => ({ value: item.layer_id, label: item.title || item.layer_id }))} onChange={onMoveNode} /></label>
       <label>泛化能力<Select aria-label="绑定能力" showSearch optionFilterProp="label" value={node.capability_id || undefined} onChange={(capability_id) => onNodeChange(capabilities.find((item) => capabilityId(item) === capability_id))} options={capabilities.map((item) => ({ value: capabilityId(item), label: capabilityLabel(item) }))} /></label>
-      {capability && <section><Typography.Text strong>{capabilityLabel(capability)}</Typography.Text><p>{capabilityTask(capability)}</p><p>输入：{capability.input_desc}</p><p>输出：{capability.output_desc}</p>{!!capability.required_inputs?.length && <p>必填：{capability.required_inputs.join('、')}</p>}</section>}
+      {capability && <section><Typography.Text strong>{capabilityLabel(capability)}</Typography.Text><p>{capabilityTask(capability)}</p><p>输入：{capability.input_desc}</p><p>输出：{capability.output_desc}</p>{!!capability.required_inputs?.length && <p>必填输入：{capability.required_inputs.join('、')}</p>}{!!capability.required_outputs?.length && <p>必填输出：{capability.required_outputs.join('、')}</p>}</section>}
       <Button danger onClick={onDelete}>删除执行节点</Button>
     </aside>;
   }

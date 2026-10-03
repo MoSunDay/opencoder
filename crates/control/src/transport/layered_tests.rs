@@ -6,6 +6,8 @@ use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
+mod cancellation;
+
 const NODE: &str = "layered-node";
 const CONNECTION: &str = "layered";
 

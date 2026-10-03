@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 #[path = "scheduler_v4/client.rs"]
 mod client;
 mod support;

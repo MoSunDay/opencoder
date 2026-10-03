@@ -44,7 +44,7 @@ it('opens project progress, then the initiative board in a right-side drawer', a
   expect(within(initiative).queryByText('完成任务')).toBeNull();
   fireEvent.click(within(initiative).getByText('专项任务', { exact: true }));
   expect((await screen.findByText('TODO · 专项任务', { exact: true })).closest('[role=dialog]')).toBeTruthy();
-  await waitFor(() => expect(api.apiGet).toHaveBeenCalledWith('/api/project/todos/t1/executions'));
+  await waitFor(() => expect(api.apiGet).toHaveBeenCalledWith('/api/project/todos/t1/executions', { signal: expect.any(AbortSignal) }));
 }, 60000);
 it('filters a table by its title column and preserves the filter after a refresh', async () => {
   render(<ProjectPanel onNotice={vi.fn()} />);

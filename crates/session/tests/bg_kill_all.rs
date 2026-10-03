@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Isolated coverage for `bg::kill_all`.
 //!
 //! This lives in its OWN integration-test binary (a separate process-global

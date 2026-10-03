@@ -477,7 +477,10 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(text.contains("configure your first model"));
-        assert!(text.contains(".opencoder/config.json"));
+        assert!(text.contains(&format!(
+            ".opencoder{}config.json",
+            std::path::MAIN_SEPARATOR
+        )));
         assert!(!text.contains("sk-onboarding-secret-1234"));
     }
 
@@ -497,7 +500,10 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(text.contains(".opencoder/config.json"));
+        assert!(text.contains(&format!(
+            ".opencoder{}config.json",
+            std::path::MAIN_SEPARATOR
+        )));
         assert!(!text.contains("sk-onboarding-secret-1234"));
     }
 }

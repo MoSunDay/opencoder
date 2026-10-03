@@ -91,7 +91,7 @@ Commit: 1ccb120ee9b7fb751500805cef3da91ec3fcdac1
 | control 根隔离（双 server） | `wasm_pool_publication_uses_configured_root_without_cross_server_leaks` | `crates/control/tests/dag_wasm_scope.rs` |
 | 未配置回落 data-dir 默认根 | `pool_scope_defaults_to_workdir_data_dir_when_unconfigured` | `crates/control/tests/dag_wasm_scope.rs` |
 | role gate 非 admin 只读 | `role_gate_wasm_pool_is_read_only_for_users` + role_gate 单测矩阵 | `crates/control/tests/dag_wasm_scope.rs`、`crates/control/src/role_gate.rs` |
-| config dag 块默认/序列化 | `dag_defaults_empty_object_matches_default_impl` 等 2 例 | `crates/core/src/config/dag.rs` |
+| config dag 块默认/序列化 | `dag_defaults_empty_object_matches_default_impl` 等 2 例 | `crates/core/src/config/runtime/dag.rs` |
 | config merge 纳管 dag 块 | `merge_dag_block_wasm_dir_and_nfs` | `crates/core/src/config/merge.rs` |
 | token 收集/名字映射 | `module_tokens_takes_first_wasm_token_deduped`、`pool_name_maps_only_flat_wasm_tokens` | `crates/worker/src/dag_wasm_pin.rs` |
 | 未配置/池缺名跳过 | `pin_is_a_no_op_without_a_configured_pool`、`pin_skips_modules_unknown_to_the_pool` | `crates/worker/src/dag_wasm_pin.rs` |

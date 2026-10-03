@@ -17,6 +17,7 @@ members = [
     "crates/dag-runtime",
     "crates/server",
     "crates/control",
+    "crates/ontology",
     "crates/worker",
     "crates/agent",
     "crates/agents",
@@ -71,6 +72,7 @@ opencoder-dag-binary = { path = "crates/dag-binary" }
 opencoder-dag-runtime = { path = "crates/dag-runtime" }
 opencoder-server = { path = "crates/server" }
 opencoder-control = { path = "crates/control" }
+opencoder-ontology = { path = "crates/ontology" }
 opencoder-worker = { path = "crates/worker" }
 opencoder-agent  = { path = "crates/agent" }
 opencoder-agents  = { path = "crates/agents" }
@@ -84,7 +86,8 @@ tokio-util = "0.7"
 futures = "0.3"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["json", "ws"] }
-libsql = { version = "0.9.30", default-features = false, features = ["core", "libsql-sys", "parser", "serde"] }
+# Published 0.9.30 double-closes SQLite handles; pin the upstream fix (#2282).
+libsql = { git = "https://github.com/tursodatabase/libsql.git", rev = "0070ff3331cd6d09425b812e1cd3ebe32e1d4206", default-features = false, features = ["core", "libsql-sys", "parser", "serde"] }
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "gzip", "socks"] }
 serde = { version = "1", features = ["derive"] }

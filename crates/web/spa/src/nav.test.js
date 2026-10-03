@@ -30,9 +30,9 @@ const ALL_ITEMS = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => ({ ...i, cate
 const ALL_PAGES = ALL_ITEMS.map((i) => i.page);
 
 describe('NAV_CATEGORIES shape', () => {
-  it('declares the three IA categories in order', () => {
-    expect(NAV_CATEGORIES.map((c) => c.key)).toEqual(['project', 'agent', 'node']);
-    expect(NAV_CATEGORIES.map((c) => c.label)).toEqual(['项目', 'Agent', '节点']);
+  it('declares the four IA categories in order', () => {
+    expect(NAV_CATEGORIES.map((c) => c.key)).toEqual(['project', 'agent', 'ontology', 'node']);
+    expect(NAV_CATEGORIES.map((c) => c.label)).toEqual(['项目', 'Agent', 'Ontology', '节点']);
   });
 
   it('has no duplicate page keys across categories', () => {
@@ -141,10 +141,11 @@ describe('menuKey fallbacks', () => {
 });
 
 describe('CATEGORY_OPTIONS / PAGE_META coverage', () => {
-  it('exposes the categories as Segmented options', () => {
+  it('exposes the categories as tab options', () => {
     expect(CATEGORY_OPTIONS).toEqual([
       { value: 'project', label: '项目' },
       { value: 'agent', label: 'Agent' },
+      { value: 'ontology', label: 'Ontology' },
       { value: 'node', label: '节点' },
     ]);
   });
@@ -183,15 +184,16 @@ describe('visibleCategories / allowedPages (permission view)', () => {
     expect(allowedPages(null)).toEqual(ALL_PAGES);
   });
 
-  it('non-admin keeps a single Agent category with only 全部执行', () => {
+  it('non-admin sees 全部执行 and the complete Ontology category', () => {
     const visible = visibleCategories({ name: 'guest', role: 'user' });
-    expect(visible).toHaveLength(1);
+    expect(visible).toHaveLength(2);
+    expect(visible[1].key).toBe('ontology');
     expect(visible[0].key).toBe('agent');
     expect(visible[0].label).toBe('Agent');
     // 全部执行 item 与全量 IA 同一行（icon/menu 不漂移）。
     const topics = NAV_CATEGORIES.find((c) => c.key === 'agent').items.find((i) => i.page === 'topics');
     expect(visible[0].items).toEqual([topics]);
-    expect(allowedPages({ name: 'guest', role: 'user' })).toEqual(['topics']);
+    expect(allowedPages({ name: 'guest', role: 'user' })).toEqual(['topics', ...pagesOf('ontology')]);
   });
 
   it('feeds the shell Menu/Select builders without dangling keys', () => {

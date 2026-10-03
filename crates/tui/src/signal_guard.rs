@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+#[cfg(unix)]
 use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 use signal_hook::flag;
 
@@ -39,11 +40,18 @@ static ARMED: AtomicBool = AtomicBool::new(false);
 /// disposition would kill the process with modes still set. (`SIGINT` never
 /// fires from Ctrl+C while raw mode is on — ISIG is disabled — but covers
 /// externally sent `kill -INT`.)
+#[cfg(unix)]
 const SIGNALS: [(i32, &str); 4] = [
     (SIGHUP, "SIGHUP"),
     (SIGINT, "SIGINT"),
     (SIGQUIT, "SIGQUIT"),
     (SIGTERM, "SIGTERM"),
+];
+
+#[cfg(windows)]
+const SIGNALS: [(i32, &str); 2] = [
+    (signal_hook::consts::SIGINT, "SIGINT"),
+    (signal_hook::consts::SIGTERM, "SIGTERM"),
 ];
 
 /// Arm the process-wide signal guard (idempotent). Called by

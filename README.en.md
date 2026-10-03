@@ -13,7 +13,7 @@
   <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue" />
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-orange?logo=rust" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
-  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" />
   <img alt="status" src="https://img.shields.io/badge/status-active%20development-yellow" />
 </p>
 
@@ -55,6 +55,8 @@ OpenCoder is a fully independent, Rust-native coding agent implemented from scra
 - **⚡ High performance** — cold start ~6 ms, binary 9.3 MB (thin-LTO + strip); libsql WAL concurrent read/write, appending 1k messages in 30 ms.
 
 ## 🚀 Quick Start
+
+Native Windows 11 x64 support covers the TUI and operator node with stable PowerShell 7.4 or newer in the 7.x series. See [Windows installation and scope](docs/windows.md).
 
 > 👉 New to OpenCoder? See the [**Quick Start guide**](docs/quickstart.en.md) — TUI keys, browsing/editing files with notepad, attaching notes to tasks, and more.
 

@@ -16,7 +16,7 @@ pub fn tool(item: &Value) -> Result<ToolProjection> {
         || item.get("error").is_some_and(|v| !v.is_null());
     let (name, input, output) = match kind {
         "command_execution" => (
-            "bash".into(),
+            opencoder_core::platform::shell::tool_name().into(),
             json!({"command":item["command"].as_str().context("Codex command missing")?}),
             item["aggregated_output"]
                 .as_str()

@@ -1,10 +1,12 @@
 //! Tool contract tests — each tool exercised with real tempdir + ToolContext.
 //! Per rules/01-mandatory-tests.md: every business function gets a real behavior test.
 
+#[cfg(unix)]
+use opencoder_session::tools::bash::BashTool;
 use std::path::Path;
 
 use opencoder_core::{Tool, ToolContext};
-use opencoder_session::tools::{bash::BashTool, edit::EditTool, ls::ListTool, search::SearchTool};
+use opencoder_session::tools::{edit::EditTool, ls::ListTool, search::SearchTool};
 use serde_json::json;
 
 fn ctx(dir: &Path) -> ToolContext {

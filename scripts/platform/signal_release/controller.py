@@ -80,19 +80,26 @@ Restart=no
     return {"unit_prefix": prefix(settings), "controller": str(target)}
 
 
-def stage(settings, bundle, maintenance=False):
+def stage(settings, bundle, maintenance=False, wait_seconds=90):
+    if type(wait_seconds) is not int or wait_seconds <= 0:
+        raise ValueError('wait_seconds must be a positive integer')
     candidate = manifest.verify(bundle)
     journal = Journal(settings.state_dir).data
     if not journal["current"]:
         raise ValueError("first migration is required before staging a signal release")
-    if journal["candidate"] not in (None, candidate["release_id"]):
-        raise ValueError("another release is unfinished; resume it or roll it back first")
+    from rolling.maintenance.recovery import forward
     state = journal.get('maintenance')
-    if state and state['stage'] not in ('complete', 'rolled_back') and state['target'] != candidate['release_id']:
+    repair = bool(maintenance and forward.active(state) and
+                  (state['stage'] == 'repairing' or state['target'] != candidate['release_id']))
+    if repair:
+        forward.validate(journal, candidate)
+    if not repair and journal["candidate"] not in (None, candidate["release_id"]):
+        raise ValueError("another release is unfinished; resume it or roll it back first")
+    if not repair and forward.active(state) and state['target'] != candidate['release_id']:
         raise ValueError('another maintenance upgrade is unfinished')
     if not maintenance:
         manifest.compatible(candidate, manifest.overlapping(journal))
-    else:
+    elif not repair:
         from rolling.maintenance.preflight import check
         from rolling.io import Operations
         check(settings, candidate, Operations(settings.token_file))
@@ -100,10 +107,12 @@ def stage(settings, bundle, maintenance=False):
     versions = settings.state_dir / "staged"
     versions.mkdir(parents=True, exist_ok=True)
     installed = manifest._installer.stage_bundle(bundle, versions, candidate)
-    intent = {"bundle": str(installed), "release_id": candidate["release_id"]}
+    intent = {"bundle": str(installed), "release_id": candidate["release_id"],
+              "wait_seconds": wait_seconds}
     if maintenance:
         intent['maintenance'] = True
-        remember_controller(settings, candidate['release_id'])
+        if not repair:
+            remember_controller(settings, candidate['release_id'])
     write(settings.state_dir / "signal-pending.json", intent)
     return intent
 

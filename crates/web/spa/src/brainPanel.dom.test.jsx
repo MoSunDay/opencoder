@@ -62,7 +62,7 @@ describe('capability library table and editor', () => {
       capability_type: 'agent', summary: '新能力', input_desc: '需求', output_desc: '结果', eng_inputs: ['示例'],
     }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(apiPut).not.toHaveBeenCalled();
+    expect(apiPut).toHaveBeenCalledWith('/api/brain/capabilities/created/target', { kind: 'agent', target: 'act' });
     fireEvent.click(button('新建能力'));
     expect(screen.getByLabelText('一句话描述').value).toBe('');
     expect(screen.queryByPlaceholderText('一条示例输入')).toBeNull();

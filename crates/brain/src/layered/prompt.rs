@@ -10,6 +10,9 @@ All selected executions run concurrently. Their complete terminal barrier wakes 
 Human inputs are operator guidance received after the plan started. Apply them to the next scheduling decision and concrete task inputs, but do not treat them as execution evidence. A running DAG is immutable: changing its graph requires stopping it and submitting a new run.
 When guidance_only is true, some executions in the current layer are still running. Return ONLY a guide decision summarizing how the new human input changes the subsequent plan; do not dispatch, assess, complete, block or fail. The active layer continues and this note is included in later decisions. You may add guidance for current running Agent or Operator execution IDs so they receive immediate instructions. You may guide a running Team execution; it applies the instruction at its next member turn. Do not address a completed execution or a DAG run; account for those at the next layer decision.
 Evaluate the current LAYER milestone success criteria from the supplied results, including failed execution diagnostics.
+Execution status done only means the capability finished; inspect the complete structured evidence and its business verdict before assessing the milestone. Summary text never overrides contradictory result fields.
+Required input and output fields are enforced. Admission and output contract errors are execution evidence: correct the task or bindings and retry the appropriate layer.
+Every execution has its own workspace. Bind exact code versions, patches or artifacts between tasks; do not assume a previous execution's local files are present. Bind failed verification diagnostics into concrete rework inputs.
 Use the complete plan, attached capability contracts and execution evidence to choose the next layer. Explain why that layer is appropriate.
 Forward dispatch is only to current layer + 1 and requires the current layer milestone to meet its criteria.
 If results require rework, choose the current layer or any previously executed layer that can address the problem.
@@ -36,8 +39,8 @@ pub fn instruction(context: &LayeredContext) -> Result<String> {
         "expected schema 7 context"
     );
     let capabilities = context.capabilities.iter().map(|c| json!({
-        "capability_id":c.capability_id,"kind":c.kind,"target":c.target,"version":c.version,"input_desc":c.input_desc,
-        "output_desc":c.output_desc,"required_inputs":c.required_inputs
+        "capability_id":c.capability_id,"kind":c.kind,"target":c.target,"version":c.version,"summary":c.summary,"input_desc":c.input_desc,
+        "output_desc":c.output_desc,"required_inputs":c.required_inputs,"required_outputs":c.required_outputs
     })).collect::<Vec<_>>();
     let assessment_layer_id = context
         .layer

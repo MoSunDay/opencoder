@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # tui 模块
 
@@ -8,6 +8,7 @@ ratatui + crossterm 交互界面。细节以代码为准。
 
 - `src/app.rs`、`src/app_loop.rs` — App 状态与主事件循环；`src/app_bootstrap.rs` 恢复本地运行态或远端绑定，`src/app_task.rs` 管理独立任务及本地新任务的运行设置
 - [worker.rs](../../crates/tui/src/worker.rs) — 按远端绑定分派 Server actor 或本地会话 actor，统一桥接 `SessionEvent` 到现有聊天渲染。
+- [clipboard.rs](../../crates/tui/src/clipboard.rs)、[app_loop_paste.rs](../../crates/tui/src/app_loop_paste.rs) — 将系统剪贴板图片转为 PNG 附件；`keymap.paste_image` 配置快捷键，终端占用默认组合键时的设置见 [Windows 使用说明](../../docs/windows.md)。
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射（模式切换门禁）
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染、渲染入口
 - `src/model_menu/` — `/config` 表单包含 `local-memory` 开关，写入顶层 `local_memory` 配置。
@@ -17,8 +18,9 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - [key_handler.rs](../../crates/tui/src/key_handler.rs)、[app_submit.rs](../../crates/tui/src/app_submit.rs) — `@` 按原文提交；远端用户消息由 Server 消费事件显示，避免重复回显。
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
+- [windows_console.rs](../../crates/tui/src/windows_console.rs) — 保存 Windows 控制台模式、启用 VT 输出，并在正常退出、panic 和控制台关闭事件中恢复。
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复
-- `src/hooks.rs` — 从 `~/.opencoder/hooks.json` 读取 TUI 事件命令（`sh -c`、3 秒超时、
+- `src/hooks.rs` — 从 `~/.opencoder/hooks.json` 读取 TUI 事件命令（宿主 Bash / PowerShell 7、3 秒超时、
   失败仅 debug 日志）异步执行；`turn_done` 仅在 `app_loop.rs` 的最终空闲分支触发——
   drain 重启（`drain_pending`）与用户取消（`cancelled`）路径不发射；`question` 仅在
   live `question` ToolStart 触发，store replay 不触发

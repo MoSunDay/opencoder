@@ -1,7 +1,8 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # OpenCoder 能力地图
 ## 平台与编排
+- [Windows 原生支持](windows/index.md) — Windows 11 x64 的 TUI、Operator 节点与 PowerShell 7.4 及以上的 7.x 稳定版。
 - [Agent 调度平台](agent-platform/index.md) — Server/Node 调度与按 ID 查执行明细。
 - [DAG 工作流](dag/index.md) — Linux 二进制与 Agent 步骤、单运行共享容器和写时复制工作区。
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。

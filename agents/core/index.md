@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # core 模块
 
@@ -15,6 +15,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed
 - [技能契约测试](../../crates/core/tests/skill_contract/main.rs) — 按发现、种子写入、规划与工作流分模块；首次安装核对准确的技能和资源集合，升级备份内置文件的用户修改，清单之外的用户资源保持原样。
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput
+- [platform/](../../crates/core/src/platform/mod.rs) — 宿主命令语言、Windows 用户目录、私有文件与原子发布入口；Windows ACL 在创建文件时生效，路径校验拒绝设备名与重解析点。
 - `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
 - [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 2；原生 DAG journal 与项目 schema v32 需要停服迁移，数据格式 1 不在兼容滚动发布范围。
@@ -22,4 +23,4 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 ## 私有任务文件
 
-`src/fleet/private_files/` 定义 `PrivateExecutionContext`、期限/路径/容量纯校验及不可变存储。执行目录 0700、文件 0600，拒绝符号链接，写入同步并校验回读；Debug 脱敏。`image_digest` 指运行中节点可执行文件 SHA256。`Config.dag.execution_private_root` 仅运行态传递，不参与配置序列化。
+`src/fleet/private_files/` 定义 `PrivateExecutionContext`、期限/路径/容量纯校验及不可变存储。Unix 执行目录 0700、文件 0600；Windows 使用受保护的 ACL，仅允许当前用户、SYSTEM 和 Administrators。拒绝链接，写入同步并校验回读；Debug 脱敏。`image_digest` 指运行中节点可执行文件 SHA256。`Config.dag.execution_private_root` 仅运行态传递，不参与配置序列化。

@@ -1,14 +1,12 @@
-//! Linux process ownership for node-launched tools.
+//! Process ownership for node-launched tools.
 //!
 //! A configured node starts every external workload below the agent binary's
 //! hidden supervisor. The supervisor is a child subreaper and holds a lease
 //! pipe whose write end exists only in the node. Kernel-close on `SIGKILL`
 //! therefore gives the supervisor a reliable crash notification.
 //!
-//! Real supervision depends on Linux-only kernel interfaces (pidfd,
-//! `PR_SET_CHILD_SUBREAPER`, `PR_SET_PDEATHSIG`). Non-Linux platforms get the
-//! fail-closed `fallback` stub: constructors keep returning their
-//! unsupervised result and callers continue to run direct child processes.
+//! Linux uses pidfd, subreapers and a parent lease. Windows uses a parent-owned
+//! Job Object and a start gate. Other platforms use direct child processes.
 
 #[cfg(target_os = "linux")]
 mod owned;
@@ -19,8 +17,10 @@ mod supervisor;
 #[cfg(target_os = "linux")]
 mod tracker;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(not(target_os = "linux"), not(windows)))]
 mod fallback;
+#[cfg(windows)]
+mod windows;
 
 #[cfg(target_os = "linux")]
 pub use owned::{command, configure_supervisor_binary, runc_command, OwnedSupervisor, SpawnLease};
@@ -31,11 +31,13 @@ pub use supervisor::{supervisor_main, RuncCleanup};
 #[cfg(target_os = "linux")]
 pub use tracker::{active_owned_processes, wait_for_owned_processes};
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(not(target_os = "linux"), not(windows)))]
 pub use fallback::{
     active_owned_processes, command, configure_supervisor_binary, runc_command, supervisor_main,
     wait_for_owned_processes, OwnedSupervisor, RuncCleanup, SignalTarget, SpawnLease,
 };
+#[cfg(windows)]
+pub use windows::*;
 
 #[cfg(target_os = "linux")]
 use anyhow::{Context, Result};

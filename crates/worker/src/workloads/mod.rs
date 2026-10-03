@@ -1,6 +1,14 @@
 pub(crate) mod agent;
 mod agent_how;
+#[cfg(not(windows))]
 pub(crate) mod agent_runc;
+#[cfg(windows)]
+#[path = "windows_runc.rs"]
+pub(crate) mod agent_runc;
+#[cfg(not(windows))]
+mod dag;
+#[cfg(windows)]
+#[path = "windows_dag.rs"]
 mod dag;
 mod project;
 mod team;

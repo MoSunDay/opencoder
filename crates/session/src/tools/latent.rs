@@ -81,7 +81,7 @@ const SOURCE_LINE_PREFIX: &str = "> Source: ";
 /// paths without a recognizable `skills/` segment.
 fn skill_name_from_source_line(line: &str) -> Option<&str> {
     let path = line.strip_prefix(SOURCE_LINE_PREFIX)?.trim();
-    let mut segments = path.split('/').filter(|s| !s.is_empty());
+    let mut segments = path.split(['/', '\\']).filter(|s| !s.is_empty());
     while let Some(seg) = segments.next() {
         if seg != "skills" {
             continue;
@@ -260,6 +260,16 @@ mod tests {
         // Flat layout resolves to the file stem.
         let flat = Some("> Source: /skills/task-plan.md\n\nbody");
         assert!(task_plan_active(flat));
+    }
+
+    #[test]
+    fn windows_skill_paths_unlock_only_the_exact_skill() {
+        let plan = "> Source: C:\\Users\\中文\\.opencoder\\skills\\task-plan\\SKILL.md\n\nbody";
+        assert!(task_plan_active(Some(plan)));
+        assert!(unlocked_from_body(Some(plan)).contains("question"));
+        let lookalike = plan.replace("task-plan", "my-task-plan");
+        assert!(!task_plan_active(Some(&lookalike)));
+        assert!(unlocked_from_body(Some(&lookalike)).is_empty());
     }
 
     #[test]

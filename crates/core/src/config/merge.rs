@@ -292,6 +292,17 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
         }
         if let Some(a) = obj.get("agent").and_then(|v| v.as_object()) {
+            if let Some(value) = a.get("codex") {
+                if let Ok(settings) = serde_json::from_value(value.clone()) {
+                    cfg.agent.codex = settings;
+                }
+            }
+            if let Some(value) = a.get("runtime") {
+                if let Ok(settings) = serde_json::from_value(value.clone()) {
+                    cfg.agent.runtime = settings;
+                }
+            }
+
             if let Some(d) = a.get("default").and_then(|v| v.as_str()) {
                 cfg.agent.default = d.to_string();
             }

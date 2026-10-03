@@ -24,7 +24,7 @@ pub(super) fn dedup_consecutive_bash_timeouts(
 ) {
     for (i, out) in results.iter_mut() {
         let tc = tool_calls.get(*i);
-        let is_bash = tc.is_some_and(|tc| tc.name == "bash");
+        let is_bash = tc.is_some_and(|tc| tc.name == "bash" || tc.name == "powershell");
         if is_bash
             && out
                 .content
@@ -60,7 +60,7 @@ mod dedup_tests {
     fn bash_tc(id: &str, command: &str) -> CompletedToolCall {
         CompletedToolCall {
             id: id.into(),
-            name: "bash".into(),
+            name: opencoder_core::platform::shell::tool_name().into(),
             input: json!({ "command": command }),
         }
     }
@@ -74,8 +74,9 @@ mod dedup_tests {
     fn timeout_output(pid: u32) -> ToolOutput {
         ToolOutput {
             content: format!(
-                "[bash-timeout: command timed out after 1s \u{2014} moved to background]\n\
-                 pid: {pid}\noutput: /tmp/opencoder_bg_{pid}.output\n\n"
+                "{} command timed out after 1s \u{2014} moved to background]\n\
+                 pid: {pid}\noutput: /tmp/opencoder_bg_{pid}.output\n\n",
+                crate::tools::command::BASH_TIMEOUT_MARKER
             ),
             is_error: false,
             images: vec![],

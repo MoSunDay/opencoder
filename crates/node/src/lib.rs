@@ -29,6 +29,8 @@ pub use runner::{NodeOpts, DEFAULT_CLAIM_INTERVAL, DEFAULT_HEARTBEAT_INTERVAL, R
 /// here only knows the trait, the agent wires in the real scheduler
 /// (`opencoder-dag-runtime`) plus its session/LLM dependencies.
 #[async_trait::async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait DagHook: Send + Sync {
     /// Poll for the next due DAG run for this node (`None` = nothing due).
     async fn claim(

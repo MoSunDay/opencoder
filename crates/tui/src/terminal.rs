@@ -38,7 +38,13 @@ impl TerminalGuard {
     /// pushed strictly *after* entering the alternate screen — see
     /// [`write_enter`] for why the ordering is load-bearing.
     pub fn enter() -> Result<Self> {
-        enable_raw_mode()?;
+        #[cfg(windows)]
+        crate::signal_guard::capture()?;
+        if let Err(error) = enable_raw_mode() {
+            #[cfg(windows)]
+            crate::signal_guard::restore_modes();
+            return Err(error.into());
+        }
         // Compose the whole setup into one buffer and write it once — mirrors
         // `restore` (also buffered), so two racing writers can never interleave
         // partial escape sequences into terminal garbage.
@@ -50,7 +56,7 @@ impl TerminalGuard {
             .write_all(setup.as_bytes())
             .and_then(|_| stdout.flush())
         {
-            let _ = disable_raw_mode();
+            Self::restore();
             return Err(e.into());
         }
 
@@ -99,13 +105,16 @@ impl TerminalGuard {
         let mut out = std::io::stdout();
         let _ = out.write_all(buf.as_bytes());
         let _ = out.flush();
+        #[cfg(windows)]
+        crate::signal_guard::restore_modes();
     }
 
     /// Best-effort redirect of a worker-thread panic message to a log file,
     /// avoiding the stderr output of the default hook that corrupts the
     /// alternate-screen terminal (C4).
     fn write_panic_log(info: &dyn fmt::Display) {
-        let mut path = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+        let mut path =
+            opencoder_core::platform::data_local_dir().unwrap_or_else(std::env::temp_dir);
         path.push("opencoder");
         path.push("tui-panic.log");
         let _ = std::fs::create_dir_all(&path);

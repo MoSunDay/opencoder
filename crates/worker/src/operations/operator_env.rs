@@ -24,7 +24,6 @@ use crate::layout::DirectoryLayout;
 use anyhow::{ensure, Context, Result};
 use opencoder_core::fleet::ExecutionKind;
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 fn snapshot_path(home: &Path) -> PathBuf {
@@ -46,14 +45,24 @@ pub(crate) fn materialize(
     }
     let home = layout.home_dir(kind, id)?;
     let workspace = layout.workspace_dir(kind, id)?;
+    #[cfg(not(windows))]
     opencoder_core::share_fs::durable_create_dir_all(&home)?;
+    #[cfg(windows)]
+    opencoder_core::platform::fs::ensure_private_directory(&home)?;
     opencoder_core::share_fs::durable_create_dir_all(&workspace)?;
+    #[cfg(windows)]
+    for directory in [home.join("AppData/Roaming"), home.join("AppData/Local")] {
+        opencoder_core::platform::fs::ensure_private_directory(&directory)?;
+    }
     let snapshot = snapshot_path(&home);
     if !snapshot.is_file() {
         let parent = snapshot
             .parent()
             .ok_or_else(|| anyhow::anyhow!("snapshot path has no parent"))?;
+        #[cfg(not(windows))]
         opencoder_core::share_fs::durable_create_dir_all(parent)?;
+        #[cfg(windows)]
+        opencoder_core::platform::fs::ensure_private_directory(parent)?;
         write_snapshot(&snapshot, &serde_json::to_string_pretty(config)?)?;
     }
     validate_snapshot(&snapshot)?;
@@ -72,14 +81,10 @@ pub(crate) fn materialize(
 pub(crate) fn write_snapshot(path: &Path, body: &str) -> Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", ulid::Ulid::new()));
     let result = (|| -> Result<()> {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
+        let mut file = opencoder_core::platform::fs::create_private_file(&temporary)?;
         file.write_all(body.as_bytes())?;
         file.sync_all()?;
-        match std::fs::hard_link(&temporary, path) {
+        match opencoder_core::platform::fs::publish_new(&temporary, path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
@@ -89,15 +94,23 @@ pub(crate) fn write_snapshot(path: &Path, body: &str) -> Result<()> {
     })();
     let cleanup = std::fs::remove_file(&temporary);
     result?;
-    cleanup?;
-    std::fs::File::open(path.parent().context("snapshot parent missing")?)?.sync_all()?;
+    if let Err(error) = cleanup {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(error.into());
+        }
+    }
+    opencoder_core::platform::fs::sync_directory(
+        path.parent().context("snapshot parent missing")?,
+    )?;
     Ok(())
 }
 
 fn validate_snapshot(path: &Path) -> Result<()> {
     let metadata = std::fs::symlink_metadata(path).context("isolated operator config missing")?;
     ensure!(
-        metadata.is_file() && metadata.permissions().mode() & 0o777 == 0o600,
+        metadata.is_file()
+            && !opencoder_core::platform::fs::is_link(&metadata)
+            && opencoder_core::platform::fs::private_access(path)?,
         "isolated operator config must be a private regular file (0600)"
     );
     let _: opencoder_core::Config = serde_json::from_slice(&std::fs::read(path)?)
@@ -133,7 +146,16 @@ pub(crate) fn resolve(
 /// HOME env pair for harness injection: persisted with the harness runtime
 /// so every resume rebuilds `SessionState::env_passthrough` from it.
 pub(crate) fn env_pairs(home: &Path) -> Vec<(String, String)> {
-    vec![("HOME".to_string(), home.to_string_lossy().into_owned())]
+    let home = home.to_string_lossy().into_owned();
+    let mut pairs = vec![("HOME".into(), home.clone())];
+    if cfg!(windows) {
+        pairs.extend([
+            ("USERPROFILE".into(), home.clone()),
+            ("APPDATA".into(), format!("{home}\\AppData\\Roaming")),
+            ("LOCALAPPDATA".into(), format!("{home}\\AppData\\Local")),
+        ]);
+    }
+    pairs
 }
 
 #[cfg(test)]
@@ -163,8 +185,7 @@ mod tests {
         let snapshot = snapshot_path(&home);
         let raw = std::fs::read_to_string(&snapshot).unwrap();
         assert!(raw.contains("gpt-isolation"), "snapshot: {raw}");
-        let mode = std::fs::metadata(&snapshot).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "snapshot must be private");
+        assert!(opencoder_core::platform::fs::private_access(&snapshot).unwrap());
 
         // Idempotent: a second materialize with a DIFFERENT config must not
         // rewrite the frozen snapshot.
@@ -293,9 +314,10 @@ mod tests {
     fn env_pairs_point_home_at_the_execution_home() {
         let pairs = env_pairs(Path::new("/node/operator/x/home"));
         assert_eq!(
-            pairs,
-            vec![("HOME".to_string(), "/node/operator/x/home".to_string())]
+            pairs[0],
+            ("HOME".to_string(), "/node/operator/x/home".to_string())
         );
+        assert_eq!(pairs.len(), if cfg!(windows) { 4 } else { 1 });
     }
 
     /// The snapshot must round-trip as a `Config` so `Config::load_with_home`

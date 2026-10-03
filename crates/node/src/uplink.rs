@@ -321,6 +321,8 @@ async fn ensure_ok(resp: reqwest::Response, what: &'static str) -> Result<reqwes
 
 /// Durable node-local DAG event/status outlet used by fleet v2.
 #[async_trait::async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait LocalDagPersistence: Send + Sync {
     async fn events(&self, batch: &opencoder_dag::DagEventBatch) -> Result<()>;
     async fn status(&self, report: &opencoder_dag::DagStatusReport) -> Result<()>;

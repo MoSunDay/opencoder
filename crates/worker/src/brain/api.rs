@@ -9,6 +9,12 @@ pub async fn handle(
     action: &str,
     input: Value,
 ) -> Result<RpcReply> {
+    if cfg!(windows) {
+        return Ok(RpcReply::error(
+            400,
+            "Windows nodes do not offer Brain or DAG capabilities",
+        ));
+    }
     ensure!(valid_id(&reference.id), "invalid execution id");
     if action == "capability_probe" {
         let config = worker.configuration()?;

@@ -72,12 +72,21 @@ pub fn classify_with_dir(command: &str, cwd: &std::path::Path) -> BashVerdict {
 /// Tool names a plan session may execute, mirroring the `plan` agent's
 /// `ToolFilter::Allow` list. `question` still has to clear the latent-skill
 /// gate downstream; `bash` additionally passes the shellguard classifier.
-const PLAN_ADMITTED: &[&str] = &["bash", "task", "question"];
+const PLAN_ADMITTED: &[&str] = &[
+    opencoder_core::platform::shell::tool_name(),
+    "task",
+    "question",
+];
 
 /// Tool names a sidecar session may execute, mirroring the sidecar agent's
 /// `ToolFilter::Allow` list. Read-only inspection only: `bash` additionally
 /// passes the shellguard classifier.
-const SIDECAR_ADMITTED: &[&str] = &["read", "search", "ls", "bash"];
+const SIDECAR_ADMITTED: &[&str] = &[
+    "read",
+    "search",
+    "ls",
+    opencoder_core::platform::shell::tool_name(),
+];
 
 /// Canonical model-facing denial for a plan-mode interception (candidate
 /// wording, verbatim). The contract: name the mode, state the read-only
@@ -176,8 +185,14 @@ pub fn gate(
         } else {
             return None;
         };
-    if tool != "bash" && !admitted.contains(&tool) {
+    if !admitted.contains(&tool) {
         return Some(denial(tool, unadmitted_detail));
+    }
+    if cfg!(windows) && tool == "powershell" {
+        return Some(denial(
+            tool,
+            "PowerShell requires asynchronous AST inspection",
+        ));
     }
     if tool == "bash" {
         if let BashVerdict::WriteBlocked(reason) = classify_with_dir(command.unwrap_or(""), workdir)
@@ -186,6 +201,31 @@ pub fn gate(
         }
     }
     None
+}
+
+/// PowerShell has its own parser; Bash classification must never inspect it.
+pub async fn gate_async(
+    kind: &opencoder_core::AgentKind,
+    agent_name: &str,
+    tool: &str,
+    command: Option<&str>,
+    workdir: &std::path::Path,
+) -> Option<String> {
+    let read_only = *kind == opencoder_core::AgentKind::Plan || agent_name == "sidecar";
+    if cfg!(windows) && tool == "powershell" && read_only {
+        return crate::tools::command::powershell::read_only(command.unwrap_or(""), workdir)
+            .await
+            .err()
+            .map(|error| {
+                let denial = if agent_name == "sidecar" {
+                    sidecar_denial
+                } else {
+                    plan_denial
+                };
+                denial(tool, &error.to_string())
+            });
+    }
+    gate(kind, agent_name, tool, command, workdir)
 }
 
 // ---------------------------------------------------------------------------
@@ -326,20 +366,15 @@ pub(crate) fn strip_wrappers(cmd: &str) -> &str {
 /// cwd.
 #[cfg(test)]
 pub(crate) fn plain_dir() -> tempfile::TempDir {
-    // Do not derive this parent from HOME: other tests deliberately swap and
-    // remove isolated HOME trees while this helper is running in parallel.
-    // `/data00` is the repository's stable non-release filesystem; retain a
-    // portable fallback for developer checkouts.
-    let parent = [
-        std::path::Path::new("/data00"),
-        std::path::Path::new("/root"),
-    ]
-    .into_iter()
-    .find(|path| path.is_dir())
-    .expect("stable non-release test parent");
+    // Windows temporary paths are outside shellguard's Unix /tmp release.
+    // Unix uses /var/tmp without depending on HOME or the checkout location.
+    #[cfg(windows)]
+    let parent = std::env::temp_dir();
+    #[cfg(not(windows))]
+    let parent = std::path::PathBuf::from("/var/tmp");
     tempfile::Builder::new()
         .prefix("sg-plain-")
-        .tempdir_in(parent)
+        .tempdir_in(&parent)
         .expect("writable stable parent for a non-released workdir")
 }
 
@@ -525,7 +560,7 @@ mod tests {
         }
         // Admitted tools pass the first layer untouched.
         for tool in super::PLAN_ADMITTED {
-            if *tool == "bash" {
+            if *tool == opencoder_core::platform::shell::tool_name() {
                 continue; // covered by the classifier tests below
             }
             assert_eq!(
@@ -537,6 +572,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn gate_blocks_mutating_bash_in_plan() {
         use opencoder_core::resolve_agent;
         let agent = resolve_agent("plan").unwrap();
@@ -550,6 +586,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn gate_blocks_writes_in_released_and_plain_call_workdirs() {
         use opencoder_core::resolve_agent;
         let agent = resolve_agent("plan").unwrap();
@@ -572,6 +609,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn gate_blocks_mutating_bash_in_sidecar() {
         use opencoder_core::resolve_agent;
         let agent = resolve_agent("sidecar").unwrap();

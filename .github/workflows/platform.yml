@@ -1,13 +1,11 @@
-# CI gate for macOS platform support. The non-Linux closure — `opencoder`
-# (CLI/TUI) and `opencoder-server` — must compile and lint on macOS, and the
-# session runtime must pass its tests there (fail-closed platform stubs,
-# direct-child process fallback). `opencoder-agent` (runc sandbox, pidfd
-# process supervision) is Linux-only and is intentionally NOT built here.
+# Native platform gates: Windows TUI/operator with PowerShell 7 and Job Objects;
+# macOS CLI/TUI/server with the existing process fallback. Linux DAG execution
+# remains covered by the workspace and container acceptance checks.
 name: platform
 
 on:
   push:
-    branches: [main]
+    branches: [main, "windows11/**"]
     # Intentionally broad: the non-Linux closure spans 14 crates (core, llm,
     # store, shellguard, dag, node, agents, brain, control, todos, session,
     # cli, tui, server + workspace root), and a narrower per-crate filter
@@ -17,6 +15,13 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "build.rs"
+      - "src/**"
+      - "tests/**"
+      - "scripts/install.ps1"
+      - "scripts/platform/release/build-windows.ps1"
+      - "scripts/platform/windows/**"
+      - "docs/windows.md"
       - ".github/workflows/platform.yml"
   pull_request:
     # Intentionally broad: the non-Linux closure spans 14 crates (core, llm,
@@ -28,6 +33,13 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "build.rs"
+      - "src/**"
+      - "tests/**"
+      - "scripts/install.ps1"
+      - "scripts/platform/release/build-windows.ps1"
+      - "scripts/platform/windows/**"
+      - "docs/windows.md"
       - ".github/workflows/platform.yml"
   workflow_dispatch:
 
@@ -40,6 +52,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows:
+    name: windows x64 (TUI / operator)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: PowerShell 7 and native build dependencies
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion -lt [version]'7.4') { throw 'Stable PowerShell 7.4 or newer required' }
+          cmake --version
+          if ($LASTEXITCODE -ne 0) { throw 'CMake required' }
+          if (-not (Test-Path "$env:LIBCLANG_PATH/libclang.dll")) { throw 'LLVM libclang required' }
+          git --version
+          if ($LASTEXITCODE -ne 0) { throw 'Native Git required' }
+          if (-not (Get-Command rg -CommandType Application -ErrorAction SilentlyContinue)) {
+            choco install ripgrep --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Native ripgrep installation failed' }
+          }
+          rg --version
+          if ($LASTEXITCODE -ne 0) { throw 'Native ripgrep required for read-only execution tests' }
+      - name: check supported packages and test targets
+        run: cargo check --locked -p opencoder -p opencoder-agent -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --all-targets
+      - name: build native programs and test supervisor
+        run: cargo build --locked -p opencoder -p opencoder-agent -p opencoder-session
+      - name: clippy
+        run: cargo clippy --locked -p opencoder -p opencoder-agent -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --all-targets -- -D warnings
+      - name: shared platform contracts
+        run: cargo test --locked -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --lib
+      - name: embedded database teardown and native file ownership
+        run: cargo test --locked -p opencoder-store --test connection_lifecycle
+      - name: Windows private ACL and durable files
+        run: cargo test --locked -p opencoder-core --test platform_fs
+      - name: Windows process trees, PowerShell and Codex
+        run: cargo test --locked -p opencoder-session --test windows_native
+      - name: Windows operator admission, execution and recovery
+        run: cargo test --locked -p opencoder-worker --test windows_operator
+      - name: Windows TUI commands
+        run: cargo test --locked -p opencoder --test windows_tui
+      - name: build Windows release ZIP
+        run: ./scripts/platform/release/build-windows.ps1 -Output "$env:RUNNER_TEMP/opencoder-windows-x64.zip"
+      - name: installer acceptance
+        run: |
+          Expand-Archive "$env:RUNNER_TEMP/opencoder-windows-x64.zip" "$env:RUNNER_TEMP/opencoder-package"
+          ./scripts/platform/windows/installer-tests.ps1 -BinaryDirectory "$env:RUNNER_TEMP/opencoder-package/bin"
+      - name: durable installer recovery transitions
+        run: ./scripts/platform/windows/installer-state-tests.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencoder-windows-x64
+          path: |
+            ${{ runner.temp }}/opencoder-windows-x64.zip
+            ${{ runner.temp }}/opencoder-windows-x64.zip.sha256
   macos:
     name: macos gate (opencoder / opencoder-server)
     runs-on: macos-latest

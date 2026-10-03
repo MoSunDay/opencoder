@@ -174,3 +174,90 @@ mod tests {
         assert_eq!(ad3, AgentDefaults::default());
     }
 }
+
+/// Reject malformed private harness settings before loading a disk snapshot.
+/// Errors identify the field without including credential-bearing values.
+pub(super) fn validate_private_settings(value: &serde_json::Value) -> crate::error::Result<()> {
+    let Some(agent) = value.get("agent") else {
+        return Ok(());
+    };
+    if let Some(value) = agent.get("codex").filter(|value| !value.is_null()) {
+        let settings: crate::harness::CodexSettings = serde_json::from_value(value.clone())
+            .map_err(|_| crate::CoreError::Config("invalid agent.codex settings".into()))?;
+        settings.validate().map_err(crate::CoreError::Config)?;
+    }
+    if let Some(value) = agent.get("runtime") {
+        let settings: crate::harness::RuntimeSettings = serde_json::from_value(value.clone())
+            .map_err(|_| crate::CoreError::Config("invalid agent.runtime settings".into()))?;
+        for profile in settings.profiles.values() {
+            profile
+                .settings
+                .validate()
+                .map_err(crate::CoreError::Config)?;
+        }
+        if serde_json::to_vec(&settings)?.len() > 768 * 1024 {
+            return Err(crate::CoreError::Config(
+                "agent.runtime settings exceed dispatch budget".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod private_settings_tests {
+    use serde_json::json;
+
+    #[test]
+    fn disk_config_preserves_codex_launch_settings_and_registered_profiles() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let _home = crate::scoped_config_home(home.clone());
+        let work = root.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let patch = json!({"agent": {
+            "codex": {"executable":"C:\\Tools\\codex.exe", "model":"native-model",
+                "envs":{"HTTPS_PROXY":"http://localhost:8080"}},
+            "runtime":{"profiles":{"native":{"revision":1,"settings":{"model":"pinned-model"}}}}
+        }});
+        std::fs::write(work.join("opencoder.json"), patch.to_string()).unwrap();
+        let loaded = crate::Config::load(&work).unwrap();
+        let settings = loaded.agent.codex.as_ref().unwrap();
+        assert_eq!(settings.executable.as_deref(), Some(r"C:\Tools\codex.exe"));
+        assert_eq!(settings.model.as_deref(), Some("native-model"));
+        assert_eq!(settings.envs["HTTPS_PROXY"], "http://localhost:8080");
+        assert_eq!(loaded.agent.runtime.profiles["native"].revision, 1);
+        let operator = root.path().join("operator");
+        std::fs::create_dir_all(&operator).unwrap();
+        std::fs::write(
+            operator.join("config.json"),
+            serde_json::to_vec(&loaded).unwrap(),
+        )
+        .unwrap();
+        let frozen = crate::Config::load_operator(&operator).unwrap();
+        assert_eq!(frozen.agent.codex, loaded.agent.codex);
+        assert_eq!(frozen.agent.runtime, loaded.agent.runtime);
+        let cleared = loaded.merged_with(&json!({"agent":{"codex":null}}));
+        assert_eq!(cleared.agent.codex, None);
+    }
+
+    #[test]
+    fn malformed_private_harness_settings_fail_without_exposing_values() {
+        let root = tempfile::tempdir().unwrap();
+        let _home = crate::scoped_config_home(root.path().join("home"));
+        for patch in [
+            json!({"agent":{"codex":{"envs":{"TOKEN":123}}}}),
+            json!({"agent":{"codex":{"approval_policy":"invalid-secret-value"}}}),
+            json!({"agent":{"runtime":{"profiles":{"bad":{"revision":1,
+                "settings":{"sandbox_mode":"invalid-secret-value"}}}}}}),
+        ] {
+            std::fs::write(root.path().join("opencoder.json"), patch.to_string()).unwrap();
+            let error = crate::Config::load(root.path()).unwrap_err().to_string();
+            assert!(!error.contains("invalid-secret-value"), "{error}");
+            assert!(
+                error.contains("Codex") || error.contains("agent.codex"),
+                "{error}"
+            );
+        }
+    }
+}

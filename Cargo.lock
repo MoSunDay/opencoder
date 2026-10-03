@@ -68,7 +68,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -79,7 +79,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -771,7 +771,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1571,9 +1571,8 @@ dependencies = [
 
 [[package]]
 name = "libsql"
-version = "0.9.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30fe980ac5693ed1f3db490559fb578885e913a018df64af8a1a46e1959a78df"
+version = "0.10.0-pre.4"
+source = "git+https://github.com/tursodatabase/libsql.git?rev=0070ff3331cd6d09425b812e1cd3ebe32e1d4206#0070ff3331cd6d09425b812e1cd3ebe32e1d4206"
 dependencies = [
  "async-trait",
  "bitflags",
@@ -1590,9 +1589,8 @@ dependencies = [
 
 [[package]]
 name = "libsql-ffi"
-version = "0.9.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0be1da6f123ceb2cd23f469883415cab9ee963286a85d61e22afb8b12e15e681"
+version = "0.10.0-pre.4"
+source = "git+https://github.com/tursodatabase/libsql.git?rev=0070ff3331cd6d09425b812e1cd3ebe32e1d4206#0070ff3331cd6d09425b812e1cd3ebe32e1d4206"
 dependencies = [
  "bindgen",
  "cc",
@@ -1603,8 +1601,7 @@ dependencies = [
 [[package]]
 name = "libsql-sqlite3-parser"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15a90128c708356af8f7d767c9ac2946692c9112b4f74f07b99a01a60680e413"
+source = "git+https://github.com/tursodatabase/libsql.git?rev=0070ff3331cd6d09425b812e1cd3ebe32e1d4206#0070ff3331cd6d09425b812e1cd3ebe32e1d4206"
 dependencies = [
  "bitflags",
  "cc",
@@ -1620,9 +1617,8 @@ dependencies = [
 
 [[package]]
 name = "libsql-sys"
-version = "0.9.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90725458cc4461bc82f8f7983e80b002ea4f64b5184e1462f252d0dd74b122f5"
+version = "0.10.0-pre.4"
+source = "git+https://github.com/tursodatabase/libsql.git?rev=0070ff3331cd6d09425b812e1cd3ebe32e1d4206#0070ff3331cd6d09425b812e1cd3ebe32e1d4206"
 dependencies = [
  "bytes",
  "libsql-ffi",
@@ -1794,7 +1790,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2059,6 +2055,7 @@ dependencies = [
  "opencoder-dag-binary",
  "opencoder-llm",
  "opencoder-node",
+ "opencoder-ontology",
  "opencoder-store",
  "opencoder-todos",
  "reqwest",
@@ -2092,6 +2089,7 @@ dependencies = [
  "tokio",
  "tracing",
  "ulid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2099,6 +2097,7 @@ name = "opencoder-dag"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "opencoder-dag-binary",
  "serde",
  "serde_json",
@@ -2213,6 +2212,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "opencoder-ontology"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "hex",
+ "libsql",
+ "opencoder-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "opencoder-project"
 version = "0.1.0"
 dependencies = [
@@ -2285,6 +2305,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "ulid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2380,6 +2401,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "unicode-width 0.2.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2457,6 +2479,7 @@ dependencies = [
  "tower",
  "tracing",
  "ulid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2992,7 +3015,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3005,7 +3028,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3295,7 +3318,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3536,7 +3559,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3978,6 +4001,7 @@ checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
@@ -4189,7 +4213,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4271,15 +4295,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]

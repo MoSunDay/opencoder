@@ -13,7 +13,7 @@ from rolling import units, probes, manifest
 from rolling.state import Journal, atomic_bytes, write
 from rolling.maintenance import configuration, services, mounts
 from control import Control
-from operations import PrivateOperations
+from systemd import RealOperations
 
 
 PORTS = set()
@@ -69,7 +69,7 @@ def save_settings(settings, path):
 
 def source_configs(settings, root, rootfs):
     sources, targets, ports = {}, {}, {}
-    for name in ('agent', 'binary', 'workspace'):
+    for name in ('agent', 'binary', 'workspace', 'wasm'):
         sources[name], targets[name], ports[name] = root / 'exports' / name, root / 'mounts' / name, port()
         sources[name].mkdir(parents=True)
         targets[name].mkdir(parents=True)
@@ -77,8 +77,9 @@ def source_configs(settings, root, rootfs):
     step = sources['workspace'] / 'execute'
     step.mkdir()
     (step / 'source.txt').write_text('Original workspace bytes survive every maintenance stage.\n')
-    agent = {'agent': {'agents_dir': str(targets['agent'])}}
-    server = {'storage': {'backend': 'libsql'}, 'agent': {'agents_dir': str(sources['agent']),
+    agent = {'agent': {'agents_dir': str(targets['agent'])}, 'dag': {'wasm_dir': str(targets['wasm'])}}
+    server = {'storage': {'backend': 'libsql'}, 'dag': {'wasm_dir': str(sources['wasm']),
+              'nfs': {'enabled': True, 'host': '127.0.0.1', 'port': ports['binary'], 'read_only': True}}, 'agent': {'agents_dir': str(sources['agent']),
               'nfs': {'enabled': True, 'host': '127.0.0.1', 'port': ports['agent'], 'read_only': True}}}
     write(settings.agent_workdir / 'opencoder.json', agent)
     write(settings.server_workdir / 'opencoder.json', server)
@@ -118,21 +119,20 @@ def launch(settings, operations, old_bundle, old_manifest, candidate_bin, rootfs
     journal.data.update(current=old['id'], candidate=None, previous=None, phase='complete', releases={old['id']: old})
     journal.save()
     resource = settings.state_dir / 'services/opencoder-resources'
-    resource_workdir = root / 'fixture-resource-work'
-    write(resource_workdir / 'opencoder.json', json.loads(settings.server_config.read_text()))
-    write(resource_workdir / '.opencoder/ap.json', {'mode': 'off'})
-    atomic_bytes(resource, (candidate_bin / 'opencoder-server').read_bytes(), 0o755)
-    service(settings, 'opencoder-resources.service', [resource, '--resources', '--workdir', resource_workdir,
+    atomic_bytes(resource, (copied / 'bin/opencoder-server').read_bytes(), 0o755)
+    service(settings, 'opencoder-resources.service', [resource, '--resources', '--workdir', settings.server_workdir,
             '--data-dir', settings.state_dir / 'resources', '--port', settings.resource_port,
-            '--token-file', settings.token_file], workdir=resource_workdir)
+            '--token-file', settings.token_file], workdir=settings.server_workdir)
+    resource_unit = settings.systemd_dir / 'opencoder-resources.service'
+    resource_unit.write_text(resource_unit.read_text().replace(' remote-fs.target opencoder-resources.service', ''))
     operations.run('systemctl', 'enable', '--now', 'opencoder-resources.service')
     operations.wait(lambda: operations.http(settings.resource_url, '/api/health'), 90)
-    for name in ('agent', 'binary', 'workspace'):
-        plan = {'path': str(targets[name]), 'port': ports[name]}
-        mount_name = operations.output('systemd-escape', '--path', '--suffix=mount', plan['path']).strip()
+    for kind, export in [('agent', 'agent'), ('wasm', 'binary')]:
+        plan = {'path': str(targets[kind]), 'port': ports[export]}
+        mount_name = mounts.name(plan['path'])
         atomic_bytes(settings.systemd_dir / mount_name, mounts.unit(plan).encode(), 0o644)
         operations.run('systemctl', 'enable', '--now', mount_name)
-    agent = candidate_bin / 'opencoder-agent'
+    agent = copied / 'bin/opencoder-agent'
     service(settings, old['host_unit'], [agent, '--name', root.name, '--data-dir', settings.state_dir / 'host',
             '--workdir', settings.agent_workdir, '--remote', settings.public_url,
             '--token-file', settings.token_file, '--max-runs', 2, 'host', '--port', old['host_port'], '--standby'])
@@ -143,11 +143,7 @@ def launch(settings, operations, old_bundle, old_manifest, candidate_bin, rootfs
     atomic_bytes(data / 'node-id', status['node']['id'].encode())
     write(data / 'host-binding.json', {'database': str(settings.state_dir / 'host/host.db'), 'runtime_id': old['id']})
     runtime_workdir = data / 'workdir'
-    runtime_config = json.loads(settings.agent_config.read_text())
-    frozen_image = units.freeze_rootfs(old, rootfs, candidate_bin)
-    runtime_config['dag']['rootfs_dir'] = str(frozen_image)
-    runtime_config['dag']['data_dir'] = str(data / 'dag/runs')
-    write(runtime_workdir / 'opencoder.json', runtime_config)
+    write(runtime_workdir / 'opencoder.json', json.loads((settings.agent_workdir / 'opencoder.json').read_text()))
     write(runtime_workdir / '.opencoder/ap.json', {'mode': 'off'})
     service(settings, old['runtime_unit'], [agent, '--data-dir', data, '--workdir', runtime_workdir,
             '--max-runs', 65535, '--token-file', settings.token_file, 'runtime', '--port', old['runtime_port']], True)
@@ -155,12 +151,11 @@ def launch(settings, operations, old_bundle, old_manifest, candidate_bin, rootfs
                     'config': {'endpoint': f"http://127.0.0.1:{old['runtime_port']}",
                                'data_dir': str(data), 'unit': old['runtime_unit']}})
     operations.run('systemctl', 'start', old['runtime_unit'])
-    operations.wait(lambda: operations.http(f"http://127.0.0.1:{old['runtime_port']}", '/inventory'), 90)
-    fixture_build = manifest._installer.build_info(agent)
-    node_probe = {**old, 'manifest': {'commit': fixture_build['git_commit']}}
-    probes.candidate(settings, node_probe, operations, 120)
-    write(root / 'old-node-fixture.json', {'build': fixture_build, 'actual_old_server_manifest': old_manifest,
-          'native_probe': probes.probe_id(node_probe), 'candidate_host_runtime_and_exporter': True})
+    inventory = operations.wait(lambda: operations.http(f"http://127.0.0.1:{old['runtime_port']}", '/inventory'), 90)
+    from legacy_probe import execute
+    legacy = execute(old, operations)
+    write(root / 'old-stack.json', {'build': manifest._installer.build_info(agent),
+          'manifest': old_manifest, 'full_old_binaries': True, 'inventory': inventory, 'probe': legacy})
     release = root / 'old-release.json'
     write(release, {'release_id': old['id'], 'state_dir': str(settings.state_dir),
                     'host_service': settings.host_url, 'resource_service': settings.resource_url})
@@ -184,5 +179,5 @@ def prepare(root, nginx):
     settings = create_settings(root)
     atomic_bytes(settings.token_file, secrets.token_hex(24).encode())
     save_settings(settings, root / 'deployment.json')
-    operations = PrivateOperations(settings, root, nginx)
+    operations = RealOperations(settings, root, nginx)
     return settings, operations, Control(operations)

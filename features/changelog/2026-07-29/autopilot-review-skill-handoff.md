@@ -47,7 +47,7 @@ review skill 的职责是评估当前状态并输出 gaps，即为 ACT 阶段的
 
 | 文件 | 改动 |
 |------|------|
-| `crates/core/src/config/autopilot.rs` | 删 `skill: Option<String>` 字段 + serde 属性 + Default + `merge()` 分支 |
+| `crates/core/src/config/runtime/autopilot.rs` | 删 `skill: Option<String>` 字段 + serde 属性 + Default + `merge()` 分支 |
 | `crates/core/src/config/merge.rs` | 删 `has_editable_key` 中 `contains_key("skill")` |
 
 ### autopilot phases 重构

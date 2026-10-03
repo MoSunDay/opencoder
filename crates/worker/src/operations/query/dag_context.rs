@@ -23,7 +23,13 @@ pub(super) async fn load(worker: &Worker, execution: &ExecutionRef) -> Result<Va
     let spec = opencoder_dag::decode_spec(definition.get("spec").unwrap_or(definition))
         .map_err(anyhow::Error::msg)?;
     let root = crate::layout::dag::accepted_parent(&record)?.join(&execution.id);
+    #[cfg(not(windows))]
     let resources = opencoder_dag_runtime::resources::frozen_resources(&root)?;
+    #[cfg(windows)]
+    let resources = {
+        let _ = root;
+        None
+    };
     let mut context = project(&execution.id, &spec, resources.as_ref())?;
     if resources.is_none()
         && record.assignment.index.status != opencoder_core::fleet::ExecutionStatus::Pending

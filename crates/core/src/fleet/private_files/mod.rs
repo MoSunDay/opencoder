@@ -52,7 +52,8 @@ fn digest(value: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 fn safe_name(value: &str) -> bool {
-    !value.is_empty()
+    crate::platform::fs::valid_component(value)
+        && !value.is_empty()
         && value.len() <= 64
         && !value.starts_with('.')
         && value

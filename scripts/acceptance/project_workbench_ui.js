@@ -69,11 +69,11 @@ async function main() {
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: 'networkidle' });
     await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
     await page.getByRole('button', { name: '项目浏览器验收', exact: true }).waitFor();
-    assert.deepEqual(await page.getByRole('tab').allTextContents(), ['项目', '专项', 'TODO']);
+    assert.deepEqual(await page.locator('.fleet-content .ant-tabs').getByRole('tab').allTextContents(), ['项目', '专项', 'TODO']);
     for (const width of [1920, 1280, 768, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       for (const tab of ['项目', '专项', 'TODO']) {
-        await page.getByRole('tab', { name: tab, exact: true }).click();
+        await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: tab, exact: true }).click();
         const table = page.getByRole('tabpanel', { name: tab, exact: true }).locator('.project-table');
         await table.waitFor();
         const bounds = await table.evaluate((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, content: el.scrollWidth, width: el.clientWidth }));
@@ -83,7 +83,7 @@ async function main() {
     }
     console.log('PASS responsive tables');
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.getByRole('tab', { name: '项目', exact: true }).click();
+    await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
     await page.getByRole('button', { name: '项目浏览器验收', exact: true }).click();
     const project = page.getByRole('dialog', { name: '项目 · 项目浏览器验收' });
     await project.getByText('专项进度', { exact: true }).waitFor();
@@ -141,7 +141,7 @@ async function main() {
     await board.getByLabel('删除 Tag 已改名标签', { exact: true }).waitFor({ state: 'hidden' });
     console.log('PASS tag CRUD');
     await board.locator('.ant-drawer-close').click();
-    await page.getByRole('tab', { name: '项目', exact: true }).click();
+    await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
     await page.getByRole('button', { name: '新建项目', exact: true }).click();
     const editor = page.getByRole('dialog', { name: '新建项目', exact: true });
     await editor.getByPlaceholder('一句话标题').fill('CRUD 验收项目');

@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 mod support;
 
 use futures::StreamExt;

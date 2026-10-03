@@ -51,6 +51,15 @@ def old_input(bundle):
     return value, info
 
 
+def corrective_input(bundle, candidate):
+    value = manifest.verify(bundle)
+    if value['commit'] == candidate['commit'] or value['release_id'] == candidate['release_id']:
+        raise ValueError('corrective bundle must contain a different compiled commit and release ID')
+    manifest.compatible(value, [candidate])
+    files, info = binary_inventory(bundle / 'bin')
+    return value, files, info
+
+
 def image_input(rootfs):
     if rootfs.is_symlink() or not rootfs.is_dir():
         raise ValueError('--rootfs must be a real directory')

@@ -1,4 +1,4 @@
-//! Actual v31 -> v32 bootstrap plus the deployment controller's project restore.
+//! Historical catalogs plus the deployment controller's project restore.
 use opencoder_store::LibsqlStore;
 use std::{path::Path, process::Command};
 
@@ -31,6 +31,15 @@ fn python(root: &Path, source: &Path, live: &Path, script: &str) {
 
 #[tokio::test]
 async fn v31_migration_restarts_and_restores_old_project_writes_without_auth_changes() {
+    migrate_and_restore(31).await;
+}
+
+#[tokio::test]
+async fn legacy_v32_catalog_migrates_and_restores_old_writes_without_auth_changes() {
+    migrate_and_restore(32).await;
+}
+
+async fn migrate_and_restore(version: i64) {
     let dir = tempfile::tempdir().unwrap();
     let live = dir.path().join("live.db");
     let saved = dir.path().join("saved.db");
@@ -43,7 +52,7 @@ async fn v31_migration_restarts_and_restores_old_project_writes_without_auth_cha
         let store = LibsqlStore::open(&live).await.unwrap();
         let conn = store.conn().await.unwrap();
         conn.execute_batch(
-            "DROP TABLE project_tags; DROP TABLE project_todo_tags;
+            "DROP TABLE project_tags; DROP TABLE project_todo_tags; DROP TABLE project_initiatives;
              ALTER TABLE project_todos RENAME COLUMN initiative_id TO milestone_id;
              CREATE TABLE project_milestones (
                id TEXT PRIMARY KEY,kind TEXT NOT NULL,goal_id TEXT,title TEXT NOT NULL,
@@ -58,6 +67,9 @@ async fn v31_migration_restarts_and_restores_old_project_writes_without_auth_cha
              INSERT INTO platform_users VALUES ('fixture','fixture-hash','operator',1);
              UPDATE schema_version SET version=31;",
         ).await.unwrap();
+        conn.execute("UPDATE schema_version SET version=?", [version])
+            .await
+            .unwrap();
     }
     python(root, &live, &saved, "import sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); from rolling.backup import database; database(Path(sys.argv[2]),Path(sys.argv[3]))");
     for _ in 0..2 {
@@ -100,7 +112,7 @@ async fn v31_migration_restarts_and_restores_old_project_writes_without_auth_cha
     let conn = db.connect().unwrap();
     assert_eq!(
         scalar(&conn, "SELECT CAST(version AS TEXT) FROM schema_version").await,
-        "31"
+        version.to_string()
     );
     assert_eq!(
         scalar(

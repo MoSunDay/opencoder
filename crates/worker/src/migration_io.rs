@@ -26,7 +26,7 @@ pub(crate) fn open_lock_file(path: &Path) -> Result<std::fs::File> {
 }
 
 pub(crate) fn copy_tree_verified(source: &Path, destination: &Path) -> Result<()> {
-    if std::fs::symlink_metadata(source)?.file_type().is_symlink() {
+    if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(source)?) {
         bail!("migration refuses symlink: {}", source.display());
     }
     opencoder_core::share_fs::durable_create_dir_all(destination)?;
@@ -44,13 +44,13 @@ pub(crate) fn copy_tree_verified(source: &Path, destination: &Path) -> Result<()
             copy_tree_verified(&from, &to)?;
         } else if file_type.is_file() {
             std::fs::copy(&from, &to)?;
-            std::fs::File::open(&to)?.sync_all()?;
+            opencoder_core::platform::fs::sync_file(&to)?;
             if sha256_file(&from)? != sha256_file(&to)? {
                 bail!("migration hash verification failed for {}", from.display());
             }
         }
     }
-    std::fs::File::open(destination)?.sync_all()?;
+    opencoder_core::platform::fs::sync_directory(destination)?;
     Ok(())
 }
 
@@ -85,7 +85,7 @@ fn real_directory(path: &Path, label: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error.into()),
     };
-    if metadata.file_type().is_symlink() {
+    if opencoder_core::platform::fs::is_link(&metadata) {
         bail!("{label} cannot be a symlink: {}", path.display());
     }
     Ok(metadata.is_dir())
@@ -124,8 +124,8 @@ pub(crate) fn durable_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let mut file = std::fs::File::create(&temp)?;
     file.write_all(&serde_json::to_vec(value)?)?;
     file.sync_all()?;
-    std::fs::rename(&temp, path)?;
-    std::fs::File::open(parent)?.sync_all()?;
+    opencoder_core::platform::fs::replace(&temp, path)?;
+    opencoder_core::platform::fs::sync_directory(parent)?;
     Ok(())
 }
 
@@ -136,7 +136,7 @@ pub(crate) fn sync_tree(path: &Path) -> Result<()> {
             sync_tree(&entry.path())?;
         }
     }
-    std::fs::File::open(path)?.sync_all()?;
+    opencoder_core::platform::fs::sync_directory(path)?;
     Ok(())
 }
 

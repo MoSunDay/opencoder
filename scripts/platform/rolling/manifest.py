@@ -19,7 +19,7 @@ def verify(bundle):
     compatibility = manifest.get("compatibility", {})
     for key in ("protocol", "data_format"):
         limits = compatibility.get(key, {})
-        supported = (1,) if key == "protocol" else (1, 2)
+        supported = (1,) if key == "protocol" else (1, 2, 3)
         if limits.get("min") not in supported or limits.get("max") != limits.get("min"):
             raise ValueError(f"unsupported handoff {key}")
     info = _installer.build_info(bundle / "bin/opencoder-agent")
@@ -54,7 +54,10 @@ def brain_preflight(settings, candidate, releases=()):
     if candidate.get("protocol_version", 0) < 10:
         return
     roots = {Path(r["runtime_data"]) for r in releases}
-    if settings.legacy_agent_data:
+    # Bootstrap owns the legacy directory. After bootstrap, the retained
+    # release registrations name the authoritative Runtime data; a preserved,
+    # unregistered legacy copy is history and cannot resume work.
+    if settings.legacy_agent_data and not roots:
         roots.add(settings.legacy_agent_data)
     for root in sorted(roots):
         paths = {path for kind in ("brain", "agent", "dag", "team", "todos", "project", "operator", "maintenance", "system") for path in (root / kind).glob("*/execution.json")}
@@ -64,7 +67,7 @@ def brain_preflight(settings, candidate, releases=()):
             assignment = record["assignment"]
             request = assignment["request"]
             if (request['kind'] == 'dag' and assignment['index']['status'] not in ('done', 'error', 'cancelled')
-                    and not record.get('annotations', {}).get('dag_parent')):
+                    and not (record.get('annotations') or {}).get('dag_parent')):
                 raise ValueError(f"DAG migration blocked by nonterminal execution {request['id']}; terminate it with the previous runtime before upgrading")
             payload = request.get("input") or {}
             if not isinstance(payload, dict):
@@ -78,6 +81,13 @@ def brain_preflight(settings, candidate, releases=()):
 
 def resources(settings, manifest):
     required = sum(item["bytes"] for item in manifest["files"].values()) * 2 + 256 * 1024 * 1024
+    from .native import effective_config
+    from .maintenance.planning.capacity import tree_bytes
+    rootfs = effective_config(settings.agent_workdir).get('dag', {}).get('rootfs_dir')
+    frozen = settings.state_dir / 'runtimes' / manifest['release_id'] / 'dag/rootfs'
+    if rootfs and not frozen.exists():
+        required += tree_bytes(Path(rootfs), {'dev', 'proc', 'sys', 'tmp', 'workspace/context'},
+                               block_size=4096)
     if shutil.disk_usage(settings.state_dir).free < required:
         raise ValueError("insufficient disk space for candidate and retained releases")
     memory = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())

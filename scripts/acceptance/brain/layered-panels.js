@@ -15,7 +15,7 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
   try {
     await page.addInitScript((value) => localStorage.setItem('oc_token', value), token);
     await page.goto(`${base}/?brain_run=${id}`, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('radiogroup').getByText('Agent', { exact: true }).click();
+    await page.getByRole('tablist', { name: '导航分类', exact: true }).getByRole('tab', { name: 'Agent', exact: true }).click();
     await page.getByRole('menuitem', { name: '大脑调度' }).click();
     await page.locator('.brain-run').first().getByText('已完成', { exact: true }).waitFor();
     await page.locator('.react-flow__controls-fitview').click();

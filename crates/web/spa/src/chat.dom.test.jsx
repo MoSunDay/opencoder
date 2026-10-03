@@ -62,7 +62,7 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
       fireEvent.keyDown(container.querySelector('textarea.ant-sender-input'), { key: 'Enter', keyCode: 13 });
     });
     await waitFor(() => {
-      const promptHit = chatTestState.hits.find((h) => h.url.includes('/prompt'));
+      const promptHit = chatTestState.hits.find((h) => h.method === 'POST' && h.url === '/api/sessions');
       expect(promptHit).toBeTruthy();
       expect(JSON.parse(promptHit.body).prompt).toBe('你好，帮我跑个测试');
     });
@@ -71,6 +71,7 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
     });
     expect(JSON.parse(chatTestState.hits.find((hit) => hit.method === 'POST' && hit.url === '/api/sessions').body).node_id).toBe('node-1');
     expect(chatTestState.hits.some((h) => h.method === 'POST' && h.url === '/api/sessions')).toBe(true);
+    expect(chatTestState.hits.some((h) => h.url.includes('/prompt'))).toBe(false);
     await waitFor(() => {
       expect(chatTestState.hits.some((h) => h.url.includes('/api/sessions/s1/events'))).toBe(true);
     });
@@ -78,6 +79,16 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
 
   it('snapshots the /seq head BEFORE posting the prompt (lost-frame race)', async () => {
     const { container, textarea } = await mountChat();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'first instruction' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', keyCode: 13 });
+    });
+    await waitFor(() => expect(chatTestState.liveEventCtl).toBeTruthy());
+    await act(async () => {
+      chatTestState.liveEventCtl.enqueue(new TextEncoder().encode('event: done\ndata: {}\n\n'));
+    });
+    await waitFor(() => expect(container.querySelector('.ant-sender-actions-btn-loading-button')).toBeFalsy());
+    chatTestState.hits = [];
     await act(async () => {
       fireEvent.change(textarea, { target: { value: 'race' } });
     });

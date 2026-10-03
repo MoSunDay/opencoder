@@ -5,7 +5,7 @@ use serde_json::json;
 
 pub(super) mod preparation;
 pub(super) mod replay;
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests;
 pub(super) mod timing;
 

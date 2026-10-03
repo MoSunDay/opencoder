@@ -9,25 +9,48 @@ pub(crate) fn write_config_save(target: &Path, body: &str) -> std::io::Result<()
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(target, body)
+    use std::io::Write;
+    let temporary = target.with_extension(format!("tmp-{}", ulid::Ulid::new()));
+    let result = (|| {
+        let mut file = crate::platform::fs::create_private_file(&temporary)?;
+        file.write_all(body.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        crate::platform::fs::replace(&temporary, target)?;
+        crate::platform::fs::sync_directory(target.parent().unwrap_or_else(|| Path::new(".")))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
+#[path = "config/runtime/agent.rs"]
 mod agent;
+#[path = "config/runtime/autopilot.rs"]
 mod autopilot;
+#[path = "config/runtime/cli.rs"]
 mod cli;
+#[path = "config/runtime/compaction.rs"]
 mod compaction;
+#[path = "config/runtime/dag.rs"]
 mod dag;
 mod domain;
 pub(crate) mod env;
 mod keymap;
+#[path = "config/runtime/mcp.rs"]
 mod mcp;
+#[path = "config/runtime/mcp_guard.rs"]
 pub(crate) mod mcp_guard;
 mod merge;
 mod model_guard;
+#[path = "config/runtime/ontology.rs"]
+mod ontology;
 mod persistence;
 mod provider;
 pub mod redact;
 mod schedule;
+#[path = "config/runtime/skill.rs"]
 mod skill;
 mod storage;
 
@@ -43,6 +66,7 @@ pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
 pub use model_guard::is_suspicious_model;
+pub use ontology::{OntologyConfig, OntologyNfsConfig};
 pub use provider::{Endpoint, HttpHeader, ProviderConfig};
 pub use schedule::{
     load_schedules, schedules_path, validate_id as validate_schedule_id, ScheduleJob, ScheduleKind,
@@ -96,6 +120,8 @@ pub struct Config {
     /// DAG binary-module pool + NFS export knobs.
     #[serde(default)]
     pub dag: DagConfig,
+    #[serde(default)]
+    pub ontology: OntologyConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
     /// Per-message assistant-output streamlining (deterministic, meaning-
@@ -292,6 +318,7 @@ impl Default for Config {
             embedding_provider: None,
             agent: AgentDefaults::default(),
             dag: DagConfig::default(),
+            ontology: OntologyConfig::default(),
             compaction: CompactionConfig::default(),
             output_streamline: OutputStreamlineConfig::default(),
             context_limit: None,
@@ -340,14 +367,7 @@ impl Config {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        match options.open(&path) {
+        match crate::platform::fs::create_private_file(&path) {
             Ok(mut file) => {
                 file.write_all(b"{}\n")?;
                 Ok((path, true))
@@ -417,6 +437,7 @@ impl Config {
                 let parsed: serde_json::Value =
                     serde_json::from_str(&std::fs::read_to_string(&p)?)?;
                 crate::provider::validate_protocol_patch(&parsed)?;
+                agent::validate_private_settings(&parsed)?;
                 if parsed.is_object() {
                     merge::merge_into(&mut cfg, parsed);
                 }
@@ -489,6 +510,7 @@ impl Config {
                 let raw = std::fs::read_to_string(&p)?;
                 let parsed: serde_json::Value = serde_json::from_str(&raw)?;
                 crate::provider::validate_protocol_patch(&parsed)?;
+                agent::validate_private_settings(&parsed)?;
                 if !parsed.is_object() {
                     // A valid-JSON-but-not-object file (e.g. `[1,2]` or
                     // `"foo"`) falls through `merge_into` silently. Warn so the
@@ -521,6 +543,7 @@ impl Config {
                 domain::apply_domain(&mut cfg, key, &v);
             }
         }
+        agent::validate_private_settings(&serde_json::json!({"agent": &cfg.agent}))?;
         Self::finalize(cfg, apply_environment)
     }
     pub fn model_id(&self) -> &str {

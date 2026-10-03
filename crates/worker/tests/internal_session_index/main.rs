@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 #[path = "../support/mod.rs"]
 mod support;
 

@@ -64,7 +64,12 @@ pub async fn forward_resources(
 ) -> Response {
     let path = request.uri().path();
     let binary = path == "/api/dag/binaries" || path.starts_with("/api/dag/binaries/");
-    if !binary && !matches!(path, "/api/agents/nfs" | "/api/dag/workspace/nfs") {
+    if !binary
+        && !matches!(
+            path,
+            "/api/agents/nfs" | "/api/dag/workspace/nfs" | "/api/ontology/nfs"
+        )
+    {
         return next.run(request).await;
     }
     let Some(platform) = state.lifecycle.platform.get() else {

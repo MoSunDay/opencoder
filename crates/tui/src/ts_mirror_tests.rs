@@ -48,7 +48,10 @@ async fn ts_session_is_registered_with_title_and_store_dir() {
         .unwrap()
         .expect("registered");
     assert_eq!(record.title.as_deref(), Some("seed title"));
-    assert_eq!(record.workdir.as_deref(), Some(workdir.as_path()));
+    assert_eq!(
+        record.workdir.as_deref(),
+        Some(workdir.canonicalize().unwrap().as_path())
+    );
     assert_eq!(
         record.store_dir.as_deref(),
         Some(opencoder_core::data_dir_for(&workdir).as_path())

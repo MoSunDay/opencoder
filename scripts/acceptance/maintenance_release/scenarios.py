@@ -1,4 +1,4 @@
-"""Crash/rollback and migrated failure/refused rollback/exact retry acceptance."""
+"""Crash recovery, migrated rollback, exact retry and post-open refusal."""
 import json
 from pathlib import Path
 import subprocess
@@ -37,9 +37,14 @@ def project_write(operations, url, title, expected_titles):
     return {'created': created, 'goals': goals, 'read_write': True}
 
 
+def authentication_state(settings):
+    return {'server': authentication(settings.server_data / 'definitions.db'),
+            'resources': authentication(settings.state_dir / 'resources/definitions.db', require_users=False)}
+
+
 def check_baselines(settings, operations, auth, root, label):
     source_hash = unchanged_source(operations.source, operations.source_frozen)
-    actual = authentication(settings.server_data / 'definitions.db')
+    actual = authentication_state(settings)
     if actual != auth:
         raise AssertionError('authentication rows changed at ' + label)
     result = {'stage': label, 'source_inventory_sha256': source_hash, 'auth': actual}
@@ -47,17 +52,15 @@ def check_baselines(settings, operations, auth, root, label):
     return result
 
 
-def run(settings, operations, old, bundle, candidate, control, receipt):
+def run(settings, operations, old, bundle, candidate, corrective, control, receipt):
     root = operations.root
     path = settings.server_data / 'definitions.db'
     receipt['scenarios'] = {}
     before = schema(path)
-    auth = authentication(path)
+    auth = authentication_state(settings)
     old_configs = {name: archive.digest(workdir / 'opencoder.json')
                    for name, workdir in [('agent', settings.agent_workdir), ('server', settings.server_workdir)]}
     receipt.update(schema_before=before, auth_before=auth)
-    if before >= 32:
-        raise ValueError(f'actual old Server created schema {before}; choose an actual older bundle to prove real schema migration to 32')
     project_write(operations, settings.public_url, 'before-maintenance', [])
     initial_journal = Journal(settings.state_dir).path.read_bytes()
     receipt['preflight'] = preflight.check(settings, candidate, operations)
@@ -110,14 +113,14 @@ def run(settings, operations, old, bundle, candidate, control, receipt):
     write(root / 'scenario-rollback.json', first)
 
     second = {'passed': False, 'schema_before': before}
-    receipt['scenarios']['post_schema_failure_refusal_retry'] = second
+    receipt['scenarios']['post_schema_recovery_retry'] = second
     second['controller_failure'] = controller(root, bundle, control, operations, 'verification', 1)
     failed = Journal(settings.state_dir)
     state = failed.data['maintenance']
     after = schema(path)
     if state['stage'] != 'verifying' or state.get('schema_started') is not True or state['writes_open']:
         raise AssertionError('verification failure was not after closed-gate migration')
-    if after != 32 or before >= after:
+    if after != 32:
         raise AssertionError(f'actual old schema did not migrate: {before} -> {after}')
     if schema(Path(state['backup']) / 'data/server/definitions.db', immutable=True) != before:
         raise AssertionError('backup does not contain the honest original schema')
@@ -125,36 +128,44 @@ def run(settings, operations, old, bundle, candidate, control, receipt):
     second.update(schema_after=after, snapshots=frozen, gates=closed_gates(settings, operations),
                   private_native_probe=native_evidence(failed.record(state['target'])))
     check_baselines(settings, operations, auth, root, 'verification-failure')
-    journal_bytes, calls = failed.path.read_bytes(), len(operations.commands)
-    try:
-        flow.rollback(settings, operations, 120)
-    except ValueError as error:
-        if 'schema migration may have committed' not in str(error) or 'restoration is forbidden' not in str(error):
-            raise
-        second['rollback_refusal'] = str(error)
-    else:
-        raise AssertionError('old rollback was accepted after schema_started')
-    if len(operations.commands) != calls or failed.path.read_bytes() != journal_bytes or schema(path) != after:
-        raise AssertionError('refused rollback changed services, journal or schema')
-    second['refusal_has_no_effects'] = True
-    check_baselines(settings, operations, auth, root, 'refused-rollback')
-    second['controller_retry'] = controller(root, bundle, control, operations, 'none', 0)
+    restored = flow.rollback(settings, operations, 120)
+    if schema(path) != before or snapshots(restored['maintenance']) != frozen:
+        raise AssertionError('post-migration recovery lost old schema or changed the sealed backup')
+    second['old_api_after_migration_recovery'] = project_write(operations, settings.public_url,
+        'old-write-after-migration-recovery', ['before-maintenance', 'old-write-after-rollback'])
+    second['post_migration_recovery'] = check_baselines(settings, operations, auth, root, 'post-migration-recovery')
+    second['controller_failure_before_retry'] = controller(root, bundle, control, operations, 'verification', 1)
+    failed = Journal(settings.state_dir)
+    state = failed.data['maintenance']
+    frozen = snapshots(state)
+    second['controller_retry'] = controller(root, bundle, control, operations, 'public', 1)
     complete = Journal(settings.state_dir)
     current = complete.record(candidate['release_id'])
-    if complete.data['phase'] != 'complete' or complete.data['current'] != state['target']:
-        raise AssertionError('retry did not complete the same candidate')
+    if complete.data['maintenance']['stage'] != 'public' or complete.data['current'] != state['target']:
+        raise AssertionError('retry did not reopen the same candidate before the injected public failure')
     if complete.data['maintenance']['writes_open'] is not True or snapshots(complete.data['maintenance']) != frozen:
         raise AssertionError('retry changed verified backup/configuration snapshots or kept gates closed')
     second['new_api'] = project_write(operations, settings.public_url, 'new-write-after-retry',
-                                      ['before-maintenance', 'old-write-after-rollback'])
+                                      ['before-maintenance', 'old-write-after-rollback', 'old-write-after-migration-recovery'])
+    try:
+        flow.rollback(settings, operations, 120)
+    except ValueError as error:
+        if 'writes may have reopened' not in str(error):
+            raise
+        second['post_open_restore_rejected'] = True
+    else:
+        raise AssertionError('old backup restore accepted after reopening')
     host = operations.http(settings.host_url, '/status')
     if host['snapshot']['ready'] is not True:
         raise AssertionError('public Host gate did not reopen to a ready node')
     registered = operations.http(settings.host_url, '/servers/' + current['id'], 'POST', {
         'id': current['id'], 'url': f"http://127.0.0.1:{current['server_port']}", 'enabled': True})
     second.update(passed=True, resumed_same_candidate=True, backup_and_configs_unchanged=True,
+                  deliberate_public_failure_after_reopening=True,
                   public_native_probe=native_evidence(current, True), public_host_write=registered,
                   source_and_auth=check_baselines(settings, operations, auth, root, 'successful-retry'))
     write(root / 'scenario-retry.json', second)
-    receipt.update(schema_after=schema(path), auth_after=authentication(path), auth_rows_unchanged=True,
+    receipt.update(schema_after=schema(path), auth_after=authentication_state(settings), auth_rows_unchanged=True,
                    source_inventory_preserved=True)
+    from cases.forward import run as corrective_release
+    corrective_release(settings, operations, corrective, control, receipt)

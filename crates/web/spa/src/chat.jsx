@@ -1,6 +1,6 @@
 // Node-owned conversations. Two creation lanes share this console:
 //   - Operator 模式（缺省）: operator-kind executions — newId('operator'), body
-//       without `kind` (legacy wire shape);
+//       without `kind`, first prompt admitted with creation;
 //   - Agent 模式: agent-kind sessions — newId('agent'), body carries
 //     `kind: 'agent'` plus the selected concrete Agent. The first prompt is
 //     persisted into that Agent's how by the worker.
@@ -215,14 +215,10 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       // retain their ID for the server's idempotent create path.
       const attemptKey = JSON.stringify([nodeSel, modeKind, sessionAgent, operatorHarness, operatorEnvs]);
       if (createAttempt.current?.key !== attemptKey) createAttempt.current = { key: attemptKey, id: newId(modeKind) };
-      // The staged act/plan choice rides creation: POST /api/sessions accepts
-      // `agent`, so the mode picked before any prompt exists is honored
-      // (server stamps meta.agent and initializes the harness with it). Agent
-      // mode also carries its first prompt in this request. The node can then
-      // initialize the session and start the drain atomically; the old
-      // create-then-seq-then-prompt chain could race the node's async launch
-      // and fail the first Agent submission with a transient 404.
-      const body = { id: createAttempt.current.id, node_id: nodeSel, agent: sessionAgent };
+      // Admit the first instruction with creation for both conversation kinds.
+      // A launcher can leave this panel as soon as onCreated runs; a later
+      // prompt request would otherwise race that navigation and initialization.
+      const body = { id: createAttempt.current.id, node_id: nodeSel, agent: sessionAgent, prompt };
       if (modeKind === 'operator') {
         if (operatorHarness === 'codex') body.harness = 'codex';
         const envs = parseEnvs(operatorEnvs);
@@ -230,7 +226,6 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       }
       if (modeKind === 'agent') {
         body.kind = 'agent';
-        body.prompt = prompt;
       }
       const j = await apiPost('/api/sessions', body);
       if (!j?.id) throw new Error('服务未返回会话 ID，请重试确认');
@@ -246,12 +241,12 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       }].concat(d));
     }
     if (!isCurrentLane()) return;
-    // A fresh Agent-mode session carries no separate prompt POST: its first
+    // A fresh session carries no separate prompt POST: its first
     // prompt rode the creation request, so the cursor stays at 0 and the
     // stream replays the complete new session without a readiness
     // round-trip to the node before its local session row exists.
     let after = 0;
-    if (dialogSel || modeKind !== 'agent') {
+    if (dialogSel) {
       // Snapshot the persisted head BEFORE the POST: if /seq is fetched after
       // the prompt is admitted, events emitted in between get seq ≤ head and
       // are never replayed — this turn's first frames would be lost forever.

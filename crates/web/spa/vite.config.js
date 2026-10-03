@@ -40,6 +40,7 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
+        inlineDynamicImports: true,
         entryFileNames: 'static/app.js',
         chunkFileNames: 'static/[name].js',
         assetFileNames: assetName,

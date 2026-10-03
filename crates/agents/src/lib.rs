@@ -15,10 +15,15 @@
 //! tests) is owned by `opencoder_core::agent::meta`.
 
 pub mod io;
+#[cfg(not(windows))]
 pub mod nfs;
 pub mod references;
 pub mod resources;
 pub mod rollback;
+#[cfg(not(windows))]
+pub mod serve;
+#[cfg(windows)]
+#[path = "windows_serve.rs"]
 pub mod serve;
 pub mod snapshot;
 pub mod write;
@@ -26,6 +31,7 @@ pub mod write;
 pub use io::{atomic_write, atomic_write_json, now_rfc3339};
 /// Read-only NFSv3 export of the agents root (`agent.nfs` config block):
 /// the VFS lives in [`nfs`], the server handle/status in [`serve`].
+#[cfg(not(windows))]
 pub use nfs::{agents_fs, ReadOnlyAgentsFs};
 pub use references::{references_snapshot, refresh_agent_references, scan_resource};
 pub use rollback::rollback_resource;

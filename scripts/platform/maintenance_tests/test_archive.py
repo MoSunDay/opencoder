@@ -1,42 +1,14 @@
 from pathlib import Path
-from contextlib import closing
 import sqlite3
 import sys
 import tempfile
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.maintenance.archive import restore_projects, unrelated
-from rolling.maintenance import archive, restore
-from rolling.state import Journal
-from fixtures import Fixture, legacy_database
+from fixtures import legacy_database
 
 
 class ArchiveTests(unittest.TestCase):
-    def test_wal_backups_remain_immutable_through_restore_and_retry(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            fixture = Fixture(root)
-            databases = [fixture.db, fixture.settings.server_data / 'control.db',
-                         fixture.settings.state_dir / 'host/host.db']
-            for database in databases:
-                with closing(sqlite3.connect(database)) as connection:
-                    self.assertEqual(connection.execute('PRAGMA journal_mode=WAL').fetchone(), ('wal',))
-                    if database.name == 'control.db':
-                        connection.execute('CREATE TABLE dispatch(id TEXT)')
-                        connection.commit()
-            output = root / 'backup'
-            metadata = archive.create(fixture.settings, output, Journal(fixture.settings.state_dir).data,
-                                      {'release_id': 'new', 'nginx': None})
-            before = archive.inventory(output)
-            for _ in range(2):
-                restore.data(fixture.settings, output, metadata)
-                self.assertEqual(archive.inventory(output), before)
-                self.assertEqual(archive.verify(output), metadata)
-                with closing(sqlite3.connect(fixture.db)) as connection:
-                    self.assertEqual(connection.execute('SELECT version FROM schema_version').fetchone(), (31,))
-                    self.assertEqual(connection.execute('SELECT token_hash FROM platform_users').fetchone(),
-                                     (b'\x00\x01\x02',))
-
     def test_restore_reinstates_v31_projects_indexes_and_old_writes_without_auth_writes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

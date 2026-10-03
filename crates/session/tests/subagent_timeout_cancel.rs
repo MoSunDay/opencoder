@@ -10,7 +10,7 @@
 //!   child's hard-cancel token is fired so its cleanup runs inside the grace
 //!   drain (DB overridden to Cancelled, not Completed).
 //! - `sustained_activity_does_not_timeout`: a child that keeps producing
-//!   events (tool calls every < task_timeout) for longer than task_timeout is
+//!   events (LLM text deltas every < task_timeout) for longer than task_timeout is
 //!   NOT killed — the key regression proving the semantics changed from a
 //!   single wall-clock cap to a per-step idle timeout.
 //! - `stalled_single_step_times_out`: a single long bash call with no
@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use opencoder_core::{resolve_agent, Config};
-use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, Store, SubagentStatus};
 
@@ -140,60 +140,90 @@ async fn timeout_marks_subagent_cancelled() {
     );
 }
 
-/// A child that keeps making progress (tool calls every ~0.2s) must NOT be
-/// killed even though its total runtime (~1.2s) exceeds the 1s task_timeout.
-/// Each tool start/end resets the idle deadline; only a truly stalled step
-/// trips it. This is the key regression proving the semantics changed from a
-/// single wall-clock cap to a per-step idle timeout: under the OLD semantics
-/// this run would have been killed at 1s.
-#[tokio::test]
-async fn sustained_activity_does_not_timeout() {
-    let store = mem_store().await;
-    // Six short bash calls (~0.2s each). Total runtime ~1.2s > 1s timeout, but
-    // every idle gap (the bash execution window) is ~0.2s << 1s, so the
-    // deadline keeps resetting and never fires.
-    let mut builder = MockChatClient::new().push_script(vec![task_turn("explore with many steps")]);
-    for _ in 0..6 {
-        builder = builder.push_script(vec![bash_call("sleep 0.2")]);
-    }
-    let mock = Arc::new(builder.with_default(vec![text_done("explored everything")]))
-        as Arc<dyn ChatStream>;
+/// Only the child stream uses delayed events. No shell process startup or
+/// filesystem / database latency is part of the idle-watchdog clock.
+struct ActiveChild {
+    parent: MockChatClient,
+    calls: std::sync::atomic::AtomicUsize,
+}
 
-    let agent = resolve_agent("act").unwrap();
+impl ChatStream for ActiveChild {
+    fn chat_stream(
+        &self,
+        req: ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) != 1 {
+            return self.parent.chat_stream(req);
+        }
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        tokio::spawn(async move {
+            for _ in 0..6 {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                if tx
+                    .send(LlmEvent::TextDelta("progress".into()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            let _ = tx.send(text_done("explored everything")).await;
+        });
+        Ok(rx)
+    }
+}
+
+/// Progress every 200ms must survive a 1s idle budget for a 1.2s run.
+/// Virtual time keeps this assertion independent of CI host scheduling.
+#[tokio::test(start_paused = true)]
+async fn sustained_activity_does_not_timeout() {
+    let mock = Arc::new(ActiveChild {
+        parent: MockChatClient::new()
+            .push_script(vec![task_turn("explore with sustained progress")])
+            .with_default(vec![text_done("done")]),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    }) as Arc<dyn ChatStream>;
     let mut session = SessionState::new(
         "sustained-activity-test",
-        agent,
+        resolve_agent("act").unwrap(),
         config(),
         mock,
         std::env::temp_dir(),
-    )
-    .with_store(store.clone());
-    let session_id = session.id.clone();
-
-    let started = std::time::Instant::now();
-    let result = tokio::time::timeout(
+    );
+    let started = tokio::time::Instant::now();
+    let mut events = Vec::new();
+    tokio::time::timeout(
         Duration::from_secs(30),
-        run(&mut session, "go".into(), |_| {}),
+        run(&mut session, "go".into(), |event| events.push(event)),
     )
-    .await;
-    let elapsed = started.elapsed();
-    assert!(
-        result.is_ok(),
-        "run did not complete within 30s; active subagent was likely killed"
+    .await
+    .expect("active subagent must finish")
+    .expect("parent run must succeed");
+    assert!(started.elapsed() >= Duration::from_millis(1200));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event,
+                SessionEvent::SubagentChild { ev, .. }
+                    if matches!(ev.as_ref(), SessionEvent::TextDelta(_))
+            ))
+            .count(),
+        6,
+        "all six child progress events must reach the parent"
     );
-    // Must have run past the 1s timeout (proving it survived the old cap).
     assert!(
-        elapsed >= Duration::from_secs(1),
-        "expected sustained run > 1s, got {:?}",
-        elapsed
+        events.iter().any(|event| matches!(event,
+            SessionEvent::SubagentEnd { ok: true, cancelled: false, summary, .. }
+                if summary == &format!("(0 tool calls) {}", "progress".repeat(6))
+        )),
+        "active child must finish successfully after exceeding its idle budget"
     );
-
-    let tasks = store.list_subagent_tasks(&session_id).await.unwrap();
-    assert_eq!(tasks.len(), 1, "expected exactly one subagent task");
     assert!(
-        matches!(tasks[0].status, SubagentStatus::Completed),
-        "an active subagent must complete, not be Cancelled; got {:?}",
-        tasks[0].status
+        events.iter().any(|event| matches!(event,
+            SessionEvent::ToolEnd { name, output, is_error: false, .. }
+                if name == "task" && output == "explored everything"
+        )),
+        "completed child result must reach the parent task output"
     );
 }
 

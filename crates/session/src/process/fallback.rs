@@ -43,6 +43,10 @@ pub struct SignalTarget {
 }
 
 impl SignalTarget {
+    pub fn terminate(&self) -> Result<()> {
+        bail!("process supervision is unavailable")
+    }
+
     pub fn signal(&self, _signal: libc::c_int) -> Result<()> {
         bail!("process supervision is Linux-only")
     }

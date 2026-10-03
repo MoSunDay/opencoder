@@ -26,8 +26,27 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
         serde_json::from_value(assignment.request.input["frozen_capabilities"].clone())
             .context("frozen capability descriptors missing")?;
     let mut summaries = BTreeMap::new();
+    let history = read::events(state, run_id, snapshot.run.last_event_seq)
+        .await
+        .map_err(|reply| anyhow::anyhow!("layered input history: {}", reply.body))?;
     let relevant = opencoder_brain::layered::relevant_operations(&snapshot);
     for operation in relevant.iter().filter(|op| op.status.terminal()) {
+        // A rejected admission has no child output, even when Control already
+        // allocated an index. Its durable receipt is the diagnostic evidence.
+        if operation.status == LayeredOperationStatus::Error && operation.source_sequence == Some(0)
+        {
+            let reason = history
+                .iter()
+                .rev()
+                .find(|event| {
+                    event.event_type == "operation_terminal"
+                        && event.execution_id.as_deref() == Some(&operation.execution_id)
+                })
+                .and_then(|event| event.reason_summary.clone())
+                .unwrap_or_else(|| "Execution admission failed before the child started".into());
+            summaries.insert(operation.execution_id.clone(), reason);
+            continue;
+        }
         let Some(index) = state.fleet.index(&operation.execution_id).await? else {
             ensure!(
                 operation.status == LayeredOperationStatus::Error,
@@ -47,9 +66,6 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
     }
     let mut context = context(state, &snapshot, &request, &capabilities, summaries).await?;
     context.guidance_only = !opencoder_brain::layered::barrier(&snapshot);
-    let history = read::events(state, run_id, snapshot.run.last_event_seq)
-        .await
-        .map_err(|reply| anyhow::anyhow!("layered input history: {}", reply.body))?;
     context.human_inputs = history
         .iter()
         .filter_map(|event| event.user_input.clone())

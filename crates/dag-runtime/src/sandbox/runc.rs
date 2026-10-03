@@ -2,10 +2,12 @@
 //! reaps the launcher before returning; cleanup failures remain visible.
 use anyhow::{Context, Result};
 use std::{path::Path, process::Stdio, time::Duration};
-use tokio::{process::Command, time::timeout};
+use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
+mod cleanup;
 mod recovery;
+pub(super) use cleanup::delete_force;
 pub use recovery::cleanup_owned_containers;
 
 pub fn runc_available() -> bool {
@@ -142,40 +144,11 @@ pub async fn run_step_streamed(
     result
 }
 
-pub(super) async fn delete_force(root: &Path, id: &str) -> Result<()> {
-    if opencoder_session::process::remove_empty_runc_state(&root.join(id))? {
-        return Ok(());
-    }
-    let mut child = Command::new("runc")
-        .arg("--root")
-        .arg(root)
-        .args(["delete", "--force", id])
-        .kill_on_drop(true)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("spawn runc cleanup")?;
-    let status = match timeout(Duration::from_secs(5), child.wait()).await {
-        Ok(status) => status?,
-        Err(_) => {
-            child.kill().await.context("reap timed-out runc cleanup")?;
-            anyhow::bail!("runc delete exceeded 5s");
-        }
-    };
-    let removed = opencoder_session::process::remove_empty_runc_state(&root.join(id))?;
-    anyhow::ensure!(status.success() || removed, "runc delete failed: {status}");
-    anyhow::ensure!(
-        !root.join(id).exists(),
-        "runc container state remains after cleanup"
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tokio::time::timeout;
 
     #[tokio::test]
     async fn cleanup_removes_interrupted_creation_without_container_metadata() {

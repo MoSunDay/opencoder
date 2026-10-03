@@ -16,6 +16,8 @@ use ulid::Ulid;
 /// text. `topic == None` means "not part of a topic run" (e.g. capability
 /// profiling) and writes no `team_topic_runs` row.
 #[async_trait]
+// async_trait annotates futures that are already must-use on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait TeamDispatcher: Send + Sync {
     async fn ask(&self, topic: Option<&str>, node_id: &str, prompt: &str) -> Result<String>;
 }

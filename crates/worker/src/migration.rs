@@ -91,12 +91,12 @@ fn discover(layout: &DirectoryLayout) -> Result<BTreeMap<String, LegacyExecution
     if !root.exists() {
         return Ok(out);
     }
-    if std::fs::symlink_metadata(&root)?.file_type().is_symlink() {
+    if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&root)?) {
         bail!("legacy execution root cannot be a symlink");
     }
     for entry in std::fs::read_dir(root)? {
         let entry = entry?;
-        if entry.file_type()?.is_symlink() {
+        if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?) {
             bail!("legacy execution records cannot be symlinks");
         }
         let path = entry.path();
@@ -137,12 +137,12 @@ fn validate_legacy_roots<'a>(
         if !root.exists() {
             continue;
         }
-        if std::fs::symlink_metadata(&root)?.file_type().is_symlink() {
+        if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&root)?) {
             bail!("legacy layout root cannot be a symlink: {}", root.display());
         }
         for entry in std::fs::read_dir(&root)? {
             let entry = entry?;
-            if entry.file_type()?.is_symlink() {
+            if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?) {
                 bail!("legacy layout roots cannot contain symlink entries");
             }
             if !entry.file_type()?.is_dir() {
@@ -226,7 +226,7 @@ fn verify_existing_trees(layout: &DirectoryLayout, source: &LegacyExecution) -> 
     // directory iteration order can never mask it behind other violations.
     for entry in std::fs::read_dir(&target)? {
         let entry = entry?;
-        if entry.file_type()?.is_symlink() {
+        if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?) {
             bail!(
                 "current execution contains a symlink: {}",
                 entry.path().display()
@@ -259,7 +259,7 @@ fn validate_source_tree(
     relative: &Path,
     destinations: &mut BTreeSet<PathBuf>,
 ) -> Result<()> {
-    if std::fs::symlink_metadata(source)?.file_type().is_symlink() {
+    if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(source)?) {
         bail!("migration refuses symlink: {}", source.display());
     }
     if !relative.as_os_str().is_empty() && !destinations.insert(relative.to_path_buf()) {
@@ -311,7 +311,7 @@ fn migrate_one(layout: &DirectoryLayout, source: &LegacyExecution) -> Result<boo
     durable_json(&staging.join(RECEIPT_FILE), &receipt(source)?)?;
     sync_tree(&staging)?;
     std::fs::rename(&staging, &target)?;
-    std::fs::File::open(&kind_root)?.sync_all()?;
+    opencoder_core::platform::fs::sync_directory(&kind_root)?;
     drop(cleanup);
     Ok(true)
 }

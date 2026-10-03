@@ -1,3 +1,4 @@
+#![cfg(not(windows))]
 //! Reading the durable scheduler outbox must not wake the reporter itself.
 mod support;
 

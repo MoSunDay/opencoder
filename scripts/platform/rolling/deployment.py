@@ -53,8 +53,11 @@ def register_server(settings, record, operations, enabled=True, host_url=None):
 def deploy(settings, bundle, operations, seconds=90):
     journal = Journal(settings.state_dir)
     state = journal.data.get('maintenance')
+    from .maintenance.recovery.forward import permitted
     if state and state['stage'] not in ('complete', 'rolled_back'):
-        raise ValueError('unfinished maintenance requires --maintenance resume or --rollback')
+        candidate = manifest.verify(bundle)
+        if not permitted(journal.data, candidate['release_id']):
+            raise ValueError('unfinished maintenance requires --maintenance resume, corrective release or --rollback before writes reopen')
     candidate = manifest.verify(bundle)
     manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
     manifest.compatible(candidate, manifest.overlapping(journal.data))
@@ -215,7 +218,7 @@ def _retire_server(settings, journal, operations, disable):
 def rollback(settings, operations, seconds=90):
     journal = Journal(settings.state_dir)
     state = journal.data.get('maintenance')
-    if state and (state['stage'] not in ('complete', 'rolled_back') or
+    if state and state['stage'] != 'repairing' and (state['stage'] not in ('complete', 'rolled_back') or
                   (journal.data['current'] == state['target'] and journal.data['previous'] in (None, state['origin']))):
         from .maintenance import rollback as restore_maintenance
         return restore_maintenance(settings, operations, seconds)

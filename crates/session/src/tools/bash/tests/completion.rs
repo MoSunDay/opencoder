@@ -1,4 +1,6 @@
 use super::*;
+use crate::tools::bg::output_path;
+use std::time::Duration;
 
 #[tokio::test]
 async fn bash_normal_completion() {

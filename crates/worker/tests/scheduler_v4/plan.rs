@@ -55,12 +55,14 @@ pub fn catalog() -> Vec<BrainCapabilityDescriptor> {
 
 pub fn capability(capability_id: &str, required: &str) -> BrainCapabilityDescriptor {
     BrainCapabilityDescriptor {
+        summary: "capability purpose".into(),
         capability_id: capability_id.into(),
         kind: ExecutionKind::Agent,
         target: "act".into(),
         input_desc: "bounded task input".into(),
         output_desc: "bounded task output".into(),
         required_inputs: vec![required.into()],
+        required_outputs: vec![],
         definition: Value::Null,
         version: "1".into(),
     }

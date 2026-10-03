@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # tui 模块
 
@@ -18,10 +18,12 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复
-- `src/hooks.rs` — 从 `~/.opencoder/hooks.json` 读取 TUI 事件命令（`sh -c`、3 秒超时、
+- `src/hooks.rs` — 从 `~/.opencoder/hooks.json` 读取 TUI 事件命令（宿主 Bash / PowerShell 7、3 秒超时、
   失败仅 debug 日志）异步执行；`turn_done` 仅在 `app_loop.rs` 的最终空闲分支触发——
   drain 重启（`drain_pending`）与用户取消（`cancelled`）路径不发射；`question` 仅在
   live `question` ToolStart 触发，store replay 不触发
+- [clipboard.rs](../../crates/tui/src/clipboard.rs)、[app_loop_paste.rs](../../crates/tui/src/app_loop_paste.rs) — 将系统剪贴板图片转为 PNG 附件；`keymap.paste_image` 配置快捷键，终端占用默认组合键时的设置见 [Windows 使用说明](../../docs/windows.md)。
+- [windows_console.rs](../../crates/tui/src/windows_console.rs) — 保存 Windows 控制台模式、启用 VT 输出，并在正常退出、panic 和控制台关闭事件中恢复。
 - `tests/` — 集成测试（agent_menu_catalog / agent_mention_flow /
   agent_switch_persist / bootstrap_agent_override 等）
 

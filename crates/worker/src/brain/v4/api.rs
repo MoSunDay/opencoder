@@ -284,7 +284,7 @@ pub async fn handle(
                 return Ok(RpcReply::ok(json!({"retry":true})));
             }
             if reply.status >= 300 {
-                layered::terminal(
+                let mut change = layered::terminal(
                     &snapshot,
                     &request,
                     &LayeredTerminalEvent {
@@ -297,7 +297,19 @@ pub async fn handle(
                     },
                     now_ms(),
                 )?
-                .context("rejected dispatch already terminal")?
+                .context("rejected dispatch already terminal")?;
+                let reason = format!(
+                    "Execution admission rejected ({}): {}",
+                    reply.status, reply.body
+                );
+                if let Some(event) = change
+                    .events
+                    .iter_mut()
+                    .find(|event| event.event_type == "operation_terminal")
+                {
+                    event.reason_summary = Some(reason.chars().take(1024).collect());
+                }
+                change
             } else {
                 let mut change = layered::change(&snapshot, now_ms());
                 if snapshot.run.phase == LayeredPhase::Deciding && snapshot.run.pending_guidance {

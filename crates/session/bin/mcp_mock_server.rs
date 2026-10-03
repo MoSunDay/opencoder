@@ -13,8 +13,14 @@
 //! The binary name is derived from the file name: `mcp_mock_server`.
 
 use std::io::{self, BufRead, Write};
+#[cfg(windows)]
+mod windows_fixture;
 
 fn main() {
+    #[cfg(windows)]
+    if windows_fixture::dispatch() {
+        return;
+    }
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();

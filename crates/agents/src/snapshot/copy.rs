@@ -75,7 +75,10 @@ fn entry_type(entry: &std::fs::DirEntry) -> Result<std::fs::FileType> {
     // NFS readdir already carries this type. Path::is_dir would repeat a
     // network getattr for every entry in a mount with attribute caching off.
     let kind = entry.file_type()?;
-    if kind.is_symlink() {
+    if kind.is_symlink()
+        || (cfg!(windows)
+            && opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?))
+    {
         bail!(
             "agent resource entries cannot be symlinks: {}",
             entry.path().display()
@@ -91,7 +94,8 @@ pub(super) fn selected(source: &Path, staging: &Path, names: &[String]) -> Resul
         opencoder_core::agent::validate_agent_name(name).map_err(anyhow::Error::msg)?;
         let path = source.join(name);
         match std::fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(metadata)
+                if metadata.is_dir() && !opencoder_core::platform::fs::is_link(&metadata) => {}
             Err(error)
                 if error.kind() == std::io::ErrorKind::NotFound
                     && opencoder_core::builtin_agents()
@@ -129,7 +133,7 @@ pub(super) fn selected(source: &Path, staging: &Path, names: &[String]) -> Resul
     for (category, name) in resources {
         let path = source.join(category).join(&name);
         let metadata = std::fs::symlink_metadata(&path)?;
-        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        if !metadata.is_dir() || opencoder_core::platform::fs::is_link(&metadata) {
             bail!("selected Agent resource must be a real directory");
         }
         copy_entry(
@@ -160,11 +164,11 @@ fn copy_entry(root: &Path, entry: &Entry) -> Result<()> {
     };
     opencoder_core::share_fs::durable_create_dir_all(&entry.target)?;
     std::fs::write(entry.target.join("meta.json"), raw)?;
-    std::fs::File::open(entry.target.join("meta.json"))?.sync_all()?;
-    std::fs::File::open(&entry.target)?.sync_all()?;
+    opencoder_core::platform::fs::sync_file(&entry.target.join("meta.json"))?;
+    opencoder_core::platform::fs::sync_directory(&entry.target)?;
     if let Some(version) = version {
         let path = entry.source.join(&version);
-        if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
+        if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&path)?) {
             bail!(
                 "resource version root cannot be a symlink: {}",
                 path.display()
@@ -188,7 +192,10 @@ pub(super) fn version_files(source: &Path, destination: &Path) -> Result<()> {
             .with_context(|| format!("read resource version entry in {}", source.display()))?;
         let path = entry.path();
         let kind = entry.file_type()?;
-        if kind.is_symlink() {
+        if kind.is_symlink()
+            || (cfg!(windows)
+                && opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&path)?))
+        {
             bail!(
                 "resource versions cannot contain symlinks: {}",
                 path.display()
@@ -205,13 +212,12 @@ pub(super) fn version_files(source: &Path, destination: &Path) -> Result<()> {
                     target.display()
                 )
             })?;
-            std::fs::File::open(&target)
-                .with_context(|| format!("reopen copied resource file {}", target.display()))?
-                .sync_all()?;
+            opencoder_core::platform::fs::sync_file(&target)
+                .with_context(|| format!("sync copied resource file {}", target.display()))?;
         } else {
             bail!("resource versions must contain only regular files and directories");
         }
     }
-    std::fs::File::open(destination)?.sync_all()?;
+    opencoder_core::platform::fs::sync_directory(destination)?;
     Ok(())
 }

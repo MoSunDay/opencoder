@@ -98,8 +98,7 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     render(<App />);
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBeNull();
 
-    await screen.findByRole('menuitem', { name: /节点列表/ });
-
+    await screen.findByText('smoke · 管理员');
     const sider = within(document.querySelector('.fleet-sidebar'));
     fireEvent.click(sider.getByText('项目')); // 分类 Segmented → 落在首页
     expect(getState().page).toBe('project');

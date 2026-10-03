@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # store 模块
 
@@ -8,6 +8,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 ## 索引
 - `src/lib.rs` — `Store` trait
 - `src/libsql_store/` — libsql 实现（WAL）
+- [Cargo.toml](../../Cargo.toml) 固定 libsql 上游提交 `0070ff3331cd6d09425b812e1cd3ebe32e1d4206`，避免连接释放时重复关闭 SQLite 句柄；[connection_lifecycle.rs](../../crates/store/tests/connection_lifecycle.rs) 验证连接与派生持有者生命周期，以及最后持有者释放后的 Windows 独占文件访问。
 - `src/libsql_store/sessions.rs` — 会话批删（FK 级联）；`node_tasks.rs` — 节点任务与终态清扫
 - [libsql_store/messages.rs](../../crates/store/src/libsql_store/messages.rs) — `load_transcript_page` 在 SQL 中投影并按字节切块，保留消息角色、展示原文、合成标记和用量，排除私有 provider 状态；与已有消息块读取共用游标和预算。
 - `src/types.rs` — `SessionMeta.kind` 泳道标签（schema v28 起 `sessions.kind TEXT`；创建时定值：`operator`/`agent`/`team`/`dag`/`todos`/`project`/`brain`，存量行为 NULL）

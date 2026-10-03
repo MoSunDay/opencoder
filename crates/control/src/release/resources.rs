@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 pub async fn serve(workdir: PathBuf, data: PathBuf, port: u16, token: String) -> Result<()> {
     let config = Config::load(&workdir)?;
+    let state = crate::bootstrap::new_resource_state(workdir.clone(), data.clone()).await?;
     ensure!(
         config.agent.nfs.read_only && config.dag.nfs.read_only,
         "resource service requires read-only exports"
@@ -36,7 +37,7 @@ pub async fn serve(workdir: PathBuf, data: PathBuf, port: u16, token: String) ->
             .await
             .map_err(anyhow::Error::msg)?;
     }
-    let state = crate::new_state(workdir, data, None).await?;
+    crate::ontology::autostart(&config, &workdir, &data).await?;
     let app = build_app(state, token);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     axum::serve(listener, app).await?;
@@ -53,6 +54,10 @@ pub fn build_app(state: std::sync::Arc<crate::AppState>, token: String) -> axum:
                 axum::Json(serde_json::json!({"ok":true,"role":"resources",
                     "build":opencoder_core::version::build_info()}))
             }),
+        )
+        .route(
+            "/api/ontology/nfs",
+            axum::routing::get(crate::ontology::status).post(crate::ontology::set_status),
         )
         .route(
             "/api/agents/nfs",

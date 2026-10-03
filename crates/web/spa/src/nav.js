@@ -1,6 +1,6 @@
 // nav.js — the single source of truth for the fleet-console information
-// architecture (IA): three top categories (项目 / Agent / 节点), each owning
-// an ordered page list. The Sider renders a category Segmented above a Menu
+// architecture (IA): 项目 / Agent / Ontology / 节点, each owning
+// an ordered page list. The Sider renders scrollable category tabs above a Menu
 // scoped to the active category; the active category is PURELY derived from
 // the store `page` (no extra global navigation state). `items` is the single
 // source for every navigation consumer below.
@@ -15,6 +15,10 @@ import {
   ProfileOutlined,
   ProjectOutlined,
   RobotOutlined,
+  ApartmentOutlined,
+  DatabaseOutlined,
+  LinkOutlined,
+  SettingOutlined,
   TeamOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -45,6 +49,17 @@ export const NAV_CATEGORIES = [
     ],
   },
   {
+    key: 'ontology',
+    label: 'Ontology',
+    items: [
+      { page: 'ontologyGraph', menu: '图谱', icon: ApartmentOutlined },
+      { page: 'ontologyEntities', menu: '实体', icon: DatabaseOutlined },
+      { page: 'ontologyTypes', menu: '实体类型', icon: ProfileOutlined },
+      { page: 'ontologyRelationships', menu: '关系类型', icon: LinkOutlined },
+      { page: 'ontologyEnvironments', menu: '环境管理', icon: SettingOutlined },
+    ],
+  },
+  {
     key: 'node',
     label: '节点',
     items: [
@@ -64,11 +79,11 @@ export const ALL_PAGES = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => i.page
 export const DEFAULT_CATEGORY = 'node';
 export const DEFAULT_PAGE = 'nodes';
 
-/// antd Segmented options for the three categories (Sider + mobile row 1).
+/// Category labels for the scrollable tabs (Sider + mobile row 1).
 export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label: c.label }));
 
-/// localStorage key mirroring the last explicitly chosen page (项目 / Agent /
-/// 节点 category + its page) so a reload restores the selection. Read and
+/// localStorage key mirroring the last explicitly chosen category and page
+/// so a reload restores the selection. Read and
 /// written exclusively through the usehooks-ts `useLocalStorage` hook in
 /// main.jsx — no other module touches localStorage for navigation state.
 export const NAV_STORAGE_KEY = 'oc_nav_page';
@@ -105,6 +120,11 @@ export const HEADERLESS_PAGES = Object.keys(HEADERLESS_REASONS);
 /// stays truthful.
 export const PAGE_META = {
   project: { title: '项目', desc: '项目、专项与 TODO 工作台' },
+  ontologyGraph: { title: '图谱', desc: '关系观测与切面管理' },
+  ontologyEntities: { title: '实体', desc: '目录、属性与正文' },
+  ontologyTypes: { title: '实体类型', desc: '类型、属性定义与 Action 配置' },
+  ontologyRelationships: { title: '关系类型', desc: '关系约束与关联记录' },
+  ontologyEnvironments: { title: '环境管理', desc: 'Ontology 数据环境' },
 };
 
 /// Category lookup with the default as the safety net (unknown keys never
@@ -156,8 +176,8 @@ export function selectItemsOf(items) {
 }
 
 /// Permission view over the IA: admin (and the pre-probe null identity)
-/// sees everything; any other role keeps exactly one category — Agent —
-/// with a single 全部执行 item. Pure: derives from NAV_CATEGORIES rows, so
+/// sees everything; any other role sees Agent's 全部执行 and the read-only
+/// Ontology category. Pure: derives from NAV_CATEGORIES rows, so
 /// icon/menu copy can never drift from the admin view.
 export function visibleCategories(identity) {
   if (!identity || identity.role === 'admin') {
@@ -168,11 +188,11 @@ export function visibleCategories(identity) {
     key: agent.key,
     label: agent.label,
     items: [agent.items.find((i) => i.page === 'topics')],
-  }];
+  }, NAV_CATEGORIES.find((c) => c.key === 'ontology')];
 }
 
 /// Flat page keys a given identity may open (menu scoping + shell routing
-/// both ask this; non-admin ⇒ exactly ['topics']).
+/// both ask this; non-admins may open topics and every Ontology page).
 export function allowedPages(identity) {
   return visibleCategories(identity).flatMap((c) => c.items.map((i) => i.page));
 }

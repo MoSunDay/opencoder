@@ -8,6 +8,7 @@
 
 const L = (n, f) => Array.from({ length: n }, (_, i) => f(i));
 const NOW = 1770000000000;
+const { ONTOLOGY_FIXTURES } = require('./spa_responsive_ontology');
 
 const NODE = (i) => ({
   id: `node-${i}`, name: `node-${i}`, online: true,
@@ -70,6 +71,7 @@ const ABSENT = ['/api/models', '/api/project/todos/todo-0/runs',
   '/api/sessions/ses-1/questions', '/api/sessions/ses-1/inputs'];
 
 const FIXTURES = {
+  ...ONTOLOGY_FIXTURES,
   '/api/health': { ok: true, version: '0.0.0-fixture' },
   // main.jsx re-probes /api/me per token; `name` unlocks IdentityBadge and
   // role=admin unlocks the admin entries (store.js setIdentity).

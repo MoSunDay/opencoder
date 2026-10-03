@@ -9,6 +9,8 @@ pub fn fake_binary(root: &Path) -> std::path::PathBuf {
 import json, os, sys, time
 if '--version' in sys.argv:
     print('codex-cli fixture'); sys.exit(0)
+# Readiness tests must allow a slow interpreter before timing failure cleanup.
+if os.environ.get('FAIL_MODE') in ('malformed', 'missing_end'): time.sleep(6)
 prompt = sys.stdin.read()
 with open(os.environ['CAPTURE'], 'a') as f:
     f.write(json.dumps({'args':sys.argv[1:], 'prompt':prompt, 'env':os.environ.get('EXAMPLE'), 'cwd':os.getcwd(), 'home':os.environ.get('HOME'), 'codex_home':os.environ.get('CODEX_HOME')})+'\n')
@@ -16,6 +18,15 @@ def emit(v): print(json.dumps(v), flush=True)
 thread = 'fork-thread' if 'fork' in sys.argv else 'fixture-thread'
 emit({'type':'thread.started','thread_id':thread})
 emit({'type':'turn.started'})
+mode = os.environ.get('FAIL_MODE')
+if mode == 'reconnect':
+    emit({'type':'error','message':'Reconnecting... 2/5 (stream interrupted)'})
+    emit({'type':'error','message':'Reconnecting... 5/5 (stream interrupted)'})
+    emit({'type':'item.completed','item':{'id':'fallback','type':'error','message':'Falling back from WebSockets to HTTPS transport.'}})
+if mode == 'stream_error_eof':
+    emit({'type':'error','message':'stream failed'}); sys.exit(0)
+if mode == 'turn_failed':
+    emit({'type':'turn.failed','error':{'message':'retries exhausted'}}); time.sleep(20); sys.exit(1)
 if os.environ.get('FAIL_MODE') == 'malformed':
     print('invalid-json', flush=True); time.sleep(20); sys.exit(1)
 emit({'type':'item.completed','item':{'id':'r1','type':'reasoning','text':'inspect first'}})
@@ -40,6 +51,7 @@ emit({'type':'item.completed','item':{'id':'c1','type':'command_execution','comm
 emit({'type':'item.completed','item':{'id':'a1','type':'agent_message','text':'answer'}})
 if os.environ.get('FAIL_MODE') == 'missing_end': sys.exit(0)
 emit({'type':'turn.completed','usage':{'input_tokens':12,'output_tokens':5,'cached_input_tokens':3}})
+if mode == 'exit_failure': sys.exit(1)
 "##).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     bin

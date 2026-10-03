@@ -8,7 +8,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 ## 仓库记忆范围
 
-`agents.md`、`agents/` 和 `features/`（含 changelog）只记录 OpenCoder 本身的模块、通用基建能力、接口契约及其演进。外部业务系统的需求、业务逻辑、数据结论、部署现场、巡检结果和一次性执行回执不得写入本仓库记忆。涉及外部系统的工作，仅在解释 OpenCoder 自身接口或能力边界所必需时记录通用事实，不沉淀具体业务状态。
+`repo-memory.md`、`agents/` 和 `features/`（含 changelog）只记录 OpenCoder 本身的模块、通用基建能力、接口契约及其演进。外部业务系统的需求、业务逻辑、数据结论、部署现场、巡检结果和一次性执行回执不得写入本仓库记忆。涉及外部系统的工作，仅在解释 OpenCoder 自身接口或能力边界所必需时记录通用事实，不沉淀具体业务状态。
 
 ## 模块索引
 

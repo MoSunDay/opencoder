@@ -61,6 +61,8 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 | Windows 程序主入口与构建身份 | `windows_main_starts_and_reports_product_metadata` | [windows_tui.rs](../../../tests/windows_tui.rs) |
 | SQLite 关闭、派生持有者与数据库文件释放 | `embedded_connections_close_safely_across_fresh_runtimes_and_last_owners`、`last_store_connection_owner_releases_the_native_database_file` | [connection_lifecycle.rs](../../../crates/store/tests/connection_lifecycle.rs) |
 
+- macOS 的 Codex 错误流测试单独计时进程就绪与错误处理；用六秒启动延迟覆盖五秒错误处理预算，仍要求错误、缺失终态及无 Done 事件。测试：`codex_malformed_stream_and_missing_terminal_fail`（`crates/session/tests/harness_codex.rs`）。
+
 ## 当前验证
 
 - 隔离候选的 Linux 全量回归：441 个测试目标，5,608 passed / 0 failed，7 个既有 ignored；全工作区 Clippy、构建、格式检查通过。计数来自 `candidate-fixed-workspace-tests.log`，不含共享工作区其他需求的测试。

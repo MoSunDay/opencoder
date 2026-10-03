@@ -52,6 +52,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - Windows 用户目录按 USERPROFILE / APPDATA / LOCALAPPDATA 解析，Operator 的四个用户目录变量随任务隔离。TUI 可使用配置快照中的原生 Codex 路径与代理；加载磁盘配置时校验私有运行参数，错误不带凭据值。
 - TUI 的 MSVC 程序预留 8 MiB 栈，进程监督入口在创建异步主流程前执行；工作目录发布先关闭已同步的文件句柄，避免 Windows 目录改名失败。
 - libsql 发布版 0.9.30 在连接释放时重复关闭 SQLite 句柄，实机出现访问异常。固定使用上游 PR #2282 的提交 `0070ff3331cd6d09425b812e1cd3ebe32e1d4206`，补充最后持有者与文件释放回归；不引入私有第三方代码副本。
+- 仓库逻辑索引从 `agents.md` 改名为 `repo-memory.md`，消除与指令文件 `AGENTS.md` 的 Windows 大小写冲突；原有索引内容与引用保留。
 - Linux mount unit 源文件使用可移植的模板名称，部署仍通过 systemd-escape 生成准确名称；UI 的 NFS 测试端口避开内核临时端口区间。
 
 | 功能 | 测试名 | 文件 |

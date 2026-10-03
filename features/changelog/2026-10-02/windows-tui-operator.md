@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # Windows 原生 TUI 与 Operator
 
@@ -69,6 +69,13 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - win-12（Windows 11 x64）原生 MSVC 构建、测试构建与六个支持包 Clippy 通过。core/session/TUI/worker 单元测试分别通过 309/440/1727/71 个；平台文件 2、会话与进程 7、Operator 1、TUI 2、数据库生命周期 2 个集成测试通过，连接关闭循环 5,000 次。
 - 实机调试构建已完成真实模型流式回复、Codex 流式回复与同一会话恢复；Operator 取消与节点强制退出清理 PowerShell 子进程，重启保留中断状态并支持显式恢复。TUI 中文输入、模型菜单、窗口缩放、剪贴板图片与正常退出已执行。
 - 正式发布包必须由干净提交经 [原生打包脚本](../../../scripts/platform/release/build-windows.ps1) 生成，安装器功能与五处进程中断恢复由 [平台 CI](../../../.github/workflows/platform.yml) 验证。调试构建与测试 EXE 的记录不能替代正式包验收。完整本轮证据存于 `/tmp/opencoder-windows-delivery-20261003`。
+
+### 最终闭环
+
+- 正式包已按上述约定闭环：干净提交 `40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c` 经 [原生打包脚本](../../../scripts/platform/release/build-windows.ps1) 生成 MSVC ZIP，archive sha256 `6cfb295ab9f9c8de316e13fb9b7eb378cd1e457b158df2a555d3d5415ab4a26f`（manifest `0.1.0 (40dd45ed)`，`opencoder.exe`/`opencoder-agent.exe` 静态 CRT），发布回读与归档控制器校验通过。
+- 安装器功能与五处强制进程中断恢复实机验收通过（`accepted-installer-complete-readback.json`，用户目录已还原，EXE 哈希与包一致）。
+- Operator 矩阵在 `node-01M405TZJCWVF8HV3YMZM37RW5` 全部通过，含真实原生模型回复与原生 Codex 流式；平台 CI 对该提交的 Windows 与 macOS 任务成功（job `111140967388`、`111140967240`）。
+- 该正式包上完成 TUI 中文输入、模型菜单、缩放、剪贴板图片、正常退出与信号异常退出（0xC000013A）恢复验收，剪贴板空基线已恢复。
 
 ## 相关
 

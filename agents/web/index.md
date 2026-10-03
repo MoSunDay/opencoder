@@ -1,4 +1,4 @@
-Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
+Commit: a7e6b8233d5a4f6d0727d656d5d3d45a985b4b63
 
 # web 模块
 
@@ -21,6 +21,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [ontology/panels.tsx](../../crates/web/spa/src/ontology/panels.tsx)、[ontology/env.tsx](../../crates/web/spa/src/ontology/env.tsx) — TypeScript + antd 的五个 Ontology 页面，复用平台身份与请求；图谱使用 G6，环境切换重新建立页面状态，管理控件由服务端能力决定。接口与存储见 [ontology](../ontology/index.md)。
 - `spa/src/ui/requests/query.js` — 读取请求的取消、迟到响应丢弃、响应校验与错误状态；失败不替换为空数据。
 - `spa/src/fleet/`、`spa/src/schedule/` — 执行表与定时任务页；`schedule/history.jsx` 按历史记录的执行 ID 打开原执行，不重新派发。节点调度设置读取失败时禁止保存默认值。
+- [fleet/detail.jsx](../../crates/web/spa/src/fleet/detail.jsx)、[fleet/detail/workloads.jsx](../../crates/web/spa/src/fleet/detail/workloads.jsx) — TODO 执行明细在工作流建立后加载工作台；初始化、停止和初始化失败只展示对应状态，初始化错误只显示一次。工作流建立后的读取错误仍显示实际原因。
 - `src/api_project*.rs` — 项目、专项、TODO 与 Tag 的共享 HTTP 处理器；Tag 范围和选择经存储验证，顺序写入携带 `initiative_id` 范围，负数位置保留给迁移且 API 拒绝；Control 复用同一组处理器
 - `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 三个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和专项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`
 - `spa/src/project/board/`、`model/board.js`、`model/catalog.js` — dnd-kit 看板与纯移动、进度、Tag 解析；按完整任务集合计算筛选后的拖动顺序，多 Tag 卡片共享 TODO ID，失败回退原数据

@@ -1,8 +1,10 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # worker 模块
 
 节点执行面：接受/恢复执行、资源快照、workload 适配。
+
+Windows 节点只声明并接受 `ExecutionKind::Operator`；其他种类在准入时拒绝，不装配 DAG/runc/NFS。原生行为见 [windows_operator.rs](../../crates/worker/tests/windows_operator.rs)，用户边界见 [Windows](../../features/windows/index.md)。
 
 ## 索引
 - `crates/worker/src/service.rs` — 根执行与会话清单
@@ -20,12 +22,12 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 
 配置平面（P1）：`operations/operator_config.rs` 维护节点数据根下的 `<data>/operator-config/`（`config.json` + `mcp|cli|skills|ap|schedules` 五域文件 + `skills/` 技能包目录）。首个 Operator 执行准入时（`state.rs::configuration_for` → `operator_configuration`）从节点 live 视图 `bootstrap` 一次（0600 first-writer-wins），此后冻结：TUI/CLI 对共享 workdir 配置的保存不再进入 Operator 执行；技能冻结（P2）`freeze_skills` 把平面 `skills/` 包 + 内置 seed 写入执行 home（用户全局池永远不是来源）；`operations/launch.rs` 用 `core::skill::with_execution` 把 workload 包进执行技能根。
 
-`operations/operator_env.rs` 为 `ExecutionKind::Operator` 提供按执行的 HOME/WORKSPACE 隔离：`materialize()` 在准入通过后把冻结配置快照（明文含 provider api key）以 0600 写入 `<data_dir>/operator/<id>/home/.opencoder/config.json`，`resolve()` 核验快照与 workspace。`env_pairs()` 产出 HOME 覆盖对，fresh 会话在输入 envs 之后注入，随后经 harness envs 持久化，resume 由 `resume.rs` 重建 env_passthrough。`operations/create.rs` 准入接受 Operator 的显式 Harness 选择，Codex 预检合并托管设置与输入 envs；`workloads/agent.rs` 固定所选 Harness 和环境。配置加载走 core `Config::load_with_home`，web drain 栈经 `AppState.config_home` 穿参，执行目录由 `brain/workdir.rs` `session_dirs()` 裁定。Maintenance/Agent/Brain 不受影响。
+`operations/operator_env.rs` 为 `ExecutionKind::Operator` 提供按执行的 HOME/WORKSPACE 隔离：`materialize()` 在准入通过后把冻结配置快照（明文含 provider api key）以私有权限写入 `<data_dir>/operator/<id>/home/.opencoder/config.json`，`resolve()` 核验快照与 workspace。`env_pairs()` 产出 HOME 覆盖对，Windows 同时隔离 USERPROFILE、APPDATA、LOCALAPPDATA；fresh 会话在输入 envs 之后注入，随后经 harness envs 持久化，resume 由 `resume.rs` 重建 env_passthrough。`operations/create.rs` 准入接受 Operator 的显式 Harness 选择，Codex 预检合并托管设置与输入 envs；`workloads/agent.rs` 固定所选 Harness 和环境。配置加载走 core `Config::load_with_home`，web drain 栈经 `AppState.config_home` 穿参，执行目录由 `brain/workdir.rs` `session_dirs()` 裁定。Maintenance/Agent/Brain 不受影响。
 
 会话泳道（P4）：Operator 执行的 Primary Session 创建时打 `kind='operator'`（其他 kind 同理，见 store 索引），默认清单泳道排除 operator 行；`service.rs::indexes()` 按 `row.kind` 精确解析已打标行，存量 NULL 行保留 id 前缀/标题回退。Agent 和 Operator 空闲终态均从持久化会话取最后一条非空 assistant 文本，以有界 `output_text` 写入执行结果；Maintenance 保留会话指针结果。
 
 ## 接缝
-- `runtime/health.rs` 统一计算节点存储准入：可用磁盘块低于 10% 或可用 inode 低于 20% 拒绝新执行；容量读取失败、零容量仍拒绝准入。健康查询和新执行入口共用纯函数判断，已接收的工作可继续完成。
+- `runtime/health.rs` 统一计算节点存储准入：可用磁盘块低于 10% 或可用 inode 低于 20% 拒绝新执行；Windows 读取字节容量，inode 为 `None`；容量读取失败、零容量仍拒绝准入。健康查询和新执行入口共用纯函数判断，已接收的工作可继续完成。
 - `operations/dag_preflight.rs` 使用本次冻结配置校验静态步骤和动态模板。所有 DAG 都要求配套 rootfs、runc 与只读源挂载；Codex Agent 额外校验 guest CLI 与节点登录目录，纯二进制与纯 Codex 不要求原生 provider 凭证。实际执行和私有挂载由 dag-runtime 负责。
 - [layout/dag.rs](../../crates/worker/src/layout/dag.rs)、[workloads/dag.rs](../../crates/worker/src/workloads/dag.rs) — 受理保存 UTC 日期目录、资源版本与配置；恢复沿用固定目录与资源。启动先清理遗留容器和挂载，再更新 journal；缺少本次固定数据的未终态运行明确拒绝恢复。
 - [operations/query/dag_context.rs](../../crates/worker/src/operations/query/dag_context.rs) — DAG Inspect 从 journal 的冻结定义和原受理目录读取资源快照，校验步骤身份、版本与摘要后投影只读 `context`。未固定为 `preparing`，非待受理运行缺少快照为 `unavailable`，损坏快照明确报错；公开结果不返回宿主路径或 Agent 依赖摘要。

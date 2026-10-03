@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 
 # Windows 原生支持
 
@@ -6,7 +6,7 @@ Windows 11 x64 可原生运行 OpenCoder TUI 与 Operator 节点，无需 WSL，
 
 ## 支持边界
 
-- TUI 支持本地任务、恢复、模型切换、图片输入和原生 `--wrap codex`。
+- TUI 支持本地任务、恢复、模型切换、图片输入和原生 `--wrap codex`。图片快捷键可配置；终端占用默认组合键时，可按 [使用说明](../../docs/windows.md) 改为 `Ctrl+Alt+V`。
 - Windows 命令工具为 `powershell`，Linux/macOS 为 `bash`。只读模式保守检查 PowerShell 语法，拒绝动态调用、脚本块、重定向及未确认只读的命令。
 - Windows 节点只接受 Operator，连接已有 Server；DAG/runc、Brain、Team、Todos、Project、Maintenance、Windows Server 部署、服务与滚动发布不在范围内。
 - Operator 有独立工作目录与配置快照，Windows 用户目录变量随任务隔离。配置与凭据文件采用受保护的 ACL。

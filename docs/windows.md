@@ -46,6 +46,12 @@ opencoder-agent --remote https://<server> --token <node-token> --workdir 'D:\Ope
 
 TUI 支持首次配置、会话恢复、模型切换、剪贴板图片和 `--wrap codex`；后者需要原生 `codex.exe` 在 PATH 上或配置其路径。`ts` 的 tmux 会话、Unix shell 脚本安装器和 Unix 工具安装不适用于 Windows。只读模式使用 PowerShell AST 检查并执行受控命令，动态调用、脚本块、重定向和未确认只读的选项会被拒绝。Git 外部 diff、textconv、fsmonitor 和继承的环境覆盖被禁用；配置了内容过滤器或部分克隆的仓库会明确拒绝只读 Git 查询。`rg` 忽略外部配置，不允许预处理程序或压缩解码程序。原生命令使用标准参数传递，保留引号和中文参数。
 
+Windows Terminal 的粘贴动作可能占用默认的 `Ctrl+V`，使 TUI 收不到图片快捷键。可在 `%USERPROFILE%\.opencoder\config.json` 的现有配置中合并下面的设置，然后重启 TUI。复制图片后按 `Ctrl+Alt+V`，看到 `clipboard.png` 附件再提交问题；也可用 `Ctrl+H` 打开快捷键设置。保留现有配置的其他字段。
+
+```json
+{"keymap":{"paste_image":"ctrl+alt+v"}}
+```
+
 ## 构建与验证
 
 安装 Visual Studio Build Tools 的 C++ 工具链、Rust MSVC x64、CMake 和 LLVM。在干净的 Git checkout 中执行：

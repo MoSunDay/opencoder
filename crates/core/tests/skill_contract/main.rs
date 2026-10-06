@@ -11,8 +11,9 @@ use opencoder_core::skill::{
 };
 use opencoder_core::{discover_skills, skills_dir, Skill, DEPS_SENTINEL};
 
-// Env mutation is process-global; serialize the HOME-manipulating tests.
+// Env mutation is process-global; serialize the profile-directory tests.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+const HOME_ENV: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
 
 fn write(path: &std::path::Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();

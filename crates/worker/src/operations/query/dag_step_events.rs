@@ -72,7 +72,7 @@ pub(in crate::operations) async fn events(
             Ok(ctx) => ctx,
             Err(reply) => return Ok(reply),
         };
-        if !ctx.items.as_ref().is_some_and(|items| index < items.len()) {
+        if ctx.items.as_ref().is_none_or(|items| index >= items.len()) {
             return Ok(RpcReply::error(404, "instance not found"));
         }
         kind = Some(

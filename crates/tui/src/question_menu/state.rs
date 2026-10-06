@@ -377,18 +377,14 @@ fn custom_ctrl_key(menu: &mut QuestionMenu, code: KeyCode) -> QuestionAction {
         KeyCode::Char('e' | 'E') => {
             item.custom_cursor = line_end(&item.custom_input, item.custom_cursor);
         }
-        KeyCode::Char('u' | 'U') => {
-            if !item.custom_input.is_empty() {
-                item.custom_input.clear();
-                item.custom_cursor = 0;
-                item.invalidate();
-            }
+        KeyCode::Char('u' | 'U') if !item.custom_input.is_empty() => {
+            item.custom_input.clear();
+            item.custom_cursor = 0;
+            item.invalidate();
         }
-        KeyCode::Char('k' | 'K') => {
-            if item.custom_cursor < item.custom_input.chars().count() {
-                item.custom_input = item.custom_input.chars().take(item.custom_cursor).collect();
-                item.invalidate();
-            }
+        KeyCode::Char('k' | 'K') if item.custom_cursor < item.custom_input.chars().count() => {
+            item.custom_input = item.custom_input.chars().take(item.custom_cursor).collect();
+            item.invalidate();
         }
         KeyCode::Char('w' | 'W') => {
             if let Some((text, cursor)) =

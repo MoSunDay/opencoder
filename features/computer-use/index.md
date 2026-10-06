@@ -1,4 +1,4 @@
-Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
+Commit: 9d82393d5ad376511b387d089199a4d845f22b08
 
 # Computer use
 
@@ -22,5 +22,6 @@ Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
 - 超时和取消会停止后续动作，无法撤销已送达桌面的操作。同一桌面不应有多个控制者；本地 CLI 文件锁只能约束同一锁目录及归一化 URL。
 - Windows、macOS、Linux 的可用能力由实际 Cua 后端和桌面权限决定；Linux 不固定 Wayland，不补自定义驱动。不支持的操作保留为失败。
 - 凭证通过配置引用文件，诊断与结果遮盖配置中的凭证；截图保留任务内容，按项目要求保管。
+- Windows 服务安装器在写入前检查下载清单，在解包前检查全部归档成员；不接受越界路径、路径别名和链接。下载校验失败时保留已有文件。脚本需与附带的 `windows/` 文件一起使用，见 [运维说明](../../tools/computer-use/ops/README.md)。
 
 安装、配置与方案调研见 [使用文档](../../tools/computer-use/README.md)，实现索引见 [computer-use 模块](../../agents/computer-use/index.md)。

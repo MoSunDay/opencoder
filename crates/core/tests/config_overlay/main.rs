@@ -99,3 +99,83 @@ fn codex_patch_changes_only_explicit_fields_and_null_clears_settings() {
         .codex
         .is_none());
 }
+
+#[test]
+fn partial_nfs_overlays_preserve_enabled_host_and_read_only_global_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let work = temp.path().join("work");
+    let _isolation = scoped_config_home(home.clone());
+    let nfs = json!({"enabled":true,"host":"127.0.0.2","port":22000,"read_only":true});
+    write(
+        &home.join(".opencoder/config.json"),
+        &json!({
+            "agent":{"nfs":nfs}, "dag":{"nfs":nfs,"workspace_nfs":{
+                "enabled":true,"host":"127.0.0.2","port":22000
+            }}
+        }),
+    );
+    write(
+        &work.join("opencoder.json"),
+        &json!({
+            "agent":{"nfs":{"port":22001}},
+            "dag":{"nfs":{"port":22002},"workspace_nfs":{"port":22003}}
+        }),
+    );
+    let loaded = Config::load_with_home(&work, Some(&home)).unwrap();
+    for value in [
+        serde_json::to_value(&loaded.agent.nfs).unwrap(),
+        serde_json::to_value(&loaded.dag.nfs).unwrap(),
+    ] {
+        assert_eq!(value["enabled"], true);
+        assert_eq!(value["host"], "127.0.0.2");
+        assert_eq!(value["read_only"], true);
+    }
+    assert_eq!(loaded.agent.nfs.port, 22001);
+    assert_eq!(loaded.dag.nfs.port, 22002);
+    assert_eq!(loaded.dag.workspace_nfs.port, 22003);
+    assert!(loaded.dag.workspace_nfs.enabled);
+    assert_eq!(loaded.dag.workspace_nfs.host, "127.0.0.2");
+}
+
+#[test]
+fn resolved_private_overlays_reject_combined_dispatch_budgets_without_exposing_values() {
+    for profiles in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let work = temp.path().join("work");
+        let _isolation = scoped_config_home(home.clone());
+        let settings = |prefix: &str| {
+            if profiles {
+                let entries: serde_json::Map<_, _> = (0..60)
+                    .map(|n| {
+                        (
+                            format!("{prefix}-{n}"),
+                            json!({"revision":1,"settings":{
+                                "envs":{"MARKER":"x".repeat(7168)}
+                            }}),
+                        )
+                    })
+                    .collect();
+                json!({"agent":{"runtime":{"profiles":entries}}})
+            } else {
+                let envs = std::collections::BTreeMap::from([(prefix, "x".repeat(40000))]);
+                json!({"agent":{"codex":{"envs":envs}}})
+            }
+        };
+        write(&home.join(".opencoder/config.json"), &settings("global"));
+        write(&work.join("opencoder.json"), &settings("project"));
+        let error = Config::load_with_home(&work, Some(&home))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(if profiles {
+                "dispatch budget"
+            } else {
+                "64 KiB"
+            }),
+            "{error}"
+        );
+        assert!(!error.contains(&"x".repeat(32)), "{error}");
+    }
+}

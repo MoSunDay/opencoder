@@ -41,7 +41,7 @@
     传播 + store 中 workflow 仍 Suspended + 末事件 `runtime_error`）。
     说明：现有 harness 无法注入 load 失败，故造委托包装；`persistence::load` 走
     `store.get_todo_workflow`。
-- **core**（`src/config/runtime/autopilot.rs` 单元）：`verify_context_limit_defaults_none_and_merges`
+- **core**（`src/config/autopilot.rs` 单元）：`verify_context_limit_defaults_none_and_merges`
   （Default/空对象 None、300 覆盖、后写覆盖 4000→300）。
 - **session 单元**（`src/autopilot/verify.rs`）：
   - `narrow_verify_context_limit_truncates_snapshot_to_judge_window`（红：

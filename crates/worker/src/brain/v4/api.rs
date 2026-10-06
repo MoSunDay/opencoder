@@ -149,7 +149,7 @@ pub async fn handle(
                     && context.schema_version == 7
                     && context.request == request
                     && context.operations == layered::relevant_operations(&snapshot)
-                    && context.guidance_only == !layered::barrier(&snapshot)
+                    && context.guidance_only != layered::barrier(&snapshot)
                     && context.layer == snapshot.run.layer
                     && context.run.as_ref() == Some(&snapshot.run),
                 "layered context identity mismatch"

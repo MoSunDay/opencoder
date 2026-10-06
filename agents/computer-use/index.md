@@ -1,4 +1,4 @@
-Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
+Commit: 9d82393d5ad376511b387d089199a4d845f22b08
 
 # computer-use 模块
 
@@ -14,6 +14,7 @@ Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
 - [state.py](../../tools/computer-use/src/opencoder_computer/state.py)：原子写入结果、JSONL 事件、PNG 截图、取消请求；根据运行锁识别异常退出。
 - [locks.py](../../tools/computer-use/src/opencoder_computer/locks.py)：URL 归一化和系统文件锁，同一本地锁目录内防止并发操作同一端点。
 - [results.py](../../tools/computer-use/src/opencoder_computer/results.py)：响应归一化、凭证遮盖、终端摘要和退出码。
+- [Windows 安装文件校验](../../tools/computer-use/ops/windows/artifacts.ps1)与[归档校验](../../tools/computer-use/ops/windows/archives.ps1)：先校验完整 manifest 和目标路径，再创建目录或下载；SHA256 校验通过后替换文件。拒绝安装根外路径、Windows 路径别名、重解析点及归档链接，解包前检查全部成员。原生文件系统覆盖见 [artifact-tests.ps1](../../tools/computer-use/ops/windows/artifact-tests.ps1)。
 
 ## 依赖与边界
 

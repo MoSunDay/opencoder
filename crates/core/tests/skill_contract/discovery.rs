@@ -3,25 +3,20 @@ use super::*;
 #[test]
 fn skills_dir_points_at_global_home() {
     let _g = ENV_LOCK.lock().unwrap();
-    // Isolate HOME so the assertion targets the temp home, not the runner's.
+    // Isolate the platform's home so this never targets the runner's profile.
     let home = tempfile::tempdir().unwrap();
-    let prev_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", home.path());
+    let prev_home = std::env::var_os(HOME_ENV);
+    std::env::set_var(HOME_ENV, home.path());
     let dir = skills_dir();
     match prev_home {
-        Some(h) => std::env::set_var("HOME", h),
-        None => std::env::remove_var("HOME"),
+        Some(h) => std::env::set_var(HOME_ENV, h),
+        None => std::env::remove_var(HOME_ENV),
     }
 
-    let dir = dir.expect("with HOME set, skills_dir must resolve");
-    let s = dir.to_string_lossy();
-    assert!(
-        s.ends_with(".opencoder/skills"),
-        "unexpected skills_dir: {s}"
-    );
-    assert!(
-        dir.starts_with(home.path()),
-        "skills_dir must live under the resolved home: {s}"
+    assert_eq!(
+        dir.expect("with a profile set, skills_dir must resolve"),
+        home.path().join(".opencoder").join("skills"),
+        "skills_dir must be the exact skills directory under the resolved profile"
     );
 }
 
@@ -32,12 +27,12 @@ fn skills_dir_points_at_global_home() {
 #[test]
 fn skills_dir_without_home_is_none_or_absolute_never_cwd() {
     let _g = ENV_LOCK.lock().unwrap();
-    let prev_home = std::env::var_os("HOME");
-    std::env::remove_var("HOME");
+    let prev_home = std::env::var_os(HOME_ENV);
+    std::env::remove_var(HOME_ENV);
     let dir = skills_dir();
     match prev_home {
-        Some(h) => std::env::set_var("HOME", h),
-        None => std::env::remove_var("HOME"),
+        Some(h) => std::env::set_var(HOME_ENV, h),
+        None => std::env::remove_var(HOME_ENV),
     }
     if let Some(d) = dir {
         assert!(

@@ -1,6 +1,6 @@
 ---
 name: repo-local-dreaming
-description: Periodic memory-consolidation pass over repository local memory (agents.md, agents/*, features/* — changelog excluded). Review the current code baseline plus the change timeline, merge redundant claims, prune stale facts, and keep a current-state snapshot. Hard structural limits: max 400 lines per md file (split by semantic boundary when exceeded), max 10 files per directory (cluster into subdirectories), max 10 subdirectories per level (fan out another level recursively).
+description: Periodic memory-consolidation pass over repository local memory (repo-memory.md, agents/*, features/* — changelog excluded). Review the current code baseline plus the change timeline, merge redundant claims, prune stale facts, and keep a current-state snapshot. Hard structural limits: max 400 lines per md file (split by semantic boundary when exceeded), max 10 files per directory (cluster into subdirectories), max 10 subdirectories per level (fan out another level recursively).
 ---
 
 # repo-local-dreaming —— 记忆整理（做梦）契约
@@ -12,8 +12,10 @@ description: Periodic memory-consolidation pass over repository local memory (ag
 
 ## 输入
 - 当前代码基线：`git rev-parse HEAD`。
-- 记忆树全量：`agents.md`、`agents/*`、`features/index.md`、`features/*`。
+- 记忆树全量：`repo-memory.md`、`agents/*`、`features/index.md`、`features/*`。
 - 时间线参考：changelog 日期目录与 `git log`（只读参考、不修改）。
+
+默认逻辑索引为 `repo-memory.md`；仓库明确声明其他索引时使用实际入口，但必须确认它与 `AGENTS.md` 是不同文件。大小写不敏感的文件系统上不能通过 `agents.md` 修改 `AGENTS.md`，维护记忆时保留指令文件。
 
 ## 做梦四步
 
@@ -28,7 +30,7 @@ description: Periodic memory-consolidation pass over repository local memory (ag
 
 ### 3. 快照固化
 - 语义真正收敛（有实质合并/修剪/拆分）的文档刷新 `Commit:` 基线行到当前 HEAD；不为刷新而刷新。
-- 顶层索引（`agents.md` / `features/index.md`）仅在逻辑图/能力图实际变化时更新。
+- 顶层索引（`repo-memory.md` / `features/index.md`）仅在逻辑图/能力图实际变化时更新。
 
 ### 4. 结构守护
 - 按下表逐项检查并执行超限动作。

@@ -149,15 +149,13 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
     match inp {
         TreeInput::Create { mut buf, parent } => match k.code {
             KeyCode::Esc => {}
-            KeyCode::Enter => {
-                if !buf.trim().is_empty() {
-                    let p = parent.join(&buf);
-                    if let Some(par) = p.parent() {
-                        let _ = std::fs::create_dir_all(par);
-                    }
-                    let _ = std::fs::write(&p, "");
-                    view.tree.rebuild(&view.workdir);
+            KeyCode::Enter if !buf.trim().is_empty() => {
+                let p = parent.join(&buf);
+                if let Some(par) = p.parent() {
+                    let _ = std::fs::create_dir_all(par);
                 }
+                let _ = std::fs::write(&p, "");
+                view.tree.rebuild(&view.workdir);
             }
             KeyCode::Backspace => {
                 buf.pop();
@@ -171,11 +169,9 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
         },
         TreeInput::CreateDir { mut buf, parent } => match k.code {
             KeyCode::Esc => {}
-            KeyCode::Enter => {
-                if !buf.trim().is_empty() {
-                    let _ = std::fs::create_dir_all(parent.join(buf.trim()));
-                    view.tree.rebuild(&view.workdir);
-                }
+            KeyCode::Enter if !buf.trim().is_empty() => {
+                let _ = std::fs::create_dir_all(parent.join(buf.trim()));
+                view.tree.rebuild(&view.workdir);
             }
             KeyCode::Backspace => {
                 buf.pop();

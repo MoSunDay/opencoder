@@ -6,14 +6,7 @@ pub(in crate::config) fn merge_codex(
     current: &Option<CodexSettings>,
     patch: &Value,
 ) -> Option<Option<CodexSettings>> {
-    if patch.is_null() {
-        return Some(None);
-    }
-    let mut merged = serde_json::to_value(current).ok()?;
-    super::super::merge::merge_json(&mut merged, patch);
-    serde_json::from_value::<CodexSettings>(merged)
-        .ok()
-        .map(Some)
+    super::super::merge::merge_fields(current, patch)
 }
 
 pub(in crate::config) fn merge_runtime(

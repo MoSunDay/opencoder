@@ -41,8 +41,8 @@ def failure_excerpt(log):
                 or 'Browser host resources:' in line]
     errors = [line for line in lines if '[err]' in line and ':ERROR:' in line
               and 'dbus/' not in line]
-    priority = '\n'.join(dict.fromkeys(fatal + original + errors))[:2200]
-    return priority + '\nLast output:\n' + '\n'.join(lines[-30:])
+    priority = '\n'.join(dict.fromkeys(fatal + original + errors[-8:]))[:3400]
+    return priority + '\nLast output:\n' + '\n'.join(lines[-10:])
 
 
 def report_failure(label, path, code):

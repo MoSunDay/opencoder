@@ -10,6 +10,10 @@ vi.mock('./execute/launcher.jsx', () => ({
   CAPABILITIES: [{ value: 'agent', label: 'Agent' }, { value: 'operator', label: 'Operator' }],
   CapabilityLauncher: ({ prompt }) => <div data-testid="native-prompt">{prompt}</div>,
 }));
+vi.mock('./execute/catalog.js', () => ({
+  useCapabilities: () => ({ capabilities: [{ id: 'agent', kind: 'agent', target: 'Agent', definition: {} }, { id: 'operator', kind: 'operator', target: 'Operator', definition: {} }], loading: false, error: '' }),
+  capabilityOptions: (caps) => caps.map((cap) => ({ value: cap.id, label: cap.target })),
+}));
 import { TodoDrawer } from './todoDrawer.jsx';
 
 const overview = { goals: [], standalone_initiatives: [], backlog: [{ id: 'todo-1', title: '任务', draft: '说明', status: 'draft', capability_id: 'agent' }] };
@@ -17,8 +21,8 @@ const overview = { goals: [], standalone_initiatives: [], backlog: [{ id: 'todo-
 beforeEach(() => {
   Object.values(api).forEach((method) => method.mockReset());
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
-    ? { assignments: [{ execution_id: 'agent-1', kind: 'agent', name: '构建 Agent', sync_state: 'complete', result_md: '已完成' }] }
-    : { id: 'agent-1', kind: 'agent', name: '构建 Agent', status: 'done' }));
+    ? { assignments: [{ execution_id: 'agent-1', kind: 'agent', name: '构建 Agent' }] }
+    : path.endsWith('/result') ? { summary: '已完成' } : { id: 'agent-1', kind: 'agent', name: '构建 Agent', status: 'done' }));
   api.apiPost.mockResolvedValue({ execution_id: 'agent-2' });
   api.apiPatch.mockResolvedValue({ ok: true });
   api.apiDel.mockResolvedValue({ deleted: true });
@@ -28,7 +32,7 @@ it('displays execution type, name and ID resolved from the index', async () => {
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   expect(await screen.findByText('构建 Agent')).toBeTruthy();
   expect(screen.getAllByText('已完成').length).toBeGreaterThan(0);
-  expect(screen.getByText('结论已回写')).toBeTruthy();
+  expect(screen.getByText('执行结论')).toBeTruthy();
   expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
   fireEvent.click(screen.getByText('查看', { selector: 'button span' }).closest('button'));
   expect(await screen.findByText('execution:agent-1')).toBeTruthy();
@@ -41,9 +45,9 @@ it('links an existing execution ID', async () => {
   await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/project/todos/todo-1/executions', { execution_id: 'agent-2' }));
 });
 
-it('reads the previous execution_ids response during a service rollback', async () => {
+it('opens an operator through its execution reference', async () => {
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
-    ? { execution_ids: ['operator-1'] }
+    ? { assignments: [{ execution_id: 'operator-1', kind: 'operator' }] }
     : { id: 'operator-1', kind: 'operator', status: 'running' }));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   expect((await screen.findAllByText('operator-1')).length).toBeGreaterThan(0);
@@ -53,7 +57,7 @@ it('reads the previous execution_ids response during a service rollback', async 
 
 it('submits Team guidance with a stable input ID from the execution detail', async () => {
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
-    ? { assignments: [{ execution_id: 'team-1', kind: 'team', name: '审核', sync_state: 'pending' }] }
+    ? { assignments: [{ execution_id: 'team-1', kind: 'team', name: '审核' }] }
     : { id: 'team-1', kind: 'team', name: '审核', status: 'running' }));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   const view = (await screen.findByText('查看', { selector: 'button span' })).closest('button');
@@ -67,7 +71,7 @@ it('submits Team guidance with a stable input ID from the execution detail', asy
 
 it('preserves a missing execution ID but does not open an unknown detail type', async () => {
   api.apiGet.mockImplementation((path) => path.endsWith('/executions')
-    ? Promise.resolve({ assignments: [{ execution_id: 'lost-1', kind: '', name: 'lost-1', sync_state: 'pending' }] })
+    ? Promise.resolve({ assignments: [{ execution_id: 'lost-1', kind: '', name: 'lost-1' }] })
     : Promise.reject(new Error('index unavailable')));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   await waitFor(() => expect(screen.getAllByText('lost-1').length).toBeGreaterThan(0));

@@ -19,6 +19,7 @@ import { useTranscriptStream } from './chat/useTranscriptStream.js';
 import { consumedEchoText, emptyStream, turnsFromMessages, usageFromMessages } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
+import { postSessionInput } from './chat/inputAttempt.js';
 import { QueuePanel } from './queuePanel.jsx';
 import { QuestionModal } from './questionModal.jsx';
 import { ModelModal } from './modelModal.jsx';
@@ -77,6 +78,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
 
   const streamRef = useRef(null);
   const createAttempt = useRef(null);
+  const inputAttempt = useRef(null);
   const sendingRef = useRef(false);
   const aliveRef = useRef(true);
   const dialogsRequestRef = useRef(0);
@@ -252,11 +254,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       // are never replayed — this turn's first frames would be lost forever.
       const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq');
       after = q?.seq || 0;
-      const ack = await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
-        { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
-      if (ack && ack.ok === false) {
-        throw new Error(ack.error || 'prompt 被拒绝');
-      }
+      await postSessionInput(apiPost, inputAttempt, sid, { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
     }
     // Optimistic echo, injected THROUGH the stream reset (TUI push_user
     // parity): a fresh run carries no steer/queue echo frame, so this echo is
@@ -295,7 +293,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       // resets the transcript, wiping the run in progress).
       setInput('');
       try {
-        await apiPost('/api/sessions/' + encodeURIComponent(dialogSel) + '/prompt',
+        await postSessionInput(apiPost, inputAttempt, dialogSel,
           { prompt, delivery: delivery === 'queue' ? 'queue' : 'steer' });
       } catch (e) {
         if (onNotice) {
@@ -405,8 +403,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       const headText = BUILTIN_AGENT_HEADS.includes(next) ? '/' + next : '/agent ' + next;
       if (busy && sid) {
         try {
-          await apiPost('/api/sessions/' + encodeURIComponent(sid) + '/prompt',
-            { prompt: headText, delivery: 'steer' });
+          await postSessionInput(apiPost, inputAttempt, sid, { prompt: headText, delivery: 'steer' });
         } catch (e) {
           notice(err('切换 agent 失败: ' + ((e && e.message) || '')));
         }

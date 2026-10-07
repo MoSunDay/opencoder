@@ -1,7 +1,7 @@
 import { DagRunResult } from '../dag/run/result.jsx';
 import { DagRunContext } from '../dag/run/context.jsx';
 import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Input, Progress, Select, Space, Spin, Typography } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { openStream } from '../sse.js';
 import { StatusTag } from '../ui/statusTag.jsx';
@@ -16,6 +16,7 @@ import { WorkloadDetail, todoInitializationNotice } from './detail/workloads.jsx
 import { BrainRunEmbed } from './detail/brainRun.jsx';
 import { TodoRunEmbed } from './detail/todoFiles.jsx';
 import { Markdown } from '../project/markdown.jsx';
+import { prepareInput } from '../chat/inputAttempt.js';
 import { err } from '../notice.js';
 
 const EVENT_TEXT_CHARS = 64 * 1024;
@@ -62,6 +63,8 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   const [prompt, setPrompt] = useState('');
   const [delivery, setDelivery] = useState('prompt');
   const [busy, setBusy] = useState(false);
+  const inputAttempt = useRef(null);
+  const submitting = useRef(false);
   const [messages, setMessages] = useState({ messages: [], partial: null, nextCursor: null, more: false });
   const [messagesBusy, setMessagesBusy] = useState(false);
   const [messageWindows, setMessageWindows] = useState([{ cursor: null, leading: new Uint8Array() }]);
@@ -144,12 +147,17 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     loadMessages({ reset: true, windowIndex: 0 });
   };
   const command = async (action, input = {}) => {
-    setBusy(true);
+    if (submitting.current) return;
+    submitting.current = true; setBusy(true);
     try {
+      if (['prompt', 'steer', 'queue'].includes(action)) {
+        const prepared = prepareInput(inputAttempt.current, id, action, input);
+        inputAttempt.current = prepared.attempt; input = prepared.input;
+      }
       const path = `/api/executions/${encodeURIComponent(id)}/commands`;
-      await apiPost(path, { action, input }); setPrompt(''); setRevision((v) => v + 1); await load(); }
+      await apiPost(path, { action, input }); inputAttempt.current = null; setPrompt(''); setRevision((v) => v + 1); await load(); }
     catch (e) { onNotice?.(err(e.message)); }
-    finally { setBusy(false); }
+    finally { submitting.current = false; setBusy(false); }
   };
   const submitGuidance = async () => {
     if (!prompt.trim() || !onGuidance) return;

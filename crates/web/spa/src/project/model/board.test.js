@@ -21,10 +21,7 @@ it('reorders within a lane and refuses an unknown destination', () => {
   expect(moveTodo(rows, 'b', 'lane:missing')).toBeNull();
 });
 
-it('only calls a TODO complete when the latest assignment has a result', () => {
-  expect(assignmentBadge({ has_result: true }).label).toBe('结论已回写');
-  expect(assignmentBadge({ has_result: false, sync_state: 'error' }).label).toBe('执行失败');
-  expect(assignmentBadge({ has_result: false, sync_state: 'cancelled' }).label).toBe('已取消');
-  expect(assignmentBadge({ has_result: false, sync_state: 'empty' }).label).toBe('已结束，无结论');
-  expect(assignmentBadge({ has_result: false, sync_state: 'pending' }).label).toBe('已指派，待结论');
+it('only labels the reference; completion remains a manual board decision', () => {
+  expect(assignmentBadge(null)).toBeNull();
+  expect(assignmentBadge({ execution_id: 'agent-1' }).label).toBe('已关联执行');
 });

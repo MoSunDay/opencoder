@@ -53,7 +53,7 @@ pub async fn load(store: &dyn ProjectStore) -> anyhow::Result<Value> {
     let initiatives = store.list_initiatives(None).await?;
     let tags = store.list_tags().await?;
     let links = store.list_todo_tags().await?;
-    let assignments = store.latest_todo_assignment_states().await?;
+    let assignments = store.latest_todo_assignments().await?;
     let todos: Vec<Value> = store
         .list_todos(None)
         .await?

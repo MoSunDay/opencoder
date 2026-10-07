@@ -30,34 +30,16 @@ impl ProjectStore for GetTodoFailingStore {
     ) -> anyhow::Result<Vec<opencoder_store::project::ProjectAssignment>> {
         self.inner.list_todo_assignments(todo_id).await
     }
-    async fn latest_todo_assignment_states(
+    async fn latest_todo_assignments(
         &self,
-    ) -> anyhow::Result<Vec<opencoder_store::project::ProjectAssignmentState>> {
-        self.inner.latest_todo_assignment_states().await
+    ) -> anyhow::Result<Vec<opencoder_store::project::ProjectAssignment>> {
+        self.inner.latest_todo_assignments().await
     }
     async fn link_todo_execution(
         &self,
         assignment: &opencoder_store::project::ProjectAssignment,
     ) -> anyhow::Result<()> {
         self.inner.link_todo_execution(assignment).await
-    }
-    async fn pending_todo_assignments(
-        &self,
-        after: &str,
-        limit: usize,
-    ) -> anyhow::Result<Vec<opencoder_store::project::ProjectAssignment>> {
-        self.inner.pending_todo_assignments(after, limit).await
-    }
-    async fn finish_todo_assignment(
-        &self,
-        todo_id: &str,
-        execution_id: &str,
-        state: &str,
-        result_md: Option<&str>,
-    ) -> anyhow::Result<()> {
-        self.inner
-            .finish_todo_assignment(todo_id, execution_id, state, result_md)
-            .await
     }
     async fn unlink_todo_execution(
         &self,

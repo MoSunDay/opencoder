@@ -14,6 +14,32 @@ def stat(pid, ticks, state='S'):
 
 
 class IngressTests(unittest.TestCase):
+    def test_switch_waits_for_acceptance_to_stop_without_waiting_for_node_channels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc = Path(directory)
+            root = proc / '11'
+            root.mkdir()
+            (root / 'stat').write_text(stat(11, 111))
+            (root / 'cmdline').write_bytes(b'nginx: worker process\0')
+            (root / 'net').mkdir()
+            (root / 'fd').mkdir()
+            (root / 'net/tcp').write_text('header\n0: local remote 0A 0 0 0 0 0 999\n')
+            listener = root / 'fd/6'
+            listener.symlink_to('socket:[999]')
+            (root / 'fd/7').symlink_to('socket:[1000]')
+            workers = [{'pid': 11, 'start_ticks': 111}]
+            self.assertFalse(ingress.switched(workers, proc))
+            (root / 'cmdline').write_bytes(b'nginx: worker process is shutting down\0')
+            self.assertFalse(ingress.switched(workers, proc))
+            listener.unlink()
+            self.assertTrue(ingress.switched(workers, proc))
+            self.assertFalse(ingress.drained(workers, proc))
+            (root / 'cmdline').write_bytes(b'nginx: worker process\0')
+            (root / 'stat').write_text(stat(11, 112))
+            self.assertTrue(ingress.switched(workers, proc))
+            (root / 'stat').unlink()
+            self.assertTrue(ingress.switched(workers, proc))
+
     def test_snapshot_includes_only_live_nginx_workers_and_tracks_pid_reuse(self):
         with tempfile.TemporaryDirectory() as directory:
             proc = Path(directory)

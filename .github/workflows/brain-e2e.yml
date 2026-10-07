@@ -61,7 +61,9 @@ jobs:
           npm run build
           echo "CHROME_PATH=$(node -e 'console.log(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
       - name: CI runner tests
-        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+          node --test scripts/acceptance/brain/failure.test.js
       - name: Prepare matching native image
         run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" prepare
       - name: Project runtime and recovery

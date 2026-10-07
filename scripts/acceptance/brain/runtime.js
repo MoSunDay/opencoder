@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const capabilityContracts = require('./capability-contracts');
+const { captureFailure } = require('./failure');
 
 const base = process.argv[2];
 assert(base, 'Fleet base URL required');
@@ -67,6 +68,7 @@ async function main() {
   page.setDefaultTimeout(30000);
   const errors = []; const details = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  page.on('crash', () => errors.push('Chromium renderer crashed'));
   page.on('request', (request) => { if (/\/api\/executions\/[^/?]+$/.test(request.url())) details.push(request.url()); });
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'browser-fixture'));
@@ -170,9 +172,7 @@ async function main() {
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ result: 'PASS', schema_version: 7, run_id: id, activations: visits.length, operations: view.operations.length, artifacts }));
   } catch (error) {
-    await page.screenshot({ path: path.join(artifacts, 'failure.png') });
-    fs.writeFileSync(path.join(artifacts, 'failure.html'), await page.content());
-    console.error(JSON.stringify({ artifacts, errors, text: (await page.locator('body').innerText()).slice(-6000) }));
+    await captureFailure(page, artifacts, error, errors);
     throw error;
   } finally { await browser.close(); }
 }

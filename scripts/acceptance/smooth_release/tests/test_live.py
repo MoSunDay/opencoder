@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from live import chain
@@ -27,17 +28,22 @@ class AcceptanceTests(unittest.TestCase):
                 time.sleep(.02)
                 run.mkdir()
                 (run / 'execution.json').write_text(json.dumps({'annotations': {'dag_parent': str(root / 'runs' / '2026-09-30')}}))
-                (root / 'runs/2026-09-30/own/workspace/hold').mkdir(parents=True)
+                actual = root / 'runs/2026-09-30/own'
+                actual.mkdir(parents=True)
+                (actual / 'container.json').write_text(json.dumps({'id': 'container-own'}))
             writer = threading.Thread(target=admit)
             writer.start()
-            release_native_gate(root, 'own', seconds=2)
+            with patch('fixture.subprocess.run', return_value=SimpleNamespace(returncode=0)) as execute:
+                release_native_gate(root, 'own', seconds=2)
             writer.join()
-            self.assertTrue((root / 'runs/2026-09-30/own/workspace/hold/release').is_file())
+            self.assertEqual(execute.call_args.args[0][:5], ['runc', '--root',
+                str(root / 'runs/2026-09-30/own/runc-state'), 'exec', 'container-own'])
+            self.assertFalse((root / 'runs/2026-09-30/own/workspace').exists())
             self.assertFalse((sibling / 'release').exists())
             (run / 'hold').mkdir()
             (run / 'hold' / 'context.json').write_text('{}')
-            release_native_gate(root, 'own')
-            self.assertTrue((root / 'runs/2026-09-30/own/workspace/hold/release').is_file())
+            with patch('fixture.subprocess.run', return_value=SimpleNamespace(returncode=0)):
+                release_native_gate(root, 'own')
 
     def test_unconfirmed_admission_does_not_create_an_orphan_directory(self):
         with tempfile.TemporaryDirectory() as directory:

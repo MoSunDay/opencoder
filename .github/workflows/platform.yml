@@ -23,6 +23,7 @@ on:
       - "scripts/install.ps1"
       - "scripts/platform/release/build-windows.ps1"
       - "scripts/platform/windows/**"
+      - "tools/computer-use/ops/**"
       - "docs/windows.md"
       - ".github/workflows/platform.yml"
   pull_request:
@@ -43,6 +44,7 @@ on:
       - "scripts/install.ps1"
       - "scripts/platform/release/build-windows.ps1"
       - "scripts/platform/windows/**"
+      - "tools/computer-use/ops/**"
       - "docs/windows.md"
       - ".github/workflows/platform.yml"
   workflow_dispatch:
@@ -92,6 +94,20 @@ jobs:
         run: cargo build --locked -p opencoder -p opencoder-agent -p opencoder-session
       - name: clippy
         run: cargo clippy --locked -p opencoder -p opencoder-agent -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --all-targets -- -D warnings
+      - name: Computer-use artifact path and archive safety
+        run: ./tools/computer-use/ops/windows/artifact-tests.ps1
+      - name: configuration overlays and memory seed contracts
+        run: |
+          $log = "$env:RUNNER_TEMP/configuration-skill-contracts.log"
+          & cargo test --locked -p opencoder-core --test config_overlay --test skill_contract 2>&1 | Tee-Object -FilePath $log
+          $result = $LASTEXITCODE
+          if ($result -ne 0) {
+            $tail = [string](@(Get-Content $log -Tail 120) -join "`n")
+            $annotation = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows configuration and skill contract failure::$annotation"
+            @('### Windows configuration and skill contract failure', '```text', $tail, '```') | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+          exit $result
       - name: shared platform contracts
         run: |
           $log = "$env:RUNNER_TEMP/platform-contracts.log"
@@ -151,6 +167,9 @@ jobs:
 
       - name: clippy
         run: cargo clippy -p opencoder -p opencoder-server --all-targets -- -D warnings
+
+      - name: configuration overlays and memory seed contracts
+        run: cargo test --locked -p opencoder-core --test config_overlay --test skill_contract
 
       - name: session tests (fallback contract + portable behavior)
         shell: bash

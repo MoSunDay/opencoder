@@ -6,6 +6,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+. (Join-Path $PSScriptRoot 'windows/artifacts.ps1')
+. (Join-Path $PSScriptRoot 'windows/archives.ps1')
+$Root = [IO.Path]::GetFullPath($Root)
+Assert-CuaFilesystemPath $Root
+$manifest = Invoke-RestMethod "$ArtifactBase/manifest.json"
+$plan = @(Get-CuaArtifactPlan $Root @($manifest))
+foreach ($name in @('install.log', 'install-result.json', 'serve.ps1', 'server.log')) {
+    Assert-CuaFilesystemPath (Join-Path $Root $name)
+}
 New-Item -ItemType Directory -Force -Path $Root | Out-Null
 Start-Transcript -Path (Join-Path $Root 'install.log') -Append | Out-Null
 $receipt = Join-Path $Root 'install-result.json'
@@ -18,18 +27,11 @@ try {
         (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
         throw 'Cua startup task or firewall rule already exists; inspect before replacing'
     }
-    $manifest = Invoke-RestMethod "$ArtifactBase/manifest.json"
-    foreach ($item in $manifest) {
-        $target = Join-Path $Root $item.file
-        New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
-        if (!(Test-Path $target) -or
-            (Get-FileHash $target -Algorithm SHA256).Hash.ToLower() -ne $item.sha256) {
-            Invoke-WebRequest "$ArtifactBase/$($item.file)" -OutFile $target -UseBasicParsing
-        }
-        if ((Get-FileHash $target -Algorithm SHA256).Hash.ToLower() -ne $item.sha256) {
-            throw "Artifact hash mismatch: $($item.file)"
-        }
+    foreach ($item in $plan) {
+        Save-CuaArtifact $Root $ArtifactBase $item
     }
+    Assert-CuaZip $Root (Join-Path $Root 'uv.zip') 'uv'
+    Assert-CuaTar $Root (Join-Path $Root 'python.tar.gz') 'runtime'
     Expand-Archive (Join-Path $Root 'uv.zip') (Join-Path $Root 'uv') -Force
     $runtime = Join-Path $Root 'runtime'
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null
@@ -55,10 +57,14 @@ try {
         -LocalAddress $HostAddress -LocalPort 8000 -RemoteAddress $Gateway | Out-Null
     $ruleCreated = $true
     $launcher = Join-Path $Root 'serve.ps1'
+    Assert-CuaFilesystemPath $launcher
+    $pythonLiteral = Get-CuaLiteral $python
+    $addressLiteral = Get-CuaLiteral $HostAddress
+    $logLiteral = Get-CuaLiteral (Join-Path $Root 'server.log')
     @"
 `$ErrorActionPreference = 'Stop'
-& '$python' -m computer_server --host '$HostAddress' --port 8000 --backend native `
-    >> '$Root\server.log' 2>&1
+& $pythonLiteral -m computer_server --host $addressLiteral --port 8000 --backend native `
+    >> $logLiteral 2>&1
 exit `$LASTEXITCODE
 "@ | Set-Content $launcher -Encoding UTF8
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `

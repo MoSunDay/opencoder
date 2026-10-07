@@ -121,6 +121,15 @@ pub(super) fn merge_json(dst: &mut serde_json::Value, patch: &serde_json::Value)
     }
 }
 
+pub(super) fn merge_fields<T>(current: &T, patch: &serde_json::Value) -> Option<T>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let mut merged = serde_json::to_value(current).ok()?;
+    merge_json(&mut merged, patch);
+    serde_json::from_value(merged).ok()
+}
+
 /// The domain keys (`mcp_servers` / `cli` / `skills` / `autopilot` /
 /// `schedules`) present in a parsed config.json object with non-`null`
 /// values, in fixed order. Pure input inspection — callers decide what to do
@@ -316,17 +325,13 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                     cfg.agent.tools_scope = parsed;
                 }
             }
-            // NFS block: partial objects keep their serde defaults, so
-            // `{"agent":{"nfs":{"port":0}}}` only overrides the port.
+            // Only explicitly configured NFS fields override the global base.
             if let Some(n) = a.get("nfs") {
-                if let Ok(parsed) = serde_json::from_value(n.clone()) {
+                if let Some(parsed) = merge_fields(&cfg.agent.nfs, n) {
                     cfg.agent.nfs = parsed;
                 }
             }
         }
-        // DAG block mirrors the agent one: `binary_dir` + a partial `nfs`
-        // object whose serde defaults fill the rest
-        // (`{"dag":{"nfs":{"port":0}}}` only overrides the port).
         if let Some(ontology) = obj.get("ontology") {
             let mut merged = serde_json::to_value(&cfg.ontology).unwrap_or_default();
             if let (Some(target), Some(patch)) = (merged.as_object_mut(), ontology.as_object()) {
@@ -361,7 +366,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 }
             }
             if let Some(value) = d.get("workspace_nfs") {
-                if let Ok(parsed) = serde_json::from_value(value.clone()) {
+                if let Some(parsed) = merge_fields(&cfg.dag.workspace_nfs, value) {
                     cfg.dag.workspace_nfs = parsed;
                 }
             }
@@ -370,7 +375,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
 
             if let Some(n) = d.get("nfs") {
-                if let Ok(parsed) = serde_json::from_value(n.clone()) {
+                if let Some(parsed) = merge_fields(&cfg.dag.nfs, n) {
                     cfg.dag.nfs = parsed;
                 }
             }

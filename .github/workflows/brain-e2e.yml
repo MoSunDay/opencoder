@@ -86,6 +86,6 @@ jobs:
           path: |
             ${{ runner.temp }}/brain-e2e/*.log
             ${{ runner.temp }}/brain-e2e/*-result.json
-            ${{ runner.temp }}/brain-e2e/browser-tmp/opencoder-brain-v7-browser-*
+            ${{ runner.temp }}/brain-e2e/browser-tmp/**/opencoder-brain-v7-browser-*
           if-no-files-found: error
           retention-days: 7

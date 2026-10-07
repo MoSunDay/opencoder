@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 # 项目工作台
 
@@ -14,4 +14,4 @@ Tag 可在项目或专项下创建、改名和删除，一个 TODO 可选择多�
 
 右侧 TODO 抽屉展示指派历史与最新结论，窄屏时宽度不超出视口；可打开对应能力的原生执行明细，运行中的 Team 可从详情提交引导。执行关联与详情由 Server 控制台提供；独立 Web 的旧项目 API 不提供控制台执行索引。项目页不提供旧的专属计划、执行或回放操作。
 
-相关逻辑：[project](../../agents/project/index.md)、[web](../../agents/web/index.md)、[control](../../agents/control/index.md)。
+业务规则见 [项目模块约定](../../rules/07-project-module-contract.md)。相关逻辑：[project](../../agents/project/index.md)、[web](../../agents/web/index.md)、[control](../../agents/control/index.md)。

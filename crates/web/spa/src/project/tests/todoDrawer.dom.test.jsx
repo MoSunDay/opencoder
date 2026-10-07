@@ -14,6 +14,11 @@ vi.mock('../views/projectTable.jsx', () => ({
   ProjectTable: ({ rows }) => <div>{rows.map((row) => <div key={row.id}>{row.id}</div>)}</div>,
   TableText: ({ children }) => <span>{children}</span>,
 }));
+vi.mock('../execute/catalog.js', () => ({
+  useCapabilities: () => ({ capabilities: [{ id: 'agent', kind: 'agent', target: 'Agent', definition: {} }, { id: 'operator', kind: 'operator', target: 'Operator', definition: {} }], loading: false, error: '' }),
+  capabilityOptions: (caps) => caps.map((cap) => ({ value: cap.id, label: cap.target })),
+}));
+vi.mock('../execute/result.jsx', () => ({ ExecutionResult: () => null }));
 import { TodoDrawer } from '../todoDrawer.jsx';
 
 const overview = { goals: [], standalone_initiatives: [], tags: [],
@@ -32,19 +37,20 @@ beforeEach(() => {
   api.apiGet.mockResolvedValue({ assignments: [] });
 });
 
-it('keeps the TODO visible when linking completes after returning from launch', async () => {
-  const post = deferred();
-  api.apiPost.mockReturnValue(post.promise);
+it('keeps the TODO visible when a dispatched execution read completes after returning', async () => {
+  const read = deferred();
   drawer();
   fireEvent.click(screen.getByRole('button', { name: '指派所选能力' }));
-  fireEvent.click(await screen.findByRole('button', { name: '发起验收' }));
-  await waitFor(() => expect(api.apiPost).toHaveBeenCalled());
+  await screen.findByRole('button', { name: '发起验收' });
+  api.apiGet.mockImplementationOnce(() => read.promise);
+  fireEvent.click(screen.getByRole('button', { name: '发起验收' }));
   fireEvent.click(screen.getByRole('button', { name: '返回 TODO' }));
   fireEvent.change(screen.getByLabelText('已有执行 ID'), { target: { value: 'agent-next' } });
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/index')
     ? { id: 'agent-late', kind: 'agent' } : { assignments: [{ execution_id: 'agent-late' }] }));
-  await act(async () => post.resolve({}));
+  await act(async () => read.resolve({ assignments: [{ execution_id: 'agent-late' }] }));
   expect(await screen.findByText('agent-late')).toBeTruthy();
+  expect(api.apiPost).not.toHaveBeenCalled();
   expect(screen.queryByText('执行详情')).toBeNull();
   expect(screen.getByLabelText('已有执行 ID').value).toBe('agent-next');
 });

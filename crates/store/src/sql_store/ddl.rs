@@ -76,8 +76,7 @@ const TODO_EXECUTION_COLUMNS: &str = "\
   created_at BIGINT NOT NULL,
   kind VARCHAR(32) NOT NULL DEFAULT '',
   name VARCHAR(255) NOT NULL DEFAULT '',
-  result_md {text} NULL,
-  sync_state VARCHAR(32) NOT NULL DEFAULT 'pending'";
+  capability_id VARCHAR(255) NULL";
 
 /// `(table, columns, secondary-index clause)`; the index clause is MySQL-only.
 const TABLES: &[(&str, &str, &str)] = &[
@@ -115,8 +114,7 @@ const UPGRADE_COLUMNS: &[(&str, &[&str])] = &[
         &[
             "kind VARCHAR(32) NOT NULL DEFAULT ''",
             "name VARCHAR(255) NOT NULL DEFAULT ''",
-            "result_md {text} NULL",
-            "sync_state VARCHAR(32) NOT NULL DEFAULT 'pending'",
+            "capability_id VARCHAR(255) NULL",
         ],
     ),
     (
@@ -264,6 +262,21 @@ pub async fn upgrade(pool: &MySqlPool, starrocks: bool) -> Result<()> {
                 sqlx::query(&sql).execute(pool).await
             };
             res.with_context(|| format!("upgrade table {table}: add {col}"))?;
+        }
+        if *table == "project_todo_executions" {
+            for column in ["result_md", "sync_state"] {
+                if existing
+                    .iter()
+                    .any(|value| value.eq_ignore_ascii_case(column))
+                {
+                    let sql = format!("ALTER TABLE project_todo_executions DROP COLUMN {column}");
+                    if starrocks {
+                        sqlx::raw_sql(&sql).execute(pool).await?;
+                    } else {
+                        sqlx::query(&sql).execute(pool).await?;
+                    }
+                }
+            }
         }
         if *table == "project_todos" {
             super::exec_write(pool, starrocks,

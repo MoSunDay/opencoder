@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 pub(crate) mod capabilities;
 mod private_context;
+pub(crate) mod results;
 mod submit;
 pub use submit::submit;
 pub(crate) use submit::submit_private;

@@ -30,7 +30,6 @@ use opencoder_store::{
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 
-mod project_assignments;
 pub mod telemetry;
 
 /// How far back a tick can be and still fire: server downtime up to a day
@@ -53,36 +52,6 @@ pub fn start(state: &Arc<AppState>) {
     {
         return;
     }
-    let assignment_state = Arc::downgrade(state);
-    tokio::spawn(async move {
-        let mut after = String::new();
-        loop {
-            let Some(state) = assignment_state.upgrade() else {
-                return;
-            };
-            if state
-                .lifecycle
-                .retiring
-                .load(std::sync::atomic::Ordering::SeqCst)
-            {
-                return;
-            }
-            match tokio::time::timeout(
-                Duration::from_secs(70),
-                project_assignments::scan(&state, &after),
-            )
-            .await
-            {
-                Ok(Ok(next)) => after = next,
-                Ok(Err(error)) => tracing::error!(%error, "project assignment sync failed"),
-                Err(_) => tracing::warn!("project assignment sync timed out"),
-            }
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(DEFAULT_SCAN_SECS)) => {}
-                _ = state.lifecycle.retired() => return,
-            }
-        }
-    });
     let weak = Arc::downgrade(state);
     tokio::spawn(async move {
         let mut interval = DEFAULT_SCAN_SECS;

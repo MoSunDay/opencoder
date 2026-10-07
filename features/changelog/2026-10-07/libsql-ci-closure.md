@@ -57,3 +57,5 @@ Brain CI 原先没有准备原生 DAG 镜像和完整 NFS、容器运行条件�
 远端 `c4c54451` 继续失败，最后的进程错误明确指向 `platform_shared_memory_region_posix.cc`：普通 runner 创建的 `browser-tmp` 不允许 Chromium 子进程写入。原生测试经 sudo 以 root 运行，Chromium 子进程会丢弃特权能力，不能靠 root 身份绕过 runner 所有的 0755 目录权限。Vulkan/EGL 初始化错误是伴随现象，关闭 GPU 并未解决问题，因此撤去该参数。
 
 本机用同一 Chromium、同一 PID/挂载隔离和同一个 0755 目录验证：目录属普通用户时原样复现共享内存 `Permission denied`，仅把归属改为 root 后正常加载并读取页面（证据 `runner-owned-browser-temp.log` / `root-owned-browser-temp.log`）。原生阶段开始前将专属临时目录归给 root，结束后通过 finally 递归归还调用用户，保证失败证据也可上传；不放宽为全员可写。新增失败路径归还所有权回归，Python CI 测试共 7 项通过。
+
+远端 `79e52433` 说明只修改末级目录归属仍不够。本机进一步复现：末级目录属 root，但上层目录属于普通用户且为 0700 时，Chromium 仍原样报共享内存权限错误；同一浏览器在 `/tmp` 下 root 所有的 0700 目录正常完成。原生阶段改用 `/tmp` 下随机独立目录，避免 runner 私有父目录，结束后归还调用用户并移入工作流证据目录；artifact 路径同步支持这层归档目录。失败路径回归验证保留原始证据；Python 7 项通过。证据为 `private-parent-browser-temp.log` 与 `public-parent-browser-temp.log`。

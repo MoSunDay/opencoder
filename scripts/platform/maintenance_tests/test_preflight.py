@@ -22,6 +22,26 @@ def configs():
 
 
 class PreflightTests(unittest.TestCase):
+    def test_project_reference_schema_can_be_inspected_without_changing_the_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'definitions.db'
+            with sqlite3.connect(database) as connection:
+                connection.executescript('''
+                    CREATE TABLE schema_version(version INTEGER);
+                    INSERT INTO schema_version VALUES(33);
+                    CREATE TABLE project_assignments(todo_id TEXT,execution_id TEXT);
+                    INSERT INTO project_assignments VALUES('todo','agent-work');
+                ''')
+            original = database.read_bytes()
+            inventory = preflight.database_inventory(database)
+            self.assertEqual(inventory['schema_version'], 33)
+            self.assertEqual(inventory['tables'], {'project_assignments': 1})
+            self.assertEqual(database.read_bytes(), original)
+            with sqlite3.connect(database) as connection:
+                connection.execute('UPDATE schema_version SET version=34')
+            with self.assertRaisesRegex(ValueError, 'unsupported definitions database schema'):
+                preflight.database_inventory(database)
+
     def test_changed_ontology_binding_rejects_before_any_service_operation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

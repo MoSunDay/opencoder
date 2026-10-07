@@ -32,15 +32,10 @@ pub fn normalize_ref(raw: Option<&str>) -> Option<String> {
 pub fn validate_capability(raw: Option<&str>) -> Result<Option<String>, Response> {
     match raw.map(str::trim) {
         None | Some("") => Ok(None),
-        Some(value)
-            if matches!(
-                value,
-                "operator" | "agent" | "team" | "dag" | "todos" | "brain"
-            ) =>
-        {
+        Some(value) if value.len() <= 255 && !value.chars().any(char::is_control) => {
             Ok(Some(value.to_owned()))
         }
-        Some(_) => Err(error_400("unsupported TODO capability")),
+        Some(_) => Err(error_400("invalid TODO capability ID")),
     }
 }
 
@@ -67,4 +62,23 @@ pub fn validate_executor(
         }
     }
     Ok(kind)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concrete_capability_ids_are_references_not_execution_kind_enums() {
+        for id in [
+            "agent-client-root-cause-operator",
+            "brain-capability-1",
+            "plan-saved@2",
+        ] {
+            assert_eq!(validate_capability(Some(id)).unwrap(), Some(id.into()));
+        }
+        assert_eq!(validate_capability(Some("  ")).unwrap(), None);
+        assert!(validate_capability(Some("bad\nname")).is_err());
+        assert!(validate_capability(Some(&"x".repeat(256))).is_err());
+    }
 }

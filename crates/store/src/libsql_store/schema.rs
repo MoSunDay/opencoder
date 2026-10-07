@@ -9,13 +9,14 @@ use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUN
 
 mod catalog;
 mod migrations;
+mod project_links;
 mod project_relations;
 use migrations::migrate;
 use project_relations::CREATE_PROJECT_MILESTONES;
 
-// v3 scheduler tables are additive and bootstrap unconditionally; keep the
-// existing schema watermark so v2 database migration remains read-compatible.
-pub(crate) const SCHEMA_VERSION: i64 = 32;
+// Scheduler tables bootstrap additively. Project v33 removes result caches;
+// the release data-format gate excludes older Servers before this migration.
+pub(crate) const SCHEMA_VERSION: i64 = 33;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -193,8 +194,7 @@ CREATE TABLE IF NOT EXISTS project_todo_executions (
   created_at INTEGER NOT NULL,
   kind TEXT NOT NULL DEFAULT '',
   name TEXT NOT NULL DEFAULT '',
-  result_md TEXT,
-  sync_state TEXT NOT NULL DEFAULT 'pending',
+  capability_id TEXT,
   PRIMARY KEY (todo_id, execution_id)
 )";
 const CREATE_INDEX_PROJECT_INITIATIVES_GOAL: &str =

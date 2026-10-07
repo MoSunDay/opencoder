@@ -1,3 +1,11 @@
+run_in_rootfs() {
+  if [ "$(id -u)" -eq 0 ]; then
+    chroot "$@"
+  else
+    sudo -n -- chroot "$@"
+  fi
+}
+
 copy_libs() {
   local out="$1" source="$2" listing
   listing="$(ldd "$source" 2>&1)" || {

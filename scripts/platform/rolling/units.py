@@ -155,19 +155,37 @@ def freeze_rootfs(record, source, binaries=None):
         relative = Path(directory).relative_to(source)
         omitted = {'dev','proc','sys','tmp'} if relative == Path('.') else {'context'} if relative == Path('workspace') else set()
         return set(names) & omitted
-    shutil.copytree(source,stage,symlinks=True,ignore=ignored)
+    copied = {}
+    def copy_file(source_file, destination):
+        stat = os.stat(source_file)
+        identity = (stat.st_dev, stat.st_ino)
+        if stat.st_nlink > 1 and identity in copied:
+            os.link(copied[identity], destination)
+        else:
+            shutil.copy2(source_file, destination)
+            copied[identity] = destination
+        return destination
+    shutil.copytree(source,stage,symlinks=True,ignore=ignored,copy_function=copy_file)
     if binaries:
         for name in ['dag-runner', 'agent-step-runner']:
-            shutil.copy2(binaries / name, stage / 'usr/bin' / name)
+            runner = stage / 'usr/bin' / name
+            runner.unlink(missing_ok=True)
+            shutil.copy2(binaries / name, runner)
     for name in ['dev','proc','sys','tmp','workspace/context']:
         directory = stage / name
         if directory.is_symlink():
             raise ValueError("OCI runtime mount must be a real directory")
         directory.mkdir(parents=True,exist_ok=True)
+    synced = set()
     for path in stage.rglob('*'):
         if path.is_file() and not path.is_symlink():
+            stat = path.stat()
+            identity = (stat.st_dev, stat.st_ino)
+            if identity in synced:
+                continue
             with path.open('rb') as stream:
                 os.fsync(stream.fileno())
+            synced.add(identity)
     for directory in sorted((p for p in stage.rglob('*') if p.is_dir() and not p.is_symlink()),key=lambda p:len(p.parts),reverse=True) + [stage]:
         fd = os.open(directory,os.O_RDONLY | os.O_DIRECTORY)
         try:

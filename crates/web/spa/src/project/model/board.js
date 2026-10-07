@@ -6,11 +6,7 @@ export const laneOf = (todo) => todo.board_status || ({ draft: 'backlog', planne
 
 export function assignmentBadge(assignment) {
   if (!assignment) return null;
-  if (assignment.has_result) return { color: 'green', label: '结论已回写' };
-  if (assignment.sync_state === 'error') return { color: 'red', label: '执行失败' };
-  if (assignment.sync_state === 'cancelled') return { color: 'default', label: '已取消' };
-  if (assignment.sync_state === 'empty') return { color: 'orange', label: '已结束，无结论' };
-  return { color: 'blue', label: '已指派，待结论' };
+  return { color: 'blue', label: '已关联执行' };
 }
 
 export const ordered = (rows) => [...rows].sort((a, b) => (a.position ?? a.created_at ?? 0) - (b.position ?? b.created_at ?? 0) || a.id.localeCompare(b.id));

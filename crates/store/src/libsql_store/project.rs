@@ -278,10 +278,6 @@ async fn exists(conn: &Connection, sql: &str, id: &str) -> Result<bool> {
 /// delegates to the free functions above / in `project_runs`.
 #[async_trait::async_trait]
 impl ProjectStore for LibsqlStore {
-    fn project_backend_name(&self) -> &'static str {
-        "libsql"
-    }
-
     async fn list_tags(&self) -> Result<Vec<crate::project::ProjectTag>> {
         let _guard = self.db_lock.lock().await;
         tags::list(&self.conn().await?).await
@@ -321,9 +317,7 @@ impl ProjectStore for LibsqlStore {
         super::project_links::list(&self.conn().await?, todo_id).await
     }
 
-    async fn latest_todo_assignment_states(
-        &self,
-    ) -> Result<Vec<crate::project::ProjectAssignmentState>> {
+    async fn latest_todo_assignments(&self) -> Result<Vec<crate::project::ProjectAssignment>> {
         let _guard = self.db_lock.lock().await;
         super::project_links::latest(&self.conn().await?).await
     }
@@ -334,27 +328,6 @@ impl ProjectStore for LibsqlStore {
     ) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         super::project_links::link(&self.conn().await?, assignment).await
-    }
-
-    async fn pending_todo_assignments(
-        &self,
-        after: &str,
-        limit: usize,
-    ) -> Result<Vec<crate::project::ProjectAssignment>> {
-        let _guard = self.db_lock.lock().await;
-        super::project_links::pending(&self.conn().await?, after, limit).await
-    }
-
-    async fn finish_todo_assignment(
-        &self,
-        todo_id: &str,
-        execution_id: &str,
-        state: &str,
-        result_md: Option<&str>,
-    ) -> Result<()> {
-        let _guard = self.db_lock.lock().await;
-        super::project_links::finish(&self.conn().await?, todo_id, execution_id, state, result_md)
-            .await
     }
 
     async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool> {

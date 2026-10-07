@@ -44,12 +44,14 @@ class Operations:
         return result.stdout.strip() == "inactive"
 
     def ingress_workers(self):
-        result = subprocess.run(['systemctl', 'show', 'nginx', '-p', 'MainPID', '--value'],
-            check=True, capture_output=True, text=True)
-        return ingress.snapshot(int(result.stdout.strip()))
+        result = self.output('systemctl', 'show', 'nginx', '-p', 'MainPID', '--value')
+        return ingress.snapshot(int(result.strip()))
 
     def ingress_drained(self, workers):
         return ingress.drained(workers)
+
+    def ingress_switched(self, workers):
+        return ingress.switched(workers)
 
     def wait(self, check, seconds=90):
         deadline = time.monotonic() + seconds

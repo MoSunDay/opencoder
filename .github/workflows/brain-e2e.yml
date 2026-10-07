@@ -6,6 +6,9 @@ on:
     paths:
       - 'crates/**'
       - 'scripts/acceptance/brain/**'
+      - 'scripts/ci/**'
+      - 'scripts/prepare-dag-rootfs.sh'
+      - 'scripts/dag-rootfs/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/brain-e2e.yml'
@@ -13,6 +16,9 @@ on:
     paths:
       - 'crates/**'
       - 'scripts/acceptance/brain/**'
+      - 'scripts/ci/**'
+      - 'scripts/prepare-dag-rootfs.sh'
+      - 'scripts/dag-rootfs/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/brain-e2e.yml'
@@ -29,6 +35,10 @@ jobs:
   schema-seven:
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      RUST_TEST_THREADS: '2'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -39,24 +49,39 @@ jobs:
           cache: npm
           cache-dependency-path: crates/web/spa/package-lock.json
       - name: Browser and native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev cmake pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev cmake pkg-config nfs-common
+          if ! command -v runc >/dev/null; then sudo apt-get install -y runc; fi
       - name: Install SPA dependencies and Chromium
         working-directory: crates/web/spa
         run: |
           npm ci
           npx playwright-core install --with-deps chromium
           npm run build
-      - name: Browser, API, scheduler and execution detail acceptance
-        run: |
-          cargo test -p opencoder-brain --test milestone
-          cargo test -p opencoder-worker --test brain_scheduler_v4
-          cargo test -p opencoder-worker --test brain_server_restart
-          cargo test -p opencoder-worker --test brain_browser schema_seven_canvas_parallel_return_and_execution_detail -- --ignored --nocapture
-      - name: Preserve browser failure evidence
-        if: failure()
+          echo "CHROME_PATH=$(node -e 'console.log(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: CI runner tests
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+      - name: Prepare matching native image
+        run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" prepare
+      - name: Project runtime and recovery
+        run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" project
+      - name: Milestone state machine
+        run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" milestone
+      - name: Worker scheduler
+        run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" scheduler
+      - name: Server restart and task continuity
+        run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" restart
+      - name: Browser, API and execution detail acceptance
+        run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" browser
+      - name: Preserve test logs and browser evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: brain-e2e-browser
-          path: /tmp/opencoder-brain-v7-browser-*
-          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/brain-e2e/*.log
+            ${{ runner.temp }}/brain-e2e/*-result.json
+            ${{ runner.temp }}/brain-e2e/browser-tmp/opencoder-brain-v7-browser-*
+          if-no-files-found: error
           retention-days: 7

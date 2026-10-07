@@ -1,6 +1,8 @@
 #![cfg(target_os = "linux")]
 #[path = "harness/runc_fixture.rs"]
 mod fixture;
+#[path = "harness/registered.rs"]
+mod registered;
 mod support;
 use opencoder_node::fleet::NodeService;
 use serde_json::{json, Value};
@@ -180,6 +182,8 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     );
     assert!(temp.path().join("home/.codex/refresh-observed").is_file());
     assert!(!knowledge.join("write-probe").exists());
+
+    registered::verify(&fleet).await;
 
     // Profile settings originate at Server, while their credential path points
     // to the selected node. The CLI executable is resolved INSIDE the rootfs.

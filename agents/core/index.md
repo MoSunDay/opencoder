@@ -1,4 +1,4 @@
-Commit: 9d82393d5ad376511b387d089199a4d845f22b08
+Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 # core 模块
 
@@ -21,7 +21,7 @@ Commit: 9d82393d5ad376511b387d089199a4d845f22b08
 - [platform/](../../crates/core/src/platform/mod.rs) — 执行种类、宿主命令语言、私有文件与原子发布的跨平台入口；Windows ACL 在创建文件时生效，路径校验拒绝设备名与重解析点，目录身份用于去重。
 - `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
-- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 3；原生 DAG journal、项目 schema v32 与独立资源存储需要维护升级，旧数据格式不在兼容滚动发布范围。
+- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 4；项目 schema v33 移除执行结论缓存，旧 Server 无法打开新库，格式 1–3 升级必须走维护发布。
 - `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
 
 ## 私有任务文件

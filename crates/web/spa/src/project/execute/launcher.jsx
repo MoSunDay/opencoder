@@ -1,48 +1,52 @@
-import { Alert, Select, Spin } from 'antd';
-import { useEffect, useState } from 'react';
-import { apiGet } from '../../api.js';
-import { ChatPanel } from '../../chat.jsx';
-import { DefsTab } from '../../dag/defsTab.jsx';
-import { FleetTeamsPanel } from '../../fleet/teams.jsx';
-import { TodoPanel } from '../../todoPanel.jsx';
-import { Launch } from '../../brain/workbench/launch.jsx';
+import { Alert, Button, Input, Space, Typography } from 'antd';
+import { useRef, useState } from 'react';
+import { apiPost } from '../../api.js';
+import { newId } from '../../fleet/model.js';
 
-export const CAPABILITIES = [
-  { value: 'operator', label: 'Operator' },
-  { value: 'agent', label: 'Agent' },
-  { value: 'team', label: 'Team' },
-  { value: 'dag', label: 'DAG 工作流' },
-  { value: 'todos', label: 'TODO 工作流' },
-  { value: 'brain', label: '大脑调度' },
-];
-
-function BrainLaunch({ onCreated, prompt }) {
-  const [capabilities, setCapabilities] = useState([]);
-  const [plans, setPlans] = useState([]);
-  const [plan, setPlan] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    Promise.all([apiGet('/api/brain/library'), apiGet('/api/brain/plan-defs')])
-      .then(([library, definitions]) => { setCapabilities(library.capabilities || []); setPlans(definitions.plans || []); })
-      .catch((failure) => setError(failure.message))
-      .finally(() => setLoading(false));
-  }, []);
-  if (error) return <Alert type="error" title={error} />;
-  if (loading) return <Spin />;
-  return <div>
-    <Select aria-label="大脑计划" placeholder="选择计划" value={plan} onChange={setPlan} style={{ width: 350, marginBottom: 16 }}
-      options={plans.filter((item) => item.schema_version === 7).map((item) => ({ value: `${item.id}@${item.latest_version}`, label: item.title }))} />
-    {plan && <Launch key={plan} onCreated={onCreated} capabilities={capabilities} initialPlan={plan} initialPrompt={prompt} />}
-  </div>;
+export function launchInput(prompt, raw) {
+  const input = JSON.parse(raw || '{}');
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('参数必须是 JSON 对象');
+  return { ...input, prompt };
 }
 
-export function CapabilityLauncher({ kind, onCreated, onNotice, prompt }) {
-  return <div>
-    {kind === 'brain' && <BrainLaunch onCreated={onCreated} prompt={prompt} />}
-    {kind === 'dag' && <DefsTab onNotice={onNotice} onDispatched={onCreated} initialPrompt={prompt} />}
-    {kind === 'todos' && <TodoPanel onNotice={onNotice} onCreated={onCreated} initialPrompt={prompt} />}
-    {kind === 'team' && <FleetTeamsPanel onNotice={onNotice} onCreated={onCreated} initialPrompt={prompt} />}
-    {(kind === 'agent' || kind === 'operator') && <ChatPanel onNotice={onNotice} onCreated={onCreated} initialPrompt={prompt} launchKind={kind} />}
-  </div>;
+export function CapabilityLauncher({ capability, todoId, onCreated, prompt: initialPrompt = '' }) {
+  const [prompt, setPrompt] = useState(initialPrompt);
+  const [raw, setRaw] = useState('{}');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const attempt = useRef(null);
+  const sending = useRef(false);
+  const send = async () => {
+    if (!capability || sending.current) return;
+    sending.current = true; setBusy(true);
+    try {
+      const input = launchInput(prompt, raw);
+      const signature = JSON.stringify([todoId, capability.id, input]);
+      if (attempt.current && attempt.current.signature !== signature) {
+        throw new Error('上次提交结果尚未确认，请先重试原请求或按保留的执行 ID 查看结果');
+      }
+      if (!attempt.current) attempt.current = { signature, id: newId(capability.kind) };
+      const body = await apiPost(`/api/project/todos/${encodeURIComponent(todoId)}/dispatch`, {
+        execution_id: attempt.current.id, capability_id: capability.id, input,
+      });
+      setError('');
+      onCreated(body.execution_id);
+    } catch (failure) {
+      // Definitive client rejection did not accept an execution. A lost reply
+      // or failed link keeps the original id and input for safe retries.
+      if (!failure.body?.accepted && [400, 404, 422].includes(failure.status)) attempt.current = null;
+      setError(`${failure.message}${attempt.current ? `；执行 ID：${attempt.current.id}，重试将使用同一 ID` : ''}`);
+    } finally { sending.current = false; setBusy(false); }
+  };
+  if (!capability) return <Alert type="error" title="所选能力已不可读取，请返回重新选择" />;
+  return <Space orientation="vertical" style={{ width: '100%' }}>
+    <Typography.Text strong>{capability.summary || capability.target}</Typography.Text>
+    <Typography.Paragraph>{capability.input_desc}</Typography.Paragraph>
+    {capability.unavailable_reason && <Alert type="error" title={capability.unavailable_reason} />}
+    {error && <Alert type="error" title={error} />}
+    <Input.TextArea aria-label="执行任务" rows={6} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={busy || !!attempt.current} />
+    {!!capability.required_inputs?.length && <Typography.Text>必填参数：{capability.required_inputs.join('、')}</Typography.Text>}
+    <Input.TextArea aria-label="能力输入参数" rows={5} value={raw} onChange={(event) => setRaw(event.target.value)} disabled={busy || !!attempt.current} placeholder="能力需要的命名参数（JSON）" />
+    <Button type="primary" loading={busy} disabled={!!capability.unavailable_reason || !prompt.trim()} onClick={send}>开始执行</Button>
+  </Space>;
 }

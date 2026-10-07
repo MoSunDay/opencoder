@@ -7,6 +7,7 @@ pub(super) mod read;
 mod request;
 pub(crate) mod runtime;
 mod view;
+pub(crate) use api::submit;
 pub use api::Page;
 pub use api::{command, create, events, input, snapshot};
 pub use view::{layer, view};

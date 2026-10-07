@@ -239,8 +239,9 @@ def validate(settings, record, operations):
 
 def nginx(settings, server_port, host_port):
     # No worker_shutdown_timeout: old workers retain accepted requests.
-    def location(port):
-        return f"""location / {{
+    def location(port, route="/", body_limit=""):
+        return f"""location {route} {{
+        {body_limit}
         proxy_pass http://127.0.0.1:{port};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -255,7 +256,9 @@ def nginx(settings, server_port, host_port):
         add_header X-Accel-Buffering no always;
     }}"""
     return f"""map $http_upgrade $opencoder_platform_connection {{ default upgrade; '' close; }}
-server {{ listen {settings.listen}; client_max_body_size 2m; {location(server_port)} }}
+server {{ listen {settings.listen}; client_max_body_size 2m;
+    {location(server_port, '~ ^/api/dag/binaries(?:/[^/]+)?$', 'client_max_body_size 48m;')}
+    {location(server_port)} }}
 server {{ listen 127.0.0.1:{settings.host_port}; client_max_body_size 2m; {location(host_port)} }}
 """
 

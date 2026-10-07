@@ -24,7 +24,11 @@
     -HostAddress '192.168.127.10' -Gateway '192.168.127.1'
 ```
 
-默认目录为 `$env:LOCALAPPDATA\OpenCoder\computer`。安装脚本核对下载文件的哈希，建立独立 Python 环境，生成 `serve.ps1`、`install.log` 和 `install-result.json`。计划任务名称为 `OpenCoder Cua Computer`，服务绑定虚拟机私有网卡的 8000 端口；防火墙规则 `OpenCoder Cua computer server` 只允许指定网关来源。`installed` 表示已安装并请求启动，必须再通过 CLI `doctor` 确认可用。
+保留 `install-windows.ps1` 与同目录的 `windows/` 辅助脚本。默认安装目录为 `$env:LOCALAPPDATA\OpenCoder\computer`。完整清单预检只允许上述固定文件与 `packages/` 下的 wheel，拒绝越界路径、重复目标、重解析点和非法哈希；预检失败不创建安装文件。下载先写临时文件，哈希通过后才替换目标；失败保留已有制品。ZIP/tar 在解压前逐项检查路径，拒绝链接和特殊文件。
+
+安装脚本建立独立 Python 环境，生成 `serve.ps1`、`install.log` 和 `install-result.json`。计划任务名称为 `OpenCoder Cua Computer`，服务绑定虚拟机私有网卡的 8000 端口；防火墙规则 `OpenCoder Cua computer server` 只允许指定网关来源。`installed` 表示已安装并请求启动，必须再通过 CLI `doctor` 确认可用。
+
+路径、归档与下载失败保护使用原生 Windows 测试：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\artifact-tests.ps1`。测试只使用独有临时目录，不创建服务任务或防火墙规则。
 
 通过 Node API 执行安装时，不能用普通后台 `Start-Process` 脱离 API 作业进程。应创建仅用于本次安装的交互式计划任务，执行完成后删除该安装任务，保留 Cua 服务任务。断点重试可复用已校验文件和 Python 环境；已存在的服务任务或防火墙规则需要先检查归属，脚本不会覆盖它们。
 

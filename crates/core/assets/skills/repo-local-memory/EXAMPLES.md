@@ -62,7 +62,7 @@ A shared coordinator module is extracted from a larger module. No new user-visib
 ### Correct Action
 - Create `agents/{new-module}/index.md`.
 - Update related `agents/*`.
-- Update `agents.md` because the logic map changed.
+- Update `repo-memory.md` because the logic map changed.
 - Usually do not update `features/*`.
 - Changelog is optional and depends on whether the extraction is meaningful enough to record.
 
@@ -103,7 +103,7 @@ Only write changelog when the change is meaningful, coherent, or retrieval-worth
 ### Bad
 After adding one changelog entry, the agent updates:
 - `features/index.md`
-- `agents.md`
+- `repo-memory.md`
 - unrelated indexes
 
 ### Why Bad

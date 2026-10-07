@@ -30,7 +30,7 @@ def execute(args, root, env, continuity):
     data = Path(record['runtime_data'])
     identifier = 'dag-' + root.name + '-new-hold'
     resource = publish_hold(env)
-    probe = probes.spec(probes.publish_probe(env.settings, record, env))
+    definition = probes.spec(probes.publish_probe(env.settings, record, env))
     runtime_pid = subprocess.check_output(['systemctl','show',record['runtime_unit'],'-p','MainPID','--value']).strip()
     try:
         env.submit_initial({'id':identifier,'kind':'dag','input':{'definition':{
@@ -45,11 +45,11 @@ def execute(args, root, env, continuity):
             if not rollback:
                 assert active['releases'][record['id']]['server_unit'] != record['server_unit'], 'republish reused a retiring Server'
                 assert active['releases'][record['id']]['host_unit'] != record['host_unit'], 'republish reused a retiring Host'
-            probe = 'dag-' + root.name + '-' + label
-            env.api('/api/executions','POST',{'id':probe,'kind':'dag','input':{'definition':probe}})
-            env.wait(lambda:env.completed(probe),30)
+            probe_id = 'dag-' + root.name + '-' + label
+            env.api('/api/executions','POST',{'id':probe_id,'kind':'dag','input':{'definition':definition}})
+            env.wait(lambda:env.completed(probe_id),30)
             target = Path(active['releases'][active['current']]['runtime_data'])
-            assert (target / 'dag' / probe / 'execution.json').is_file(), 'post-signal task has incorrect owner'
+            assert (target / 'dag' / probe_id / 'execution.json').is_file(), 'post-signal task has incorrect owner'
     finally:
         release_native_gate(data, identifier)
     env.wait(lambda:env.completed(identifier),90)

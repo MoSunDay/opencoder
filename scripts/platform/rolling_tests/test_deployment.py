@@ -215,6 +215,16 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("proxy_next_upstream off", configuration)
         self.assertIn("listen 127.0.0.1:18081", configuration)
 
+    def test_binary_upload_limit_is_scoped_to_server_resource_routes(self):
+        configuration = nginx(self.settings, 19000, 19002)
+        resource_location = configuration.split("location ~ ", 1)[1].split("}", 1)[0]
+        self.assertTrue(resource_location.startswith("^/api/dag/binaries(?:/[^/]+)?$ {"))
+        self.assertIn("client_max_body_size 48m;", resource_location)
+        self.assertIn("proxy_pass http://127.0.0.1:19000;", resource_location)
+        self.assertEqual(configuration.count("client_max_body_size 48m;"), 1)
+        self.assertEqual(configuration.count("client_max_body_size 2m;"), 2)
+        self.assertNotIn("client_max_body_size 48m;", configuration.rsplit("server {", 1)[1])
+
     def test_old_resource_service_is_rejected_before_candidate_or_service_changes(self):
         original = self.operations.http
         def old(base, path, method='GET', body=None):

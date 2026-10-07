@@ -27,6 +27,9 @@ class AdapterTests(unittest.TestCase):
                     nginx.assert_called_once_with('-t')
                 self.assertEqual(request(control.path, 'output',
                     ['systemctl', 'show', 'nginx', '-p', 'MainPID', '--value']), '12345\n')
+                with patch('rolling.io.ingress.snapshot', return_value=['private-worker']) as snapshot:
+                    self.assertEqual(operations.ingress_workers(), ['private-worker'])
+                    snapshot.assert_called_once_with(12345)
                 with self.assertRaisesRegex(RuntimeError, 'private Nginx PID'):
                     request(control.path, 'output', ['systemctl', 'show', 'nginx', '-p', 'ActiveState'])
             finally:

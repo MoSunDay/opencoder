@@ -164,6 +164,12 @@ class Fixture:
             raise TimeoutError('fixture wait failed')
         return result
 
+    def ingress_workers(self):
+        return [{'pid': 1, 'start_ticks': 1}]
+
+    def ingress_switched(self, workers):
+        return True
+
     def patches(self):
         stack = ExitStack()
         stack.enter_context(patch.object(flow.manifest, 'verify', return_value=self.candidate))

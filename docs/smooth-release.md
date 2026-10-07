@@ -158,4 +158,6 @@ Ontology 备份先取得 ontology.db 快照，再复制数据库记录的实际�
 
 首次迁移完成后，使用 `python3 scripts/acceptance/smooth_release/live.py --config <现有配置> --bundle <下一兼容版本包>` 做真实模型验收。该命令创建专用 TODO 依赖链和长原生二进制任务，运行正式发布命令，核对原 Runtime/Shell 进程、新任务归属和 SSE 游标，然后持续提交探针观察至少 900 秒。验收失败也只释放自身等待信号，保留执行与证据，不删除数据库或取消任务。应提前构建好下一版本包。
 
-加入 `--signal` 使用 Server 信号发布；两版均支持信号时，再加入 `--signal-roundtrip`，在新旧长任务仍运行时执行发布、回滚、再发布。验收脚本应由独立 systemd 作业运行，避免终端退出中断观察。独立信号失败演练入口为 `scripts/acceptance/signal_release/main.py`，验证真实 USR1/USR2、重复信号、失败回执和 Server 继续服务。
+Runtime 使用私有挂载时，宿主看到的 `workspace` 可能只是空挂载点。当前 `release_native_gate` 文件辅助函数不跨挂载空间；独立验收作业须按任务所属 Runtime，通过 `nsenter --target <Runtime PID> --mount --root --wd=/ -- ...` 在正确视图中调用它。仅切换 `--mount` 仍可能沿用宿主的根目录视图。操作只限本次验收创建的等待标记，失败日志与复验回执均须保留。
+
+加入 `--signal` 使用 Server 信号发布；两版均支持信号时，再加入 `--signal-roundtrip`，在新旧长任务仍运行时执行发布、回滚、再发布。验收脚本应由独立 systemd 作业运行，避免终端退出中断观察。独立信号失败演练入口为 `scripts/acceptance/signal_release/main.py --bin-dir <已构建二进制目录> --nginx <nginx路径> --rootfs <配套原生镜像>`，验证真实 USR1/USR2、重复信号、失败回执和 Server 继续服务。

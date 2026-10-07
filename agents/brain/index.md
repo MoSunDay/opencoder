@@ -1,4 +1,4 @@
-Commit: 9d82393d5ad376511b387d089199a4d845f22b08
+Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 # brain 模块
 
@@ -23,4 +23,4 @@ Brain 管理的执行各有工作区，见 [工作区解析](../../crates/worker
 
 新计划和运行入口要求 schema 7；历史 schema 4/5/6 只读；`v4/` 是现存实现目录名，历史读取逻辑保留在代码中。历史数据清理使用 `scripts/maintenance/brain_cleanup/` 的审阅清单、行摘要校验、备份与重复复核；清理范围必须同时覆盖运行数据、Server 索引及 Host 休眠索引，避免节点同步恢复已删除的 ID。清理不在存储初始化中自动执行。
 
-[运行协议](../../docs/brain-orchestration.md) · [工作台](../../features/brain/index.md)
+[调度规则](../../rules/06-brain-scheduling-contract.md) · [运行协议](../../docs/brain-orchestration.md) · [工作台](../../features/brain/index.md)

@@ -72,7 +72,10 @@ def create(settings, output, original, scope):
         return metadata
     output.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix='.maintenance-incomplete-', dir=output.parent))
-    backup.snapshot(settings, stage / 'data', stopped=True)
+    # Maintenance mutates shared Server/resource databases and Host ownership.
+    # Existing execution trees stay in place, stopped, under their old Runtime;
+    # recovery deliberately never replaces them (see restore.data).
+    backup.snapshot(settings, stage / 'data', stopped=True, runtime_data=False)
     paths = [*managed_units(settings, original, scope), settings.nginx_include,
              settings.state_dir / 'services', settings.state_dir / 'resources',
              settings.state_dir / 'host/deployment.json']

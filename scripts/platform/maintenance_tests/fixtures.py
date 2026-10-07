@@ -125,11 +125,9 @@ class Fixture:
             return '{}'
         unit = args[2]
         active = 'active' if unit in self.active else 'inactive'
-        if '-p' in args and 'LoadState' in args:
-            return 'loaded'
         if '--value' in args:
-            return active
-        return f'ActiveState={active}\nMainPID={1 if active == "active" else 0}\nUnitFileState=enabled\n'
+            return 'loaded' if 'LoadState' in args else active
+        return f'LoadState=loaded\nActiveState={active}\nMainPID={1 if active == "active" else 0}\nUnitFileState=enabled\n'
 
     def http(self, base, path, method='GET', body=None):
         self.calls.append((base, path, method))

@@ -57,7 +57,7 @@ def main():
                   'services': 'real systemd units with remapped private service dependencies',
                   'real': ['Nginx', 'NFS', 'runc', 'old Server/Host/Runtime/resources', 'candidate Server/Host/Runtime']},
                'limitations': ['Only this run-owned systemd units, mounts, ports, credentials and data are changed.',
-                  'Schema 31 -> 32 is covered separately by Store catalog_maintenance and project_tags tests; this harness reports the actual old schema.',
+                  'Schema 31 -> 33 is covered separately by Store catalog_maintenance and project_tags tests; this harness reports the actual old schema.',
                   'This fixture creates its own token/data/config and never reads production state, tokens or config.']}
     operations = control = None
     started = time.monotonic()

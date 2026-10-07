@@ -36,4 +36,4 @@ done
 printf 'root:x:0:0:root:/tmp:/bin/bash\n' > "$out/etc/passwd"
 printf 'root:x:0:\n' > "$out/etc/group"
 printf 'hosts: files dns\n' > "$out/etc/nsswitch.conf"
-chroot "$out" /bin/bash -lc 'printf "native shell ready\n"'
+run_in_rootfs "$out" /bin/bash -lc 'printf "native shell ready\n"'

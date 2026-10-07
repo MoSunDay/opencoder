@@ -52,7 +52,6 @@ pub mod redact;
 mod schedule;
 #[path = "config/runtime/skill.rs"]
 mod skill;
-mod storage;
 
 pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 
@@ -73,7 +72,6 @@ pub use schedule::{
     ScheduleOverlap, SchedulesConfig,
 };
 pub use skill::SkillConfig;
-pub use storage::{StorageBackend, StorageConfig};
 
 use model_guard::warn_if_suspicious_model;
 
@@ -218,10 +216,6 @@ pub struct Config {
     /// User-configurable keyboard shortcuts (see [`KEYMAP_INFO`]).
     #[serde(default)]
     pub keymap: KeymapConfig,
-    /// Project-data storage backend selection (libsql default; optional
-    /// mysql/starrocks for project tables only). DSNs may use `{VAR}` refs.
-    #[serde(default)]
-    pub storage: StorageConfig,
     /// opencoder-team workspace root: per-topic scratch/checkpoint area
     /// shared by the multi-node topic fan-out. Default `<data_root>/team`.
     #[serde(default = "default_team_root")]
@@ -337,7 +331,6 @@ impl Default for Config {
             schedules: SchedulesConfig::default(),
             enable_tmux_session: None,
             keymap: KeymapConfig::default(),
-            storage: StorageConfig::default(),
             team_root: default_team_root(),
             team_max_turns: default_team_max_turns(),
             team_max_sub_turns: default_team_max_sub_turns(),

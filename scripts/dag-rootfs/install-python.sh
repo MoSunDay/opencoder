@@ -4,6 +4,7 @@ set -euo pipefail
 out="${1:?rootfs directory required}"
 [ -d "$out" ] || { echo "rootfs directory missing" >&2; exit 2; }
 out="$(cd "$out" && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 /usr/bin/python3 - "$out" <<'PY'
 import os
 import pathlib
@@ -54,4 +55,4 @@ if guest_stdlib != destination:
         guest_stdlib.symlink_to(os.path.relpath(destination, guest_stdlib.parent))
 PY
 # Verify the same imports used by the collector inside the actual rootfs.
-chroot "$out" /usr/bin/python3 -I -c 'import hashlib,json,pathlib,ssl,tempfile,urllib.request; assert ssl.OPENSSL_VERSION'
+run_in_rootfs "$out" /usr/bin/python3 -I -c 'import hashlib,json,pathlib,ssl,tempfile,urllib.request; assert ssl.OPENSSL_VERSION'

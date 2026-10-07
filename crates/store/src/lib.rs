@@ -5,12 +5,9 @@ pub mod jsonl;
 pub mod libsql_store;
 pub mod project;
 pub mod project_executor_spec;
-pub mod project_factory;
 pub mod project_types;
 pub mod schedule_types;
 pub mod session_store;
-#[cfg(any(feature = "mysql", feature = "starrocks"))]
-pub mod sql_store;
 pub mod store;
 pub mod team_types;
 pub mod todo_types;
@@ -28,7 +25,6 @@ pub use bundle::{
 pub use jsonl::JsonlStore;
 pub use libsql_store::LibsqlStore;
 pub use project::ProjectStore;
-pub use project_factory::open_project_store;
 pub use project_types::{
     ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
     ProjectInitiativePatch, ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectRunText,

@@ -100,7 +100,7 @@ def advance(settings, bundle, journal, operations, seconds):
         from .planning import capacity
         capacity.check(capacity.plan(settings, record['manifest'], Path(state['scope']['rootfs']),
                                      state['original'], state['scope']))
-        gates.close(settings, old, operations)
+        gates.close(settings, old, operations, seconds)
         operations.http(endpoint(old), '/api/admin/drain', 'POST', {})
         checkpoint(journal, 'waiting')
     if state['stage'] == 'waiting':
@@ -148,7 +148,7 @@ def advance(settings, bundle, journal, operations, seconds):
         journal.save()
         operations.run('systemctl', 'start', record['server_unit'])
         operations.wait(lambda: operations.http(endpoint(record), '/api/health'), seconds)
-        gates.close(settings, record, operations)
+        gates.close(settings, record, operations, seconds)
         operations.http(host_url, '/commit-host', 'POST', {})
         checkpoint(journal, 'verifying')
     if state['stage'] == 'verifying':
@@ -161,7 +161,7 @@ def advance(settings, bundle, journal, operations, seconds):
         journal.data.update(current=record['id'], candidate=record['id'])
         journal.save()
         operations.wait(lambda: operations.http(endpoint(record), '/api/admin/drain', 'DELETE'), seconds)
-        units.switch_ingress(settings, record, operations)
+        gates.reopen(settings, record, operations, seconds)
         checkpoint(journal, 'public')
     if state['stage'] == 'public':
         probes.public(settings, record, operations, seconds)
@@ -218,12 +218,14 @@ def rollback(settings, operations, seconds=90):
             checkpoint(journal, 'restore_ingress')
         if state['stage'] == 'restore_ingress':
             if metadata:
-                restore.ingress(settings, backup, metadata, operations)
+                restore.ingress(settings, backup, metadata, operations, seconds)
             elif state['scope']['nginx'] is not None:
                 from ..state import atomic_bytes
+                workers = operations.ingress_workers()
                 atomic_bytes(settings.nginx_include, base64.b64decode(state['scope']['nginx']), 0o644)
                 operations.run('nginx', '-t')
                 operations.run('systemctl', 'reload', 'nginx')
+                operations.wait(lambda: operations.ingress_switched(workers), seconds)
             operations.wait(lambda: operations.http(settings.public_url, '/api/health'), seconds)
             operations.http(settings.public_url, '/api/project/overview')
             # The saved journal is restored only after the old service answers.

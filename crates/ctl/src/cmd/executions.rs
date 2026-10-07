@@ -41,6 +41,8 @@ pub enum ExecCmd {
     },
     /// Inspect one execution by id.
     Get { id: String },
+    /// Read the current conclusion from the owning node.
+    Result { id: String },
     /// Send a runtime command (cancel/steer/...) to an execution.
     #[command(alias = "command")]
     Cmd {
@@ -160,6 +162,10 @@ pub fn plan(sub: &ExecCmd) -> Result<RequestPlan> {
         ExecCmd::Create { json } => {
             RequestPlan::post("/api/executions").with_opt_body(parse_body(Some(json))?)
         }
+        ExecCmd::Result { id } => RequestPlan::get(format!(
+            "/api/executions/{}/result",
+            crate::http::urlencode(id)
+        )),
         ExecCmd::Get { id } => RequestPlan::get(format!("/api/executions/{id}")),
         ExecCmd::Cmd { id, action, json } => RequestPlan::post(format!(
             "/api/executions/{id}/commands"
@@ -244,5 +250,20 @@ async fn run_artifact(ctx: &Ctx, request: RequestPlan, dest: &std::path::Path) -
             out::fail_transport(&format!("{error:#}"));
             Ok(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_reads_the_existing_execution_without_creating_a_project_run() {
+        let request = plan(&ExecCmd::Result {
+            id: "agent-shared".into(),
+        })
+        .unwrap();
+        assert_eq!(request.path, "/api/executions/agent-shared/result");
+        assert_eq!(request.method, reqwest::Method::GET);
     }
 }

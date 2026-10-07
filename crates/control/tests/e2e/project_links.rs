@@ -1,3 +1,5 @@
+mod dispatch;
+mod operators;
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use reqwest::Method;
 use serde_json::json;
@@ -5,7 +7,7 @@ use serde_json::json;
 use crate::support::Harness;
 
 #[tokio::test]
-async fn assignment_link_is_idempotent_and_records_kind_name_and_result() {
+async fn assignment_link_is_idempotent_and_only_records_execution_references() {
     let harness = Harness::new().await;
     let (status, todo) = harness
         .req(
@@ -38,15 +40,9 @@ async fn assignment_link_is_idempotent_and_records_kind_name_and_result() {
     assert_eq!(assignments.len(), 1);
     assert_eq!(assignments[0]["kind"], "agent");
     assert_eq!(assignments[0]["execution_id"], "agent-linked");
-    assert_eq!(body["execution_ids"], json!(["agent-linked"]));
-    harness
-        .state
-        .projects
-        .finish_todo_assignment(todo_id, "agent-linked", "complete", Some("done"))
-        .await
-        .unwrap();
-    let (_, body) = harness.req(Method::GET, &path, None).await;
-    assert_eq!(body["assignments"][0]["result_md"], "done");
+    assert!(body.get("execution_ids").is_none());
+    assert!(assignments[0].get("result_md").is_none());
+    assert!(assignments[0].get("sync_state").is_none());
     let (_, overview) = harness
         .req(Method::GET, "/api/project/overview", None)
         .await;
@@ -57,7 +53,7 @@ async fn assignment_link_is_idempotent_and_records_kind_name_and_result() {
         .find(|row| row["id"] == todo_id)
         .unwrap();
     assert_eq!(board["latest_assignment"]["execution_id"], "agent-linked");
-    assert_eq!(board["latest_assignment"]["has_result"], true);
+    assert!(board["latest_assignment"].get("has_result").is_none());
 }
 
 #[tokio::test]

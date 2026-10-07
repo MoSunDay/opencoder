@@ -19,7 +19,7 @@ def verify(bundle):
     compatibility = manifest.get("compatibility", {})
     for key in ("protocol", "data_format"):
         limits = compatibility.get(key, {})
-        supported = (1,) if key == "protocol" else (1, 2, 3)
+        supported = (1,) if key == "protocol" else (1, 2, 3, 4)
         if limits.get("min") not in supported or limits.get("max") != limits.get("min"):
             raise ValueError(f"unsupported handoff {key}")
     info = _installer.build_info(bundle / "bin/opencoder-agent")

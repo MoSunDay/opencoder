@@ -2,29 +2,8 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
-    if from < 31 {
-        add_column_if_absent(
-            conn,
-            "project_todo_executions",
-            "kind",
-            "TEXT NOT NULL DEFAULT ''",
-        )
-        .await?;
-        add_column_if_absent(
-            conn,
-            "project_todo_executions",
-            "name",
-            "TEXT NOT NULL DEFAULT ''",
-        )
-        .await?;
-        add_column_if_absent(conn, "project_todo_executions", "result_md", "TEXT").await?;
-        add_column_if_absent(
-            conn,
-            "project_todo_executions",
-            "sync_state",
-            "TEXT NOT NULL DEFAULT 'pending'",
-        )
-        .await?;
+    if from < 33 {
+        super::project_links::migrate(conn).await?;
     }
     if from < 30 {
         let add_board_status = !column_exists(conn, "project_todos", "board_status").await?;

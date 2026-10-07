@@ -10,6 +10,9 @@ use crate::SessionState;
 
 fn eligible_as(parent: &SessionState, kind: AgentKind) -> bool {
     parent.config.local_memory
+        // External Codex owns its task lifecycle and model credentials. Starting
+        // an Act child here silently switches harness and may have no provider.
+        && parent.harness.harness != opencoder_core::harness::Harness::Codex
         && kind == AgentKind::Act
         && parent.agent.mode == AgentMode::Primary
         && parent.agent.name != "workflow"

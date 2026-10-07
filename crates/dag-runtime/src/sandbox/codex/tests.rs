@@ -59,9 +59,10 @@ fn guest_settings_keep_profile_and_credentials_private() {
             ("HTTPS_PROXY", "host-proxy"),
             ("OPENAI_API_KEY", "fixture-key"),
         ]),
+        Path::new("/node/login"),
     )
     .unwrap();
-    assert_eq!(guest.envs["CODEX_HOME"], HOME_MOUNT);
+    assert_eq!(guest.envs["CODEX_HOME"], "/node/login");
     assert_eq!(guest.envs["HOME"], GUEST_HOME);
     assert_eq!(guest.envs["HTTPS_PROXY"], "profile-proxy");
     assert_eq!(guest.envs["OPENAI_API_KEY"], "fixture-key");
@@ -122,6 +123,10 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
     .unwrap();
     let launch = resolve(&config, "check", &rootfs).unwrap().unwrap();
     assert_eq!(launch.home, home);
+    assert_eq!(
+        launch.runtime.envs["CODEX_HOME"],
+        home.display().to_string()
+    );
     assert_eq!(launch.runtime.model.as_deref(), Some("selected-model"));
     let run = root.join("run");
     std::fs::create_dir_all(&run).unwrap();
@@ -141,7 +146,7 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
     let mounts = value["mounts"].as_array().unwrap();
     let login = mounts
         .iter()
-        .find(|m| m["destination"] == HOME_MOUNT)
+        .find(|m| m["destination"] == json!(home))
         .unwrap();
     assert_eq!(login["source"], json!(home));
     assert!(login["options"].as_array().unwrap().contains(&json!("rw")));

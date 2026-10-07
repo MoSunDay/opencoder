@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 # project 模块
 
@@ -12,5 +12,6 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - `crates/control/src/api/project_links.rs`、`crates/control/src/scheduler/project_assignments.rs` — 关联既有执行并从节点执行结果回写结论；Agent 和 Operator 均读取节点写出的助手正文
 
 ## 相关
+- [项目模块约定](../../rules/07-project-module-contract.md) — 归属、看板、执行关联、结论回写与进度规则
 - [brain](../brain/index.md)、[control](../control/index.md)
 - [dag-runtime](../dag-runtime/index.md)、[执行约定](../../rules/04-dag-execution-contract.md)

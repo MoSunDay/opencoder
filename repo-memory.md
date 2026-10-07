@@ -1,4 +1,4 @@
-Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
+Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 # OpenCoder 逻辑地图
 
@@ -28,7 +28,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 单 DAG 单容器、共享写时复制工作区与原生步骤调度；Server 不链接。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
 - [agents/project](agents/project/index.md) — 项目、专项、TODO 与 Tag 数据；旧执行链独立保留。
-- [agents/brain](agents/brain/index.md) — 能力库、版本化 step/连线计划、唯一 v4 分层调度与嵌套计划。
+- [agents/brain](agents/brain/index.md) — 能力库、schema 7 里程碑计划、分层调度与嵌套计划。
 - [agents/agents](agents/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
 - [agents/team](agents/team/index.md) — 团队目录与消息扇出运行时。
 - [agents/control](agents/control/index.md) — 平台控制面：节点调度、五字段执行索引。
@@ -47,3 +47,5 @@ OpenCoder 能力入口见 [features/index.md](features/index.md)。
 - [rules/02-regression-gate.md](rules/02-regression-gate.md) — 迭代结束全量回归 + changelog 附测试清单
 - [rules/03-test-pyramid.md](rules/03-test-pyramid.md) — 测试分层（unit/integration/e2e）
 - [rules/04-dag-execution-contract.md](rules/04-dag-execution-contract.md) — DAG 单节点单容器与原生步骤执行约定
+- [rules/06-brain-scheduling-contract.md](rules/06-brain-scheduling-contract.md) — 大脑整层调度、结果评估、返工与恢复约定
+- [rules/07-project-module-contract.md](rules/07-project-module-contract.md) — 项目、专项、TODO 的归属、看板、执行关联与进度约定

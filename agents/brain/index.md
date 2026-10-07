@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 
 # brain 模块
 
@@ -20,6 +20,7 @@ Brain 管理的执行各有工作区，见 [工作区解析](../../crates/worker
 - `crates/control/src/api/brain_runs/v4/`：准入、派发、事件转交及索引视图。
 - `crates/worker/src/brain/v4/`：节点投影、恢复、模型调度与确认。
 - `crates/brain/tests/milestone.rs` 与 `crates/brain/tests/milestone/`：图约束、层屏障、回退与终态；`crates/worker/tests/brain_scheduler_v4.rs`：节点调度；`crates/worker/tests/brain_nested.rs`：嵌套计划链路。
+- [CI 入口](../../scripts/ci/brain.py) 分阶段准备同版本原生镜像，并验证项目恢复、里程碑、调度、Server 重启和真实浏览器；编译与原生运行分开处理权限，临时目录避开 runner 私有父目录，失败保留原始错误和页面证据。运行条件见 [验收说明](../../scripts/acceptance/brain/README.md)。
 
 新计划和运行入口要求 schema 7；历史 schema 4/5/6 只读；`v4/` 是现存实现目录名，历史读取逻辑保留在代码中。历史数据清理使用 `scripts/maintenance/brain_cleanup/` 的审阅清单、行摘要校验、备份与重复复核；清理范围必须同时覆盖运行数据、Server 索引及 Host 休眠索引，避免节点同步恢复已删除的 ID。清理不在存储初始化中自动执行。
 

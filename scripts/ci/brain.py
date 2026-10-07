@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 REPO = Path(__file__).resolve().parents[2]
 SUITES = {
@@ -100,9 +101,9 @@ def native_command(executable, arguments, env):
 
 
 def native_temp_owner(temp, owner, recursive=False):
-    if os.geteuid() != 0:
-        subprocess.run(['sudo', '-n', '--', 'chown', *(['-R'] if recursive else []),
-                        owner, str(temp)], check=True)
+    prefix = ['sudo', '-n', '--'] if os.geteuid() != 0 else []
+    subprocess.run([*prefix, 'chown', *(['-R'] if recursive else []),
+                    owner, str(temp)], check=True)
 
 
 def preflight(rootfs):
@@ -137,14 +138,18 @@ def run_suite(suite, output):
                          output / f'{suite}-build.log', target=target)
     if not executables or any(not Path(path).is_file() for path in executables):
         raise RuntimeError(f'cargo did not produce the {suite} test executables')
-    temp = output / f'{suite}-tmp'
-    temp.mkdir(exist_ok=True)
+    archive = output / f'{suite}-tmp'
+    archive.mkdir(exist_ok=True)
+    if suite in NATIVE:
+        preflight(output / 'rootfs')
+    # Capability-free Chromium children cannot traverse runner-private parents,
+    # even when their immediate temporary directory belongs to root.
+    temp = (Path(tempfile.mkdtemp(prefix=f'oc-brain-{suite}-', dir='/tmp'))
+            if suite in NATIVE else archive)
     env = {**os.environ, 'TMPDIR': str(temp), 'RUST_BACKTRACE': '1',
            'DAG_TEST_ROOTFS': str(output / 'rootfs')}
     if suite == 'browser':
         env['DEBUG'] = 'pw:browser'
-    if suite in NATIVE:
-        preflight(output / 'rootfs')
     try:
         if suite in NATIVE:
             # Chromium drops capabilities: root still needs to own TMPDIR to
@@ -165,6 +170,7 @@ def run_suite(suite, output):
         if suite in NATIVE:
             # Only this suite's temporary evidence can be owned by root.
             native_temp_owner(temp, f'{os.getuid()}:{os.getgid()}', recursive=True)
+            shutil.move(str(temp), archive / temp.name)
 
 
 def main():

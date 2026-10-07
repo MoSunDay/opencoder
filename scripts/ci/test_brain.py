@@ -13,9 +13,12 @@ class BrainRunnerTests(unittest.TestCase):
     def test_failed_native_test_restores_evidence_ownership(self):
         events = []
 
-        def logged(command, *_args, **_kwargs):
+        def logged(command, _path, env=None, **_kwargs):
             if command[0] == 'cargo':
                 return ['/bin/true']
+            temp = Path(env['TMPDIR'])
+            self.assertEqual(temp.parent, Path('/tmp'))
+            (temp / 'failure.txt').write_text('original browser error')
             events.append('test')
             raise subprocess.CalledProcessError(17, command)
 
@@ -30,6 +33,9 @@ class BrainRunnerTests(unittest.TestCase):
                   patch.object(brain.os, 'getgid', return_value=1001)):
                 with self.assertRaises(subprocess.CalledProcessError):
                     brain.run_suite('browser', Path(directory))
+            evidence = list(Path(directory).glob('browser-tmp/*/failure.txt'))
+            self.assertEqual(len(evidence), 1)
+            self.assertEqual(evidence[0].read_text(), 'original browser error')
         self.assertEqual(events, [('0:0', False), 'test', ('1001:1001', True)])
 
     def test_browser_process_failure_survives_a_long_rust_backtrace(self):

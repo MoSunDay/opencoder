@@ -65,6 +65,7 @@ jobs:
       - name: CI runner tests
         run: |
           python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+          python3 -m unittest discover -s scripts/acceptance/brain/scheduling/tests -v
           node --test scripts/acceptance/brain/failure.test.js
       - name: Prepare matching native image
         run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" prepare

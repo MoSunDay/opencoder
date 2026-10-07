@@ -82,7 +82,7 @@ def native_command(executable, arguments, env):
                str(executable), *arguments]
     if os.geteuid() != 0:
         keys = ('PATH', 'DAG_TEST_ROOTFS', 'TMPDIR', 'CHROME_PATH',
-                'RUST_BACKTRACE', 'RUST_TEST_THREADS')
+                'RUST_BACKTRACE', 'RUST_TEST_THREADS', 'DEBUG')
         command = ['sudo', '-n', '--', 'env',
                    *(f'{key}={env[key]}' for key in keys if key in env), *command]
     return command
@@ -124,6 +124,8 @@ def run_suite(suite, output):
     temp.mkdir(exist_ok=True)
     env = {**os.environ, 'TMPDIR': str(temp), 'RUST_BACKTRACE': '1',
            'DAG_TEST_ROOTFS': str(output / 'rootfs')}
+    if suite == 'browser':
+        env['DEBUG'] = 'pw:browser'
     if suite in NATIVE:
         preflight(output / 'rootfs')
     try:

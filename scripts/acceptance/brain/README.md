@@ -15,7 +15,7 @@ Linux 还需 `runc`、`nfs-common`、C 编译器、`unshare` 及可免交互使�
 
 `project` 阶段执行项目运行模块的全部单元与集成测试，其中 DAG 恢复用例也需要配套镜像和挂载权限。纯 libsql 存储测试由独立的 `project-store-tests` 工作流执行。
 
-每一步保存独立的构建与测试日志；截图和 HTML 位于输出目录的 `browser-tmp/opencoder-brain-v7-browser-*`。CI 无论成功失败均上传这些证据，保留退出码和失败摘要。
+每一步保存独立的构建与测试日志；截图和 HTML 位于输出目录的 `browser-tmp/opencoder-brain-v7-browser-*`。CI 无论成功失败均上传这些证据，保留退出码和失败摘要。浏览器阶段记录 Chromium 进程日志；即使页面崩溃、截图或 HTML 读取失败，`failure.json` 和控制台仍保留原始异常。
 
 该场景从工作台进入计划库，在画布配置两层里程碑：Coding 层并行绑定 Agent 和 Operator，测试层绑定 Operator。关闭再打开草稿，提交 schema 7 计划，核验保存时自动补齐前进和回退路径，再选择节点发布运行。确定性模型在首轮测试后回退 Coding，第二轮重新执行两层并完成。
 

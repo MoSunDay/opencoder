@@ -90,10 +90,17 @@ def release_native_gate(runtime_root, identifier, seconds=120):
         if journal.is_file():
             record = json.loads(journal.read_text())
             run = Path(record['annotations']['dag_parent']) / identifier
-            gate = run / 'workspace/hold/release'
-            if gate.parent.is_dir():
-                gate.touch()
-                return
+            container = run / 'container.json'
+            if container.is_file():
+                identity = json.loads(container.read_text())['id']
+                # Runtime services own a private mount namespace. Release the
+                # fixture through its container, where the overlay is mounted.
+                result = subprocess.run(['runc', '--root', str(run / 'runc-state'),
+                    'exec', identity, '/bin/sh', '-c',
+                    'test -d /workspace/hold && : > /workspace/hold/release'],
+                    capture_output=True, timeout=10)
+                if result.returncode == 0:
+                    return
         if time.monotonic() >= deadline:
             raise TimeoutError('cannot release unconfirmed native admission: ' + identifier)
         time.sleep(.1)

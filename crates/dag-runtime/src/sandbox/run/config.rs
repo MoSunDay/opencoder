@@ -1,4 +1,7 @@
 use super::mounts;
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;
 use anyhow::{ensure, Context, Result};
 use opencoder_dag::{DagClaimedRun, StepKind};
 use serde_json::{json, Value};
@@ -99,7 +102,7 @@ pub(super) fn render(
             false,
         )?;
         if let StepKind::Agent { agent, .. } = step.kind.executable() {
-            if let Some(mut launch) =
+            if let Some(launch) =
                 super::super::codex::resolve(config, agent.as_deref().unwrap_or("act"), &rootfs)?
             {
                 use std::os::unix::fs::MetadataExt;
@@ -107,23 +110,25 @@ pub(super) fn render(
                     std::fs::metadata(&launch.home)?.uid() == agent_uid,
                     "Codex credentials must belong to the executing node user"
                 );
-                let guest = format!("/run/opencoder-private/codex/{}/home", step.name);
-                launch
-                    .runtime
-                    .envs
-                    .insert("CODEX_HOME".into(), guest.clone());
-                if let Some(settings) = &mut launch.runtime.codex {
-                    settings.envs = launch.runtime.envs.clone();
-                }
                 let private = root.join("private/codex").join(&step.name);
                 std::fs::create_dir_all(&private)?;
-                std::fs::create_dir_all(private.join("home"))?;
                 mounts::permissions(&private, agent_uid, 0o700)?;
                 opencoder_core::atomic_write(
                     &private.join("launch.json"),
                     &serde_json::to_vec(&launch.runtime)?,
                 )?;
-                bind(&rootfs, &mut mounts, &launch.home, &guest, true)?;
+                let guest = launch.home.to_str().context("Codex home must be UTF-8")?;
+                ensure!(
+                    !mounts.iter().any(|mount| {
+                        let destination = Path::new(mount["destination"].as_str().unwrap_or("/"));
+                        (destination == launch.home && mount["source"] != json!(launch.home))
+                            || (destination != launch.home && destination.starts_with(&launch.home))
+                    }),
+                    "Codex home must not shadow a runtime mount"
+                );
+                if !mounts.iter().any(|mount| mount["destination"] == guest) {
+                    bind(&rootfs, &mut mounts, &launch.home, guest, true)?;
+                }
             }
         }
     }

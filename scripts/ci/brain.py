@@ -99,6 +99,12 @@ def native_command(executable, arguments, env):
     return command
 
 
+def native_temp_owner(temp, owner, recursive=False):
+    if os.geteuid() != 0:
+        subprocess.run(['sudo', '-n', '--', 'chown', *(['-R'] if recursive else []),
+                        owner, str(temp)], check=True)
+
+
 def preflight(rootfs):
     for name in ('runc', 'mount.nfs', 'unshare', 'cc', 'node'):
         if shutil.which(name) is None:
@@ -140,6 +146,10 @@ def run_suite(suite, output):
     if suite in NATIVE:
         preflight(output / 'rootfs')
     try:
+        if suite in NATIVE:
+            # Chromium drops capabilities: root still needs to own TMPDIR to
+            # create shared memory in a directory originally made by the runner.
+            native_temp_owner(temp, '0:0')
         count = 0
         for index, executable in enumerate(executables):
             command = [executable, *arguments]
@@ -152,10 +162,9 @@ def run_suite(suite, output):
             'suite': suite, 'executables': executables, 'passed': count, 'exit_code': 0,
         }, indent=2) + '\n')
     finally:
-        if suite in NATIVE and os.geteuid() != 0:
+        if suite in NATIVE:
             # Only this suite's temporary evidence can be owned by root.
-            subprocess.run(['sudo', '-n', '--', 'chown', '-R',
-                            f'{os.getuid()}:{os.getgid()}', str(temp)], check=True)
+            native_temp_owner(temp, f'{os.getuid()}:{os.getgid()}', recursive=True)
 
 
 def main():

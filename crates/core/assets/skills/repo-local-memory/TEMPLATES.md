@@ -47,7 +47,7 @@ Commit: <documentation baseline git commit sha>
 
 ---
 
-## Template: `agents.md`
+## Template: `repo-memory.md`
 
 ```md
 Commit: <documentation baseline git commit sha>

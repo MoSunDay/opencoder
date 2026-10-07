@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const HANDOFF_PROTOCOL: u32 = 1;
-// Ontology storage and its independent resource export require a maintenance upgrade.
-pub const HANDOFF_DATA_FORMAT: u32 = 3;
+// Project schema v33 removes cached result columns. Older Servers cannot
+// read or reopen the upgraded store, so the upgrade requires maintenance.
+pub const HANDOFF_DATA_FORMAT: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,12 +60,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_project_release_requires_maintenance_from_previous_format() {
+    fn project_reference_schema_requires_maintenance_from_previous_formats() {
         let current = ReleaseCompatibility::current();
+        assert_eq!(current.data_format, CompatibleRange { min: 4, max: 4 });
         assert!(current.compatible(&current));
-        let mut previous = current.clone();
-        previous.data_format = CompatibleRange { min: 1, max: 1 };
-        assert!(!current.compatible(&previous));
-        assert!(!previous.compatible(&current));
+        for version in 1..=3 {
+            let mut previous = current.clone();
+            previous.data_format = CompatibleRange {
+                min: version,
+                max: version,
+            };
+            assert!(!current.compatible(&previous));
+            assert!(!previous.compatible(&current));
+        }
     }
 }

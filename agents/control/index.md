@@ -1,4 +1,4 @@
-Commit: 9d82393d5ad376511b387d089199a4d845f22b08
+Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 # control 模块
 
@@ -11,7 +11,8 @@ Commit: 9d82393d5ad376511b387d089199a4d845f22b08
 - `src/api/executions/`、`src/role_gate.rs` — 派发去重、选点冻结、回执与角色门禁；执行索引五字段协议
 - `src/api/settings/` — Harness 配置与节点调度配置（Maintenance RPC 转发）
 - `src/api/catalog.rs`、`src/api/compat/`、`src/api/project.rs` — 节点/定义目录、兼容路由与 Project 中继；项目、专项、TODO、Tag 处理器复用 Web 实现并经 `src/routes.rs` 装配
-- `src/api/project_links.rs`、`src/scheduler/project_assignments.rs` — TODO 关联 Agent、Operator、Team、DAG、TODO 工作流或 Brain 执行；定期从所属节点读取产物，回写独立结论及同步状态
+- [api/project_links.rs](../../crates/control/src/api/project_links.rs)、[api/project_links/](../../crates/control/src/api/project_links/) — TODO 保存执行与能力引用；`dispatch` 以稳定执行 ID 和既有 Fleet 回执复用 Agent、Operator、Team、DAG、TODO 工作流及保存的 Brain 计划入口，重试不能改变输入或能力。`reference` 按真实准入记录核验能力，不信任任意请求标签。
+- [api/executions/results/](../../crates/control/src/api/executions/results/) — `GET /api/executions/:id/result` 从所属节点即时读取有界结论，不在 Server 缓存；失败、离线与内容省略显式返回。
 - `src/api/compat/dag_instances.rs`、`src/api/stream.rs`、`src/api/streaming/` — 实例中继与 SSE（v4 运行沿用同一 `/events` 通道，负载由节点按运行版本给出）
 - `src/api/brain_runs/` — schema 7 计划与运行；`plan_capabilities.rs` 注册保存计划版本能力，`v4/` 实现目录负责准入、派发、读取和事件确认。
 - [api/brain_runs/tui.rs](../../crates/control/src/api/brain_runs/tui.rs) — `GET /api/tui/agent-capabilities` 复用能力库目录，仅投影可用 Agent/Operator 的 ID、种类、目标和摘要；User 可读，不返回定义与 Harness 私有设置。

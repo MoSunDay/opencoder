@@ -98,9 +98,7 @@ impl ProjectStore for SqlProjectStore {
         project_links::list(&self.pool, self.starrocks, todo_id).await
     }
 
-    async fn latest_todo_assignment_states(
-        &self,
-    ) -> Result<Vec<crate::project::ProjectAssignmentState>> {
+    async fn latest_todo_assignments(&self) -> Result<Vec<crate::project::ProjectAssignment>> {
         project_links::latest(&self.pool, self.starrocks).await
     }
 
@@ -109,32 +107,6 @@ impl ProjectStore for SqlProjectStore {
         assignment: &crate::project::ProjectAssignment,
     ) -> Result<()> {
         project_links::link(&self.pool, self.starrocks, assignment).await
-    }
-
-    async fn pending_todo_assignments(
-        &self,
-        after: &str,
-        limit: usize,
-    ) -> Result<Vec<crate::project::ProjectAssignment>> {
-        project_links::pending(&self.pool, self.starrocks, after, limit).await
-    }
-
-    async fn finish_todo_assignment(
-        &self,
-        todo_id: &str,
-        execution_id: &str,
-        state: &str,
-        result_md: Option<&str>,
-    ) -> Result<()> {
-        project_links::finish(
-            &self.pool,
-            self.starrocks,
-            todo_id,
-            execution_id,
-            state,
-            result_md,
-        )
-        .await
     }
 
     async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool> {

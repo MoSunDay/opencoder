@@ -34,8 +34,19 @@ def artifact(line, target):
     return None
 
 
+def failure_excerpt(log):
+    lines = log.splitlines()
+    fatal = [line for line in lines if 'FATAL:' in line or 'Received signal' in line]
+    original = [line for line in lines if 'Brain browser failure:' in line
+                or 'Browser host resources:' in line]
+    errors = [line for line in lines if '[err]' in line and ':ERROR:' in line
+              and 'dbus/' not in line]
+    priority = '\n'.join(dict.fromkeys(fatal + original + errors))[:2200]
+    return priority + '\nLast output:\n' + '\n'.join(lines[-30:])
+
+
 def report_failure(label, path, code):
-    tail = '\n'.join(path.read_text(errors='replace').splitlines()[-60:])
+    tail = failure_excerpt(path.read_text(errors='replace'))
     print(f'{label} failed with exit code {code}; log: {path}', file=sys.stderr)
     if os.environ.get('GITHUB_ACTIONS') == 'true':
         escaped = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')

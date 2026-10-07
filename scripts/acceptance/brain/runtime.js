@@ -63,7 +63,11 @@ async function openRound(page, round) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const browser = await chromium.launch({
+    executablePath: process.env.CHROME_PATH || chromium.executablePath(),
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--enable-logging=stderr',
+      '--vmodule=render_process_host_impl=1,child_process_launcher_helper=1'],
+  });
   const page = await browser.newPage({ viewport: { width: 1650, height: 1100 } });
   page.setDefaultTimeout(30000);
   const errors = []; const details = [];

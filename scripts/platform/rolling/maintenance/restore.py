@@ -124,8 +124,10 @@ def controls(settings, root, metadata):
                     os.chown(member, uid, gid, follow_symlinks=False)
 
 
-def ingress(settings, root, metadata, operations):
+def ingress(settings, root, metadata, operations, seconds=90):
     item = next(item for item in metadata['control'] if item['path'] == str(settings.nginx_include))
+    workers = operations.ingress_workers()
     replace(root / item['copy'] if item['exists'] else root / 'absent', settings.nginx_include)
     operations.run('nginx', '-t')
     operations.run('systemctl', 'reload', 'nginx')
+    operations.wait(lambda: operations.ingress_switched(workers), seconds)

@@ -39,6 +39,43 @@ def drained(workers, proc=Path('/proc')):
     return True
 
 
+def switched(workers, proc=Path('/proc')):
+    """Old workers stopped accepting; established node channels may stay open."""
+    for worker in workers:
+        root = proc / str(worker['pid'])
+        try:
+            state, ticks = identity((root / 'stat').read_text())
+            if state == 'Z' or ticks != worker['start_ticks']:
+                continue
+            command = (root / 'cmdline').read_bytes()
+        except FileNotFoundError:
+            continue
+        if not command.startswith(b'nginx: worker process is shutting down'):
+            return False
+        # Nginx changes its process title just before closing the inherited
+        # listeners. Confirm the descriptors too, while leaving WebSockets up.
+        try:
+            listeners = set()
+            for name in ('tcp', 'tcp6'):
+                path = root / 'net' / name
+                if name == 'tcp6' and not path.exists():
+                    continue
+                for line in path.read_text().splitlines()[1:]:
+                    fields = line.split()
+                    if fields[3] == '0A':
+                        listeners.add('socket:[' + fields[9] + ']')
+            for descriptor in (root / 'fd').iterdir():
+                try:
+                    if str(descriptor.readlink()) in listeners:
+                        return False
+                except FileNotFoundError:
+                    continue
+        except FileNotFoundError:
+            if (root / 'stat').exists():
+                raise
+    return True
+
+
 def retire(operations, base, workers, successor_port):
     status = operations.http(base, '/api/admin/release')
     if status.get('retirement_protocol', 1) >= 2:

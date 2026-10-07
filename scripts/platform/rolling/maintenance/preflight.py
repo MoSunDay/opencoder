@@ -139,11 +139,15 @@ def check(settings, candidate, operations):
                          'enabled': status.get('UnitFileState') == 'enabled'}
     database = database_inventory(settings.server_data / 'definitions.db')
     from ..state import Journal
+    from ..backup import roots as backup_roots
     from .planning import capacity
     budget = capacity.check(capacity.plan(settings, candidate, rootfs,
                                           Journal(settings.state_dir).data, {'mounts': mounts}))
     return {'rootfs': str(rootfs), 'mounts': mounts, 'release_id': candidate['release_id'],
             'database': database, 'backup_bytes': budget['components']['stopped_backup'], 'capacity': budget,
+            'backup_roots': {name: str(path) for name, path in backup_roots(settings, runtime_data=False).items()},
+            'retained_execution_roots': [str(settings.state_dir / 'runtimes')]
+                + ([str(settings.legacy_agent_data)] if settings.legacy_agent_data else []),
             'configuration_hashes': configuration_files.hashes((agent, server))}
 
 

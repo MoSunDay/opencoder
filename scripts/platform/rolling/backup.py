@@ -29,7 +29,24 @@ def database(source, target):
         os.fsync(stream.fileno())
 
 
-def snapshot(settings, output, stopped=False):
+def roots(settings, runtime_data=True):
+    result = {"server": settings.server_data}
+    for name in ("resources", "host"):
+        path = settings.state_dir / name
+        if path.exists():
+            result[name] = path
+    if runtime_data:
+        if settings.legacy_agent_data:
+            result["legacy-node"] = settings.legacy_agent_data
+        runtimes = settings.state_dir / "runtimes"
+        if runtimes.exists():
+            result.update({f"runtimes/{path.name}": path for path in runtimes.iterdir() if path.is_dir()})
+    return result
+
+
+def snapshot(settings, output, stopped=False, runtime_data=True):
+    if not runtime_data and not stopped:
+        raise ValueError("shared-data maintenance backup requires stopped writers")
     if output.exists():
         raise ValueError("backup destination must be new")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -37,19 +54,8 @@ def snapshot(settings, output, stopped=False):
     # starts a new staging directory and never edits or deletes the old copy.
     destination = output
     output = Path(tempfile.mkdtemp(prefix=f".{output.name}.incomplete-", dir=output.parent))
-    roots = {"server": settings.server_data}
-    resources = settings.state_dir / "resources"
-    if resources.exists():
-        roots["resources"] = resources
-    if settings.legacy_agent_data:
-        roots["legacy-node"] = settings.legacy_agent_data
-    host = settings.state_dir / "host"
-    if host.exists():
-        roots["host"] = host
-    runtimes = settings.state_dir / "runtimes"
-    if runtimes.exists():
-        roots.update({f"runtimes/{path.name}": path for path in runtimes.iterdir() if path.is_dir()})
-    for name, root in roots.items():
+    selected = roots(settings, runtime_data)
+    for name, root in selected.items():
         if output.is_relative_to(root):
             raise ValueError("backup output cannot be inside a source tree")
         if stopped:
@@ -83,6 +89,8 @@ def snapshot(settings, output, stopped=False):
     write(output / "backup-manifest.json", {
         "kind": "stopped-consistent-copy" if stopped else "independent-online-database-backups",
         "cross_database_snapshot": stopped, "files": files,
+        "data_roots": {name: str(path) for name, path in selected.items()},
+        "runtime_data_included": runtime_data,
         "ontology_files_root": str(ontology_root) if ontology_root else None})
     os.rename(output, destination)
     with_parent = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)

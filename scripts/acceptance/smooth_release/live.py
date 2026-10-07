@@ -132,13 +132,13 @@ def verify_stream(env, stream, identifier):
     assert stream.resume_delays and max(stream.resume_delays) < 5, 'SSE did not resume within five seconds'
 
 
-def observe(env, root, tag, seconds):
+def observe(env, root, tag, seconds, definition):
     deadline = time.monotonic() + seconds
     samples = []
     while time.monotonic() < deadline:
         identifier = f'dag-{tag}-observe-{len(samples)}'
         began = time.monotonic()
-        env.api('/api/executions', 'POST', {'id': identifier, 'kind': 'dag', 'input': {'definition': probe}})
+        env.api('/api/executions', 'POST', {'id': identifier, 'kind': 'dag', 'input': {'definition': definition}})
         env.wait(lambda: env.completed(identifier), 30)
         ready = env.api('/api/ready')
         assert ready['mode'] == 'open' and ready['ready_nodes'] >= 1, 'scheduling became unavailable'
@@ -285,7 +285,7 @@ def exercise(args, settings, root):
     continuity['readiness'] = verify_ready(ready_samples, ready_failures)
     write(root / 'scheduling.json', continuity)
     verify_stream(env, stream, dag_id)
-    samples = observe(env, root, tag, args.observe_seconds)
+    samples = observe(env, root, tag, args.observe_seconds, probe)
     result = {'result': 'PASS', 'previous': old['id'], 'current': current['current'],
         'started_on_candidate': on_candidate,
         'rollback_target': previous['previous'] if on_candidate else old['id'],

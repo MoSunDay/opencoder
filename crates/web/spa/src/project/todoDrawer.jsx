@@ -5,8 +5,9 @@ import { ExecutionView } from '../fleet/detail.jsx';
 import { KIND_LABELS, newId } from '../fleet/model.js';
 import { err, ok } from '../notice.js';
 import { flattenTodos, groupOptions, searchSelect } from './model/relations.js';
-import { CapabilityLauncher, CAPABILITIES } from './execute/launcher.jsx';
-import { Markdown } from './markdown.jsx';
+import { CapabilityLauncher } from './execute/launcher.jsx';
+import { useCapabilities, capabilityOptions } from './execute/catalog.js';
+import { ExecutionResult } from './execute/result.jsx';
 import { effectiveTags, remapTagIds } from './model/catalog.js';
 import { ProjectTable, TableText } from './views/projectTable.jsx';
 
@@ -28,7 +29,8 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
   const availableTags = effectiveTags(overview, groupId);
   const selectedTags = remapTagIds(overview, tagIds, groupId);
   const [mode, setMode] = useState('overview');
-  const [kind, setKind] = useState(todo?.capability_id || null);
+  const catalog = useCapabilities();
+  const [capabilityId, setCapabilityId] = useState(todo?.capability_id || null);
   const [linkInput, setLinkInput] = useState('');
   const [pendingId, setPendingId] = useState('');
   const [executionId, setExecutionId] = useState('');
@@ -51,12 +53,12 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     try {
       const result = await apiGet(linkPath(todoId), { signal: request.signal });
       if (request.signal.aborted) return null;
-      const assignments = result.assignments || (result.execution_ids || []).map((execution_id) => ({ execution_id, kind: '', name: '', sync_state: 'pending' }));
+      const assignments = result.assignments || [];
       setLinks(assignments);
       const found = await Promise.all(assignments.map(async (assignment) => {
         const id = assignment.execution_id;
         try { return [id, await apiGet(`/api/executions/${encodeURIComponent(id)}/index`, { signal: request.signal })]; }
-        catch { return [id, { id, missing: true }]; }
+        catch (failure) { return [id, { id, missing: true, readError: failure.message }]; }
       }));
       const resolved = Object.fromEntries(found);
       if (request.signal.aborted) return null;
@@ -80,7 +82,7 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     setBusy(true);
     try {
       await apiPatch(`/api/project/todos/${encodeURIComponent(todoId)}`, {
-        title: title.trim(), draft, initiative_id: groupId, board_status: status, capability_id: kind, tag_ids: selectedTags,
+        title: title.trim(), draft, initiative_id: groupId, board_status: status, capability_id: capabilityId, tag_ids: selectedTags,
       });
       await refresh();
       setError('');
@@ -89,19 +91,13 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     } catch (failure) { setError(failure.message); return false; }
     finally { setBusy(false); }
   };
-  const link = async (id, retryIndex = false) => {
+  const link = async (id, alreadyLinked = false) => {
     const execution = id.trim();
     if (!execution) return;
     const attempt = navigation.current;
     setBusy(true);
     try {
-      for (let attempt = 0; ; attempt += 1) {
-        try { await apiPost(linkPath(todoId), { execution_id: execution }); break; }
-        catch (failure) {
-          if (!retryIndex || failure.status !== 404 || attempt >= 7) throw failure;
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-      }
+      if (!alreadyLinked) await apiPost(linkPath(todoId), { execution_id: execution });
       setPendingId((current) => current === execution ? '' : current);
       setLinkInput((current) => current.trim() === execution ? '' : current);
       const resolved = await loadLinks(true);
@@ -132,16 +128,16 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     { title: '类型', key: 'kind', width: '13%', kind: 'enum', searchValue: (r) => KIND_LABELS[r.kind] || r.kind || '不可读取', render: (_, row) => KIND_LABELS[row.kind] || row.kind || '不可读取' },
     { title: '名称', key: 'name', searchValue: (r) => r.name || r.id, render: (_, row) => row.name || row.id },
     { title: '执行 ID', key: 'id', width: '25%', searchValue: (r) => r.id, dataIndex: 'id', render: (id) => <Typography.Text copyable={{ text: id }}><TableText>{id}</TableText></Typography.Text> },
-    { title: '状态', key: 'status', width: '18%', kind: 'enum', searchValue: (r) => r.result_md ? '结论已回写' : ({ error: '失败', cancelled: '已取消', empty: '已结束，无结论' }[r.sync_state] || r.status || '等待执行'), render: (_, row) => row.result_md ? '结论已回写' : ({ error: '失败', cancelled: '已取消', empty: '已结束，无结论' }[row.sync_state] || row.status || '等待执行') },
+    { title: '状态', key: 'status', width: '18%', kind: 'enum', searchValue: (r) => r.status || r.readError || '等待读取', render: (_, row) => row.readError || row.status || '等待读取' },
     { title: '操作', key: 'actions', width: '17%', render: (_, row) => <Space>
-      <Button type="link" disabled={!row.kind || row.missing} onClick={() => { setExecutionId(row.id); navigate('execution'); }}>查看</Button>
+      <Button type="link" disabled={!row.kind} onClick={() => { setExecutionId(row.id); navigate('execution'); }}>查看</Button>
       <Button danger type="link" disabled={busy} onClick={() => unlink(row.id)}>解除关联</Button>
     </Space> },
   ];
   return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" styles={{ wrapper: { maxWidth: 1000 } }} destroyOnHidden>
     <Space style={{ marginBottom: 16 }}>
       {mode !== 'overview' && <Button onClick={() => navigate('overview')}>返回 TODO</Button>}
-      {mode === 'overview' && <Button type="primary" disabled={!kind} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</Button>}
+      {mode === 'overview' && <Button type="primary" disabled={!capabilityId || catalog.loading || !!catalog.error} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</Button>}
     </Space>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
     {pendingId && <Button loading={busy} onClick={() => link(pendingId)}>重试关联 {pendingId}</Button>}
@@ -150,21 +146,22 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
       <Select {...searchSelect} aria-label="所属专项" placeholder="未归属专项" value={groupId} onChange={(value) => { setTagIds(remapTagIds(overview, tagIds, value || null)); setGroupId(value || null); }} options={groupOptions(overview)} style={{ width: '100%' }} />
       <Select mode="multiple" aria-label="TODO Tag" value={selectedTags} onChange={setTagIds} disabled={!groupId} showSearch optionFilterProp="label" placeholder={groupId ? "选择 Tag" : "关联专项后可选择 Tag"} options={availableTags.map((tag) => ({ value: tag.id, label: tag.name }))} style={{ width: '100%' }} />
       <Select aria-label="TODO 看板列" value={status} onChange={setStatus} options={STATUS_OPTIONS} style={{ width: 180 }} />
-      <Select aria-label="执行能力" placeholder="选择能力后可指派" value={kind} onChange={(value) => setKind(value || null)} allowClear options={CAPABILITIES} style={{ width: 210 }} />
+      {catalog.error && <Alert type="error" title={catalog.error} action={<Button onClick={catalog.reload}>重试能力列表</Button>} />}
+      <Select aria-label="执行能力" placeholder="选择能力库中的能力" value={capabilityId} onChange={(value) => setCapabilityId(value || null)} allowClear loading={catalog.loading} options={capabilityOptions(catalog.capabilities)} style={{ width: '100%' }} showSearch optionFilterProp="label" />
       <Input.TextArea aria-label="任务说明" value={draft} onChange={(event) => setDraft(event.target.value)} rows={6} placeholder="写下任务要求，指派时会带入执行界面" />
       <Button type="primary" loading={busy} onClick={save}>保存 TODO</Button>
       <Typography.Title level={5}>指派记录</Typography.Title>
-      {links[0]?.result_md && <div><Typography.Text strong>最新结论</Typography.Text><Markdown text={links[0].result_md} /></div>}
+      {links[0]?.execution_id && <ExecutionResult key={links[0].execution_id} id={links[0].execution_id} />}
       <Space.Compact style={{ width: '100%' }}>
         <Input aria-label="已有执行 ID" placeholder="粘贴已有执行 ID" value={linkInput} onChange={(event) => setLinkInput(event.target.value)} />
         <Button disabled={!linkInput.trim()} loading={busy} onClick={() => link(linkInput)}>关联</Button>
       </Space.Compact>
-      <ProjectTable label="TODO 指派记录" viewKey={`assignments:${todoId}`} pagination={false} rows={links.map((record) => ({ ...indexes[record.execution_id], ...record, id: record.execution_id, kind: record.kind || indexes[record.execution_id]?.kind, name: record.name || indexes[record.execution_id]?.name, status: indexes[record.execution_id]?.status, missing: indexes[record.execution_id]?.missing }))} columns={columns} />
+      <ProjectTable label="TODO 指派记录" viewKey={`assignments:${todoId}`} pagination={false} rows={links.map((record) => ({ ...indexes[record.execution_id], ...record, id: record.execution_id, kind: record.kind || indexes[record.execution_id]?.kind, name: record.name || indexes[record.execution_id]?.name, status: indexes[record.execution_id]?.status, missing: indexes[record.execution_id]?.missing, readError: indexes[record.execution_id]?.readError }))} columns={columns} />
     </Space>}
-    {mode === 'launch' && <CapabilityLauncher key={kind} kind={kind} onNotice={onNotice}
+    {mode === 'launch' && <CapabilityLauncher key={capabilityId} capability={catalog.capabilities.find((cap) => cap.id === capabilityId)} todoId={todoId} onNotice={onNotice}
       prompt={[title, draft].filter(Boolean).join('\n\n')} onCreated={(id) => link(id, true)} />}
     {mode === 'execution' && (indexes[executionId]
-      ? <ExecutionView key={executionId} executionRef={{ id: executionId, kind: indexes[executionId].kind }} summary={indexes[executionId]} onNotice={onNotice}
+      ? <ExecutionView key={executionId} executionRef={{ id: executionId, kind: indexes[executionId].kind || links.find((link) => link.execution_id === executionId)?.kind }} summary={indexes[executionId]} onNotice={onNotice}
         allowGuidance={indexes[executionId].kind === 'team' && indexes[executionId].status === 'running'}
         onGuidance={async (prompt) => {
           try {

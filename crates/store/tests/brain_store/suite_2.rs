@@ -17,10 +17,10 @@ async fn migration_v14_to_v15_creates_brain_tables() {
 
     let store = LibsqlStore::open(&db_path).await.unwrap();
 
-    // Schema version bumped to the latest (32).
+    // Schema version bumped to the latest (33).
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        32
+        33
     );
 
     // All three brain tables now exist.

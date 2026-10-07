@@ -34,12 +34,13 @@ async function main() {
     await verifyWorkbench(browserPage, h.root, linkedId);
     const launchedId = await verifyNativeAgentLaunch(browserPage, initiativeTodo.title);
     const operatorId = await verifyNativeOperatorLaunch(browserPage, backlog.title);
-    await until(async () => (await api('GET', `/api/project/todos/${initiativeTodo.id}/executions`)).assignments.some((record) => record.execution_id === launchedId && record.result_md === 'fixture completed' && record.sync_state === 'complete'), 'native Agent conclusion', 60000);
-    await until(async () => (await api('GET', `/api/project/todos/${backlog.id}/executions`)).assignments.some((record) => record.execution_id === operatorId && record.result_md === 'fixture completed' && record.sync_state === 'complete'), 'native Operator conclusion', 60000);
+    await until(async () => (await api('GET', `/api/executions/${launchedId}/result`)).summary === 'fixture completed', 'native Agent conclusion', 60000);
+    await until(async () => (await api('GET', `/api/executions/${operatorId}/result`)).summary === 'fixture completed', 'native Operator conclusion', 60000);
     const board = await api('GET', '/api/project/overview');
     const card = board.goals.flatMap((goal) => goal.initiatives).flatMap((item) => item.todos).find((item) => item.id === initiativeTodo.id);
     assert.equal(card.latest_assignment.execution_id, launchedId);
-    assert.equal(card.latest_assignment.has_result, true);
+    assert.equal(card.latest_assignment.has_result, undefined);
+    assert.notEqual(card.board_status, 'done');
     assert.deepEqual(errors, []);
     const report = { acceptance: 'project workbench', linked_execution_id: linkedId, launched_execution_id: launchedId, operator_execution_id: operatorId, browser_errors: errors };
     fs.writeFileSync(path.join(h.root, 'report.json'), JSON.stringify(report, null, 2));

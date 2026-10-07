@@ -13,23 +13,15 @@ pub mod overview;
 pub mod tags;
 pub use tags::{ProjectTag, ProjectTodoTag};
 
+/// A project owns references, never a copy of an execution's state or output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectAssignment {
     pub todo_id: String,
     pub execution_id: String,
+    pub capability_id: Option<String>,
     pub kind: String,
     pub name: String,
     pub created_at: i64,
-    pub result_md: Option<String>,
-    pub sync_state: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectAssignmentState {
-    pub todo_id: String,
-    pub execution_id: String,
-    pub has_result: bool,
-    pub sync_state: String,
 }
 
 #[derive(Debug)]
@@ -181,20 +173,8 @@ pub trait ProjectStore: Send + Sync {
     /// `created_at`.
     async fn list_todos(&self, initiative_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>>;
     async fn list_todo_assignments(&self, todo_id: &str) -> Result<Vec<ProjectAssignment>>;
-    async fn latest_todo_assignment_states(&self) -> Result<Vec<ProjectAssignmentState>>;
+    async fn latest_todo_assignments(&self) -> Result<Vec<ProjectAssignment>>;
     async fn link_todo_execution(&self, assignment: &ProjectAssignment) -> Result<()>;
-    async fn pending_todo_assignments(
-        &self,
-        after: &str,
-        limit: usize,
-    ) -> Result<Vec<ProjectAssignment>>;
-    async fn finish_todo_assignment(
-        &self,
-        todo_id: &str,
-        execution_id: &str,
-        state: &str,
-        result_md: Option<&str>,
-    ) -> Result<()>;
     async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool>;
 
     // ---- todo runs ----

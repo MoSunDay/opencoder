@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 
 # core 模块
 
@@ -7,7 +7,7 @@ Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 ## 索引
 - `src/message.rs` — Message/Role/ContentBlock
-- `src/config.rs` + `src/config/` — Config 加载、配置合并与存储等基础配置；`src/config/runtime/` 保存 Agent、DAG、Ontology、MCP、CLI、技能等运行配置。物理目录拆分不改变 `crate::config` 的公共类型和序列化字段；顶层 `local_memory` 默认关闭，供会话完成钩子读取。`load_with_home` 将候选链重定向到执行 home；`load_with_home_frozen` 额外跳过 `apply_env`（快照即最终，版本化 Operator resume 用）；`load_operator(dir)` 只读 Operator 配置平面目录（`config.json` + 域文件，不做 env 合并）；`effective_domain_value`/`domain_file_for` 供节点 bootstrap 携带域视图
+- `src/config.rs` + `src/config/` — Config 加载、配置合并与基础配置；`src/config/runtime/` 保存 Agent、DAG、Ontology、MCP、CLI、技能等运行配置。物理目录拆分不改变 `crate::config` 的公共类型和序列化字段；顶层 `local_memory` 默认关闭，供会话完成钩子读取。`load_with_home` 将候选链重定向到执行 home；`load_with_home_frozen` 额外跳过 `apply_env`（快照即最终，版本化 Operator resume 用）；`load_operator(dir)` 只读 Operator 配置平面目录（`config.json` + 域文件，不做 env 合并）；`effective_domain_value`/`domain_file_for` 供节点 bootstrap 携带域视图
 - [配置覆盖](../../crates/core/tests/config_overlay/main.rs) — Codex 与三类可配置 NFS 按显式字段覆盖；未填写的启动、凭据、环境变量和导出字段保留。运行配置保留未指定的 profile，同名项替换完整版本。私有配置容量同时检查单文件和最终合并结果，错误不包含配置值；实现见 [merge.rs](../../crates/core/src/config/merge.rs) 与 [private_settings.rs](../../crates/core/src/config/runtime/agent/private_settings.rs)。
 - [config/runtime/dag.rs](../../crates/core/src/config/runtime/dag.rs) — 原生 DAG 的镜像、二进制池、源工作区、节点数据根与独立只读 NFS 配置；严格拒绝未知字段，不提供执行模式切换。约定见 [规则 04](../../rules/04-dag-execution-contract.md)。
 - [config/runtime/ontology.rs](../../crates/core/src/config/runtime/ontology.rs) — 可选正文根 `ontology.files_dir` 与独立 NFS 的启用、监听地址、端口；默认关闭、`127.0.0.1:2052`，导出始终只读。正文根默认由 Server workdir 对应的数据根计算，与 `--data-dir` 中的数据库分别管理。

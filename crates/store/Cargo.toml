@@ -19,13 +19,6 @@ libsql.workspace = true
 ulid.workspace = true
 fs2 = "0.4"
 
-# Optional project-data backends. StarRocks speaks the MySQL wire protocol,
-# so both map to the same sqlx mysql driver; the feature choice only records
-# intent for DDL/tx behavior branching. Untyped `sqlx::query` only — the
-# macros feature is deliberately NOT enabled (it would require a
-# compile-time database URL); rustls, never native-tls/openssl.
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "mysql"], optional = true }
-
 [dev-dependencies]
 tempfile.workspace = true
 libsql.workspace = true
@@ -49,8 +42,3 @@ path = "tests/contracts/input_idempotency.rs"
 [[test]]
 name = "project_atomic_claim"
 path = "tests/contracts/project_atomic_claim.rs"
-
-[features]
-default = []
-mysql = ["dep:sqlx"]
-starrocks = ["dep:sqlx"]

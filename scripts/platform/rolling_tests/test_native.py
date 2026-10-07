@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
@@ -8,10 +9,33 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.io import HttpFailure
 from rolling.native import publish_binary, runtime_config
-from rolling.units import service
+from rolling.units import service, freeze_rootfs
 
 
 class PublisherTests(unittest.TestCase):
+    def test_frozen_image_preserves_internal_hardlinks_without_linking_the_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, binaries = root / 'source', root / 'bin'
+            programs = source / 'usr/bin'
+            programs.mkdir(parents=True)
+            binaries.mkdir()
+            (programs / 'git').write_bytes(b'original git')
+            os.link(programs / 'git', programs / 'git-status')
+            (programs / 'dag-runner').write_bytes(b'old runner')
+            os.link(programs / 'dag-runner', programs / 'agent-step-runner')
+            for name in ['dag-runner', 'agent-step-runner']:
+                (binaries / name).write_bytes(name.encode())
+            image = freeze_rootfs({'runtime_data': str(root / 'runtime')}, source, binaries)
+            copied = image / 'usr/bin'
+            self.assertEqual((copied / 'git').stat().st_ino, (copied / 'git-status').stat().st_ino)
+            self.assertNotEqual((copied / 'git').stat().st_ino, (programs / 'git').stat().st_ino)
+            (programs / 'git').write_bytes(b'changed after snapshot')
+            self.assertEqual((copied / 'git-status').read_bytes(), b'original git')
+            for name in ['dag-runner', 'agent-step-runner']:
+                self.assertEqual((copied / name).read_bytes(), name.encode())
+                self.assertEqual((programs / name).read_bytes(), b'old runner')
+
     def test_only_runtime_units_create_private_mounts_for_native_dags(self):
         runtime = service(['/bin/true'], 'runtime', runtime=True)
         self.assertIn('ExecStart="/usr/bin/unshare" "--mount" "--propagation" "private" "--" "/bin/true"', runtime)

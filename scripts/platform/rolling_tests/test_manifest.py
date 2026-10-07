@@ -8,11 +8,30 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.config import Settings
-from rolling.manifest import resources, brain_preflight
+from rolling.manifest import resources, brain_preflight, compatible, verify
 import json
 
 
 class ResourceTests(unittest.TestCase):
+    def test_project_reference_format_verifies_but_cannot_overlap_cached_result_servers(self):
+        candidate = {'release_id': 'reference-index', 'protocol_version': 10,
+                     'brain_schema_version': 7, 'compatibility': {
+                         'protocol': {'min': 1, 'max': 1},
+                         'data_format': {'min': 4, 'max': 4}}}
+        info = {'brain_schema_version': 7,
+                'release_compatibility': candidate['compatibility']}
+        from rolling.manifest import _installer
+        with patch.object(_installer, 'verify_bundle', return_value=candidate), \
+                patch.object(_installer, 'bundle_names', return_value=_installer.NAMES), \
+                patch.object(_installer, 'build_info', return_value=info):
+            self.assertEqual(verify(Path('bundle')), candidate)
+        compatible(candidate, [candidate])
+        previous = {**candidate, 'release_id': 'cached-results', 'compatibility': {
+            **candidate['compatibility'], 'data_format': {'min': 3, 'max': 3}}}
+        for new, old in [(candidate, previous), (previous, candidate)]:
+            with self.assertRaisesRegex(ValueError, 'different data_format; use --maintenance'):
+                compatible(new, [old])
+
     def test_container_cutover_rejects_unpinned_active_dags_without_mutating_them(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

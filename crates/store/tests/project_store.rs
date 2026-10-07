@@ -127,6 +127,8 @@ fn libsql_store_coerces_to_project_store(store: Arc<LibsqlStore>) -> Arc<dyn Pro
 // workflow artifact root (output_ref). Unknown kind text in the row is
 // corruption and fails closed on read.
 
+#[path = "project_store/reopen.rs"]
+mod reopen;
 #[path = "project_store/suite_1.rs"]
 mod suite_1;
 #[path = "project_store/suite_2.rs"]

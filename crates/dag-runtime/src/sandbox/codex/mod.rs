@@ -11,7 +11,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub const HOME_MOUNT: &str = "/run/opencoder-codex/home";
 pub const LAUNCH_MOUNT: &str = "/run/opencoder-codex/launch.json";
 const DEFAULT_BINARY: &str = "/usr/bin/codex";
 const GUEST_HOME: &str = "/tmp/codex-user";
@@ -80,7 +79,7 @@ pub fn resolve(
             home.is_dir() && home.parent().is_some(),
             "Codex home must be a directory below the filesystem root"
         );
-        runtime = guest_runtime(runtime, &inherited)?;
+        runtime = guest_runtime(runtime, &inherited, &home)?;
         let executable = runtime
             .codex
             .as_ref()
@@ -115,6 +114,7 @@ fn credential_home(
 fn guest_runtime(
     mut runtime: HarnessRuntime,
     inherited: &BTreeMap<String, String>,
+    home: &Path,
 ) -> Result<HarnessRuntime> {
     for key in INHERITED {
         if let Some(value) = inherited.get(*key) {
@@ -124,7 +124,11 @@ fn guest_runtime(
                 .or_insert_with(|| value.clone());
         }
     }
-    runtime.envs.insert("CODEX_HOME".into(), HOME_MOUNT.into());
+    // Codex stores absolute rollout paths in its shared SQLite index.
+    // Keep the same home path on the node and in every container.
+    runtime
+        .envs
+        .insert("CODEX_HOME".into(), home.display().to_string());
     runtime.envs.insert("HOME".into(), GUEST_HOME.into());
     runtime
         .envs

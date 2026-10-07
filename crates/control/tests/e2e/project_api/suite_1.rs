@@ -8,22 +8,32 @@ async fn todo_capability_can_be_saved_before_execution_and_cleared() {
             Method::POST,
             "/api/project/todos",
             Some(json!({
-                "title": "operator task", "draft": "work", "capability_id": "operator"
+                "title": "operator task", "draft": "work", "capability_id": "agent-client-code-repair-operator"
             })),
         )
         .await;
     assert_eq!(status, 200, "{created}");
-    assert_eq!(created["capability_id"], "operator");
+    assert_eq!(
+        created["capability_id"],
+        "agent-client-code-repair-operator"
+    );
     let id = created["id"].as_str().unwrap();
     let path = format!("/api/project/todos/{id}");
     let (_, overview) = h.req(Method::GET, "/api/project/overview", None).await;
-    assert_eq!(overview["backlog"][0]["capability_id"], "operator");
+    assert_eq!(
+        overview["backlog"][0]["capability_id"],
+        "agent-client-code-repair-operator"
+    );
     let (status, _) = h
-        .req(Method::PATCH, &path, Some(json!({"capability_id":"agent"})))
+        .req(
+            Method::PATCH,
+            &path,
+            Some(json!({"capability_id":"plan-project@2"})),
+        )
         .await;
     assert_eq!(status, 200);
     let (_, changed) = h.req(Method::GET, "/api/project/todos", None).await;
-    assert_eq!(changed["todos"][0]["capability_id"], "agent");
+    assert_eq!(changed["todos"][0]["capability_id"], "plan-project@2");
     let (status, _) = h
         .req(Method::PATCH, &path, Some(json!({"capability_id":null})))
         .await;
@@ -34,7 +44,7 @@ async fn todo_capability_can_be_saved_before_execution_and_cleared() {
         .req(
             Method::PATCH,
             &path,
-            Some(json!({"capability_id":"unknown"})),
+            Some(json!({"capability_id":"invalid\ncapability"})),
         )
         .await;
     assert_eq!(status, 400);

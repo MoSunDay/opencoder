@@ -49,24 +49,22 @@ def existing(path):
 
 def plan(settings, candidate, rootfs, original, scope):
     from ..archive import managed_units
+    from ...backup import roots as backup_roots
     from ...native.ontology import files_root
     identifier = candidate['release_id']
     block_size = os.statvfs(existing(settings.state_dir)).f_frsize
     frozen = settings.state_dir / 'runtimes' / identifier / 'dag/rootfs'
-    # Runner replacement can grow the source image. Count both packaged
-    # runners as additional space, including the stopped backup's second copy.
+    # Runner replacement can grow the new image. Old execution trees and the
+    # new candidate image stay in place; shared-data recovery never copies them.
     binaries = sum(item['bytes'] for name, item in candidate['files'].items()
                    if name in ('bin/dag-runner', 'bin/agent-step-runner'))
     image = tree_bytes(rootfs, {'dev', 'proc', 'sys', 'tmp', 'workspace/context'}, block_size) + binaries
     freeze = 0 if frozen.exists() else image
-    roots = [settings.server_data, settings.state_dir / 'host', settings.state_dir / 'runtimes',
-             settings.state_dir / 'resources']
-    if settings.legacy_agent_data:
-        roots.append(settings.legacy_agent_data)
+    roots = list(backup_roots(settings, runtime_data=False).values())
     ontology = files_root(settings.server_data)
     if ontology:
         roots.append(ontology)
-    backup = sum(tree_bytes(path, block_size=block_size) for path in roots) + freeze
+    backup = sum(tree_bytes(path, block_size=block_size) for path in roots)
     controls = [*managed_units(settings, original, scope), settings.nginx_include,
                 settings.state_dir / 'services', settings.state_dir / 'resources',
                 settings.state_dir / 'host/deployment.json']

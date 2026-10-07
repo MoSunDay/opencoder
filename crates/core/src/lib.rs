@@ -32,8 +32,8 @@ pub use config::validate_team_turn_budgets;
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, ApMode, AutoPilotConfig, CliConfig,
     CompactionConfig, Config, Endpoint, HttpHeader, InjectionTarget, KeymapConfig, McpServerConfig,
-    NetworkConfig, OutputStreamlineConfig, ProviderConfig, ScopedConfigHome, StorageBackend,
-    StorageConfig, DEFAULT_CONTEXT_LIMIT, KEYMAP_INFO, TEAM_TURN_BUDGET_MAX,
+    NetworkConfig, OutputStreamlineConfig, ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT,
+    KEYMAP_INFO, TEAM_TURN_BUDGET_MAX,
 };
 pub use data_dir::{data_dir_for, data_root, workdir_hash};
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};

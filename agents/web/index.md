@@ -1,4 +1,4 @@
-Commit: a7e6b8233d5a4f6d0727d656d5d3d45a985b4b63
+Commit: c854143bd187656f4d74be6cca0f153176e44a21
 
 # web 模块
 
@@ -25,7 +25,8 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `src/api_project*.rs` — 项目、专项、TODO 与 Tag 的共享 HTTP 处理器；Tag 范围和选择经存储验证，顺序写入携带 `initiative_id` 范围，负数位置保留给迁移且 API 拒绝；Control 复用同一组处理器
 - `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 三个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和专项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`
 - `spa/src/project/board/`、`model/board.js`、`model/catalog.js` — dnd-kit 看板与纯移动、进度、Tag 解析；按完整任务集合计算筛选后的拖动顺序，多 Tag 卡片共享 TODO ID，失败回退原数据
-- `spa/src/project/todoDrawer.jsx`、`execute/launcher.jsx` — TODO 编辑、Tag 选择、指派历史与原生执行界面；复用 `ExecutionView` 的记录和引导入口，窄屏表格内部横向滚动
+- [project/todoDrawer.jsx](../../crates/web/spa/src/project/todoDrawer.jsx)、[project/execute/](../../crates/web/spa/src/project/execute/) — TODO 选择实际能力 ID，以稳定执行 ID 派发并关联；回复丢失时保留同一请求重试。结论在打开时向所属节点读取，失败清空旧结果并显示错误；`ExecutionView` 复用原会话、事件与引导入口。
+- [chat/inputAttempt.js](../../crates/web/spa/src/chat/inputAttempt.js) — 会话页与执行明细共享人工输入 ID 的生成与重试规则，未确认的回复保持原输入 ID，避免断线重试重复提交。
 - `spa/src/dag/editor/canvasEditor.jsx` — 用已发出的 spec 签名避免重复通知，并保证依赖边更新在节点编辑之后仍能保存
 - `spa/src/agents/`、`spa/src/agentNfsCard.jsx` — Agent 配置与资源页签；复用状态卡读取 Agent、二进制、源工作区、Ontology 正文四个实际只读 NFS 导出，停止须确认，读取失败不显示为已停止。
 - `spa/src/dag/resources/` — 二进制池界面；`model.js` 负责 ELF 与版本引用纯校验，`read.js` 校验池和历史响应，`editor.jsx` 发布文件，`panel.jsx` 管理下载、删除与当前版本指针，`field.jsx` 为步骤选择受理时 current 或固定版本。

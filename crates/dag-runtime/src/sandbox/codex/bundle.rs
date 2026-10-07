@@ -1,4 +1,4 @@
-use super::{guest_path, Launch, HOME_MOUNT, LAUNCH_MOUNT};
+use super::{guest_path, Launch, LAUNCH_MOUNT};
 use crate::sandbox::oci::{self, BundleSpec};
 use anyhow::{Context, Result};
 use serde_json::json;
@@ -11,9 +11,15 @@ impl Launch {
     pub fn write_bundle(&self, dir: &Path, spec: &BundleSpec) -> Result<PathBuf> {
         let dir = oci::write_bundle(dir, spec)?;
         let rootfs = dir.join("rootfs");
-        let home_mount = guest_path(&rootfs, HOME_MOUNT)?;
+        let destination = self.home.to_str().context("Codex home must be UTF-8")?;
+        let home_mount = guest_path(&rootfs, destination)?;
         std::fs::create_dir_all(home_mount)?;
         let launch_mount = guest_path(&rootfs, LAUNCH_MOUNT)?;
+        std::fs::create_dir_all(
+            launch_mount
+                .parent()
+                .context("Codex launch parent missing")?,
+        )?;
         std::fs::write(&launch_mount, b"")?;
         let private = dir.join("codex-private");
         std::fs::create_dir_all(&private)?;
@@ -35,7 +41,7 @@ impl Launch {
             .as_array_mut()
             .context("OCI mounts missing")?;
         mounts.push(
-            json!({"destination":HOME_MOUNT,"type":"bind","source":self.home,
+            json!({"destination":destination,"type":"bind","source":self.home,
             "options":["rw","rbind","nosuid","nodev"]}),
         );
         mounts.push(

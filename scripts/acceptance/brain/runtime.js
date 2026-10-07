@@ -65,8 +65,7 @@ async function openRound(page, round) {
 async function main() {
   const browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH || chromium.executablePath(),
-    // This DOM acceptance does not require GPU acceleration on headless CI hosts.
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--enable-logging=stderr',
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--enable-logging=stderr',
       '--vmodule=render_process_host_impl=1,child_process_launcher_helper=1'],
   });
   const page = await browser.newPage({ viewport: { width: 1650, height: 1100 } });

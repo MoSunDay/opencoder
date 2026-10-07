@@ -10,6 +10,28 @@ import brain
 
 
 class BrainRunnerTests(unittest.TestCase):
+    def test_failed_native_test_restores_evidence_ownership(self):
+        events = []
+
+        def logged(command, *_args, **_kwargs):
+            if command[0] == 'cargo':
+                return ['/bin/true']
+            events.append('test')
+            raise subprocess.CalledProcessError(17, command)
+
+        def owner(_temp, identity, recursive=False):
+            events.append((identity, recursive))
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (patch.object(brain, 'logged', side_effect=logged),
+                  patch.object(brain, 'preflight'),
+                  patch.object(brain, 'native_temp_owner', side_effect=owner),
+                  patch.object(brain.os, 'getuid', return_value=1001),
+                  patch.object(brain.os, 'getgid', return_value=1001)):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    brain.run_suite('browser', Path(directory))
+        self.assertEqual(events, [('0:0', False), 'test', ('1001:1001', True)])
+
     def test_browser_process_failure_survives_a_long_rust_backtrace(self):
         fatal = 'pw:browser [pid=21][err] FATAL: renderer launch failed'
         original = 'Brain browser failure: page.goto: Page crashed'

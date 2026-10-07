@@ -1,6 +1,6 @@
 ---
 name: repo-local-memory
-description: Maintain repository local memory docs so `agents.md`, `agents/*`, `features/*`, and changelog entries stay accurate after code changes. Use when initializing local memory, repairing touched memory, or updating memory after feature, bug-fix, or refactor work.
+description: Maintain repository local memory docs so `repo-memory.md`, `agents/*`, `features/*`, and changelog entries stay accurate after code changes. Use when initializing local memory, repairing touched memory, or updating memory after feature, bug-fix, or refactor work.
 ---
 
 # Repository Local Memory Maintainer
@@ -20,11 +20,13 @@ Local memory is not:
 - a task diary
 
 ## Repository-First Policy
-If the repository already defines explicit local-memory rules in `AGENTS.md`, `agents.md`, or nearby instructions, follow those repository rules first for document structure, naming, scope, language, indexing, and changelog policy.
+If the repository already defines explicit local-memory rules in `AGENTS.md`, `repo-memory.md`, or nearby instructions, follow those repository rules first for document structure, naming, scope, language, indexing, and changelog policy.
 Use this skill as the default fallback and consistency layer when:
 - the repo has no clear local-memory contract
 - the repo contract is incomplete
 - you need help deciding the minimum accurate update set
+
+The default logic index is `repo-memory.md`. An explicitly declared repository index takes precedence only when it is a distinct file from `AGENTS.md`. On case-insensitive filesystems, never create or edit an index through the `agents.md` alias of `AGENTS.md`. Preserve `AGENTS.md` during memory initialization and repair.
 
 Treat existing memory docs as auditable inputs, not as guaranteed truth.
 If repository docs are stale, inaccurate, weak, or internally inconsistent, repair them against the code while preserving the repository's explicit governance rules.
@@ -53,7 +55,7 @@ Default inspection scope is local:
 
 ## Output Scope
 Stable layer:
-- `agents.md`
+- `repo-memory.md`
 - `agents/{module}/index.md`
 - `agents/{module}/{submodule}/index.md` when needed
 - `features/index.md`
@@ -103,7 +105,7 @@ When judging or repairing local memory, prefer evidence in this order:
 Never preserve a claim only because it already exists in memory docs.
 
 ## Document Responsibilities
-### `agents.md`
+### `repo-memory.md`
 
 Repository-level logic map. Keep only:
 
@@ -210,7 +212,7 @@ Usually skip changelog for:
 
 Update top-level indexes only if the map changes:
 
-- module added, removed, split, or merged -> update `agents.md`
+- module added, removed, split, or merged -> update `repo-memory.md`
 - feature added, removed, split, or merged -> update `features/index.md`
 
 Do not update top-level indexes merely because a new changelog entry exists.
@@ -250,7 +252,7 @@ Before editing local memory:
 When initializing memory for an existing repository:
 
 - build a current-state baseline, not a reconstruction of history
-- start with `agents.md` and `features/index.md`
+- start with `repo-memory.md` and `features/index.md`
 - add only a small number of high-value module and feature docs first
 - do not create docs for every directory
 - changelog may be empty at initialization

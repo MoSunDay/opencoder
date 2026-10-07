@@ -326,9 +326,9 @@ fn prepare_with_config(
     let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "resources");
     let input = &assignment.request.input;
     anyhow::ensure!(
-        !(assignment.request.kind == ExecutionKind::Brain
-            && input["schema_version"] != opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
-            && !input.get("_brain").is_some()
+        (assignment.request.kind != ExecutionKind::Brain
+            || input["schema_version"] == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
+            && input.get("_brain").is_none()
             && input.get("brain_scheduler").is_none()
             && input.get("brain_receipt").is_none()
             && input.get("playbook_receipt").is_none(),

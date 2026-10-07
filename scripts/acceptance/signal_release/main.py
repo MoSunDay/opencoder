@@ -66,9 +66,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bin-dir',type=Path,required=True)
     parser.add_argument('--nginx',type=Path,required=True)
+    parser.add_argument('--rootfs',type=Path,required=True)
     parser.add_argument('--data-parent',type=Path)
     args = parser.parse_args()
-    env = Environment(args.bin_dir.resolve(),args.nginx.resolve(),args.data_parent)
+    env = Environment(args.bin_dir.resolve(),args.nginx.resolve(),args.rootfs.resolve(),args.data_parent)
     try:
         exercise(env)
     finally:

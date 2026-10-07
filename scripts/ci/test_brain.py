@@ -23,12 +23,13 @@ class BrainRunnerTests(unittest.TestCase):
     def test_native_child_gets_required_paths_without_host_credentials(self):
         env = {'PATH': '/runner/node:/usr/bin', 'DAG_TEST_ROOTFS': '/fixture/rootfs',
                'TMPDIR': '/fixture/tmp', 'CHROME_PATH': '/runner/chromium',
-               'GITHUB_TOKEN': 'fixture-secret', 'RUST_BACKTRACE': '1'}
+               'GITHUB_TOKEN': 'fixture-secret', 'RUST_BACKTRACE': '1', 'DEBUG': 'pw:browser'}
         with patch.object(brain.os, 'geteuid', return_value=1001):
             command = brain.native_command('/fixture/test', ['--ignored'], env)
         self.assertIn('CHROME_PATH=/runner/chromium', command)
         self.assertIn('TMPDIR=/fixture/tmp', command)
         self.assertNotIn('GITHUB_TOKEN=fixture-secret', command)
+        self.assertIn('DEBUG=pw:browser', command)
         self.assertIn('--kill-child', command)
         self.assertIn('private', command)
         self.assertEqual(command[-2:], ['/fixture/test', '--ignored'])

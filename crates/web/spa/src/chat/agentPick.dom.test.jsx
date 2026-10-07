@@ -130,12 +130,12 @@ describe('agent pick', () => {
     fireEvent.change(input, { target: { value: '第一条' } });
     fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 });
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions/s1/prompt',
-      { prompt: '第一条', delivery: 'steer' }));
+      { prompt: '第一条', delivery: 'steer', input_id: expect.stringMatching(/^input-/) }));
 
     await type(container, '@wr');
     clickRow(container, '@writer');
     await waitFor(() => expect(apiPost).toHaveBeenLastCalledWith('/api/sessions/s1/prompt',
-      { prompt: '/agent writer', delivery: 'steer' }));
+      { prompt: '/agent writer', delivery: 'steer', input_id: expect.stringMatching(/^input-/) }));
     expect(container.querySelector('textarea.ant-sender-input').value).toBe('');
   });
 });

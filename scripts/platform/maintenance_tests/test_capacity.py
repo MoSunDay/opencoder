@@ -25,7 +25,7 @@ class CapacityTests(unittest.TestCase):
             budget = capacity.plan(fixture.settings, candidate, fixture.rootfs,
                                    Journal(fixture.settings.state_dir).data, {})
             self.assertGreaterEqual(budget['components']['frozen_image'], 512 * 1024 * 1024 + 20)
-            self.assertGreaterEqual(budget['components']['stopped_backup'], budget['components']['frozen_image'])
+            self.assertLess(budget['components']['stopped_backup'], budget['components']['frozen_image'])
             self.assertEqual(budget['components']['packages'], 240)
             self.assertGreater(budget['components']['controls'], 0)
             required = budget['filesystems'][0]['required']
@@ -36,7 +36,7 @@ class CapacityTests(unittest.TestCase):
             with patch.object(capacity.shutil, 'disk_usage', return_value=SimpleNamespace(free=required)):
                 self.assertEqual(capacity.check(budget), budget)
 
-    def test_existing_frozen_image_only_needs_backup_and_incomplete_copy_is_counted(self):
+    def test_existing_images_are_not_copied_again_and_available_space_is_rechecked(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory))
             runtime = fixture.settings.state_dir / 'runtimes/new/dag'
@@ -48,7 +48,16 @@ class CapacityTests(unittest.TestCase):
             budget = capacity.plan(fixture.settings, fixture.candidate, fixture.rootfs,
                                    Journal(fixture.settings.state_dir).data, {})
             self.assertEqual(budget['components']['frozen_image'], 0)
-            self.assertGreaterEqual(budget['components']['stopped_backup'], 1500)
+            before = budget['components']['stopped_backup']
+            with (stage / 'large-image').open('wb') as stream:
+                stream.truncate(1024 * 1024 * 1024)
+            after = capacity.plan(fixture.settings, fixture.candidate, fixture.rootfs,
+                                  Journal(fixture.settings.state_dir).data, {})
+            self.assertEqual(after, budget)
+            self.assertGreater(before, 0)
+            with patch.object(capacity.shutil, 'disk_usage', return_value=SimpleNamespace(free=0)):
+                with self.assertRaisesRegex(ValueError, 'insufficient space'):
+                    capacity.check(after)
 
     def test_low_space_recheck_leaves_old_service_and_admission_untouched(self):
         with tempfile.TemporaryDirectory() as directory:

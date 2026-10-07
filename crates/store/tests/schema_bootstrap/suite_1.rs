@@ -105,7 +105,7 @@ async fn legacy_tables_without_version_row_converge_on_open() {
 
     assert_eq!(
         version_of(&conn).await,
-        32,
+        33,
         "version row must be stamped at the latest version"
     );
     for (table, column) in [
@@ -156,7 +156,7 @@ async fn legacy_tables_without_version_row_converge_on_open() {
     let conn = store.conn().await.unwrap();
     assert_eq!(
         version_of(&conn).await,
-        32,
+        33,
         "re-open must not move the version"
     );
     assert_eq!(count_schema_version_rows(&conn).await, 1);
@@ -210,7 +210,7 @@ async fn failed_bootstrap_rolls_back_and_reopens_after_repair() {
 
     let store = LibsqlStore::open(&path).await.unwrap();
     let conn = store.conn().await.unwrap();
-    assert_eq!(version_of(&conn).await, 32);
+    assert_eq!(version_of(&conn).await, 33);
     assert!(has_column(&conn, "sessions", "task_type").await);
     assert!(store.get_session("parent").await.unwrap().is_some());
     assert_eq!(scalar(&conn, "PRAGMA integrity_check").await, "ok");

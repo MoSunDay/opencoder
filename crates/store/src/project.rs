@@ -1,6 +1,4 @@
-//! Project-module persistence trait — the seam that lets the project tables
-//! (goals / initiatives / todos / runs) live in libsql today and in an
-//! external MySQL / StarRocks tomorrow without touching upper layers.
+//! Project catalog and execution persistence over libsql.
 //!
 //! Upper-layer code depends on `Arc<dyn ProjectStore>`; the concrete libsql
 //! implementation lives in `libsql_store::project` (+ `project_runs`).
@@ -13,23 +11,15 @@ pub mod overview;
 pub mod tags;
 pub use tags::{ProjectTag, ProjectTodoTag};
 
+/// A project owns references, never a copy of an execution's state or output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectAssignment {
     pub todo_id: String,
     pub execution_id: String,
+    pub capability_id: Option<String>,
     pub kind: String,
     pub name: String,
     pub created_at: i64,
-    pub result_md: Option<String>,
-    pub sync_state: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectAssignmentState {
-    pub todo_id: String,
-    pub execution_id: String,
-    pub has_result: bool,
-    pub sync_state: String,
 }
 
 #[derive(Debug)]
@@ -58,17 +48,13 @@ use crate::project_types::{
 ///   an invalid empty `SET`).
 /// - `delete_*` returns `false` when the id does not exist.
 /// - Goal deletion detaches initiatives; nonempty initiatives reject deletion.
-///   TODO deletion also removes its runs. libsql/MySQL use transactions;
-///   StarRocks performs the statements sequentially.
+///   TODO deletion also removes its runs in the same libsql transaction.
 /// - Status/kind strings round-trip exactly; an unrecognized status on read is
 ///   corruption and propagates as an error.
 #[async_trait]
 // async_trait annotates futures that are already must-use on Rust 1.99.
 #[allow(clippy::double_must_use)]
 pub trait ProjectStore: Send + Sync {
-    /// Backend identifier for diagnostics ("libsql", "mysql", ...).
-    fn project_backend_name(&self) -> &'static str;
-
     async fn list_tags(&self) -> Result<Vec<ProjectTag>> {
         Ok(vec![])
     }
@@ -150,8 +136,7 @@ pub trait ProjectStore: Send + Sync {
     /// `false` means the todo was absent or another attempt is running; no
     /// run row is written. Any insert/commit failure rolls the claim back.
     ///
-    /// Backends that cannot provide a transaction spanning both tables must
-    /// fail before either write instead of degrading to two statements.
+    /// The claim and run insertion share one libsql transaction.
     async fn claim_todo_running_with_run(
         &self,
         rec: &ProjectTodoRunRecord,
@@ -159,11 +144,7 @@ pub trait ProjectStore: Send + Sync {
     ) -> Result<bool>;
     /// Expected-status CAS variant of `patch_todo`: applies the patch only
     /// when the row's current status equals `when` (and the id exists).
-    /// Returns `true` iff applied. Cross-backend caveat: SQLite counts
-    /// matched rows (a byte-identical rewrite reports `true`), MySQL counts
-    /// changed rows only (the same rewrite reports `false`, indistinguishable
-    /// from a lost CAS) — callers must set `patch.status` different from
-    /// `when` and treat `false` as "not applied"; both readings are lossless.
+    /// Returns `true` iff the expected state matched, including unchanged values.
     async fn patch_todo_when(
         &self,
         id: &str,
@@ -181,20 +162,8 @@ pub trait ProjectStore: Send + Sync {
     /// `created_at`.
     async fn list_todos(&self, initiative_id: Option<&str>) -> Result<Vec<ProjectTodoRecord>>;
     async fn list_todo_assignments(&self, todo_id: &str) -> Result<Vec<ProjectAssignment>>;
-    async fn latest_todo_assignment_states(&self) -> Result<Vec<ProjectAssignmentState>>;
+    async fn latest_todo_assignments(&self) -> Result<Vec<ProjectAssignment>>;
     async fn link_todo_execution(&self, assignment: &ProjectAssignment) -> Result<()>;
-    async fn pending_todo_assignments(
-        &self,
-        after: &str,
-        limit: usize,
-    ) -> Result<Vec<ProjectAssignment>>;
-    async fn finish_todo_assignment(
-        &self,
-        todo_id: &str,
-        execution_id: &str,
-        state: &str,
-        result_md: Option<&str>,
-    ) -> Result<()>;
     async fn unlink_todo_execution(&self, todo_id: &str, execution_id: &str) -> Result<bool>;
 
     // ---- todo runs ----
@@ -218,9 +187,8 @@ pub trait ProjectStore: Send + Sync {
     /// Expected-status CAS variant of `patch_todo_run`: applies the patch
     /// only when the run row's current status equals `when` (and the id
     /// exists). Terminal rows keep their label when a stale convergence
-    /// races the driver's own close. Same cross-backend caveat as
-    /// `patch_todo_when` (matched- vs changed-rows): keep the patched status
-    /// different from `when` and treat `false` as "not applied".
+    /// races the driver's own close. As with `patch_todo_when`, an unchanged
+    /// value still reports whether the expected state matched.
     async fn patch_todo_run_when(
         &self,
         id: &str,

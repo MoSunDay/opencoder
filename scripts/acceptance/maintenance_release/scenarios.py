@@ -120,7 +120,7 @@ def run(settings, operations, old, bundle, candidate, corrective, control, recei
     after = schema(path)
     if state['stage'] != 'verifying' or state.get('schema_started') is not True or state['writes_open']:
         raise AssertionError('verification failure was not after closed-gate migration')
-    if after != 32:
+    if after != 33:
         raise AssertionError(f'actual old schema did not migrate: {before} -> {after}')
     if schema(Path(state['backup']) / 'data/server/definitions.db', immutable=True) != before:
         raise AssertionError('backup does not contain the honest original schema')

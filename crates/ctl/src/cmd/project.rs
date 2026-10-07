@@ -103,6 +103,24 @@ pub enum TodosCmd {
     },
     /// DELETE /api/project/todos/{id}.
     Delete { id: String },
+    /// List the capability/execution references attached to this TODO.
+    Links { id: String },
+    /// Attach an existing execution, including the operator's current session.
+    Attach {
+        id: String,
+        execution_id: String,
+        #[arg(long)]
+        capability_id: Option<String>,
+    },
+    /// Remove a reference without cancelling or deleting its execution.
+    Detach { id: String, execution_id: String },
+    /// Dispatch a registered capability and attach the admitted execution.
+    /// Body: {"execution_id","capability_id","input"?,"node_id"?}.
+    Dispatch {
+        id: String,
+        #[arg(long)]
+        json: String,
+    },
     /// POST /api/project/todos/{id}/plan — spawn a plan run (202 + run_id).
     Plan {
         id: String,
@@ -182,6 +200,29 @@ fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
             RequestPlan::patch(format!("/api/project/todos/{id}")).with_body(required_body(json)?)
         }
         TodosCmd::Delete { id } => RequestPlan::delete(format!("/api/project/todos/{id}")),
+        TodosCmd::Links { id } => RequestPlan::get(format!(
+            "/api/project/todos/{}/executions",
+            crate::http::urlencode(id)
+        )),
+        TodosCmd::Attach {
+            id,
+            execution_id,
+            capability_id,
+        } => RequestPlan::post(format!(
+            "/api/project/todos/{}/executions",
+            crate::http::urlencode(id)
+        ))
+        .with_body(serde_json::json!({"execution_id":execution_id,"capability_id":capability_id})),
+        TodosCmd::Detach { id, execution_id } => RequestPlan::delete(format!(
+            "/api/project/todos/{}/executions/{}",
+            crate::http::urlencode(id),
+            crate::http::urlencode(execution_id)
+        )),
+        TodosCmd::Dispatch { id, json } => RequestPlan::post(format!(
+            "/api/project/todos/{}/dispatch",
+            crate::http::urlencode(id)
+        ))
+        .with_body(required_body(json)?),
         TodosCmd::Plan { id, json } => RequestPlan::post(format!("/api/project/todos/{id}/plan"))
             .with_opt_body(parse_body(json.as_deref())?),
         TodosCmd::Execute { id, json } => {
@@ -221,6 +262,47 @@ mod tests {
             json!({"title": "ship"})
         );
         assert!(required_body("nope").is_err());
+    }
+
+    #[test]
+    fn project_capability_tools_link_existing_sessions_and_dispatch_with_stable_ids() {
+        let attach = plan_todos(&TodosCmd::Attach {
+            id: "t1".into(),
+            execution_id: "operator-existing".into(),
+            capability_id: None,
+        })
+        .unwrap();
+        assert_eq!(attach.path, "/api/project/todos/t1/executions");
+        assert_eq!(attach.body.unwrap()["execution_id"], "operator-existing");
+        assert_eq!(
+            plan_todos(&TodosCmd::Links { id: "t1".into() })
+                .unwrap()
+                .method,
+            reqwest::Method::GET
+        );
+        assert_eq!(
+            plan_todos(&TodosCmd::Detach {
+                id: "t1".into(),
+                execution_id: "operator-existing".into()
+            })
+            .unwrap()
+            .method,
+            reqwest::Method::DELETE
+        );
+        let dispatch = plan_todos(&TodosCmd::Dispatch {
+            id: "t1".into(),
+            json:
+                r#"{"execution_id":"agent-stable","capability_id":"cap","input":{"prompt":"task"}}"#
+                    .into(),
+        })
+        .unwrap();
+        assert_eq!(dispatch.path, "/api/project/todos/t1/dispatch");
+        assert_eq!(dispatch.body.unwrap()["execution_id"], "agent-stable");
+        assert!(plan_todos(&TodosCmd::Dispatch {
+            id: "t1".into(),
+            json: "invalid".into()
+        })
+        .is_err());
     }
 
     #[test]

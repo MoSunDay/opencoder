@@ -67,7 +67,7 @@ async function createHierarchy(page) {
     if (capability) {
       const detail = page.getByRole('dialog', { name: `TODO · ${title}` });
       await detail.getByRole('combobox', { name: '执行能力' }).click();
-      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(capability, { exact: true }).click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(capability === 'Agent' ? 'General purpose agent · act' : 'Execute an explicit host operation using the registered Operator · act', { exact: true }).click();
       const updated = page.waitForResponse((r) => r.url().endsWith(`/api/project/todos/${created.id}`) && r.request().method() === 'PATCH');
       await detail.getByRole('button', { name: '保存 TODO' }).click();
       if (!(await updated).ok()) throw new Error('Failed to save TODO capability');
@@ -107,41 +107,29 @@ async function verifyWorkbench(page, root, executionId) {
   await page.setViewportSize({ width: 1500, height: 1000 });
   fs.writeFileSync(path.join(root, 'workbench-browser.json'), JSON.stringify({ linked_execution_id: executionId, detail_opened: true }, null, 2));
 }
+async function launchFromTodo(page, todoTitle, agent) {
+  await page.locator('.ant-drawer-close').click();
+  await page.getByRole('button', { name: todoTitle, exact: true }).click();
+  if (agent) {
+    await page.getByRole('combobox', { name: '执行能力' }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: 'acceptance-agent' }).click();
+  }
+  await page.getByRole('button', { name: '指派所选能力' }).click();
+  await page.getByRole('textbox', { name: '执行任务' }).fill('通过 TODO 发起执行验收');
+  const submitted = page.waitForResponse((response) => response.url().endsWith('/dispatch') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: '开始执行' }).click();
+  const response = await submitted;
+  if (!response.ok()) throw new Error(`browser capability launch: ${await response.text()}`);
+  const execution = await response.json();
+  await page.getByRole('button', { name: '返回 TODO' }).click();
+  await page.locator('tr').filter({ hasText: execution.execution_id }).waitFor();
+  return execution.execution_id;
+}
 async function verifyNativeAgentLaunch(page, todoTitle) {
   await page.getByRole('button', { name: '返回 TODO' }).click();
-  await page.locator('.ant-drawer-close').click();
-  await page.getByRole('button', { name: todoTitle, exact: true }).click();
-  await page.getByRole('button', { name: '指派所选能力' }).click();
-  await page.getByRole('combobox', { name: '执行节点' }).click();
-  await page.locator('.ant-select-item-option-content').filter({ hasText: 'node-a' }).click();
-  await page.getByRole('combobox', { name: '执行 Agent' }).click();
-  await page.locator('.ant-select-item-option-content').filter({ hasText: 'acceptance-agent' }).click();
-  const sent = page.waitForResponse((response) => response.url().endsWith('/api/sessions') && response.request().method() === 'POST');
-  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').fill('通过专项 TODO 发起 Agent 验收');
-  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').press('Enter');
-  const receipt = await sent;
-  if (!receipt.ok()) throw new Error(`browser agent launch: ${await receipt.text()}`);
-  const execution = await receipt.json();
-  await page.getByRole('button', { name: '返回 TODO' }).waitFor();
-  await page.getByRole('button', { name: '返回 TODO' }).click();
-  await page.locator('tr').filter({ hasText: execution.id }).waitFor();
-  return execution.id;
+  return launchFromTodo(page, todoTitle, true);
 }
 async function verifyNativeOperatorLaunch(page, todoTitle) {
-  await page.locator('.ant-drawer-close').click();
-  await page.getByRole('button', { name: todoTitle, exact: true }).click();
-  await page.getByRole('button', { name: '指派所选能力' }).click();
-  await page.getByRole('combobox', { name: '执行节点' }).click();
-  await page.locator('.ant-select-item-option-content').filter({ hasText: 'node-a' }).click();
-  const created = page.waitForResponse((response) => response.url().endsWith('/api/sessions') && response.request().method() === 'POST');
-  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').fill('通过 TODO 发起 Operator 验收');
-  await page.getByPlaceholder('输入提示词，Enter 发送，Shift+Enter 换行').press('Enter');
-  const response = await created;
-  if (!response.ok()) throw new Error(`browser operator launch: ${await response.text()}`);
-  const execution = await response.json();
-  await page.getByRole('button', { name: '返回 TODO' }).waitFor();
-  await page.getByRole('button', { name: '返回 TODO' }).click();
-  await page.locator('tr').filter({ hasText: execution.id }).waitFor();
-  return execution.id;
+  return launchFromTodo(page, todoTitle, false);
 }
 module.exports = { openBrowser, createHierarchy, projectPage, verifyWorkbench, verifyNativeAgentLaunch, verifyNativeOperatorLaunch };

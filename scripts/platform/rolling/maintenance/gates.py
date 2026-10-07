@@ -2,7 +2,7 @@
 from ..state import atomic_bytes
 
 
-def close(settings, record, operations):
+def close(settings, record, operations, seconds=90):
     # The private Server identity check reads Host status through its stable
     # loopback address; every Host write/RPC remains closed during migration.
     content = f'''server {{
@@ -22,9 +22,18 @@ server {{
     location / {{ return 503; }}
 }}
 '''
+    workers = operations.ingress_workers()
     atomic_bytes(settings.nginx_include, content.encode(), 0o644)
     operations.run('nginx', '-t')
     operations.run('systemctl', 'reload', 'nginx')
+    operations.wait(lambda: operations.ingress_switched(workers), seconds)
+
+
+def reopen(settings, record, operations, seconds):
+    from ..units import switch_ingress
+    workers = operations.ingress_workers()
+    switch_ingress(settings, record, operations)
+    operations.wait(lambda: operations.ingress_switched(workers), seconds)
 
 
 def drained(operations, endpoint, node_id):

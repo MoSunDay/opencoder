@@ -10,6 +10,16 @@ import brain
 
 
 class BrainRunnerTests(unittest.TestCase):
+    def test_browser_process_failure_survives_a_long_rust_backtrace(self):
+        fatal = 'pw:browser [pid=21][err] FATAL: renderer launch failed'
+        original = 'Brain browser failure: page.goto: Page crashed'
+        log = '\n'.join([fatal, original, *[f'frame {i}' for i in range(100)], 'FAILED'])
+        excerpt = brain.failure_excerpt(log)
+        self.assertTrue(excerpt.startswith(fatal))
+        self.assertIn(original, excerpt)
+        self.assertTrue(excerpt.endswith('FAILED'))
+        self.assertNotIn('frame 0\n', excerpt)
+
     def test_failed_command_keeps_output_and_exit_status(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'failure.log'

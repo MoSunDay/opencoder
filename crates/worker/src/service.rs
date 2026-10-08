@@ -27,12 +27,7 @@ impl NodeService for Worker {
                     .ok()
                     .and_then(|deps| deps.persistence_error.lock().unwrap().clone())
             })
-            .or_else(|| {
-                self.configuration()
-                    .and_then(|c| crate::resources::check_mount(c.agent.agents_dir.as_deref()))
-                    .err()
-                    .map(|e| format!("{e:#}"))
-            })
+            .or_else(|| self.inner.resources.error())
             .or_else(|| self.admission_error());
         NodeSnapshot {
             pending_runs: self

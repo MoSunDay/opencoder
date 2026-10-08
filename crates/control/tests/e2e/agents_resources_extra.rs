@@ -23,6 +23,61 @@ async fn scoped() -> tokio::sync::MutexGuard<'static, ()> {
     guard
 }
 
+#[tokio::test]
+async fn complete_resource_version_is_reachable_through_control_server() {
+    let _guard = scoped().await;
+    let h = Harness::new().await;
+    let files = json!([
+        {"path":"launch","content_b64":b64("execute"),"mode":0o755},
+        {"path":"settings.json","content_b64":b64("{}"),"mode":0o644}
+    ]);
+    want(
+        &h,
+        Method::POST,
+        "/api/agents/resources/tools",
+        Some(json!({"name":"version-proof","files":files})),
+        200,
+    )
+    .await;
+    let version = want(
+        &h,
+        Method::GET,
+        "/api/agents/resources/tools/version-proof/versions/1",
+        None,
+        200,
+    )
+    .await;
+    assert_eq!(version["files"], files);
+    for (version, status) in [(0, 400), (2, 404)] {
+        want(
+            &h,
+            Method::GET,
+            &format!("/api/agents/resources/tools/version-proof/versions/{version}"),
+            None,
+            status,
+        )
+        .await;
+    }
+    want(
+        &h,
+        Method::POST,
+        "/api/agents/resources/tools",
+        Some(json!({"name":"invalid-permission","files":[{
+            "path":"launch","content_b64":b64("execute"),"mode":0o4755
+        }]})),
+        400,
+    )
+    .await;
+    want(
+        &h,
+        Method::GET,
+        "/api/agents/resources/tools/invalid-permission/meta",
+        None,
+        404,
+    )
+    .await;
+}
+
 /// One save-body (pure data, no hidden state).
 fn save_body(name: &str, path: &str, content: &str) -> Value {
     json!({"name": name, "files": [{"path": path, "content_b64": b64(content)}]})

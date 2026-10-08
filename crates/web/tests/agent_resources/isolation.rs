@@ -20,6 +20,7 @@ async fn shared_resources_fork_all_categories_with_history_bytes_and_modes() {
                     &[opencoder_agents::VersionFile {
                         rel_path: path.into(),
                         bytes: bytes.into(),
+                        mode: 0o600,
                     }],
                 )
                 .unwrap()
@@ -190,6 +191,7 @@ async fn builtins_show_real_definitions_and_resource_writes_are_forbidden() {
             &[opencoder_agents::VersionFile {
                 rel_path: "memory.md".into(),
                 bytes: b"builtin memory".to_vec(),
+                mode: 0o600,
             }],
         )
         .unwrap()

@@ -14,6 +14,45 @@ use serde::Serialize;
 use std::io;
 pub use transaction::{restore, save};
 
+/// Full bytes and modes of an immutable version for pre-publication verification.
+pub fn version_files(cat: &str, name: &str, version: u32) -> io::Result<Vec<FileChange>> {
+    let _lock = lock::write_lock()?;
+    if version == 0 {
+        return Err(invalid_input("resource version must be positive"));
+    }
+    let meta = resource_meta(cat, name)?;
+    if version != meta.current && !meta.history.contains(&version) {
+        return Err(not_found("unknown resource version"));
+    }
+    let directory = crate::write::resource_dir(cat, name)?.join(format!("v{version}"));
+    Ok(filesystem::read_files(&directory)?
+        .iter()
+        .map(FileChange::from)
+        .collect())
+}
+
+/// Permissions of one pinned regular resource file, using the same confinement as reads.
+pub fn file_mode(cat: &str, name: &str, version: u32, path: &str) -> io::Result<u32> {
+    model::validate_path(path)?;
+    let target = crate::write::resource_dir(cat, name)?
+        .join(format!("v{version}"))
+        .join(path);
+    filesystem::check_path(&target)?;
+    let metadata = std::fs::symlink_metadata(target)?;
+    if !metadata.is_file() {
+        return Err(invalid_input("resource must be a regular file"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        Ok(metadata.permissions().mode() & 0o777)
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(0o600)
+    }
+}
+
 #[derive(Serialize)]
 pub struct ResourceView {
     pub ok: bool,

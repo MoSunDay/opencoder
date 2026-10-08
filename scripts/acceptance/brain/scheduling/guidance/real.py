@@ -1,21 +1,26 @@
 """Real-model steering for Agent, Operator and Team while a native barrier is held."""
-import time
-
 from assertions import events
 from environment import require
 from cases.control import release_all, pump
 from cases.execution_types import one_layer, node
+from guidance import gates
 
 
 def run(env, capabilities):
+    scheduling = env.api('GET', f'/api/nodes/{env.node_id}/scheduling')
+    require(scheduling['max_runs'] >= 5,
+            'live steering requires capacity for four held children and one Brain activation')
     original = env.tag + '-initial-marker'
     updated = env.tag + '-human-marker'
-    # The long local tool makes a running leaf observable; it does not tell the Brain
-    # what decision to emit. No external filesystem, service or message is changed.
-    leaf = ('Perform this bounded timing diagnostic in your own workspace: invoke a local shell '
-        'command python3 -c "import time; time.sleep(150); print(\'diagnostic finished\')" once. '
-        'Do not finish before the tool returns. Then return the latest marker requested for this task, '
-        f'initially {original}. Apply later human guidance to the final marker. No network or other file operations.')
+    # Each real tool stays held until the controller observes guidance delivery.
+    # A model taking longer than a fixed sleep cannot silently remove the targets.
+    leaf = ('Perform this bounded timing diagnostic in your own workspace: invoke this local shell '
+        f'command once: {gates.diagnostic()}. '
+        'Wait until the command prints diagnostic finished; a background job ID is not completion. '
+        'Do not create, modify or delete the release file; the controller releases it after guidance. '
+        'Then return the latest marker requested for this task, '
+        f'initially {original}. Apply later human guidance to the final marker. '
+        'Only this diagnostic may create its ready file; no network or other file operations.')
     team = env.tag + '-guidance-team'
     env.api('POST', '/api/teams', {'name': team, 'captain': 'act',
                                  'members': [{'agent': 'act'}, {'agent': 'plan'}]})
@@ -34,9 +39,10 @@ def run(env, capabilities):
         def started():
             view = env.view(root)
             require(view['run']['phase'] not in ('blocked', 'failed', 'cancelled'), 'steering plan failed before guidance')
-            return view if len(view['operations']) == 4 and all(op['status'] == 'running' for op in view['operations']) else None
-        before = env.wait(started, 330, 'all four guidance targets admitted')
-        time.sleep(5)
+            return view if len(view['operations']) == 4 and all(op['status'] == 'running' for op in view['operations']) and gates.ready(env, view) else None
+        # 240 seconds to start + the full 330-second decision window stay
+        # within the first child's 600-second tool deadline.
+        before = env.wait(started, 240, 'all four guidance targets admitted')
         env.api('POST', f'/api/brain/runs/{root}/inputs', {'text':
             f'最终报告标记变更为 {updated}。请立即把这个新要求传给本层仍在运行的 Agent、Operator 和 Team；'
             'Team 在下次成员发问时应用。DAG 继续运行，等待整层结束后再评估。'})
@@ -50,6 +56,7 @@ def run(env, capabilities):
         require({action['execution_id'] for action in actions} == supported,
                 'guide omitted a supported running child or targeted the DAG')
         require(all(updated in action['message'] for action in actions), 'guidance lost the human marker')
+        gates.release(env, guidance)
         final = pump(env, root, 1200)
         require(final['run']['phase'] == 'completed', 'steered layer did not complete')
         for op in final['operations']:
@@ -60,4 +67,6 @@ def run(env, capabilities):
                          env.api('GET', f'/api/executions/{op["execution_id"]}/events-page'))
         return {'run_id': root, 'guided_execution_ids': sorted(supported), 'marker': updated}
     finally:
-        release_all(env, env.view(root))
+        view = env.view(root)
+        gates.release(env, view)
+        release_all(env, view)

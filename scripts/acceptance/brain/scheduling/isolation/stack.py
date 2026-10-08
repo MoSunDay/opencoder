@@ -76,7 +76,9 @@ def provision(bundle, model_config, source_rootfs, root, port_base):
         server_data=str(root / 'server-data'), agent_workdir=str(agent_workdir), token_file=str(token),
         server_user='root', node_name=suffix, public_url=f'http://127.0.0.1:{port}',
         listen=f'127.0.0.1:{port}', host_port=port + 1, resource_port=port + 3,
-        port_base=port, max_runs=4, bin_dir=str(root / 'bin'),
+        # Four held children plus their finite human-guidance activation.
+        # The queue case independently reduces capacity to one.
+        port_base=port, max_runs=5, bin_dir=str(root / 'bin'),
         nginx_include=str(root / 'unused-nginx.conf'),
         legacy_agent_unit=f'{suffix}-unused-agent.service', legacy_server_unit=f'{suffix}-unused-server.service')
     config_path = root / 'opencoder.json'

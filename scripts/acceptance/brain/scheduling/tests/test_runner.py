@@ -115,6 +115,16 @@ class RunnerTests(unittest.TestCase):
             result = blockers(env)
             self.assertEqual([r['id'] for r in result['local_executions']], ['owned-but-other-task'])
             self.assertEqual(result['other_busy_nodes'], ['remote'])
+            inventory = env.http('local', '/inventory')
+            inventory['snapshot']['resource_error'] = 'node admission is frozen'
+            env.http = lambda *_: inventory
+            self.assertEqual(blockers(env)['resource_error'], 'node admission is frozen')
+            frozen = blockers(env, allow_frozen=True)
+            self.assertIsNone(frozen['resource_error'])
+            self.assertEqual(frozen['local_executions'], result['local_executions'])
+            self.assertEqual(frozen['other_busy_nodes'], result['other_busy_nodes'])
+            inventory['snapshot']['resource_error'] = 'node storage low'
+            self.assertEqual(blockers(env, allow_frozen=True)['resource_error'], 'node storage low')
             with patch('faults.runtime.require_isolated'), self.assertRaisesRegex(AssertionError, 'unrelated work'):
                 FrozenWindow(env).__enter__()
 

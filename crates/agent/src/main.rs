@@ -60,6 +60,9 @@ struct Args {
     /// Do not accept DAG workflows on this node.
     #[arg(long)]
     no_dag: bool,
+    /// Do not advertise Brain scheduling support (host fixtures and special-purpose nodes).
+    #[arg(long)]
+    no_brain: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -322,13 +325,14 @@ async fn run(args: Args) -> Result<()> {
     });
 
     if let Some(AgentCommand::Host { port, standby }) = args.command {
-        let host = host::Host::open(
+        let host = host::Host::open_with_brain(
             &data_dir,
             name,
             token,
             args.max_runs
                 .unwrap_or_else(|| opencoder_node::fleet::cpu::capacity().ceil() as usize)
                 .max(1),
+            !args.no_brain,
         )
         .await?;
         return host::run(

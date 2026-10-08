@@ -40,10 +40,12 @@ def provision(bundle, model_config, source_rootfs, root, port_base):
         'created_at': int(time.time() * 1000),
         **{key + '_unit': f'opencoder-{key}-{suffix}.service' for key in ('server', 'host', 'runtime')}}
     resource_unit = f'opencoder-resources-{suffix}.service'
+    incompatible_unit = f'opencoder-incompatible-{suffix}.service'
+    incompatible_data = root / 'incompatible-host'
     token = root / 'token'
     atomic_bytes(token, secrets.token_urlsafe(40).encode())
     server_workdir, agent_workdir = root / 'server-work', root / 'agent-work'
-    for directory in [server_workdir, agent_workdir, root / 'source', root / 'mounts',
+    for directory in [server_workdir, agent_workdir, incompatible_data, root / 'source', root / 'mounts',
                       root / 'teams', root / 'knowledge', state / 'host']:
         directory.mkdir(parents=True, exist_ok=True)
     source_config = json.loads(model_config.read_text())
@@ -115,6 +117,28 @@ def provision(bundle, model_config, source_rootfs, root, port_base):
     operations.http(settings.host_url, '/runtimes/' + record['id'] + '/activate', 'POST', {})
     run('systemctl', 'start', record['server_unit'])
     register_server(settings, record, operations)
+    # Keep one real online node that deliberately lacks Brain.  The definitions
+    # case pins a Brain run to it and must observe the server's explicit 503
+    # placement rejection rather than silently having no incompatible target.
+    incompatible_binary = state / 'releases' / record['id'] / 'bundle/bin/opencoder-agent'
+    incompatible_command = [incompatible_binary, '--remote', settings.public_url,
+        '--token-file', token, '--name', suffix + '-incompatible', '--workdir', agent_workdir,
+        '--data-dir', incompatible_data, '--max-runs', 1, '--no-brain', 'host',
+        '--port', port + 7]
+    incompatible_content = units.service(incompatible_command, incompatible_unit, workdir=agent_workdir)
+    incompatible_content = incompatible_content.replace('Type=simple',
+        'Type=simple\nEnvironment="HOME=' + str(root / 'home') + '"\nEnvironment="PATH=/root/.local/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"')
+    incompatible_content = incompatible_content.replace('Restart=on-failure', 'Restart=no')
+    atomic_bytes(settings.systemd_dir / incompatible_unit, incompatible_content.encode(), 0o644)
+    run('systemctl', 'daemon-reload')
+    run('systemctl', 'start', incompatible_unit)
+    incompatible_node = incompatible_data / 'node-id'
+    operations.wait(lambda: incompatible_node.exists(), 30)
+    incompatible_node_id = incompatible_node.read_text().strip()
+    operations.wait(lambda: any(node['id'] == incompatible_node_id and node['online']
+                                for node in operations.http(settings.public_url, '/api/nodes')['nodes']), 60)
+    receipt.update(incompatible_unit=incompatible_unit, incompatible_node_id=incompatible_node_id)
+    write(state / 'isolation.json', receipt)
     operations.http(settings.host_url, '/activate-host', 'POST', {})
     operations.http(settings.host_url, '/commit-host', 'POST', {})
     journal = Journal(state)

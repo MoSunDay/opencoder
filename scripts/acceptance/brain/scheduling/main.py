@@ -21,6 +21,7 @@ CASES = {'admission': admission.run, 'definitions': definitions.run, 'closed-loo
          'failure-barrier': negative.failure_barrier, 'oversize-output': negative.oversize,
          'missing-prerequisite': negative.blocked, 'same-layer-repair': definitions.same_layer,
          'contracts': contracts.run, 'frozen-contract': contracts.frozen,
+         'root-resources': admission.root_resources,
          'live-steering': guidance.run,
          'context-capacity': admission.capacity, 'dispatch-retry': recovery.retry_receipts,
          'process-recovery': recovery.run, 'correction-budget': correction.run,

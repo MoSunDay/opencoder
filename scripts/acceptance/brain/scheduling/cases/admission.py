@@ -1,9 +1,33 @@
 """Public schema/version validation and deployed capacity-feature checks."""
 import copy
+from pathlib import Path
 import time
 
 from environment import require
 from scenario import plan
+
+
+def root_resources(env, capabilities):
+    from cases.execution_types import one_layer, node
+    instruction = ('Run the supplied positive arithmetic diagnostic with its default expression. '
+                   'Complete only when its actual check.passed is true.')
+    spec = one_layer('大脑根任务资源准入', instruction,
+        [node('check', capabilities['fast'], 'Use the diagnostic default and return its actual output.')])
+    began = time.monotonic()
+    identifier = env.create('root-resources', spec)
+    elapsed = time.monotonic() - began
+    resources = Path(env.record['runtime_data']) / 'brain' / identifier / 'resources'
+    require(resources.is_dir() and not any(resources.iterdir()),
+            'finite Root copied unrelated Agent resources')
+    require(elapsed <= 30, 'finite Root admission exceeded 30 seconds')
+    final = env.terminal(identifier, 330)
+    require(final['run']['phase'] == 'completed', 'finite Root did not finish its actual decision')
+    require(len(final['operations']) == 1, 'finite Root did not create exactly one diagnostic')
+    detail = env.detail(final['operations'][0])
+    require(detail['result']['scheduler_output']['check']['passed'] is True,
+            'finite Root completed without passing execution evidence')
+    require(not any(resources.iterdir()), 'Root acquired Agent resources during activation')
+    return {'run_id': identifier, 'admission_seconds': elapsed, 'root_agent_resources': 0}
 
 
 def run(env, capabilities):

@@ -163,7 +163,7 @@ pub(in crate::operations) fn begin(
         .context("execution preparation parent missing")?;
     opencoder_core::share_fs::durable_create_dir_all(parent)?;
     let stage = parent.join(format!(".prepare-{}", ulid::Ulid::new()));
-    // A native-only request freezes an empty Agent namespace. Publish it with
+    // A request without Agent dependencies freezes an empty namespace with
     // the reservation, sharing the same parent-directory durability barrier.
     // Agent-bearing requests must still copy and validate their resource pool.
     let empty_resources = if crate::resources::requires_agent_pool(&assignment) {

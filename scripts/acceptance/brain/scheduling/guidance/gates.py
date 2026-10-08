@@ -42,7 +42,10 @@ def ready(env, view):
 
 def release(env, view):
     for operation in view['operations']:
-        if operation['execution_kind'] in KINDS:
+        # A creating operation is only a durable dispatch intent: its child and
+        # workspace may not exist. Do not replace an admission timeout with a
+        # cleanup 404, or write gate files after a child has already finished.
+        if operation['execution_kind'] in KINDS and operation['status'] == 'running':
             path = workspace(env, operation)
             if (path / READY).is_file():
                 (path / RELEASE).touch()

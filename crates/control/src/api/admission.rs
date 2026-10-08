@@ -265,7 +265,7 @@ pub async fn reopen(
 pub async fn freeze_cluster(state: &Arc<AppState>) -> anyhow::Result<()> {
     let _transition = state.admission.transition().await;
     state.admission.freeze(&state.placement).await?;
-    let (nodes, _) = call_online_nodes(state, NodeAdmissionCommand::Freeze).await;
+    let (nodes, _) = call_online_nodes(state, NodeAdmissionCommand::Freeze, None).await;
     for node in nodes
         .into_iter()
         .filter(|node| !(200..300).contains(&node.status))

@@ -26,6 +26,19 @@ class GuardTests(unittest.TestCase):
         window = FrozenWindow(env)
         self.assertFalse(window.reopen())
         env.api.assert_not_called()
+        inventory['snapshot']['resource_error'] = 'node admission is frozen'
+        self.assertFalse(window.reopen())
+        env.api.assert_any_call('DELETE', '/api/admin/drain')
+        inventory['snapshot']['resource_error'] = 'node storage low'
+        env.api.reset_mock()
+        self.assertFalse(window.reopen())
+        env.api.assert_not_called()
+        inventory['registration']['id'] = 'node-other'
+        inventory['snapshot']['resource_error'] = 'node admission is frozen'
+        self.assertFalse(window.reopen())
+        env.api.assert_not_called()
+        inventory['registration']['id'] = 'node-owned'
+        inventory['snapshot']['resource_error'] = None
         inventory['snapshot']['ready'] = True
         self.assertFalse(window.reopen())
         public['nodes'][0]['snapshot']['ready'] = True

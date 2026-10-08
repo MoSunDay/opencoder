@@ -42,7 +42,7 @@ def owned_ids(env):
     return identifiers
 
 
-def blockers(env):
+def blockers(env, *, allow_frozen=False):
     identifiers = owned_ids(env)
     inventory = env.http(env.runtime_url, '/inventory')
     active = [index for index in inventory['indexes']
@@ -51,8 +51,11 @@ def blockers(env):
     remote = [node['id'] for node in nodes if node['id'] != env.node_id and node['online']
               and (node.get('snapshot') or {}).get('active_runs', 0) +
                   (node.get('snapshot') or {}).get('pending_runs', 0) > 0]
+    resource_error = inventory['snapshot'].get('resource_error')
+    if allow_frozen and resource_error == 'node admission is frozen':
+        resource_error = None
     return {'local_executions': active, 'other_busy_nodes': remote,
-            'resource_error': inventory['snapshot'].get('resource_error')}
+            'resource_error': resource_error}
 
 
 def wait_idle(env, seconds=1800):
@@ -84,7 +87,7 @@ class FrozenWindow:
         env.save('faults/restore', {'admission': 'open', 'units': [env.record['server_unit'], env.record['runtime_unit']]})
         try:
             env.api('POST', '/api/admin/drain', {})
-            require(not any(blockers(env).values()), 'unrelated admission raced the freeze')
+            require(not any(blockers(env, allow_frozen=True).values()), 'unrelated admission raced the freeze')
             return self
         except BaseException:
             self.restore()
@@ -102,7 +105,9 @@ class FrozenWindow:
     def reopen(self):
         try:
             runtime = self.env.http(self.env.runtime_url, '/inventory')
-            if runtime['registration']['id'] != self.env.node_id or not runtime['snapshot']['ready']:
+            snapshot = runtime['snapshot']
+            if runtime['registration']['id'] != self.env.node_id or not (
+                    snapshot['ready'] or snapshot.get('resource_error') == 'node admission is frozen'):
                 return False
             self.env.api('DELETE', '/api/admin/drain')
             nodes = self.env.api('GET', '/api/nodes')['nodes']
@@ -116,7 +121,7 @@ class FrozenWindow:
 
 
 def restart(env, kind):
-    require(not any(blockers(env).values()), 'unrelated work prevents restart')
+    require(not any(blockers(env, allow_frozen=True).values()), 'unrelated work prevents restart')
     unit = env.record[kind + '_unit']
     before = int(subprocess.check_output(['systemctl', 'show', unit, '-p', 'MainPID', '--value']))
     require(before > 0, 'fault target is not running')

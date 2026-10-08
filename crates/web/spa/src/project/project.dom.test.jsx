@@ -30,7 +30,7 @@ it('has exactly three tabs and a global TODO table including unassigned work', a
   expect(within(table).getByText('前端')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '拖动 专项任务' })).toBeNull();
 });
-it('opens project progress, then the initiative board in a right-side drawer', async () => {
+it('opens project progress, then the initiative board and TODO in full-width right-side drawers', async () => {
   render(<ProjectPanel onNotice={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: '项目甲' }));
   const project = (await screen.findByText('项目 · 项目甲', { exact: true })).closest('[role=dialog]');
@@ -38,12 +38,16 @@ it('opens project progress, then the initiative board in a right-side drawer', a
   expect(within(project).getAllByText('1/2').length).toBeGreaterThan(0);
   fireEvent.click(within(project).getByText('专项甲', { exact: true }).closest('button'));
   const initiative = (await screen.findByText('专项 · 专项甲', { exact: true })).closest('[role=dialog]');
+  expect(initiative.closest('.ant-drawer-content-wrapper').style.width).toBe('100vw');
+  expect(initiative.closest('.ant-drawer-content-wrapper').style.maxWidth).toBe('');
   expect(within(initiative).getByLabelText('拖动 专项任务').disabled).toBe(false);
   fireEvent.change(within(initiative).getByLabelText('搜索专项 TODO'), { target: { value: '专项任务' } });
   expect(within(initiative).getByLabelText('拖动 专项任务').disabled).toBe(false);
   expect(within(initiative).queryByText('完成任务')).toBeNull();
   fireEvent.click(within(initiative).getByText('专项任务', { exact: true }));
-  expect((await screen.findByText('TODO · 专项任务', { exact: true })).closest('[role=dialog]')).toBeTruthy();
+  const todo = (await screen.findByText('TODO · 专项任务', { exact: true })).closest('[role=dialog]');
+  expect(todo.closest('.ant-drawer-content-wrapper').style.width).toBe('100vw');
+  expect(todo.closest('.ant-drawer-content-wrapper').style.maxWidth).toBe('');
   await waitFor(() => expect(api.apiGet).toHaveBeenCalledWith('/api/project/todos/t1/executions', { signal: expect.any(AbortSignal) }));
 }, 60000);
 it('filters a table by its title column and preserves the filter after a refresh', async () => {

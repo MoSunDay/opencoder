@@ -322,6 +322,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
             post(api_agent_resources::rollback),
         )
         .route(
+            "/api/agents/resources/:cat/:name/versions/:v",
+            get(api_agent_resources::version_files),
+        )
+        .route(
             "/api/agents/resources/:cat/:name/versions/:v/files/*path",
             get(api_agent_resources::read_file),
         )

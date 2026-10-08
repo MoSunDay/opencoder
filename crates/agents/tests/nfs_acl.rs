@@ -134,3 +134,45 @@ fn retransmitted_nfs_request_does_not_block_later_nfs_or_acl_replies() {
     drop(stream);
     server.shutdown();
 }
+
+#[test]
+fn fragmented_pipelined_calls_keep_reply_frames_intact_after_partial_client_disconnect() {
+    let root = tempfile::tempdir().unwrap();
+    let server = spawn_nfs_server(&NfsServerOpts {
+        export_root: root.path().into(),
+        host: "127.0.0.1".into(),
+        port: 0,
+        read_only: true,
+    })
+    .unwrap();
+    let address = server.local_addr().unwrap();
+    let mut disconnected = TcpStream::connect(address).unwrap();
+    disconnected.write_all(&100u32.to_be_bytes()).unwrap();
+    disconnected.write_all(&[0; 3]).unwrap();
+    drop(disconnected);
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+        .unwrap();
+    for xid in 1..=64 {
+        let mut message = vec![];
+        let program = if xid % 2 == 0 { 100003 } else { 100227 };
+        for number in [xid, 0, 2, program, 3, 0, 0, 0, 0, 0] {
+            word(&mut message, number);
+        }
+        stream.write_all(&17u32.to_be_bytes()).unwrap();
+        stream.write_all(&message[..17]).unwrap();
+        send(&mut stream, &message[17..]);
+    }
+    let mut identifiers = vec![];
+    for _ in 1..=64 {
+        let reply = receive(&mut stream);
+        assert_eq!(reply.len(), 24);
+        assert_eq!(value(&reply, 20), 0);
+        identifiers.push(value(&reply, 0));
+    }
+    identifiers.sort_unstable();
+    assert_eq!(identifiers, (1..=64).collect::<Vec<_>>());
+    drop(stream);
+    server.shutdown();
+}

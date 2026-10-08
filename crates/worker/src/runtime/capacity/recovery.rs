@@ -2,7 +2,7 @@
 use super::HostCapacity;
 use crate::{journal::Journal, lifecycle::StopIntent};
 use anyhow::{ensure, Context, Result};
-use opencoder_core::fleet::ExecutionStatus;
+use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use std::path::Path;
 
 impl HostCapacity {
@@ -35,7 +35,6 @@ impl HostCapacity {
         if tickets.is_empty() {
             return Ok(());
         }
-        self.verify_owners(data).await?;
         // Validate the complete set before changing any reservation. Unknown
         // records must use explicit offline recovery, never a blanket release.
         for (ticket, execution, _) in &tickets {
@@ -43,6 +42,10 @@ impl HostCapacity {
                 .records
                 .get(execution)
                 .context("capacity owner record missing")?;
+            ensure!(
+                record.assignment.index.kind != ExecutionKind::Brain,
+                "Brain has unresolved running capacity; use storage settle-brain-crash for the exact root"
+            );
             ensure!(
                 record.assignment.index.node_id == node
                     && record.assignment.index.id == *execution
@@ -59,6 +62,7 @@ impl HostCapacity {
                 "execution recovery is not durable"
             );
         }
+        self.verify_owners(data).await?;
         for (ticket, execution, _) in tickets {
             if journal.records[&execution].assignment.index.status == ExecutionStatus::Pending {
                 journal.request_stop(&execution, StopIntent::Interrupt, false)?;

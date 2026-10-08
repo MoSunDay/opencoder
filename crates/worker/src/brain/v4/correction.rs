@@ -10,6 +10,11 @@ use tokio_util::sync::CancellationToken;
 const MAX_ATTEMPTS: u64 = 3;
 const BUDGET_MS: i64 = 300_000;
 
+fn correctable(error: &anyhow::Error) -> bool {
+    !error.is::<crate::runtime::crash::ProcessCrash>()
+        && error.to_string().contains("invalid layered decision")
+}
+
 fn remaining_budget(deadline_ms: i64, now: i64) -> Result<std::time::Duration> {
     let remaining = deadline_ms.saturating_sub(now);
     anyhow::ensure!(
@@ -70,8 +75,8 @@ pub(super) async fn decide(
             anyhow::bail!("brain activation interrupted");
         }
         attempt += 1;
-        // Persist before invoking the model. A crash consumes the attempt,
-        // rather than resetting the budget and retrying indefinitely.
+        // Persist before invoking the model. Graceful interruption retains the
+        // budget; an unexpected process crash fails the root without retrying.
         mark(worker, context, attempt, deadline_ms, &feedback).await?;
         let mut corrected = context.clone();
         if !feedback.is_empty() {
@@ -100,7 +105,7 @@ pub(super) async fn decide(
         }
         let decision = match result {
             Ok(value) => value,
-            Err(error) if error.to_string().contains("invalid layered decision") => {
+            Err(error) if correctable(&error) => {
                 feedback = error.to_string();
                 mark(worker, context, attempt, deadline_ms, &feedback).await?;
                 continue;
@@ -129,6 +134,19 @@ pub(super) async fn decide(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_crash_is_not_retried_even_when_output_mentions_an_invalid_decision() {
+        let crash = anyhow!(crate::runtime::crash::ProcessCrash(
+            "invalid layered decision then SIGKILL".into()
+        ))
+        .context("invalid layered decision");
+        assert!(!correctable(&crash));
+        assert!(correctable(&anyhow!(
+            "invalid layered decision: missing field"
+        )));
+        assert!(!correctable(&anyhow!("model connection failed")));
+    }
 
     #[test]
     fn expired_recovery_deadline_never_becomes_an_unsigned_wait() {

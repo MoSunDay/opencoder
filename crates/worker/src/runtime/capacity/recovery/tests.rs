@@ -61,6 +61,49 @@ async fn unverified_restart_retains_capacity_instead_of_trusting_an_empty_tracke
     assert_eq!(capacity.store.capacity().await.unwrap().running, 1);
 }
 
+#[tokio::test]
+async fn failed_brain_requires_explicit_settlement_and_keeps_its_capacity() {
+    let root = tempfile::tempdir().unwrap();
+    let data = std::fs::canonicalize(root.path()).unwrap();
+    let store = Arc::new(FleetStore::open_memory().await.unwrap());
+    store.initialize_capacity(1).await.unwrap();
+    store
+        .enqueue_capacity("brain-ticket", "brain", "old")
+        .await
+        .unwrap();
+    assert!(store.claim_capacity("brain-ticket", "old").await.unwrap());
+    store
+        .enqueue_capacity("other-ticket", "other", "new")
+        .await
+        .unwrap();
+    let layout = DirectoryLayout::new(data.clone(), None).unwrap();
+    let path = layout.record_path(ExecutionKind::Brain, "brain").unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = serde_json::to_vec(&json!({"assignment":{
+        "index":{"id":"brain","kind":"brain","created_at":1,"node_id":"node","status":"error"},
+        "request":{"id":"brain","kind":"brain","input":{"schema_version":7}}},
+        "queue":{"ticket":"brain-ticket","sequence":1,"resume":false,"config":{}},
+        "result":{"phase":"failed"},"error":"Worker crashed","events":[]}))
+    .unwrap();
+    std::fs::write(&path, &original).unwrap();
+    let mut journal = Journal::load(layout).unwrap();
+    let capacity = HostCapacity {
+        store: store.clone(),
+        runtime_id: "old".into(),
+    };
+
+    let error = capacity
+        .recover(&data, "node", &mut journal)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("settle-brain-crash"), "{error}");
+    assert_eq!(std::fs::read(path).unwrap(), original);
+    assert_eq!(store.capacity().await.unwrap().running, 1);
+    assert_eq!(store.runtime_tickets("old").await.unwrap()[0].2, "running");
+    assert!(!store.claim_capacity("other-ticket", "new").await.unwrap());
+}
+
 #[test]
 fn cgroup_ownership_uses_exact_components_and_includes_nested_containers() {
     let unit = "opencoder-runtime-old.service";

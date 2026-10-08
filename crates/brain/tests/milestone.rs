@@ -277,6 +277,8 @@ fn only_all_successful_layers_can_complete_without_configured_routes() {
     );
 }
 
+#[path = "milestone/crash.rs"]
+mod crash;
 #[path = "milestone/validation.rs"]
 mod validation;
 
@@ -325,9 +327,9 @@ fn decision_context_maps_layer_ids_to_one_based_targets() {
         .layers
         .iter()
         .enumerate()
-        .map(|(index, layer)| json!({"layer":index + 1,"layer_id":layer.layer_id}))
+        .map(|(index, layer)| json!({"number":index + 1,"layer_id":layer.layer_id}))
         .collect();
-    assert_eq!(prompt["layer_numbers"], json!(expected));
+    assert_eq!(prompt["layer_catalog"], json!(expected));
     let mut invalid = proposal(&initial, &req, 1);
     if let LayeredDecision::DispatchLayer { layer, .. } = &mut invalid {
         *layer = 0;
@@ -335,9 +337,9 @@ fn decision_context_maps_layer_ids_to_one_based_targets() {
     let error = decide(&initial, &req, &catalog(), &invalid, 2)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("1-based integer in 1..=2"), "{error}");
+    assert!(error.contains("valid dispatch layers are 1..=2"), "{error}");
     assert!(
-        error.contains("layer 0 is only the initial run state"),
+        error.contains("run.layer=0 means no layer dispatched"),
         "{error}"
     );
     assert!(decide(&initial, &req, &catalog(), &proposal(&initial, &req, 1), 2).is_ok());

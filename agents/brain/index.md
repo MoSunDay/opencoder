@@ -1,4 +1,4 @@
-Commit: 07d29e11815cdbbbfc82a73a5a208bd0eb313e62
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # brain 模块
 
@@ -8,7 +8,7 @@ Commit: 07d29e11815cdbbbfc82a73a5a208bd0eb313e62
 
 调度范围是计划已绑定的能力，每次派发覆盖目标层全部节点；运行中不检索能力库来增加节点或替换能力。能力描述、输入输出描述及必填字段随能力定义冻结，进入调度与执行提示词。[字段校验](../../crates/brain/src/contracts.rs) 负责字段名、输入值和输出证据的纯函数校验；字段要求存于现有 `capability_target`，不扩展数据库表。
 
-[容量预算](../../crates/brain/src/layered/budget.rs) 按完整计划、冻结能力、各节点结果上限和输出预留计算准入容量，包含 JSON 转义与嵌套回执。Control 携带真实请求探测支持 `brain_context_budget_v1` 的节点；[节点预算](../../crates/worker/src/brain/v4/budget.rs) 按有效模型配置再次检查并冻结预算。人工输入按累计内容检查，实际决策上下文在模型调用前复核；超限不裁剪成功证据，准入返回 413，存量超限运行保留证据并明确阻塞。上限及部署顺序见调度规则。
+[容量预算](../../crates/brain/src/layered/budget/mod.rs) 按完整计划、冻结能力、各节点结果上限和输出预留计算准入容量，包含 JSON 转义与嵌套回执。Control 携带真实请求探测支持 `brain_context_budget_v1` 的节点；[节点预算](../../crates/worker/src/brain/v4/budget/mod.rs) 按有效模型配置再次检查并冻结预算。人工输入按累计内容检查，实际决策上下文在模型调用前复核；超限不裁剪成功证据，准入返回 413，存量超限运行保留证据并明确阻塞。上限及部署顺序见调度规则。
 
 [Control gateway](../../crates/control/src/api/brain_runs/v4/gateway.rs) 解析实际输入，缺失引用或字段以 422 回执结束该次派发，原因与操作终态一同持久化并重新唤醒大脑；临时不可用继续重试。[Worker 输出适配](../../crates/worker/src/brain/v4/output.rs) 向大脑传递完整结构化结果，`summary` 不能覆盖其他字段。叶子能力的成功决策证据限 16 KiB；缺失必填输出或超限转为 Error，完整结果保留在子执行，失败上下文明确标记省略部分。Done 仅表示能力执行结束，里程碑是否达标由大脑判断。
 
@@ -22,6 +22,8 @@ Brain 管理的执行各有工作区，见 [工作区解析](../../crates/worker
 - `crates/control/src/api/brain_runs/v4/`：准入、派发、事件转交及索引视图。
 - `crates/worker/src/brain/v4/`：节点投影、恢复、模型调度与确认。
 - `crates/brain/tests/milestone.rs` 与 `crates/brain/tests/milestone/`：图约束、层屏障、回退与终态；`crates/worker/tests/brain_scheduler_v4.rs`：节点调度；`crates/worker/tests/brain_nested.rs`：嵌套计划链路。
+- [CI 入口](../../scripts/ci/brain.py) 分阶段准备同版本原生镜像，并验证项目恢复、里程碑、调度、Server 重启和真实浏览器；编译与原生运行分开处理权限，临时目录避开 runner 私有父目录，失败保留原始错误和页面证据。运行条件见 [验收说明](../../scripts/acceptance/brain/README.md)。
+- [当前 Server 真实调度验收](../../scripts/acceptance/brain/scheduling/README.md) 覆盖事件唤醒、结果判断、跨层与同层整改、六种能力、人工控制、字段约定和故障恢复；使用实际进程版本与独立证据目录，逐项区分通过、失败和未执行。故障用例要求其他任务结束；脚本自身的证据、归属和恢复保护测试接入 CI。
 
 新计划和运行入口要求 schema 7；历史 schema 4/5/6 只读；`v4/` 是现存实现目录名，历史读取逻辑保留在代码中。历史数据清理使用 `scripts/maintenance/brain_cleanup/` 的审阅清单、行摘要校验、备份与重复复核；清理范围必须同时覆盖运行数据、Server 索引及 Host 休眠索引，避免节点同步恢复已删除的 ID。清理不在存储初始化中自动执行。
 

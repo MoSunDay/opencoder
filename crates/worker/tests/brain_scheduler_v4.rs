@@ -59,7 +59,7 @@ fn root(id: &str) -> ExecutionRef {
 /// Create one v4 root the way control does: the canvas is frozen in the
 /// execution input, so the node never resolves a plan of its own.
 async fn create(node: &Worker, id: &str) {
-    let input = json!({"schema_version": 7, "layered_request": plan::request(id), "frozen_capabilities": plan::catalog()});
+    let input = json!({"schema_version": 7, "layered_request": plan::request(id), "frozen_capabilities":plan::catalog()});
     let reply = node
         .handle(NodeOperation::Create {
             assignment: assignment(node, id, ExecutionKind::Brain, input, Some(json!({}))),
@@ -71,7 +71,7 @@ async fn create(node: &Worker, id: &str) {
 
 #[tokio::test]
 async fn root_emits_one_layered_wake_until_control_acknowledges_it() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), mock()).await;
     let id = "brain-v4-wake";
@@ -113,7 +113,7 @@ async fn root_emits_one_layered_wake_until_control_acknowledges_it() {
 
 #[tokio::test]
 async fn human_input_wakes_brain_before_barrier_without_dispatching_next_layer() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(LayeredClient::new());
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), client.clone()).await;
@@ -165,7 +165,7 @@ async fn human_input_wakes_brain_before_barrier_without_dispatching_next_layer()
 
 #[tokio::test]
 async fn human_input_reopens_a_blocked_brain_decision() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(LayeredClient::with([json!({
         "decision":"block","reason":"Need an operator supplied verification constraint"
     })]));
@@ -197,7 +197,7 @@ async fn human_input_reopens_a_blocked_brain_decision() {
 
 #[tokio::test]
 async fn guidance_to_running_agent_replays_until_acknowledged() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(LayeredClient::new());
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), client).await;
@@ -257,7 +257,7 @@ async fn guidance_to_running_agent_replays_until_acknowledged() {
 
 #[tokio::test]
 async fn newer_human_input_cancels_an_in_flight_guidance_decision() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(HoldSecondDecision::new());
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), client.clone()).await;
@@ -327,7 +327,7 @@ async fn newer_human_input_cancels_an_in_flight_guidance_decision() {
 
 #[tokio::test]
 async fn invalid_decision_is_corrected_before_any_capability_is_dispatched() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(LayeredClient::with([json!({
         "decision":"dispatch_layer","layer":2,"assignments":[],"reason":"skip the first layer"
     })]));
@@ -347,7 +347,7 @@ async fn invalid_decision_is_corrected_before_any_capability_is_dispatched() {
 
 #[tokio::test]
 async fn three_invalid_decisions_block_without_dispatching_a_capability() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let invalid = json!({"decision":"dispatch_layer","layer":2,"assignments":[],"reason":"skip"});
     let client = Arc::new(LayeredClient::with([
         invalid.clone(),
@@ -374,7 +374,7 @@ async fn three_invalid_decisions_block_without_dispatching_a_capability() {
 
 #[tokio::test]
 async fn layered_context_requeues_the_idle_root_for_its_layer_decision() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(LayeredClient::new());
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), client.clone()).await;
@@ -425,7 +425,7 @@ async fn layered_context_requeues_the_idle_root_for_its_layer_decision() {
 
 #[tokio::test]
 async fn failure_wakes_the_brain_and_reflection_creates_a_distinct_durable_visit() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(LayeredClient::new());
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), client.clone()).await;
@@ -474,7 +474,7 @@ async fn failure_wakes_the_brain_and_reflection_creates_a_distinct_durable_visit
 
 #[tokio::test]
 async fn closing_context_completes_the_root_and_binds_the_summary() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let client = Arc::new(LayeredClient::new());
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), client.clone()).await;
@@ -518,7 +518,7 @@ async fn closing_context_completes_the_root_and_binds_the_summary() {
 
 #[tokio::test]
 async fn historical_schema_four_is_read_only_after_reopening_a_terminal_journal() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), mock()).await;
     let id = "brain-historical";
@@ -555,7 +555,7 @@ async fn historical_schema_four_is_read_only_after_reopening_a_terminal_journal(
 
 #[tokio::test]
 async fn exhausted_budget_blocks_dispatch_until_the_budget_command_and_resume() {
-    let (_config, _home) = plan::isolated_config();
+    let (_config, _home) = isolated_brain_config();
     let dir = tempfile::tempdir().unwrap();
     let node = worker(dir.path(), Arc::new(LayeredClient::new())).await;
     let id = "brain-round-budget";

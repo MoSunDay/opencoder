@@ -15,8 +15,15 @@ def spec(capabilities):
 
 def baseline_config(env, capabilities, label):
     wait_idle(env, 0)
-    baseline = env.create(label, spec(capabilities))
-    require(env.terminal(baseline)['run']['phase'] == 'completed', 'real-model baseline failed before fault injection')
+    baseline = env.create(label, one_layer('纠错故障注入的健康基线',
+        'Run the built-in positive-number diagnostic once with no input overrides. '
+        'Its default expression is abs(a) + abs(b), which is valid for its positive-number cases. '
+        'Completion requires the real check.passed=true output. No source change or expression-identity '
+        'check is part of this health baseline; do not bind inputs from another execution.',
+        [node('check', capabilities['fast'], 'Use the built-in default diagnostic without input overrides.')]))
+    final = env.terminal(baseline)['run']
+    require(final['phase'] == 'completed',
+            f"real-model baseline failed before fault injection: {final['phase']}: {final.get('error')}")
     return journal(env, baseline)['queue']['config']
 
 

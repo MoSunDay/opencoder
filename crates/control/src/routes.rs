@@ -99,6 +99,7 @@ pub fn build_app_with_metrics(
         .route("/api/agents/resources/:cat/:name", put(api_agent_resources::put_version).delete(api_agent_resources::delete))
         .route("/api/agents/resources/:cat/:name/meta", get(api_agent_resources::meta))
         .route("/api/agents/resources/:cat/:name/rollback", post(api_agent_resources::rollback))
+        .route("/api/agents/resources/:cat/:name/versions/:v", get(api_agent_resources::version_files))
         .route("/api/agents/resources/:cat/:name/versions/:v/files/*path", get(api_agent_resources::read_file))
         .route("/api/ontology/nfs", get(crate::ontology::status).post(crate::ontology::set_status))
         .route("/api/agents/nfs", get(api_agent_nfs::get_status).post(api_agent_nfs::post_set))

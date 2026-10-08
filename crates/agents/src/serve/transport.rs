@@ -2,12 +2,13 @@ use crate::nfs::{agents_fs, ReadOnlyAgentsFs};
 use anyhow::{ensure, Result};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::mpsc,
     task::JoinSet,
 };
 
-async fn read(stream: &mut TcpStream) -> Result<Vec<u8>> {
+async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<Vec<u8>> {
     let mut message = Vec::new();
     loop {
         let header = stream.read_u32().await?;
@@ -25,32 +26,73 @@ async fn read(stream: &mut TcpStream) -> Result<Vec<u8>> {
     }
 }
 
-async fn write(stream: &mut TcpStream, message: &[u8]) -> Result<()> {
+async fn write(stream: &mut (impl AsyncWrite + Unpin), message: &[u8]) -> Result<()> {
     stream.write_u32(0x8000_0000 | message.len() as u32).await?;
     stream.write_all(message).await?;
     Ok(())
 }
 
+async fn requests(
+    client: &mut (impl AsyncRead + Unpin),
+    backend: &mut (impl AsyncWrite + Unpin),
+    fs: &ReadOnlyAgentsFs,
+    port: u16,
+    replies: mpsc::Sender<Vec<u8>>,
+) -> Result<()> {
+    loop {
+        let request = read(client).await?;
+        match crate::nfs::acl::reply(fs, &request, port).await? {
+            Some(response) => replies.send(response).await?,
+            None => write(backend, &request).await?,
+        }
+    }
+}
+
+async fn responses(
+    backend: &mut (impl AsyncRead + Unpin),
+    replies: mpsc::Sender<Vec<u8>>,
+) -> Result<()> {
+    loop {
+        replies.send(read(backend).await?).await?;
+    }
+}
+
+async fn deliver(
+    client: &mut (impl AsyncWrite + Unpin),
+    mut replies: mpsc::Receiver<Vec<u8>>,
+) -> Result<()> {
+    while let Some(response) = replies.recv().await {
+        write(client, &response).await?;
+    }
+    Ok(())
+}
+
 async fn connection(
-    mut client: TcpStream,
+    client: TcpStream,
     backend: SocketAddr,
     fs: Arc<ReadOnlyAgentsFs>,
     port: u16,
 ) -> Result<()> {
     client.set_nodelay(true)?;
-    let mut backend = TcpStream::connect(backend).await?;
+    let backend = TcpStream::connect(backend).await?;
     backend.set_nodelay(true)?;
-    loop {
-        let request = read(&mut client).await?;
-        let response = match crate::nfs::acl::reply(&fs, &request, port).await? {
-            Some(response) => response,
-            None => {
-                write(&mut backend, &request).await?;
-                read(&mut backend).await?
-            }
-        };
-        write(&mut client, &response).await?;
-    }
+    let (mut client_read, mut client_write) = client.into_split();
+    let (mut backend_read, mut backend_write) = backend.into_split();
+    let (send, receive) = mpsc::channel(16);
+    // Retransmitted RPCs may have no backend response. Keep reading requests;
+    // XIDs associate replies, while one bounded writer keeps frames intact.
+    tokio::try_join!(
+        requests(
+            &mut client_read,
+            &mut backend_write,
+            &fs,
+            port,
+            send.clone()
+        ),
+        responses(&mut backend_read, send),
+        deliver(&mut client_write, receive),
+    )?;
+    Ok(())
 }
 
 pub(super) async fn serve(listener: TcpListener, backend: SocketAddr, root: PathBuf) -> Result<()> {

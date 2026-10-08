@@ -76,6 +76,11 @@ class Environment:
         # and keeps those binaries unchanged for the duration of this run.
         self.bin = binaries
         self.info = json.loads(subprocess.check_output([self.bin / 'opencoder-agent','--build-info']))
+        bundle_manifest = self.bin.parent / 'manifest.json'
+        self.manifest = json.loads(bundle_manifest.read_text()) if bundle_manifest.exists() else {
+            'commit': self.info['git_commit']}
+        if self.manifest['commit'] != self.info['git_commit']:
+            raise ValueError('Smooth acceptance manifest differs from the actual binaries')
         write(self.root / 'build-info.json',self.info)
         self.settings = Settings(self.root / 'state',self.root / 'server-work',self.root / 'server-data',
             self.root / 'agent-work',self.root / 'token',public_url=f'http://127.0.0.1:{port()}',
@@ -143,7 +148,9 @@ class Environment:
         mark('start')
         s = self.settings
         record = {'id':label,'server_port':port(),'runtime_port':port(),'host_port':port(),
-            'runtime_data':str(s.state_dir / label),'manifest':{'commit':self.info['git_commit']},
+            'runtime_data':str(s.state_dir / label),'manifest':{
+                'commit':self.info['git_commit'],
+                'required_runtime_features':self.manifest.get('required_runtime_features', [])},
             'created_at':int(time.time()*1000),'runtime_unit':f'opencoder-runtime-{self.prefix}-{label}.service'}
         self.records.append(record)
         host = f"http://127.0.0.1:{record['host_port']}"

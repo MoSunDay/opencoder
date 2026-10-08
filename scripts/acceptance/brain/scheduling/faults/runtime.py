@@ -12,6 +12,21 @@ class NotRun(RuntimeError):
     """A required external precondition is unavailable; never a passing result."""
 
 
+def require_isolated(env):
+    path = env.settings.state_dir / 'isolation.json'
+    if not path.is_file():
+        raise NotRun('process/model/capacity faults require the dedicated isolated hosted stack')
+    receipt = json.loads(path.read_text())
+    require(receipt['node_id'] == env.node_id, 'isolation node identity mismatch')
+    for kind in ('server', 'host', 'runtime'):
+        key = kind + '_unit'
+        require(receipt['record'][key] == env.record[key]
+                and env.record[key].startswith('opencoder-' + kind + '-brain-e2e-'),
+                'fault target is outside the isolated stack')
+    require(Path(env.record['runtime_data']).resolve().is_relative_to(Path(receipt['root']).resolve()),
+            'Runtime data is outside the isolated stack')
+
+
 def journal(env, identifier):
     require(identifier in env.created, 'journal target is not an owned test root')
     return json.loads((Path(env.record['runtime_data']) / 'brain' / identifier / 'execution.json').read_text())
@@ -60,6 +75,7 @@ class FrozenWindow:
 
     def __enter__(self):
         env = self.env
+        require_isolated(env)
         require(not any(blockers(env).values()), 'unrelated work arrived before process fault')
         status = env.api('GET', '/api/admin/drain')
         require(status['server']['mode'] == 'open', 'admission was already frozen by another owner')
@@ -85,8 +101,13 @@ class FrozenWindow:
 
     def reopen(self):
         try:
+            runtime = self.env.http(self.env.runtime_url, '/inventory')
+            if runtime['registration']['id'] != self.env.node_id or not runtime['snapshot']['ready']:
+                return False
             self.env.api('DELETE', '/api/admin/drain')
-            return True
+            nodes = self.env.api('GET', '/api/nodes')['nodes']
+            return any(node['id'] == self.env.node_id and node['online']
+                       and (node.get('snapshot') or {}).get('ready') for node in nodes)
         except (OSError, RuntimeError, AssertionError):
             return False
 

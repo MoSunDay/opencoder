@@ -24,12 +24,16 @@ async fn isolated_activation_sends_configured_reasoning_to_the_provider() {
     std::fs::write(&context, layered_context(node_context()).to_string()).unwrap();
     std::fs::write(&config, json!({
         "model":"fixture/planner","providers":{"fixture":{"base_url":format!("http://{address}"),"api_key":"fixture"}},
-        "reasoning_effort":"low"
+        "reasoning_effort":"low", "max_tokens":65535
     }).to_string()).unwrap();
     assert_eq!(activate(&context, &config, &output).await.unwrap(), 0);
     let request = received.recv().await.unwrap();
     assert_eq!(request["reasoning_effort"], "low");
     assert_eq!(request["model"], "planner");
+    assert_eq!(
+        request["max_tokens"],
+        opencoder_brain::layered::budget::OUTPUT_TOKENS
+    );
     assert!(request["messages"]
         .as_array()
         .unwrap()
@@ -130,6 +134,41 @@ struct Fixture {
     request: tokio::sync::mpsc::Receiver<Value>,
     server: tokio::task::JoinHandle<()>,
     _directory: tempfile::TempDir,
+}
+
+#[tokio::test]
+async fn handled_invalid_decision_has_a_receipt_distinct_from_process_crash() {
+    use clap::Parser;
+    let fixture = fixture(
+        layered_context(node_context()),
+        json!({"invalid":"model proposal"}),
+    )
+    .await;
+    let cli = crate::Cli::try_parse_from([
+        "opencoder-cli",
+        "brain",
+        "activate-local",
+        "--context",
+        fixture.context.to_str().unwrap(),
+        "--config",
+        fixture.config.to_str().unwrap(),
+        "--output",
+        fixture.output.to_str().unwrap(),
+    ])
+    .unwrap();
+    let error = crate::run(cli).await.unwrap_err();
+    assert!(error.to_string().contains("invalid layered decision"));
+    assert!(!fixture.output.exists());
+    let receipt: Value = serde_json::from_slice(
+        &std::fs::read(fixture.output.with_extension("error.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(receipt["error"]
+        .as_str()
+        .unwrap()
+        .contains("invalid layered decision"));
+    fixture.server.abort();
+    let _ = fixture.server.await;
 }
 
 /// Context + config + output files wired to a one-shot stub provider.

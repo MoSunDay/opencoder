@@ -5,7 +5,7 @@ import time
 from environment import require
 from cases.execution_types import node, one_layer
 from faults.model import ModelFault
-from faults.runtime import FrozenWindow, journal, restart, wait_idle
+from faults.runtime import journal, wait_idle
 
 
 def spec(capabilities):
@@ -45,14 +45,12 @@ def deadline(env, capabilities):
         root = proxy.create('correction-deadline', spec(capabilities), delayed)
         env.wait(lambda: proxy.calls.get(root, 0) == 1, 90, 'first injected model call')
         before = journal(env, root)['annotations']['layered_decision_attempt']
-        with FrozenWindow(env):
-            restart(env, 'runtime')
         final = env.terminal(root, 360)
         after = journal(env, root)['annotations']['layered_decision_attempt']
         require(final['run']['phase'] == 'blocked' and not final['operations'], 'expired correction did not block')
-        require(after['deadline_ms'] == before['deadline_ms'], 'restart reset the correction deadline')
-        require(after['attempt'] > before['attempt'] and after['attempt'] <= 3, 'restart reset consumed attempts')
+        require(after['deadline_ms'] == before['deadline_ms'], 'correction reset the deadline')
+        require(after['attempt'] == before['attempt'] == 1, 'deadline retried an unfinished attempt')
         require(time.time() * 1000 >= after['deadline_ms'], 'five-minute deadline was not exercised')
         require('five-minute' in final['run'].get('error', ''), 'run did not report deadline exhaustion')
         env.save('faults/deadline', {'before': before, 'after': after, 'run_id': root})
-    return {'deadline_survived_restart': True, 'deadline_run_id': root}
+    return {'shared_five_minute_deadline': True, 'deadline_run_id': root}

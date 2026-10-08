@@ -92,8 +92,11 @@ pub(super) async fn launch_locked(
             .await
         })
         .catch_unwind()
-        .await
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("execution panicked")));
+        .await;
+        let brain_panicked = outcome.is_err()
+            && !cancel.is_cancelled()
+            && record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Brain;
+        let outcome = outcome.unwrap_or_else(|_| Err(anyhow::anyhow!("execution panicked")));
         let (status, result, error) = match outcome {
             Ok((status, result)) => (status, result, None),
             Err(error) => (
@@ -112,12 +115,24 @@ pub(super) async fn launch_locked(
         };
         let gate = worker.lifecycle_gate(&id).await;
         let _guard = gate.lock().await;
-        let persisted = worker
-            .inner
-            .journal
-            .lock()
+        let persisted = if brain_panicked {
+            crate::runtime::crash::fail_root(
+                worker.inner.state.store.as_ref(),
+                &mut *worker.inner.journal.lock().await,
+                &id,
+                "Brain decision task panicked; start a new Brain run",
+            )
             .await
-            .finalize(&id, status, result, error);
+            .map(|_| ())
+        } else {
+            worker
+                .inner
+                .journal
+                .lock()
+                .await
+                .finalize(&id, status, result, error)
+                .map(|_| ())
+        };
         if let Err(error) = persisted {
             tracing::error!(%id,%error,"could not persist terminal execution status");
             *worker.inner.persistence_error.lock().unwrap() =

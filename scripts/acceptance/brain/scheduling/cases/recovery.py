@@ -85,15 +85,16 @@ def run(env, capabilities):
                 return all(op['status'] in ('done', 'error', 'cancelled') for op in view['operations'])
             env.wait(children_settled, 180, 'paused children settle before Worker restart')
             restart(env, 'runtime')
-        env.wait(lambda: env.view(identifier)['run']['phase'] == 'paused', 180, 'Worker recovery')
+        env.wait(lambda: env.view(identifier)['run']['phase'] == 'failed', 180, 'crashed Worker fails root')
         recovered = journal(env, identifier)
         for key, value in durable.items():
             require(recovered['annotations'][key] == value, 'restart rewrote durable decision or intent')
-        command(env, identifier, 'resume')
-        final = pump(env, identifier)
-        require(final['run']['phase'] == 'completed', 'restarted run did not finish')
+        status, _ = env.request('POST', f'/api/brain/runs/{identifier}/commands', {'action': 'resume'})
+        require(status == 409, 'failed root was resumable')
+        final = env.view(identifier)
+        require(final['run']['phase'] == 'failed', 'crashed root did not remain failed')
         require([(o['operation_id'], o['execution_id']) for o in final['operations']] == identities,
                 'restart created duplicate executions')
-        return {'run_id': identifier, 'identities': identities, 'server_and_worker_restarted': True}
+        return {'run_id': identifier, 'identities': identities, 'server_continuity': True, 'worker_crash_phase': 'failed'}
     finally:
         release_all(env, env.view(identifier))

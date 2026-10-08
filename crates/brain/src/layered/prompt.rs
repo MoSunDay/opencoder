@@ -22,7 +22,7 @@ Do not re-assess earlier layers; their evidence may appear in the summary only.
 If run.error records a rejected decision, correct that validation error; do not treat it as a capability failure.
 Explain the reflection, problems to fix and evidence. The context's previous results are historical evidence,
 not automatically valid current outputs. Do not invent output values or execution IDs.
-First dispatch layer 1. Complete only after the final layer passes; never complete early.
+Layer numbers are ONE-BASED. layer_catalog gives every valid number and its layer_id. run.layer=0 means no layer has been dispatched; 0 is never a dispatch target. First dispatch layer 1, including after a missing prerequisite is supplied. Complete only after the final layer passes; never complete early.
 If the current milestone is unmet and no executed layer can address the problem, or required inputs are missing, block with an actionable reason.
 Decisions:
 {"decision":"dispatch_layer","layer":1,"assignments":[{"node_id":"coding","capability_id":"attached-id","inputs":{"task":{"kind":"value","value":"specific task"}},"reason":"why this capability"}],"reason":"assessment and next-layer rationale","reflection":null,"evidence_execution_ids":[],"assessments":{}}
@@ -49,15 +49,23 @@ pub fn instruction(context: &LayeredContext) -> Result<String> {
         .map(|layer| &layer.layer_id);
     let mut plan = serde_json::to_value(&context.request.plan)?;
     plan.as_object_mut().unwrap().remove("transitions");
+    let layer_catalog: Vec<_> = context
+        .request
+        .plan
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(index, layer)| json!({"number":index + 1,"layer_id":layer.layer_id}))
+        .collect();
     let instruction = serde_json::to_string(
-        &json!({"schema_version":LAYERED_SCHEMA_VERSION,"run":context.run,"plan":plan,"assessment_layer_id":assessment_layer_id,
+        &json!({"schema_version":LAYERED_SCHEMA_VERSION,"run":context.run,"plan":plan,"layer_catalog":layer_catalog,"assessment_layer_id":assessment_layer_id,
         "capabilities":capabilities,"root_inputs":context.request.inputs,"artifacts":context.request.artifacts,"todo":context.todo,
         "operations":context.operations,"summaries":context.summaries,"human_inputs":context.human_inputs,
         "guidance_only":context.guidance_only,"guidance_notes":context.guidance_notes}),
     )?;
     ensure!(
-        instruction.len() <= 1024 * 1024,
-        "milestone decision context exceeds 1 MiB; reduce plan inputs, capability contracts or human guidance before resuming"
+        instruction.len() <= super::budget::INSTRUCTION_BYTES,
+        "milestone decision context exceeds 1 MiB; evidence retained, start a smaller plan; resuming cannot increase transport capacity"
     );
     Ok(instruction)
 }

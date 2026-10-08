@@ -1,26 +1,17 @@
-# 大脑调度真实验收
+# Brain 调度真实验收
 
-主场景通过当前公共 Server、真实模型和原生 DAG 容器验证：创建运行唤醒大脑；两个并行测试只完成一个时，至少 30 秒不继续调度；人工输入先落事件，再触发引导；最后一层进程正常退出但 `passed:false` 时，大脑根据失败数据修正源码，再验证同一新版本。
-
-测试源码的初始表达式是 `abs(a) + abs(b)`。普通正数和零值测试通过，负数边界测试真实失败。模型只看到业务目标、节点能力和执行证据。`1→2→3→1→2→3`、两轮和八个子执行只写在验收断言中，不写进模型指令。两次源码的 SHA-256、归档文件、每个测试的实际结果、独立工作区和容器身份均须一致。
-
-## 运行
-
-需要 Python 3.10+、静态 C 编译器、`runc`、systemd、部署配置中的凭证文件，以及可用的当前模型和资源服务。凭证只从配置指定的文件读取，不传入命令行、不写入证据或 Git。每次运行必须使用新的证据目录。
+使用本目录 `main.py` 对已部署的指定提交运行验收。每批使用新的证据目录；现网运行非故障用例，故障用例只接受 `isolation/stack.py` 创建的独立托管实例。
 
 ```sh
+python3 scripts/acceptance/brain/scheduling/isolation/stack.py \
+  --bundle /path/to/candidate-bundle --model-config /path/to/frozen-model-config.json \
+  --rootfs /path/to/source-rootfs --root /data00/brain-acceptance-new
 python3 scripts/acceptance/brain/scheduling/main.py \
-  --config /etc/opencoder/server/opencoder.json \
-  --expected-commit <线上完整提交 SHA> \
-  --out /var/tmp/brain-scheduling-<本次唯一编号> \
-  --case closed-loop
+  --config /data00/brain-acceptance-new/opencoder.json \
+  --expected-commit <完整提交> --out /var/tmp/brain-evidence-new --case all
 ```
 
-`--case all --wait-ready 1800` 执行完整套件；`--case controls contracts` 可以选择多项。版本校验依据发布状态和正在运行的 Server、Runtime 可执行文件，不根据工作目录 HEAD 推断。程序不发布代码，也不把工作区尚未发布的规则当作线上能力。
-
-完整套件包含停止 Server、杀死并恢复 Worker、注入模型回答、修改本节点并发上限等操作，应在用户已授权当前机器故障演练时执行，并由独立 systemd 作业托管。故障阶段最多等待 30 分钟，要求其他任务自然结束；精确核对运行归属，发现其他任务便停止注入，不会取消它们。进程故障期间冻结准入，结束后恢复；排队测试恢复原调度设置。模型异常只改变本次测试根运行的冻结传输地址，不修改生产模型配置、鉴权数据、重试次数或截止时间。
-
-强杀 Worker 前还会只读检查本地 libSQL 的 `capacity_queue`。当前版本若有尚未结算的运行名额，重启会被 Host 拒绝，测试便记录 `NOT_RUN`。因此 `process-recovery` 在暂停的子任务结束后重启；`correction-deadline` 中模型调用进行期间的强杀，需要产品先具备已验证的名额恢复路径。测试不会删除数据库名额来制造恢复成功。
+隔离实例独立使用数据库、服务、端口、节点身份、资源池与只读 NFS；模型配置和候选包与待发布版本一致。脚本不注册到现网集群，不修改已有鉴权数据。强杀测试使用产品命令结清精确根运行，不能直接删除容量预留。
 
 ## 覆盖与证据
 
@@ -38,8 +29,9 @@ python3 scripts/acceptance/brain/scheduling/main.py \
 | `missing-prerequisite`、`live-steering` | block 后人工补充条件、向运行中的 Agent/Operator/Team 引导、DAG 不接收即时引导 |
 | `context-capacity` | 当前节点容量特性、超限准入 413、不创建运行、累计人工输入超限不改变状态 |
 | `dispatch-retry` | 5xx/408/423/429 保持同一创建意图、422 终态、重复拒绝去重、Server 离线提交与重放 |
-| `process-recovery` | 当前 Server 和 Worker 实际重启、冻结决策与意图不变、执行 ID 不变、继续完成 |
-| `correction-budget`、`correction-deadline` | 非法决策最多三次、不派发；Worker 重启不重置五分钟截止时间或已消耗次数，分别记录结果 |
+| `process-recovery` | Server 重启保持连续；Worker 强杀后根失败，保留已结束子任务和执行 ID，拒绝 resume |
+| `correction-budget`、`correction-deadline` | 非法决策最多三次、不派发；完整等待共用五分钟截止时间，到期阻塞而非崩溃失败 |
+| `worker-crash`、`decision-crash` | 活跃 Runtime 禁止结清、未结清容量禁止启动、根失败且不重试、精确容量结清、回执重复执行、新运行可执行 |
 | `capacity-queue` | 满载显式选点受理后排队、容量释放后执行、排队不换节点、不重复执行 |
 
 CPU 比例排序、预留量竞争、Team 在下一次成员发问时应用引导等精确内部时序，还需同时通过既有 Rust 集成回归；真实模型用例不能替代这些确定性断言。入口见 `crates/core/src/fleet/scheduling.rs`、`crates/brain/tests/milestone.rs`、`crates/worker/tests/brain_scheduler_v4.rs`、`brain_guidance_e2e.rs`、`brain_contracts.rs`、`brain_dispatch_failures.rs`、`brain_nested.rs`、`brain_server_restart.rs`。

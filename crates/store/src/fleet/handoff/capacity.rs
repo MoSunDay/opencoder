@@ -169,4 +169,21 @@ impl FleetStore {
         }
         Ok(tickets)
     }
+
+    /// Include completed tickets so crash settlement can verify ownership on
+    /// every re-entry, including after capacity was durably released.
+    pub async fn capacity_ticket(&self, ticket: &str) -> Result<Option<(String, String, String)>> {
+        let _gate = self.gate.lock().await;
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT execution_id,runtime_id,phase FROM capacity_queue WHERE ticket=?1",
+                [ticket],
+            )
+            .await?;
+        rows.next()
+            .await?
+            .map(|row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .transpose()
+    }
 }

@@ -51,8 +51,19 @@ def run(env, capabilities):
 
 
 def capacity(env, capabilities):
+    descriptors = env.api('GET', '/api/brain/library')['capabilities']
+    required = {node['capability_id'] for node in plan(capabilities)['nodes']}
+    fields = ('kind', 'target', 'input_desc', 'output_desc', 'definition', 'version')
+    frozen = [{'capability_id': item['id'], **{key: item[key] for key in fields}}
+              for item in descriptors if item['id'] in required]
+    for item in frozen:
+        source = next(value for value in descriptors if value['id'] == item['capability_id'])
+        item.update(summary=source.get('summary', ''),
+                    required_inputs=source.get('required_inputs', []),
+                    required_outputs=source.get('required_outputs', []))
+    require({item['capability_id'] for item in frozen} == required, 'missing frozen probe descriptors')
     reply = env.rpc({'operation': 'brain', 'execution': {'id': env.tag + '-probe', 'kind': 'brain'},
-                     'action': 'capability_probe', 'input': {'layered_request': {
+                     'action': 'capability_probe', 'input': {'frozen_capabilities': frozen, 'layered_request': {
                          'schema_version': 7, 'plan': plan(capabilities), 'inputs': {}}}})
     env.save('capacity/probe', reply)
     require('brain_context_budget_v1' in reply.get('features', []),

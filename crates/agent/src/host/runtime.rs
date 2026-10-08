@@ -15,6 +15,7 @@ use std::sync::Arc;
 pub async fn serve(worker: Worker, port: u16, token: String) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let worker = Arc::new(worker);
+    let shutdown_worker = worker.clone();
     let app = router(worker.clone(), token);
     // Runtime units are independent. Publishing and host retirement never
     // signal them. SIGTERM is accepted only when quiescence is proven.
@@ -31,7 +32,7 @@ pub async fn serve(worker: Worker, port: u16, token: String) -> Result<()> {
             }
         })
         .await?;
-    Ok(())
+    shutdown_worker.shutdown().await
 }
 
 pub fn router(worker: Arc<Worker>, token: String) -> Router {

@@ -43,16 +43,8 @@ pub fn terminal(
     e.execution_id = Some(old.execution_id.clone());
     e.source_sequence = Some(notice.source_sequence);
     e.decision_summary = Some(format!("{:?}", notice.status).to_lowercase());
-    let settle_cancelled =
-        snapshot.run.phase.terminal() && old.cancel_requested && !old.status.terminal();
-    if old.status.terminal()
-        || (snapshot.run.phase.terminal() && !settle_cancelled)
-        || old.activation != snapshot.run.activation
-    {
-        e.reason_summary = Some("late terminal event".into());
-        update.events.push(e);
-        return Ok(Some(update));
-    }
+    // A failed root still records the real outcomes of children it already
+    // started. The terminal-phase return below prevents any further dispatch.
     let op = update
         .operations
         .iter_mut()

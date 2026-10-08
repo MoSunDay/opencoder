@@ -49,6 +49,7 @@ flowchart TD
 ## 整层派发、评估与完成
 
 - 首次派发必须从第一层开始。每次派发覆盖目标层全部节点，每个节点调用所绑定能力一次；不能漏发、重复调用或替换能力。
+- 派发层号从 1 开始，决策上下文明确提供层号与 `layer_id` 的映射。运行状态 `layer: 0` 只表示尚未派发，补齐必要条件后也必须从第 1 层开始；不能把非法层号静默改成合法值。
 - 同层任务允许并行，实际启动受执行节点容量和排队影响。必须等本次派发的全部任务进入 `Done`、`Error` 或 `Cancelled` 后，才可评估或调度下一层；这就是层屏障。
 - 某个任务失败时，大脑调度层不自动重试该任务，也不自动取消同层其他任务。继续收集整层结果，再统一决定返工、阻塞或失败。
 - `Done` 只表示能力执行成功结束。大脑必须检查完整结构化结果和业务结论；例如测试正常结束但返回 `passed: false`，不能据执行状态直接判定达标。`summary` 不能覆盖相反的结果字段，人工输入也不能代替执行证据。
@@ -70,6 +71,7 @@ flowchart TD
 - 输入绑定支持根输入、已登记产物、终态执行输出的 JSON pointer 和具体值。引用必须存在且可解析，实际值还须通过能力必填字段校验；失败结果也可以作为整改输入。
 - 必填字段缺失、为 `null` 或空白文本时校验失败；`false`、`0` 和空数组是有效数据。字段校验不能替代业务达成标准。
 - 叶子能力交给大脑的成功结果最多 16 KiB，保留完整结构化字段；大文件和长报告用产物引用。输出缺失或超限转为 `Error`，完整结果留在子执行，传给大脑的失败证据须标明省略部分。
+- 准入按实际冻结模型窗口校验完整计划、能力说明、全部节点证据、人工输入预留及 16384 输出 token；指令上限 1 MiB，传输帧上限 2 MiB。节点须支持 `brain_context_budget_v1`。超限请求返回 413，不能先创建运行；超限人工输入不能追加事件或改变代次。已有运行组装上下文后超限则阻塞并保留证据，不截断证据来强行调度。
 - 各子执行有各自的工作区。开发、测试等任务之间必须显式传递代码版本、补丁或产物，并依据同一版本的验证结果判断完成；不能假设其他执行的本地文件已存在。
 - 一个 DAG 内部的步骤仍按规则 04 共享该次运行的工作区，不因 Brain 调度而改变其单节点、单容器约定。
 
@@ -98,7 +100,9 @@ flowchart TD
 - 非法模型决策最多纠正两次，连同首次共三次尝试，共用五分钟预算。尝试次数、截止时间和校验错误持久化，重启不重置预算；仍不合法或超时则阻塞，不派发未通过校验的任务。
 - 决策和创建意图必须先落盘，再发布操作索引和派发消息。未确认的唤醒、派发、引导、取消与终态回执可重放；接收方按身份、代次和序号去重。
 - `generation` 校验阻止旧上下文或旧决策覆盖新状态；`activation`、执行身份和来源序号阻止迟到或重复回执推进当前层。
-- Server 重启后继续向所属节点读取状态并转交事件；Worker 根据已持久化的上下文、决策和意图恢复。不得重新规划已经提交的派发或覆盖历史理由。
+- Server 重启、正常发布、正常 Worker 停机和暂停恢复保留连续性，复用已持久化的上下文、决策和意图。不得重新规划已经提交的派发或覆盖历史理由。
+- **2026-10-07 用户决定：Worker 或大脑决策进程意外崩溃时，受影响的 Brain 根运行整体进入 `failed`，不能自动恢复、重新决策或继续派发。** 需要重新执行时创建新运行；主动取消和决策预算到期引起的进程终止不属于意外崩溃。已启动子执行的真实结果继续保留，迟到回执不能复活根运行。
+- Worker 持久化正常退出标记。遇到未结清的 Host 运行容量时继续拒绝启动，不根据超时释放容量。`opencoder-agent --data-dir <目录> storage settle-brain-crash --run-id <精确根 ID> --receipt-dir <回执目录>` 只在所属 Runtime 已停止、目录独占锁及进程清理检查通过后结清该根：先保存意图回执，再落盘 `failed`，最后结清精确容量票据。重复执行不能改变结果、重置预算、清除其他执行的容量或恢复任务。
 
 ## 实现依据与变更验收
 
@@ -110,6 +114,8 @@ flowchart TD
 |------|----------|
 | 同层屏障、失败等待、返工、轮次与完成 | [milestone.rs](../crates/brain/tests/milestone.rs) |
 | 节点唤醒、决策纠错、引导与预算恢复 | [brain_scheduler_v4.rs](../crates/worker/tests/brain_scheduler_v4.rs) |
+| 实际模型窗口、准入与累计人工输入容量 | [context_budget.rs](../crates/brain/tests/context_budget.rs)、[brain_context_budget.rs](../crates/worker/tests/brain_context_budget.rs) |
+| 意外崩溃失败、正常退出连续性与重复恢复 | [brain_crash.rs](../crates/worker/tests/brain_crash.rs)、[隔离进程验收](../scripts/acceptance/brain/scheduling/faults/crash.py) |
 | 实际人工引导链路 | [brain_guidance_e2e.rs](../crates/worker/tests/brain_guidance_e2e.rs) |
 | 输入输出校验、明确拒绝及重复回执 | [brain_contracts.rs](../crates/worker/tests/brain_contracts.rs)、[brain_dispatch_failures.rs](../crates/worker/tests/brain_dispatch_failures.rs) |
 | 开发、测试、整改与版本传递 | [brain_closed_loop.rs](../crates/worker/tests/brain_closed_loop.rs) |

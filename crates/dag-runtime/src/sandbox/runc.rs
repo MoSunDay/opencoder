@@ -9,6 +9,7 @@ mod cleanup;
 mod recovery;
 pub(super) use cleanup::delete_force;
 pub use recovery::cleanup_owned_containers;
+pub use recovery::cleanup_owned_run;
 
 pub fn runc_available() -> bool {
     std::process::Command::new("runc")

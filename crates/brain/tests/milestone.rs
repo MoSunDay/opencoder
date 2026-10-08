@@ -277,6 +277,8 @@ fn only_all_successful_layers_can_complete_without_configured_routes() {
     );
 }
 
+#[path = "milestone/crash.rs"]
+mod crash;
 #[path = "milestone/validation.rs"]
 mod validation;
 

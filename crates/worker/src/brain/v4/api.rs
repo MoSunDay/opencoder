@@ -53,6 +53,7 @@ pub async fn handle(
     };
     let change = match action {
         "layered_intent" => {
+            ensure!(!snapshot.run.phase.terminal(), "run is terminal");
             let intent: LayeredDispatchIntent = serde_json::from_value(input.clone())?;
             ensure!(
                 intent.generation == snapshot.run.generation + 1,
@@ -156,6 +157,16 @@ pub async fn handle(
             );
             let mut change = layered::change(&snapshot, now_ms());
             context.generation = change.run.generation;
+            if let Err(error) = super::budget::context(worker, &record, &context) {
+                let next = worker
+                    .inner
+                    .state
+                    .store
+                    .commit_brain_layered(&layered::block(&snapshot, error.to_string(), now_ms()))
+                    .await?;
+                state::settle(worker, &next).await?;
+                return Ok(RpcReply::ok(json!(next)));
+            }
             // Context is a finite root activation input, never an event.
             state::annotate(worker, id, "layered_context", json!(context)).await?;
             change.run.phase = LayeredPhase::Deciding;
@@ -171,6 +182,9 @@ pub async fn handle(
                 !text.is_empty() && text.len() <= 4096,
                 "text must contain 1..4096 bytes"
             );
+            if let Err(error) = super::budget::human(worker, &record, text).await {
+                return Ok(RpcReply::error(413, error.to_string()));
+            }
             let mut change = layered::change(&snapshot, now_ms());
             change.run.pending_guidance = true;
             let mut event = layered::event(&change.run, "human_input", None);
@@ -356,6 +370,11 @@ pub async fn handle(
             return Ok(RpcReply::ok(json!({"acknowledged":op.operation_id})));
         }
         "pause" | "resume" | "cancel" => {
+            if action == "resume" {
+                if let Err(error) = super::budget::human(worker, &record, "").await {
+                    return Ok(RpcReply::error(413, error.to_string()));
+                }
+            }
             layered::command(&snapshot, &request.plan, action, now_ms())?
         }
         _ => return Ok(RpcReply::error(400, "unknown v4 layered operation")),

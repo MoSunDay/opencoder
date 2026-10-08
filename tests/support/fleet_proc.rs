@@ -123,6 +123,11 @@ fn spawn_reader(stream: impl Read + Send + 'static, label: &str, kind: &str, log
 pub fn write_config(workdir: &Path, stub_port: u16, extra: Value) {
     let mut config = json!({
         "model": "stub/m1",
+        // Brain layered admission reserves complete child evidence and the
+        // real configured model uses a one-million-token context window.
+        // Keep this process fixture on that same explicit contract instead
+        // of silently exercising the conservative 128K default.
+        "context_limit": 1000000,
         "providers": {
             "stub": {
                 "base_url": format!("http://127.0.0.1:{stub_port}/v1"),

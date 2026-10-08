@@ -6,18 +6,51 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from environment import Environment
 from cases.control import pump
 from cases.negative import blocked
-from faults.runtime import NotRun, require_restartable, restart
+from faults.runtime import FrozenWindow, NotRun, require_restartable, restart, require_isolated
 from main import CASES
 from report import summarize
 
 
 class GuardTests(unittest.TestCase):
+    def test_fault_restore_waits_for_owned_runtime_and_public_node_readiness(self):
+        inventory = {'registration': {'id': 'node-owned'}, 'snapshot': {'ready': False}}
+        public = {'nodes': [{'id': 'node-owned', 'online': True, 'snapshot': {'ready': False}}]}
+        env = SimpleNamespace(node_id='node-owned', runtime_url='http://isolated',
+                              http=Mock(return_value=inventory), api=Mock(return_value=public))
+        window = FrozenWindow(env)
+        self.assertFalse(window.reopen())
+        env.api.assert_not_called()
+        inventory['snapshot']['ready'] = True
+        self.assertFalse(window.reopen())
+        public['nodes'][0]['snapshot']['ready'] = True
+        self.assertTrue(window.reopen())
+        env.http.side_effect = OSError('Runtime has not opened its listener')
+        self.assertFalse(window.reopen())
+
+    def test_faults_require_matching_isolated_node_units_and_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = {key + '_unit': f'opencoder-{key}-brain-e2e-fixture.service' for key in ('server', 'host', 'runtime')}
+            record['runtime_data'] = str(root / 'runtime')
+            env = SimpleNamespace(settings=SimpleNamespace(state_dir=root), node_id='node-isolated', record=record)
+            with self.assertRaises(NotRun):
+                require_isolated(env)
+            (root / 'isolation.json').write_text(json.dumps({'root': directory, 'node_id': env.node_id, 'record': record}))
+            require_isolated(env)
+            env.node_id = 'node-production'
+            with self.assertRaisesRegex(AssertionError, 'identity mismatch'):
+                require_isolated(env)
+            env.node_id = 'node-isolated'
+            env.record['runtime_unit'] = 'opencoder-runtime-production.service'
+            with self.assertRaisesRegex(AssertionError, 'outside the isolated stack'):
+                require_isolated(env)
+
     def test_decision_evidence_excludes_activation_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -96,7 +96,8 @@ class ModelFault:
             require(not any(blockers(env).values()), 'unrelated execution prevents scoped model fault')
             require_restartable(env)
             unit = env.record['runtime_unit']
-            subprocess.run(['systemctl', 'kill', '--kill-who=main', '--signal=SIGKILL', unit], check=True, timeout=15)
+            # A normal, quiescent exit preserves the paused root. SIGKILL is a
+            # separate failure case and must never prepare a resumable fixture.
             subprocess.run(['systemctl', 'stop', unit], check=True, timeout=90)
             require(subprocess.check_output(['systemctl', 'show', unit, '-p', 'MainPID', '--value']).strip() == b'0',
                     'Runtime must be stopped before modifying the owned fixture record')

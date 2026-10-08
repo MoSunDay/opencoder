@@ -1,5 +1,6 @@
 mod admission;
 pub(crate) mod capacity;
+pub(crate) mod crash;
 mod health;
 mod scheduling;
 pub use capacity::HostBinding;

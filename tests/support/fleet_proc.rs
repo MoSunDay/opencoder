@@ -122,6 +122,8 @@ fn spawn_reader(stream: impl Read + Send + 'static, label: &str, kind: &str, log
 /// processes discover this file through `--workdir`.
 pub fn write_config(workdir: &Path, stub_port: u16, extra: Value) {
     let mut config = json!({
+        // The deterministic model supports complete multi-layer evidence.
+        "context_limit": 1_000_000,
         "model": "stub/m1",
         "providers": {
             "stub": {

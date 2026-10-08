@@ -1,14 +1,14 @@
+import { ModalForm } from "../../ui/ModalForm";
 import { PlusOutlined } from "@ant-design/icons";
 import {
-  ModalForm,
   CheckField,
   SelectField,
   TextField,
   TextAreaField,
   DataTable,
 } from "../../ui";
-import { App, Button, Descriptions, Drawer, Popconfirm, Space, Tag, Tabs, Typography } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, App, Button, Descriptions, Drawer, Grid, Popconfirm, Space, Tag, Tabs, Typography } from "antd";
+import { useMemo } from "react";
 import { searchableLabels } from "../../forms/selectOptions";
 import { api } from "../../api";
 import type {
@@ -18,9 +18,13 @@ import type {
   EntityType,
   EntityTypeAction,
   Relationship,
-  RelationshipType,
 } from "../../types";
 import EntityDetailDrawer from "./EntityDetailDrawer";
+import { useResource } from "../admin/useResource";
+import { useDraftGuard } from "../../navigation/DraftGuard";
+import { useDetailNavigation } from "../graph/details/useDetailNavigation";
+import EntityRelations from "../graph/details/EntityRelations";
+import RelationshipDrawer from "../graph/RelationshipDrawer";
 
 const kinds: { label: string; value: AttributeKind }[] = ["string", "integer", "float", "boolean", "datetime", "json", "text"].map(
   (value) => ({ label: value, value: value as AttributeKind }),
@@ -59,52 +63,24 @@ function ActionPanel({ env, entityType, canManage, actions, onReload }: { env: s
 
 export default function EntityTypeDetailDrawer({ env, entityType, canManage, onClose, onSaved }: Props) {
   const { message } = App.useApp();
-  const [attributes, setAttributes] = useState<AttributeDefinition[]>([]);
-  const [typeEntities, setTypeEntities] = useState<Entity[]>([]);
-  const [allEntities, setAllEntities] = useState<Entity[]>([]);
-  const [relationships, setRelationships] = useState<Relationship[]>([]);
-  const [relationshipTypes, setRelationshipTypes] = useState<RelationshipType[]>([]);
-  const [detail, setDetail] = useState<Entity>();
-  const [actions, setActions] = useState<EntityTypeAction[]>([]);
-
-  const loadAttributes = useCallback(
-    async (type: EntityType) =>
-      setAttributes((await api.attributes(env, type.id)).items.filter((item) => item.kind !== "vector")),
-    [env],
-  );
-  const loadEntities = useCallback(
-    async (type: EntityType) => {
-      const result = await api.entities(env, true);
-      setAllEntities(result.items);
-      setTypeEntities(result.items.filter((item) => item.entity_type_id === type.id));
-    },
-    [env],
-  );
-  const loadRelationships = useCallback(async () => {
-    const [rel, types] = await Promise.all([api.relationships(env), api.relationshipTypes(env)]);
-    setRelationships(rel.items);
-    setRelationshipTypes(types.items);
-  }, [env]);
-  const reload = useCallback(
-    async (type: EntityType) => {
-      await Promise.all([loadAttributes(type), loadEntities(type), loadRelationships(), api.actions(env, type.id, true).then((result) => setActions(result.items))]);
-    },
-    [loadAttributes, loadEntities, loadRelationships],
-  );
-
-  useEffect(() => {
-    if (!entityType) {
-      setAttributes([]);
-      setTypeEntities([]);
-      setAllEntities([]);
-      setRelationships([]);
-      setRelationshipTypes([]);
-      setDetail(undefined);
-      return;
-    }
-    void reload(entityType).catch((failure) => message.error(failure.message));
-  }, [entityType, reload]);
-
+  const screens = Grid.useBreakpoint();
+  const guard = useDraftGuard();
+  const navigation = useDetailNavigation();
+  const resource = useResource(`${env}/${entityType?.id ?? ""}`, async () => {
+    if (!entityType) return undefined;
+    const [attributes, entities, relationships, relationshipTypes, actions, types] = await Promise.all([
+      api.attributes(env, entityType.id), api.entities(env, true), api.relationships(env), api.relationshipTypes(env), api.actions(env, entityType.id, true), api.entityTypes(env, true),
+    ]);
+    return { attributes: attributes.items.filter((item) => item.kind !== "vector"), allEntities: entities.items,
+      relationships: relationships.items, relationshipTypes: relationshipTypes.items, actions: actions.items, types: types.items };
+  });
+  const { attributes = [], allEntities = [], relationships = [], relationshipTypes = [], actions = [], types = [] } = resource.data ?? {};
+  const typeEntities = allEntities.filter((item) => item.entity_type_id === entityType?.id);
+  const detail = navigation.current?.kind === "entity" ? allEntities.find((item) => item.id === navigation.current?.id) : undefined;
+  const relation = navigation.current?.kind === "relationship" ? relationships.find((item) => item.id === navigation.current?.id) : undefined;
+  const setDetail = (item?: Entity) => guard.run(() => item ? navigation.openEntity(item.id) : navigation.close());
+  const loadAttributes = async (_type: EntityType) => resource.reload();
+  const loadEntities = async (_type: EntityType) => resource.reload();
   const typeEntityIds = useMemo(() => new Set(typeEntities.map((item) => item.id)), [typeEntities]);
   const typeRelationships = useMemo(
     () =>
@@ -120,7 +96,8 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
   );
 
   return (
-    <Drawer title={entityType?.name} size="75%" open={Boolean(entityType)} onClose={onClose} destroyOnHidden>
+    <Drawer title={entityType?.name} width={screens.md ? "75%" : "100%"} open={Boolean(entityType)} onClose={() => guard.run(onClose)} destroyOnHidden>
+      {resource.error ? <Alert type="error" showIcon message={resource.error} action={<Button onClick={() => void resource.reload()}>重试</Button>} /> : null}
       {entityType ? (
         <>
           <Descriptions
@@ -177,6 +154,8 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
                     headerTitle="实体"
                     rowKey="id"
                     search={false}
+                    loading={resource.loading}
+                    scroll={{ x: 680 }}
                     options={false}
                     dataSource={typeEntities}
                     onRow={(row) => ({ onClick: () => setDetail(row) })}
@@ -214,6 +193,8 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
                     headerTitle="属性定义"
                     rowKey="id"
                     search={false}
+                    loading={resource.loading}
+                    scroll={{ x: 680 }}
                     options={false}
                     dataSource={attributes}
                     toolBarRender={() =>
@@ -247,7 +228,7 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
                       { title: "名称", dataIndex: "name" },
                       { title: "Key", dataIndex: "attribute_key" },
                       { title: "类型", dataIndex: "kind", render: (_, row) => <Tag>{row.kind}</Tag> },
-                      { title: "必填", dataIndex: "required", render: (value) => value ? "是" : "否" },
+                      { title: "必填", dataIndex: "required" },
                       { title: "Revision", dataIndex: "revision" },
                       {
                         title: "操作",
@@ -304,7 +285,7 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
               {
                 key: "actions",
                 label: "Action",
-                children: <ActionPanel env={env} entityType={entityType} canManage={canManage} actions={actions} onReload={async () => { setActions((await api.actions(env, entityType.id)).items); }} />,
+                children: <ActionPanel env={env} entityType={entityType} canManage={canManage} actions={actions} onReload={resource.reload} />,
               },
               {
                 key: "relationships",
@@ -314,6 +295,8 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
                     headerTitle="关系"
                     rowKey="id"
                     search={false}
+                    loading={resource.loading}
+                    scroll={{ x: 680 }}
                     options={false}
                     dataSource={typeRelationships}
                     columns={[
@@ -335,11 +318,6 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
                         render: (_, row) => entityNames[row.target_entity_id] ?? row.target_entity_id,
                       },
                       { title: "描述", dataIndex: "description", ellipsis: true },
-                      {
-                        title: "固定观测",
-                        dataIndex: "is_pinned",
-                        render: (_, row) => (row.is_pinned ? <Tag color="gold">已固定</Tag> : <Tag>未固定</Tag>),
-                      },
                       { title: "Revision", dataIndex: "revision" },
                     ]}
                   />
@@ -352,13 +330,18 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
       <EntityDetailDrawer
         env={env}
         entity={detail}
-        entityType={entityType}
+        entityType={types.find((item) => item.id === detail?.entity_type_id)}
         canManage={canManage}
+        onBack={navigation.canBack ? navigation.back : undefined} view={navigation.view} onView={navigation.remember}
+        relations={detail ? <EntityRelations key={detail.id} entityId={detail.id} entities={allEntities} relationships={relationships} relationshipTypes={relationshipTypes} observedIds={[]}
+          onEntity={(id) => guard.run(() => navigation.openEntity(id))} onRelationship={(id) => guard.run(() => navigation.openRelationship(id))} /> : undefined}
         onClose={() => setDetail(undefined)}
         onEntityChanged={async () => {
           if (entityType) await loadEntities(entityType);
         }}
       />
+      <RelationshipDrawer env={env} relationship={relation} entities={allEntities} relationshipTypes={relationshipTypes} canManage={canManage}
+        onClose={navigation.close} onChanged={resource.reload} onEntity={navigation.openEntity} onBack={navigation.canBack ? navigation.back : undefined} />
     </Drawer>
   );
 }

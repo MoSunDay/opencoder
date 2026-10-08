@@ -100,6 +100,9 @@ class Candidate:
         self.lose_reply = lose_reply
         self.creates = 0
         self.definition = spec()
+        self.brain_reply = {"status": 200, "body": {"compatible": True,
+                            "features": ["brain_context_budget_v1"]}}
+        self.brain_inputs = []
 
     def http(self, base, path, method="GET", body=None):
         index = {"id": probe_id(self.record), "kind": "dag", "node_id": "node-test",
@@ -108,6 +111,9 @@ class Candidate:
             return {"runtime_id": self.record["id"], "build": {"git_commit": "commit"},
                     "registration": {"id": "node-test"}, "snapshot": {"ready": True},
                     "indexes": [index] if self.accepted else []}
+        if body["operation"] == "brain":
+            self.brain_inputs.append(copy.deepcopy(body["input"]))
+            return self.brain_reply
         if body["operation"] == "inspect":
             if not self.accepted:
                 return {"status": 404}
@@ -140,6 +146,31 @@ class CandidateProbeTests(unittest.TestCase):
         self.record = {"id": "release-test", "probe_epoch": 2, "runtime_port": 3100,
                        "runtime_data": self.directory.name, "created_at": 123,
                        "manifest": {"commit": "commit"}}
+
+    def test_capacity_is_checked_with_frozen_request_before_any_admission(self):
+        self.record["manifest"]["required_runtime_features"] = ["brain_context_budget_v1"]
+        operations = Candidate(self.record)
+        self.assertEqual(candidate_locked(None, self.record, operations, 1), "node-test")
+        self.assertEqual(len(operations.brain_inputs), 1)
+        request = operations.brain_inputs[0]
+        self.assertEqual(request["layered_request"]["schema_version"], 7)
+        self.assertEqual(request["frozen_capabilities"][0]["capability_id"], "agent")
+
+    def test_missing_feature_or_rejected_capacity_prevents_warming_execution(self):
+        self.record["manifest"]["required_runtime_features"] = ["brain_context_budget_v1"]
+        for reply in ({"status": 200, "body": {"compatible": True, "features": []}},
+                      {"status": 413, "body": {"error": "context budget exceeded"}}):
+            operations = Candidate(self.record)
+            operations.brain_reply = reply
+            with self.subTest(reply=reply), self.assertRaisesRegex(ValueError, "capacity admission failed"):
+                candidate_locked(None, self.record, operations, 1)
+            self.assertEqual(operations.creates, 0)
+
+    def test_rollback_to_release_without_capacity_requirement_keeps_native_probe(self):
+        operations = Candidate(self.record)
+        self.assertEqual(candidate_locked(None, self.record, operations, 1), "node-test")
+        self.assertEqual(operations.brain_inputs, [])
+        self.assertEqual(operations.creates, 1)
 
     def test_resumed_activation_recovers_completed_probe_without_admission(self):
         operations = Candidate(self.record, accepted=True)

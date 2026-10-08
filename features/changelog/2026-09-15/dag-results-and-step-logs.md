@@ -13,7 +13,6 @@ Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 
 - SPA 全量：97 个测试文件、714 项通过（`/tmp/opencoder-dag-spa-final-full.log`）。
 - `cargo clippy --workspace --all-targets -- -D warnings`：零警告（`/tmp/opencoder-dag-clippy-final2.log`）。
-- `cargo test --workspace`：394 个测试套件，5,204 passed / 0 failed / 6 ignored（`/tmp/opencoder-dag-tests-final2.log`）。6 项为原有 NFS 挂载、runc/wasm rootfs 和挂载 CLI 的特权手工用例，没有新增跳过项。
 - `cargo build --workspace`：独立工作树通过（`/tmp/opencoder-dag-build-isolated.log`）。共享工作区在测试运行期间加入另一批 host/runtime handoff 改造，其构建因锁跨越 await 失败；本次发布使用已提交基线和明确的 DAG 修复隔离构建，未纳入这些在途改动。
 - 浏览器验收入口：`PLATFORM_BIN_DIR=<bundle>/bin node scripts/acceptance/dag_results.js`。独立 Server/Agent 使用确定性模型响应，并校验浏览器实际加载的 SPA 与仓库产物一致。
 

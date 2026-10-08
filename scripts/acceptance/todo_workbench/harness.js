@@ -1,5 +1,5 @@
 // Independent UI acceptance for the durable TODO initialization window.
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFileSync } = require('child_process');
 const { chromium } = require('../../../crates/web/spa/node_modules/playwright-core');
 const assert = require('assert/strict');
 const crypto = require('crypto');
@@ -23,6 +23,7 @@ let page;
 let mock;
 let responseFor;
 let native;
+let agentMount;
 
 async function until(check, label, timeout = 40_000) {
   const deadline = Date.now() + timeout;
@@ -115,23 +116,43 @@ async function startMock() {
   await new Promise((resolve) => mock.listen(0, '127.0.0.1', resolve));
 }
 
-function writeConfig(directory, modelConfig) {
+function writeConfig(directory, modelConfig, contextLimit) {
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(directory, 'opencoder.json'), JSON.stringify(modelConfig || {
+  const config = modelConfig || {
     providers: { fixture: { base_url: `http://127.0.0.1:${mock.address().port}/v1`, api_key: 'fixture' } },
     model: 'fixture/model', cache_salt: false,
+  };
+  fs.writeFileSync(path.join(directory, 'opencoder.json'), JSON.stringify({
+    ...config, ...(contextLimit === undefined ? {} : { context_limit: contextLimit }),
   }), { mode: 0o600 });
 }
 
 
-async function open(answer, { dag = false, rootfs, modelConfig, withBrowser = true } = {}) {
+async function open(answer, { dag = false, rootfs, modelConfig, contextLimit, withBrowser = true, agents = false } = {}) {
   responseFor=answer;if (!modelConfig) await startMock();
   const serverWork=path.join(root,'server-work'),nodeWork=path.join(root,'node-work');
-  writeConfig(serverWork,modelConfig);writeConfig(nodeWork,modelConfig);
+  writeConfig(serverWork,modelConfig,contextLimit);writeConfig(nodeWork,modelConfig,contextLimit);
+  if (agents) {
+    for (const [workdir, name] of [[serverWork, 'agent-pool'], [nodeWork, 'mounted-agents']]) {
+      const directory = path.join(root, name); fs.mkdirSync(directory);
+      const file = path.join(workdir, 'opencoder.json');
+      const config = JSON.parse(fs.readFileSync(file));
+      config.agent = { ...config.agent, agents_dir: directory, nfs: { host: '127.0.0.1', port: 0 } };
+      fs.writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
+    }
+  }
   if (dag) native = await prepareNative(root, serverWork, [nodeWork], rootfs, 'node artifact', { [nodeWork]: path.join(root, 'node-data') });
   const server=start('opencoder-server',['--workdir',serverWork,'--data-dir',path.join(root,'server-data'),'--port','0','--token',token],serverWork,'server');
   await until(()=>{const m=fs.readFileSync(server.logPath,'utf8').match(/listening on (http:\/\/127\.0\.0\.1:\d+)/);if(m)base=m[1];return base;},'server ready');
   if (native) native.mount();
+  if (agents) {
+    const { status } = await api('POST', '/api/agents/nfs', { enabled: true });
+    const directory = path.join(root, 'mounted-agents');
+    execFileSync('mount', ['-t', 'nfs', '-o',
+      'ro,nfsvers=3,proto=tcp,nolock,port=' + status.port + ',mountport=' + status.port + ',mountproto=tcp,noac,lookupcache=none',
+      '127.0.0.1:/', directory]);
+    agentMount = directory;
+  }
   const args=['--remote',base,'--token',token,'--name','todo-review-node','--workdir',nodeWork,'--data-dir',path.join(root,'node-data'),...(dag ? [] : ['--no-dag'])];
   let agent=start('opencoder-agent',args,nodeWork,'agent');
   const nodeId=await until(async()=>(await api('GET','/api/nodes')).nodes.find(n=>n.online&&n.snapshot?.ready)?.id,'node ready');
@@ -143,6 +164,12 @@ async function open(answer, { dag = false, rootfs, modelConfig, withBrowser = tr
     await page.goto(base,{waitUntil:'networkidle'});
   }
   return {page,root,nodeId,api,request,until,pause,errors:browserErrors,
+    stopNode: async () => stop(agent, 'SIGKILL'),
+    startNode: async () => {
+      agent=start('opencoder-agent',args,nodeWork,'agent-started');
+      await until(async () => (await api('GET','/api/nodes')).nodes.some(
+        node => node.id === nodeId && node.online && node.snapshot?.ready), 'node started');
+    },
     restart:async()=>{
       const previous=(await api('GET','/api/nodes')).nodes.find(n=>n.id===nodeId)?.snapshot?.generation;
       await stop(agent,'SIGKILL');agent=start('opencoder-agent',args,nodeWork,'agent-restarted');
@@ -159,6 +186,7 @@ async function close() {
   const servers = children.filter((child) => path.basename(child.spawnargs[0]) === 'opencoder-server');
   for (const child of children.filter((child) => !servers.includes(child)).reverse()) await attempt(() => stop(child));
   if (native) await attempt(() => native.close());
+  if (agentMount) await attempt(() => execFileSync('umount', [agentMount]));
   for (const child of servers.reverse()) await attempt(() => stop(child));
   if (mock?.listening) await attempt(() => new Promise((resolve) => mock.close(resolve)));
   if (errors.length) throw new AggregateError(errors, 'fixture cleanup failed');

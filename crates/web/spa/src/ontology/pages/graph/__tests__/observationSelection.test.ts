@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import "../../../testSetup";
 import { describe, expect, it } from "vitest";
 import type { GraphResponse } from "../../../types";
 import { centersDisconnected } from "../observationSelection";

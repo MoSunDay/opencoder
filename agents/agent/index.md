@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: 07d29e11815cdbbbfc82a73a5a208bd0eb313e62
 
 # agent 模块
 
@@ -17,7 +17,8 @@ Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点，启动前�
 ## 报告与发布边界
 
 - [host/client.rs](../../crates/agent/src/host/client.rs)：普通只读 RPC 不增加库存修订号；唤醒 Runtime 或清除休眠标记仍通知同步。Host 汇总全部 Runtime 索引，但只用活动 Runtime 的健康状态决定新任务准入；退休 Runtime 的休眠快照错误不阻断当前版本。
-- [host/service.rs](../../crates/agent/src/host/service.rs)、[host/client.rs](../../crates/agent/src/host/client.rs)：节点冻结、查询准入和重新开放跳过已休眠 Runtime；实际访问唤醒时，先依次取得 Host 准入锁和 Runtime 使用锁，再同步当前准入模式，成功后清除休眠标记并转发请求。
+- [host/client.rs](../../crates/agent/src/host/client.rs) 对 `result`、`team.topic` 的分块读取复用 [result_reader](../../crates/worker/src/result_reader/mod.rs)，在原执行所属 Runtime 的目录只读读取，补齐内容版本，不唤醒、恢复或迁移原执行。其他请求仍按执行归属转发；升级顺序见 [项目模块约定](../../rules/07-project-module-contract.md)。
+- [host/service.rs](../../crates/agent/src/host/service.rs)、[host/client.rs](../../crates/agent/src/host/client.rs)：节点冻结、查询准入和重新开放跳过已休眠 Runtime；需要转发给 Runtime 的请求若触发唤醒，先依次取得 Host 准入锁和 Runtime 使用锁，再同步当前准入模式，成功后清除休眠标记并转发请求。
 - [host/mod.rs](../../crates/agent/src/host/mod.rs)：关闭信号 future 在主循环外固定，库存和通道变化不会丢弃已到达的 SIGTERM。
 - [rolling/deployment.py](../../scripts/platform/rolling/deployment.py)：历史 Server/Host 批量停用后统一重载 systemd；不停止保留 Runtime。
 - [rolling/probes.py](../../scripts/platform/rolling/probes.py)：切换前优先检查候选 Server 上的就绪节点；旧 Host 因退休 Runtime 状态不就绪时，改为核验已完成执行探针的候选 Runtime、候选 Host 与候选 Server 身份，切换后仍执行公共入口探针。

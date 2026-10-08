@@ -45,6 +45,13 @@ pub struct ScopedConfigHome {
     prev: Option<PathBuf>,
 }
 
+impl ScopedConfigHome {
+    /// Capture the current thread's override when starting a background thread.
+    pub fn current() -> Option<PathBuf> {
+        isolated_home()
+    }
+}
+
 impl Drop for ScopedConfigHome {
     fn drop(&mut self) {
         ISOLATION.with(|c| *c.borrow_mut() = self.prev.take());

@@ -23,7 +23,7 @@ pub(crate) async fn execute_agent_step_runc(
         ctx.instance,
         &session_id,
     );
-    let mut result = match execute_session(ctx, deps, cancel.clone(), &session_id).await {
+    let mut result = match execute_session(ctx, deps, cancel.child_token(), &session_id).await {
         Ok(result) => result,
         Err(error) => StepResult {
             outcome: if cancel.is_cancelled() {
@@ -158,7 +158,9 @@ async fn execute_session(
         crate::sandbox::run::execute(&root, process, cancel.clone(), Some(output.clone()));
     tokio::pin!(execution);
     let mut offset = 0;
-    let events = std::path::Path::new(&ctx.relative_dir()).join("events.ndjson");
+    let events = std::path::Path::new(&ctx.relative_dir())
+        .join("agent-events")
+        .join(format!("{session_id}.ndjson"));
     let workspace = root.join("workspace");
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
     let mut event_error = None;

@@ -2,6 +2,7 @@
 //! before remounting its root read-only, so bundles must not share that root.
 use anyhow::{bail, ensure, Context, Result};
 use std::{
+    collections::HashMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -9,6 +10,7 @@ use std::{
 
 const RUNTIME_DIRS: &[&str] = &["dev", "proc", "sys", "tmp", "workspace/context"];
 const COPY_CHUNK_BYTES: usize = 1024 * 1024;
+const SYNC_BATCH_BYTES: usize = 8 * COPY_CHUNK_BYTES;
 
 pub(super) fn snapshot(source: &Path, bundle: &Path) -> Result<PathBuf> {
     let destination = bundle.join("rootfs");
@@ -26,7 +28,8 @@ pub(super) fn snapshot(source: &Path, bundle: &Path) -> Result<PathBuf> {
     );
     let staging = Staging(bundle.join(format!(".rootfs-{}", ulid::Ulid::new())));
     fs::create_dir(&staging.0)?;
-    copy_directory(source, &staging.0, Path::new("")).context("copy private runc rootfs")?;
+    copy_directory(source, &staging.0, Path::new(""), &mut HashMap::new())
+        .context("copy private runc rootfs")?;
     fs::rename(&staging.0, &destination).context("publish private runc rootfs")?;
     Ok(destination)
 }
@@ -40,7 +43,12 @@ impl Drop for Staging {
     }
 }
 
-fn copy_directory(source: &Path, destination: &Path, relative: &Path) -> Result<()> {
+fn copy_directory(
+    source: &Path,
+    destination: &Path,
+    relative: &Path,
+    copied: &mut HashMap<(u64, u64), PathBuf>,
+) -> Result<()> {
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let relative = relative.join(entry.file_name());
@@ -57,9 +65,23 @@ fn copy_directory(source: &Path, destination: &Path, relative: &Path) -> Result<
         }
         if kind.is_dir() {
             fs::create_dir(&target)?;
-            copy_directory(&entry.path(), &target, &relative)?;
+            copy_directory(&entry.path(), &target, &relative, copied)?;
         } else if kind.is_file() {
-            // Copy bytes, never hard-link shared files that can be updated.
+            // Preserve links only inside this private snapshot. Git installs
+            // over a hundred command aliases to one inode; expanding them
+            // needlessly copies and flushes hundreds of MiB per session.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                let metadata = entry.metadata()?;
+                let identity = (metadata.dev(), metadata.ino());
+                if let Some(private_copy) = copied.get(&identity) {
+                    fs::hard_link(private_copy, &target)?;
+                    continue;
+                }
+                copied.insert(identity, target.clone());
+            }
+            // The first occurrence always copies bytes from the source.
             copy_file(&entry.path(), &target)?;
         } else if kind.is_symlink() {
             copy_symlink(&entry.path(), &target)?;
@@ -85,16 +107,21 @@ fn copy_file(source: &Path, destination: &Path) -> Result<()> {
         .create_new(true)
         .open(destination)?;
     let mut buffer = vec![0; COPY_CHUNK_BYTES];
+    let mut dirty = 0;
     loop {
         let count = input.read(&mut buffer)?;
         if count == 0 {
             break;
         }
         output.write_all(&buffer[..count])?;
+        dirty += count;
         // Large kernel copies can leave hundreds of MiB in the filesystem's
         // ordered transaction, delaying unrelated admission fsyncs. Bound
         // dirty image data while preserving the private staging tree.
-        output.sync_data()?;
+        if dirty >= SYNC_BATCH_BYTES {
+            output.sync_data()?;
+            dirty = 0;
+        }
     }
     output.set_permissions(input.metadata()?.permissions())?;
     output.sync_all()?;
@@ -125,9 +152,12 @@ mod tests {
         let bundle = temp.path().join("bundle");
         fs::create_dir(&source).unwrap();
         fs::create_dir(&bundle).unwrap();
-        let bytes: Vec<u8> = (0..3 * 1024 * 1024 + 37).map(|n| (n % 251) as u8).collect();
+        let bytes: Vec<u8> = (0..SYNC_BATCH_BYTES + 37)
+            .map(|n| (n % 251) as u8)
+            .collect();
         let executable = source.join("executable");
         fs::write(&executable, &bytes).unwrap();
+        fs::hard_link(&executable, source.join("alias")).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -141,6 +171,10 @@ mod tests {
             let original = fs::metadata(&executable).unwrap();
             let copied = fs::metadata(root.join("executable")).unwrap();
             assert_ne!(original.ino(), copied.ino());
+            assert_eq!(
+                fs::metadata(root.join("alias")).unwrap().ino(),
+                copied.ino()
+            );
             assert_eq!(copied.mode() & 0o777, 0o751);
         }
         fs::write(executable, b"new version").unwrap();

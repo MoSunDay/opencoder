@@ -1,11 +1,50 @@
 use super::response;
 use crate::{admission::AdmissionMode, AppState};
-use axum::{extract::State, response::Response};
+use axum::{
+    extract::{Path, Query, State},
+    response::Response,
+};
 use futures::future::join_all;
 use opencoder_core::fleet::{NodeAdmissionCommand, NodeOperation, RpcReply};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+
+async fn node_command(state: &Arc<AppState>, id: &str, command: NodeAdmissionCommand) -> Response {
+    if command == NodeAdmissionCommand::Status {
+        return response(
+            state
+                .hub
+                .call(id, NodeOperation::Admission { command })
+                .await,
+        );
+    }
+    let _process_lock = match state.fleet.request_lock("admission", "cluster").await {
+        Ok(lock) => lock,
+        Err(error) => return response(RpcReply::error(500, error.to_string())),
+    };
+    let _transition = state.admission.transition().await;
+    if command == NodeAdmissionCommand::Reopen && !state.admission.is_open().await {
+        return response(RpcReply::error(409, "Server admission is frozen"));
+    }
+    let reply = state
+        .hub
+        .call(id, NodeOperation::Admission { command })
+        .await;
+    response(reply)
+}
+
+pub async fn node_status(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    node_command(&state, &id, NodeAdmissionCommand::Status).await
+}
+
+pub async fn node_freeze(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    node_command(&state, &id, NodeAdmissionCommand::Freeze).await
+}
+
+pub async fn node_reopen(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    node_command(&state, &id, NodeAdmissionCommand::Reopen).await
+}
 
 #[derive(Debug, Serialize)]
 struct NodeAdmissionResult {
@@ -17,8 +56,15 @@ struct NodeAdmissionResult {
 async fn call_online_nodes(
     state: &Arc<AppState>,
     command: NodeAdmissionCommand,
+    selected: Option<&str>,
 ) -> (Vec<NodeAdmissionResult>, Vec<String>) {
-    let views = state.hub.views().await;
+    let views: Vec<_> = state
+        .hub
+        .views()
+        .await
+        .into_iter()
+        .filter(|node| selected.is_none_or(|id| node.registration.id == id))
+        .collect();
     let offline = views
         .iter()
         .filter(|node| !node.online)
@@ -120,7 +166,8 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Response {
         Ok(status) => status,
         Err(error) => return response(RpcReply::error(500, error.to_string())),
     };
-    let (nodes, offline_nodes) = call_online_nodes(&state, NodeAdmissionCommand::Status).await;
+    let (nodes, offline_nodes) =
+        call_online_nodes(&state, NodeAdmissionCommand::Status, None).await;
     let drained = cluster_drained(&status, &nodes);
     response(RpcReply::ok(json!({
         "server": status,
@@ -139,7 +186,8 @@ pub async fn freeze(State(state): State<Arc<AppState>>) -> Response {
     if let Err(error) = state.admission.freeze(&state.placement).await {
         return response(RpcReply::error(500, error.to_string()));
     }
-    let (nodes, offline_nodes) = call_online_nodes(&state, NodeAdmissionCommand::Freeze).await;
+    let (nodes, offline_nodes) =
+        call_online_nodes(&state, NodeAdmissionCommand::Freeze, None).await;
     let status = local_status(&state)
         .await
         .unwrap_or_else(|error| json!({"mode":"frozen","status_error":error.to_string()}));
@@ -152,7 +200,15 @@ pub async fn freeze(State(state): State<Arc<AppState>>) -> Response {
     })))
 }
 
-pub async fn reopen(State(state): State<Arc<AppState>>) -> Response {
+#[derive(Deserialize)]
+pub struct ReopenScope {
+    pub node_id: Option<String>,
+}
+
+pub async fn reopen(
+    State(state): State<Arc<AppState>>,
+    Query(scope): Query<ReopenScope>,
+) -> Response {
     let _process_lock = match state.fleet.request_lock("admission", "cluster").await {
         Ok(lock) => lock,
         Err(error) => return response(RpcReply::error(500, error.to_string())),
@@ -161,7 +217,15 @@ pub async fn reopen(State(state): State<Arc<AppState>>) -> Response {
     // Reconcile online nodes even when the server is already open: a node
     // may still carry its durable shutdown freeze.
     let server_open = state.admission.is_open().await;
-    let (nodes, offline_nodes) = call_online_nodes(&state, NodeAdmissionCommand::Reopen).await;
+    let (nodes, offline_nodes) = call_online_nodes(
+        &state,
+        NodeAdmissionCommand::Reopen,
+        scope.node_id.as_deref(),
+    )
+    .await;
+    if scope.node_id.is_some() && nodes.is_empty() {
+        return response(RpcReply::error(503, "selected node is unavailable"));
+    }
     if nodes.is_empty() && !server_open {
         return response(RpcReply::error(
             503,

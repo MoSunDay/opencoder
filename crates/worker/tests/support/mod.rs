@@ -96,6 +96,7 @@ pub fn drain_runtime(low: Arc<AtomicBool>) -> WorkerRuntime {
                 total_inodes: Some(100),
             })
         }),
+        ..WorkerRuntime::default()
     }
 }
 

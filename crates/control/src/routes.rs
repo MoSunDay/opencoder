@@ -53,6 +53,7 @@ pub fn build_app_with_metrics(
         .route("/api/nodes", get(catalog::nodes))
         .route("/api/nodes/:id/execution-capabilities", get(catalog::execution_capabilities))
         .route("/api/nodes/:id", axum::routing::delete(catalog::unregister))
+        .route("/api/nodes/:id/admission", get(admission::node_status).post(admission::node_freeze).delete(admission::node_reopen))
         .route(
             "/api/nodes/:id/scheduling",
             get(api::settings::get_scheduling).put(api::settings::save_scheduling),

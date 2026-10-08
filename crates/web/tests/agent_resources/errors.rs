@@ -174,6 +174,7 @@ async fn incomplete_shared_history_aborts_fork_without_changing_reference() {
                 &[opencoder_agents::VersionFile {
                     rel_path: "memory.md".into(),
                     bytes: text.as_bytes().to_vec(),
+                    mode: 0o600,
                 }],
             )
             .unwrap();

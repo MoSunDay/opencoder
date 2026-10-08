@@ -56,6 +56,7 @@ pub fn append_to_how_md(agent: &str, delta: &str) -> Result<u32, String> {
         None => files.push(VersionFile {
             rel_path: HOW_FILE.into(),
             bytes,
+            mode: 0o600,
         }),
     }
     save_resource_version("prompts", &pool, &files).map_err(|e| e.to_string())
@@ -67,21 +68,15 @@ fn current_pool_files(pool: &str) -> Result<Vec<VersionFile>, String> {
     let Some(dir) = opencoder_core::agent::resource_current_version_dir("prompts", pool) else {
         return Ok(Vec::new());
     };
-    let mut names: Vec<String> = std::fs::read_dir(&dir)
+    crate::resources::filesystem::read_files(&dir)
         .map_err(|e| e.to_string())?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().is_file())
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.ends_with(".md"))
-        .collect();
-    names.sort();
-    names
         .into_iter()
-        .map(|name| {
-            let bytes = std::fs::read(dir.join(&name)).map_err(|e| format!("read {name}: {e}"))?;
+        .filter(|file| file.path.ends_with(".md"))
+        .map(|file| {
             Ok(VersionFile {
-                rel_path: name,
-                bytes,
+                rel_path: file.path,
+                bytes: file.bytes,
+                mode: file.mode,
             })
         })
         .collect()
@@ -133,6 +128,7 @@ mod tests {
             &[VersionFile {
                 rel_path: "soul.md".into(),
                 bytes: b"identity".to_vec(),
+                mode: 0o600,
             }],
         )
         .unwrap();

@@ -5,6 +5,76 @@ use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use reqwest::Method;
 use serde_json::json;
 
+#[tokio::test]
+async fn node_admission_changes_only_the_selected_node() {
+    use crate::support::{MockNode, TOKEN};
+    use opencoder_node::fleet::NodeService;
+    use std::{
+        sync::{atomic::Ordering, Arc},
+        time::Duration,
+    };
+    let h = Harness::new().await;
+    let other = MockNode::new("resource-independent-node");
+    let service: Arc<dyn NodeService> = other.clone();
+    let base = h.base.clone();
+    let link = tokio::spawn(async move { opencoder_node::fleet::run(&base, TOKEN, service).await });
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while !h
+            .state
+            .hub
+            .views()
+            .await
+            .iter()
+            .any(|n| n.online && n.registration.id == other.id)
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let route = format!("/api/nodes/{}/admission", h.node.id);
+    let (status, body) = h.req(Method::GET, &route, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["mode"], "open");
+    let (status, body) = h.req(Method::POST, &route, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["mode"], "frozen");
+    assert!(!h.node.open.load(Ordering::SeqCst));
+    assert!(other.open.load(Ordering::SeqCst));
+    assert_eq!(other.freezes.load(Ordering::SeqCst), 0);
+    let (_, cluster) = h.req(Method::GET, "/api/admin/drain", None).await;
+    assert_eq!(cluster["server"]["mode"], "open");
+    let (status, body) = h.req(Method::DELETE, &route, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["mode"], "open");
+    assert!(h.node.open.load(Ordering::SeqCst));
+    assert!(other.open.load(Ordering::SeqCst));
+    let (status, _) = h.req(Method::POST, "/api/admin/drain", None).await;
+    assert_eq!(status, 200);
+    let (status, _) = h.req(Method::DELETE, &route, None).await;
+    assert_eq!(
+        status, 409,
+        "node reopen must preserve a newer cluster freeze"
+    );
+    assert!(!h.node.open.load(Ordering::SeqCst));
+    assert!(!other.open.load(Ordering::SeqCst));
+    let (status, _) = h
+        .req(Method::DELETE, "/api/admin/drain?node_id=missing", None)
+        .await;
+    assert_eq!(status, 503);
+    assert!(!h.node.open.load(Ordering::SeqCst));
+    let route = format!("/api/admin/drain?node_id={}", h.node.id);
+    let (status, body) = h.req(Method::DELETE, &route, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["server"]["mode"], "open");
+    assert!(h.node.open.load(Ordering::SeqCst));
+    assert!(
+        !other.open.load(Ordering::SeqCst),
+        "unselected node must remain frozen"
+    );
+    link.abort();
+}
+
 use crate::support::Harness;
 
 #[tokio::test]

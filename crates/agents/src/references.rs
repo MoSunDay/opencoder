@@ -252,6 +252,7 @@ mod tests {
             &[crate::write::VersionFile {
                 rel_path: "soul.md".into(),
                 bytes: b"s".to_vec(),
+                mode: 0o600,
             }],
         )
         .unwrap();
@@ -267,10 +268,12 @@ mod tests {
                 crate::write::VersionFile {
                     rel_path: "soul.md".into(),
                     bytes: b"s".to_vec(),
+                    mode: 0o600,
                 },
                 crate::write::VersionFile {
                     rel_path: "how.md".into(),
                     bytes: b"h".to_vec(),
+                    mode: 0o600,
                 },
             ],
         )

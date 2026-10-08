@@ -9,9 +9,7 @@ use opencoder_core::agent::{
     AGENT_CATEGORIES,
 };
 
-use crate::io::{
-    atomic_write, atomic_write_json, invalid_input, not_found, now_rfc3339, sync_dir_best_effort,
-};
+use crate::io::{atomic_write_json, invalid_input, not_found, now_rfc3339, sync_dir_best_effort};
 use crate::references::references_snapshot;
 
 /// One file inside a version dir: `rel_path` is relative to the version
@@ -20,13 +18,7 @@ use crate::references::references_snapshot;
 pub struct VersionFile {
     pub rel_path: String,
     pub bytes: Vec<u8>,
-}
-
-/// A `rel_path` is legal when non-empty, relative (no leading `/`), and
-/// confined to the version dir (no `..` component) — path traversal is
-/// rejected before any filesystem work happens.
-fn validate_rel_path(rel: &str) -> io::Result<()> {
-    crate::resources::model::validate_path(rel)
+    pub mode: u32,
 }
 
 /// Resource dir `<agents_root>/<cat>/<name>` (category + name validated
@@ -99,9 +91,15 @@ pub fn save_shared_version(
         return Err(invalid_input(format!("未知资源类别: {cat}")));
     }
     validate_resource_name(cat, name).map_err(invalid_input)?;
-    for file in files {
-        validate_rel_path(&file.rel_path)?;
-    }
+    let entries: Vec<_> = files
+        .iter()
+        .map(|file| crate::resources::model::FileEntry {
+            path: file.rel_path.clone(),
+            bytes: file.bytes.clone(),
+            mode: file.mode,
+        })
+        .collect();
+    crate::resources::model::validate_files(cat, &entries)?;
     let dir = resource_dir(cat, name)?;
     crate::resources::filesystem::check_path(&dir.join("meta.json"))?;
     std::fs::create_dir_all(&dir)?;
@@ -116,14 +114,7 @@ pub fn save_shared_version(
     }
     let temp = dir.join(format!(".tmp-v{next}.{}", std::process::id()));
     let build = || -> io::Result<()> {
-        std::fs::create_dir(&temp)?;
-        for file in files {
-            let target = temp.join(&file.rel_path);
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            atomic_write(&target, &file.bytes)?;
-        }
+        crate::resources::filesystem::write_files(&temp, &entries)?;
         opencoder_core::platform::fs::replace(&temp, &dest)
     };
     if let Err(e) = build() {

@@ -17,12 +17,15 @@ async function loadMetadata(env: string): Promise<Metadata> {
 }
 
 /** The owning component is keyed by ENV; no cache or selection crosses that boundary. */
-export function useGraphObservation(env: string, expandNeighbors = false) {
+export function useGraphObservation(env: string, expandNeighbors = false, active = true) {
   const [selection, setSelection] = useState(initialSelection);
   const [metadata, setMetadata] = useState(EMPTY_METADATA);
   const [data, setData] = useState(EMPTY_GRAPH);
+  const [appliedSelection, setAppliedSelection] = useState<ObservationSelection>();
+  const [metadataReady, setMetadataReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [metadataError, setMetadataError] = useState("");
   const metadataRef = useRef<Promise<Metadata>>();
   const requestRef = useRef(0);
   const mountedRef = useRef(false);
@@ -37,6 +40,7 @@ export function useGraphObservation(env: string, expandNeighbors = false) {
     const request = ++requestRef.current;
     const current = () => mountedRef.current && request === requestRef.current;
     let correctingSelection = false;
+    let metadataLoaded = false;
     setLoading(true);
     setError("");
     try {
@@ -45,12 +49,16 @@ export function useGraphObservation(env: string, expandNeighbors = false) {
       const nextMetadata = await pendingMetadata;
       if (!current()) return;
       setMetadata(nextMetadata);
+      setMetadataReady(true);
+      metadataLoaded = true;
+      setMetadataError("");
+      if (!active) return;
       const entityTypeIds = retainAvailableIds(selection.entityTypeIds, nextMetadata.entityTypes.map((item) => item.id));
       const centerIds = retainAvailableIds(selection.centerIds, entitiesOfTypes(nextMetadata.entities, entityTypeIds).map((item) => item.id));
       const incidentIds = incidentRelationshipTypeIds(nextMetadata.entities, nextMetadata.relationships, entityTypeIds);
       const candidateTypeIds = relationshipTypeCandidates(nextMetadata.relationshipTypes, entityTypeIds, expandNeighbors)
         .filter((item) => !expandNeighbors || incidentIds.has(item.id)).map((item) => item.id);
-      const relationshipTypeIds = retainAvailableIds(selection.relationshipTypeIds, candidateTypeIds);
+      const relationshipTypeIds = retainAvailableIds(selection.relationshipTypeIds, expandNeighbors ? nextMetadata.relationshipTypes.map((item) => item.id) : candidateTypeIds);
       if (entityTypeIds !== selection.entityTypeIds || centerIds !== selection.centerIds || relationshipTypeIds !== selection.relationshipTypeIds) {
         correctingSelection = true;
         setSelection({ ...selection, entityTypeIds, centerIds, relationshipTypeIds });
@@ -64,15 +72,16 @@ export function useGraphObservation(env: string, expandNeighbors = false) {
       });
       if (!current()) return;
       setData(nextGraph);
+      setAppliedSelection({ ...selection });
     } catch (reason) {
       if (!current()) return;
       metadataRef.current = undefined;
-      setData(EMPTY_GRAPH);
+      if (!metadataLoaded) setMetadataError(reason instanceof Error ? reason.message : "观测范围加载失败");
       setError(reason instanceof Error ? reason.message : "拓扑加载失败");
     } finally {
       if (current() && !correctingSelection) setLoading(false);
     }
-  }, [env, selection, expandNeighbors]);
+  }, [env, selection, expandNeighbors, active]);
 
   useEffect(() => {
     void reload();
@@ -94,10 +103,10 @@ export function useGraphObservation(env: string, expandNeighbors = false) {
         const candidateIds = new Set(relationshipTypeCandidates(metadata.relationshipTypes, next.entityTypeIds, expandNeighbors)
           .filter((item) => !expandNeighbors || incidentIds.has(item.id)).map((item) => item.id));
         const centerIds = retainAvailableIds(next.centerIds, entitiesOfTypes(metadata.entities, next.entityTypeIds).map((item) => item.id));
-        return { ...next, centerIds, relationshipTypeIds: next.relationshipTypeIds.filter((id) => candidateIds.has(id)) };
+        return { ...next, centerIds, relationshipTypeIds: expandNeighbors ? next.relationshipTypeIds : next.relationshipTypeIds.filter((id) => candidateIds.has(id)) };
       }
       return next;
     });
   };
-  return { ...metadata, selection, data, loading, error, refresh, changeSelection };
+  return { ...metadata, selection, appliedSelection, metadataReady, data, loading, error, metadataError, refresh, changeSelection };
 }

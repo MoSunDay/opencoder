@@ -44,6 +44,7 @@ import { UsersDrawer } from './admin/usersDrawer.jsx';
 import { normalizeNotice } from './notice.js';
 import { theme } from './theme.js';
 import { bootUrlCredential } from './boot.js';
+import { DraftGuardProvider, useDraftGuard } from './ontology/navigation/DraftGuard';
 
 // zh-CN everywhere: antd built-ins (Modal/Popconfirm buttons) + dayjs
 // relative dates (fromNow lands in iteration 3).
@@ -103,8 +104,9 @@ function PageBody({ page, onNotice }) {
 /// inside the padded pane.
 const SHEET_PAGES = new Set(['chat']);
 
-function App() {
+function FleetShell() {
   const { token, page, identity } = useStore();
+  const draftGuard = useDraftGuard();
   // 项目 / Agent / 节点 分类选择的持久化：显式导航（goPage）经 usehooks-ts 的
   // useLocalStorage 把所选页写入 `oc_nav_page`（键与校验集都在 nav.js）；重新
   // 挂载时在首帧绘制前恢复进 store——useLayoutEffect 先于绘制执行，默认页不
@@ -143,8 +145,10 @@ function App() {
   // the single writer of the persisted selection; programmatic jumps keep
   // the store-only semantics they already had.
   const goPage = (key) => {
-    setStoredPage(key);
-    setState({ page: key });
+    if (key !== page) draftGuard.run(() => {
+      setStoredPage(key);
+      setState({ page: key });
+    });
   };
 
   // Refresh / link-login sessions start with a stored token but no identity
@@ -173,8 +177,6 @@ function App() {
   }, [token, identityRevision]);
 
   return (
-    <ConfigProvider theme={theme} locale={zhCN}>
-      <AntdApp component={false}>
       <div className="fleet-root">
         <Layout className="fleet-layout">
           <Header className="fleet-header">
@@ -186,7 +188,7 @@ function App() {
               {identity?.role === 'admin' ? (
                 <Button size="small" onClick={() => setUsersOpen(true)}>后台管理</Button>
               ) : null}
-              <Button size="small" type="text" onClick={clearCredentials}>退出</Button>
+              <Button size="small" type="text" onClick={() => draftGuard.run(clearCredentials)}>退出</Button>
             </div>
           </Header>
           <Layout style={{ minHeight: 0 }}>
@@ -266,9 +268,13 @@ function App() {
         <LoginModal open={!token} onConnected={() => setNotice(null)} />
         <UsersDrawer open={usersOpen} onClose={() => setUsersOpen(false)} onNotice={notify} />
       </div>
-      </AntdApp>
-    </ConfigProvider>
   );
+}
+
+function App() {
+  return <ConfigProvider theme={theme} locale={zhCN}>
+    <AntdApp component={false}><DraftGuardProvider><FleetShell /></DraftGuardProvider></AntdApp>
+  </ConfigProvider>;
 }
 
 export default App;

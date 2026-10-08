@@ -17,7 +17,12 @@ pub async fn handle(
     }
     ensure!(valid_id(&reference.id), "invalid execution id");
     if action == "capability_probe" {
-        let config = worker.configuration()?;
+        let config = worker.configuration_for(reference.kind)?;
+        if input.get("layered_request").is_some() {
+            if let Err(error) = super::v4::budget::admit(&input, &config) {
+                return Ok(RpcReply::error(413, error.to_string()));
+            }
+        }
         let matches = opencoder_core::agent::scope::with_root_sync(
             config.agent.agents_dir.clone(),
             || -> Result<()> {
@@ -36,6 +41,10 @@ pub async fn handle(
             return Ok(RpcReply::error(412, error.to_string()));
         }
         let mut body = json!({"compatible":true,"features":["dag_container_v1","dag_dynamic_v1","brain_scheduler_v7",opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,opencoder_core::fleet::private_files::CAPABILITY]});
+        body["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!(opencoder_brain::layered::budget::CAPABILITY));
         if input["private_files"] == true {
             body["image_digest"] = json!(tokio::task::spawn_blocking(
                 opencoder_core::fleet::private_files::runtime_image_digest

@@ -44,8 +44,6 @@ Commit: (working-tree, 基于 64f7000f)
 
 ## 3. 等宽与调色板收尾（评审「应当/可以」项）
 
-- `theme.js`：`accentUser`/`accentAi`/`accentWasm` 收进 `palette`（此前每个 hex 在文件内写了两遍），
-  `cssVars` 走单源；新增 `--oc-accent-wasm`（`app.css` `:root` 同步声明，`.dag-edit-node--wasm` 改用变量，
   此前该规则紧邻的上一行已经用 `var(--oc-primary)`）；`token.fontFamilyCode: MONO` —— 否则 antd 默认代码栈
   （含 `Courier`、缺 `ui-monospace`）统治 `<Text code>`（`dag/runsTable.jsx`、`agentsConfig.jsx`、
   `admin/usersDrawer.jsx`）。

@@ -6,17 +6,35 @@ use anyhow::{Context, Result};
 
 /// Resolve the effective proxy URL. Priority: an explicit config value, then
 /// `OPENCODER_PROXY`, then `ALL_PROXY`, then `HTTPS_PROXY` / `HTTP_PROXY`.
+/// Standard proxy variables also accept their lowercase spelling.
 /// Empty/whitespace values are ignored.
 pub fn effective_proxy(explicit: Option<&str>) -> Option<String> {
+    proxy_url(
+        explicit,
+        [
+            "OPENCODER_PROXY",
+            "ALL_PROXY",
+            "all_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+        ]
+        .map(|key| std::env::var(key).ok()),
+    )
+}
+
+fn proxy_url(
+    explicit: Option<&str>,
+    environment: impl IntoIterator<Item = Option<String>>,
+) -> Option<String> {
     if let Some(p) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
         return Some(p.to_string());
     }
-    for var in ["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"] {
-        if let Ok(v) = std::env::var(var) {
-            let t = v.trim();
-            if !t.is_empty() {
-                return Some(t.to_string());
-            }
+    for value in environment.into_iter().flatten() {
+        let t = value.trim();
+        if !t.is_empty() {
+            return Some(t.to_string());
         }
     }
     None
@@ -29,21 +47,52 @@ pub fn effective_proxy(explicit: Option<&str>) -> Option<String> {
 /// tests and localhost endpoints break whenever a proxy is in effect.
 const LOOPBACK_NO_PROXY: &str = "127.0.0.1,localhost,::1,0.0.0.0";
 
+/// Carry the existing proxy exclusions into otherwise empty OCI environments.
+/// The proxy URL and credentials already live in the frozen configuration.
+pub fn proxy_bypass_environment(lookup: impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    ["NO_PROXY", "no_proxy"]
+        .into_iter()
+        .filter_map(|name| lookup(name).map(|value| (name.to_owned(), value)))
+        .collect()
+}
+
+fn bypass_hosts(configured: Option<&str>) -> String {
+    match configured.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => format!("{LOOPBACK_NO_PROXY},{value}"),
+        None => LOOPBACK_NO_PROXY.to_owned(),
+    }
+}
+
 /// Build a proxy-aware reqwest client (rustls) with a custom per-read idle
 /// timeout. `explicit` is the config `network.proxy` value; env fallbacks are
 /// applied via [`effective_proxy`]. When a proxy is in use, loopback hosts are
-/// excluded so local traffic stays direct.
+/// excluded so local traffic stays direct. `NO_PROXY` (or `no_proxy`) adds
+/// the caller's excluded hosts without losing the loopback exclusions.
 pub fn build_http_client_with_read_timeout(
     explicit: Option<&str>,
     read_timeout: std::time::Duration,
 ) -> Result<reqwest::Client> {
+    let proxy = effective_proxy(explicit);
+    let excluded = std::env::var("NO_PROXY")
+        .or_else(|_| std::env::var("no_proxy"))
+        .ok();
+    build_http_client_with_proxy_rules(proxy.as_deref(), excluded.as_deref(), read_timeout)
+}
+
+/// Build a client from resolved proxy rules without reading process environment.
+pub fn build_http_client_with_proxy_rules(
+    proxy: Option<&str>,
+    excluded: Option<&str>,
+    read_timeout: std::time::Duration,
+) -> Result<reqwest::Client> {
     let mut b = reqwest::Client::builder()
+        .no_proxy()
         .connect_timeout(std::time::Duration::from_secs(30))
         .read_timeout(read_timeout);
-    if let Some(p) = effective_proxy(explicit) {
-        let no_proxy = reqwest::NoProxy::from_string(LOOPBACK_NO_PROXY);
-        let proxy = reqwest::Proxy::all(&p)
-            .with_context(|| format!("invalid proxy '{p}'"))?
+    if let Some(p) = proxy {
+        let no_proxy = reqwest::NoProxy::from_string(&bypass_hosts(excluded));
+        let proxy = reqwest::Proxy::all(p)
+            .context("invalid proxy URL")?
             .no_proxy(no_proxy);
         b = b.proxy(proxy);
     }
@@ -62,6 +111,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn container_inherits_proxy_exclusions_without_other_host_environment() {
+        let environment = proxy_bypass_environment(|key| match key {
+            "NO_PROXY" => Some("10.37.35.13,.internal".into()),
+            "no_proxy" => Some("another.internal".into()),
+            _ => panic!("unrelated host environment requested: {key}"),
+        });
+        assert_eq!(
+            environment,
+            vec![
+                ("NO_PROXY".into(), "10.37.35.13,.internal".into()),
+                ("no_proxy".into(), "another.internal".into()),
+            ]
+        );
+        assert!(proxy_bypass_environment(|_| None).is_empty());
+    }
+
+    #[test]
     fn explicit_proxy_wins_over_env() {
         // explicit value must be returned even when env vars are set.
         assert_eq!(
@@ -72,26 +138,11 @@ mod tests {
 
     #[test]
     fn empty_explicit_falls_through() {
-        // Env-isolated: an empty explicit value must fall through to env, and
-        // with no proxy env vars set at all, resolve to None.
-        let keys = ["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"];
-        let saved: std::collections::HashMap<&str, Option<String>> =
-            keys.iter().map(|&k| (k, std::env::var(k).ok())).collect();
-        for k in keys {
-            std::env::remove_var(k);
-        }
-        assert_eq!(effective_proxy(Some("   ")), None);
-        std::env::set_var("OPENCODER_PROXY", "socks5://1.2.3.4:1080");
+        assert_eq!(proxy_url(Some("   "), [None]), None);
         assert_eq!(
-            effective_proxy(Some("   ")),
+            proxy_url(Some("   "), [Some("socks5://1.2.3.4:1080".into())]),
             Some("socks5://1.2.3.4:1080".to_string())
         );
-        for k in keys {
-            match saved.get(k).cloned().flatten() {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
-            }
-        }
     }
 
     #[test]
@@ -122,12 +173,7 @@ mod tests {
 
     #[test]
     fn build_http_client_direct_when_no_proxy() {
-        // With no explicit proxy and (in this test process) no proxy env vars,
-        // the client builds cleanly with no proxy attached.
-        std::env::remove_var("OPENCODER_PROXY");
-        std::env::remove_var("ALL_PROXY");
-        std::env::remove_var("HTTPS_PROXY");
-        std::env::remove_var("HTTP_PROXY");
-        build_http_client(None).expect("direct client builds");
+        build_http_client_with_proxy_rules(None, None, std::time::Duration::from_secs(2))
+            .expect("direct client builds");
     }
 }

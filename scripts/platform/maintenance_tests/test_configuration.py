@@ -16,12 +16,12 @@ class ConfigurationTests(unittest.TestCase):
             path = Path(directory) / 'candidate.json'
             path.write_text(json.dumps({'dag': {'rootfs_dir': '/images/new'},
                                         'llm': {'model': 'new-model'}}))
-            original = {'dag': {'wasm_dir': '/old'},
+            original = {'dag': {'binary_dir': '/old'},
                         'llm': {'api_key': 'fixture-private', 'model': 'old-model'}}
             result = configuration.overlay(original, path)
             self.assertEqual(result['dag'], {'rootfs_dir': '/images/new'})
             self.assertEqual(result['llm'], {'api_key': 'fixture-private', 'model': 'new-model'})
-            self.assertEqual(original['dag'], {'wasm_dir': '/old'})
+            self.assertEqual(original['dag'], {'binary_dir': '/old'})
 
     def test_freeze_leaves_working_configuration_unchanged_and_rejects_changes(self):
         with tempfile.TemporaryDirectory() as directory:

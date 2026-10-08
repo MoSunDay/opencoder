@@ -131,6 +131,17 @@ def restart(env, kind):
     subprocess.run(['systemctl', 'restart', unit], check=True, timeout=90)
     after = int(subprocess.check_output(['systemctl', 'show', unit, '-p', 'MainPID', '--value']))
     require(after > 0 and before != after, 'process was not restarted')
+    def listening():
+        try:
+            if kind == 'server':
+                env.http(env.settings.public_url, '/api/health')
+                return any(node['id'] == env.node_id and node['online']
+                           for node in env.api('GET', '/api/nodes')['nodes'])
+            inventory = env.http(env.runtime_url, '/inventory')
+            return inventory['registration']['id'] == env.node_id
+        except (OSError, RuntimeError, AssertionError):
+            return False
+    env.wait(listening, 120, kind + ' listener and owned Runtime connection after restart')
     env.save('faults/' + kind + '-restart', {'unit': unit, 'before_pid': before, 'after_pid': after})
 
 

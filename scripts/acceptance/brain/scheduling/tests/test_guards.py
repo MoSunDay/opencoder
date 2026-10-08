@@ -15,9 +15,58 @@ from cases.negative import blocked
 from faults.runtime import FrozenWindow, NotRun, require_restartable, restart, require_isolated
 from main import CASES
 from report import summarize
+from cases.recovery import active_decision
 
 
 class GuardTests(unittest.TestCase):
+    def test_offline_fault_waits_for_matching_actual_decision_attempt(self):
+        view = {'run': {'phase': 'ready', 'generation': 5}, 'operations': []}
+        marker = {}
+        env = SimpleNamespace(view=lambda _: view)
+        with patch('cases.recovery.journal', side_effect=lambda *_: {'annotations': {'layered_decision_attempt': marker}}):
+            self.assertIsNone(active_decision(env, 'owned'))
+            view['run']['phase'] = 'deciding'
+            self.assertIsNone(active_decision(env, 'owned'))
+            marker['generation'] = 4
+            self.assertIsNone(active_decision(env, 'owned'))
+            marker['generation'] = 5
+            self.assertEqual(active_decision(env, 'owned'), view)
+            view['operations'] = [{'execution_id': 'child'}]
+            with self.assertRaisesRegex(AssertionError, 'model outran'):
+                active_decision(env, 'owned')
+
+    def test_failed_case_cleanup_cannot_cancel_other_case_or_foreign_roots(self):
+        env = Environment.__new__(Environment)
+        env.created = ['failed-case', 'another-case']
+        reads, commands, receipts = [], [], []
+        env.capture_decisions = lambda _: None
+        env.cleanup_snapshot = lambda root: (reads.append(root) or {'run': {'phase': 'cancelled'}, 'operations': []})
+        env.brain_rpc = lambda *args: commands.append(args)
+        env.wait = lambda predicate, *_: predicate()
+        env.save = lambda name, value: receipts.append((name, value))
+        env.cleanup(['failed-case'], 'cleanup/cases/failed')
+        self.assertEqual(reads, ['failed-case', 'failed-case'])
+        self.assertEqual(commands, [])
+        self.assertEqual(receipts[0][0], 'cleanup/cases/failed')
+        with self.assertRaisesRegex(AssertionError, 'not owned'):
+            env.cleanup(['foreign'])
+    def test_server_restart_waits_for_listener_and_owned_node_connection(self):
+        env = SimpleNamespace(record={'server_unit': 'opencoder-server-brain-e2e-fixture.service'},
+            node_id='node-owned', settings=SimpleNamespace(public_url='http://isolated'),
+            http=Mock(side_effect=[OSError('listener not open'), {}, {}]),
+            api=Mock(side_effect=[{'nodes': [{'id': 'node-other', 'online': True}]},
+                                 {'nodes': [{'id': 'node-owned', 'online': True}]}]), save=Mock())
+        def wait(predicate, *_):
+            self.assertFalse(predicate(), 'a new PID does not prove its listener is open')
+            self.assertFalse(predicate(), 'another connected node cannot establish root ownership')
+            self.assertTrue(predicate())
+        env.wait = wait
+        with patch('faults.runtime.blockers', return_value={}), \
+                patch('faults.runtime.subprocess.check_output', side_effect=[b'123', b'456']), \
+                patch('faults.runtime.subprocess.run'):
+            restart(env, 'server')
+        self.assertEqual(env.save.call_args.args[1]['after_pid'], 456)
+
     def test_fault_restore_waits_for_owned_runtime_and_public_node_readiness(self):
         inventory = {'registration': {'id': 'node-owned'}, 'snapshot': {'ready': False}}
         public = {'nodes': [{'id': 'node-owned', 'online': True, 'snapshot': {'ready': False}}]}

@@ -74,6 +74,7 @@ def main():
         for name, run in selected.items():
             print(json.dumps({'case': name, 'stage': 'started'}), flush=True)
             began = time.monotonic()
+            owned_before = len(env.created)
             try:
                 if name in FAULT_CASES:
                     if not fault_checked:
@@ -95,6 +96,12 @@ def main():
             report['cases'].append(record)
             env.save('result', report)
             print(json.dumps(record), flush=True)
+            if record['result'] != 'PASS':
+                try:
+                    env.cleanup(env.created[owned_before:], 'cleanup/cases/' + name)
+                except Exception as error:
+                    record['cleanup_error'] = str(error)
+                    raise RuntimeError('failed case cleanup must finish before further cases: ' + name) from error
         final_runtime = env.verify_release()
         env.save('final-runtime', final_runtime)
         require(final_runtime['ready_status'] == 200, 'public readiness failed at the end of acceptance')

@@ -10,6 +10,7 @@ def held_plan(capabilities):
     spec = plan(capabilities)
     spec['title'] = '运行控制验收'
     spec['objective'] = 'Run the supplied arithmetic expression and finish when its two actual tests pass. '
+    spec['inputs'] = {'initial_args': ['a + b']}
     spec['layers'] = [spec['layers'][1]]
     spec['nodes'] = [node for node in spec['nodes'] if node['layer_id'] == 'normal']
     for node in spec['nodes']:

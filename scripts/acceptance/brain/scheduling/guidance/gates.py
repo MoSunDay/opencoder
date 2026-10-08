@@ -1,5 +1,6 @@
 """Hold real child tools until guidance is observed; only touch owned workspaces."""
 from pathlib import Path
+import json
 import shlex
 
 from environment import require
@@ -27,7 +28,7 @@ def workspace(env, operation):
     kind, identifier = operation['execution_kind'], operation['execution_id']
     require(kind in KINDS and '/' not in identifier and identifier not in ('', '.', '..'),
             'invalid guidance gate execution')
-    root = Path(env.record['runtime_data']).resolve()
+    root = env.execution_data(operation).resolve()
     path = (root / kind / identifier / 'workspace').resolve()
     require(path.is_relative_to(root), 'guidance gate is outside the owned Runtime')
     return path
@@ -45,3 +46,12 @@ def release(env, view):
             path = workspace(env, operation)
             if (path / READY).is_file():
                 (path / RELEASE).touch()
+
+
+def delivered(env, identifier, sequence):
+    require(identifier in env.created, 'guidance receipt is not owned by this acceptance')
+    root = Path(env.record['runtime_data']).resolve()
+    path = (root / 'brain' / identifier / 'execution.json').resolve()
+    require(path.is_relative_to(root), 'guidance receipt is outside the owned Runtime')
+    record = json.loads(path.read_text())
+    return record['annotations'].get('layered_guidance_ack', 0) >= sequence

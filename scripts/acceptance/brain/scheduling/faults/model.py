@@ -93,7 +93,7 @@ class ModelFault:
                 return False
         env.wait(released_slot, 330, 'paused root releases its previous model slot')
         with FrozenWindow(env):
-            require(not any(blockers(env).values()), 'unrelated execution prevents scoped model fault')
+            require(not any(blockers(env, allow_frozen=True).values()), 'unrelated execution prevents scoped model fault')
             require_restartable(env)
             unit = env.record['runtime_unit']
             # A normal, quiescent exit preserves the paused root. SIGKILL is a

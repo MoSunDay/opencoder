@@ -8,23 +8,34 @@ from faults.runtime import FrozenWindow, journal, restart, wait_idle
 from assertions import events
 
 
+def active_decision(env, root):
+    view = env.view(root)
+    require(not view['operations'], 'model outran offline-dispatch fault preparation')
+    marker = journal(env, root)['annotations'].get('layered_decision_attempt') or {}
+    return view if view['run']['phase'] == 'deciding' and marker.get('generation') == view['run']['generation'] else None
+
+
 def retry_receipts(env, capabilities):
     wait_idle(env, 0)
     spec = held_plan(capabilities)
+    # A model-requested rework is different from retrying a creation intent.
+    # One round keeps the transport fault from starting a legitimate new round.
+    spec['max_rounds'] = 1
     spec['objective'] += 'If one diagnostic is definitively rejected, collect its sibling then stop with a failure explanation. Never rework this diagnostic.'
     root = env.create('dispatch-retry', spec)
     unit = env.record['server_unit']
     try:
         # Stop Control while the first real model call is still generating, so its durable
         # intent cannot race with child admission. The Worker remains the sole state writer.
-        view = env.view(root)
-        require(not view['operations'], 'model outran offline-dispatch fault preparation')
+        env.wait(lambda: active_decision(env, root), 330, 'first real decision starts before Server stops')
         with FrozenWindow(env):
             subprocess.run(['systemctl', 'stop', unit], check=True, timeout=90)
             def intention():
                 snapshot = env.brain_rpc(root, 'snapshot')
                 return snapshot if snapshot['operations'] else None
             pending = env.wait(intention, 330, 'offline committed dispatch intent')
+            require(subprocess.check_output(['systemctl', 'show', unit, '-p', 'MainPID', '--value']).strip() == b'0',
+                    'Server was not offline when dispatch intent committed')
             require(all(op['status'] == 'creating' for op in pending['operations']), 'child admission raced offline fault')
             operation = next(op for op in pending['operations'] if op['node_id'] == 'fast')
             intent = journal(env, root)['annotations']['layered_intent']
@@ -73,8 +84,6 @@ def run(env, capabilities):
         identities = [(o['operation_id'], o['execution_id']) for o in before['operations']]
         with FrozenWindow(env):
             restart(env, 'server')
-            env.wait(lambda: env.http(env.runtime_url, '/inventory')['registration']['id'] == env.node_id,
-                     120, 'node inventory after Server restart')
             after_server = env.view(identifier)
             require(after_server['run']['phase'] == 'paused', 'Server restart lost pause state')
             require([(o['operation_id'], o['execution_id']) for o in after_server['operations']] == identities,
@@ -90,7 +99,7 @@ def run(env, capabilities):
         for key, value in durable.items():
             require(recovered['annotations'][key] == value, 'restart rewrote durable decision or intent')
         status, _ = env.request('POST', f'/api/brain/runs/{identifier}/commands', {'action': 'resume'})
-        require(status == 409, 'failed root was resumable')
+        require(status == 409, f'failed root resume must return 409, received {status}')
         final = env.view(identifier)
         require(final['run']['phase'] == 'failed', 'crashed root did not remain failed')
         require([(o['operation_id'], o['execution_id']) for o in final['operations']] == identities,

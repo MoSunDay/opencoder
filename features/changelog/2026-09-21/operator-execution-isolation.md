@@ -15,5 +15,4 @@ Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 
 ## 测试
 - `cargo check --workspace --all-targets` 通过。
-- 单元/集成：store、session（857）、web/todos/project/dag-runtime、worker（217）、local/tui/core/brain/node/dag-wasm（2518）、shellguard/llm/dag/server/control/agent/agents/team/cli（1066）全绿。
 - e2e：operator_e2e 11/11（含新增 `operator_config_plane_frozen_against_workdir_and_user_pool`：TUI 侧保存 `config.json` 与全局池新增包均不进入平面/快照/执行内 `ls`）、dag_e2e 17/17、todos_e2e、team_e2e、brain_e2e、running_mode_switch_e2e、根包 smoke 全绿。

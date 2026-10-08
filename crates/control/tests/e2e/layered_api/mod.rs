@@ -153,6 +153,23 @@ async fn layered_admission_requires_the_v4_advertisement_and_freezes_the_scope()
 }
 
 #[tokio::test]
+async fn node_capacity_rejection_is_reported_before_creating_a_brain_index() {
+    let h = Harness::with_brain_kind().await;
+    h.node
+        .set_capability_reply(opencoder_core::fleet::RpcReply::error(
+            413,
+            "complete-evidence model capacity exceeded",
+        ));
+    let (status, body) = h
+        .req(Method::POST, "/api/brain/runs", Some(request()))
+        .await;
+    assert_eq!(status, 413, "{body}");
+    assert!(body.to_string().contains("complete-evidence"));
+    assert!(h.state.fleet.index(RUN).await.unwrap().is_none());
+    assert!(h.node.journal_ids().is_empty());
+}
+
+#[tokio::test]
 async fn unknown_or_legacy_schema_versions_are_explicit_errors() {
     let h = Harness::with_brain_kind().await;
     for version in [1, 2, 3, 4, 5, 6] {

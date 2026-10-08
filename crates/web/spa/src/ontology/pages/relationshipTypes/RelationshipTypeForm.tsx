@@ -1,4 +1,5 @@
-import { ModalForm, SelectField, TextField, TextAreaField } from "../../ui";
+import { ModalForm } from "../../ui/ModalForm";
+import { SelectField, TextField, TextAreaField } from "../../ui";
 import { Alert, App, Button } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { api } from "../../api";
@@ -29,8 +30,7 @@ export default function RelationshipTypeForm({ env, types, item, onSaved }: Prop
       if (item) {
         await api.updateRelationshipType(env, item.id, { ...values, ...scope, is_deleted: false, expected_revision: item.revision });
       } else {
-        if (!values.source_entity_type_id) throw new Error("请选择源实体类型");
-        await api.createRelationshipType(env, { ...values, source_entity_type_id: values.source_entity_type_id });
+        await api.createRelationshipType(env, { ...values, source_entity_type_id: values.source_entity_type_id! });
       }
       message.success(item ? "关系类型已更新" : "关系类型已创建");
       await onSaved();
@@ -38,7 +38,7 @@ export default function RelationshipTypeForm({ env, types, item, onSaved }: Prop
     }}>
     {!item && <TextField name="key" label="类型 Key" rules={[{ required: true, whitespace: true }]} />}
     <TextField name="name" label="名称" rules={[{ required: true, whitespace: true }]} />
-    {fixedScope && !item?.source_entity_type_id ? <Alert type="info" title="全局关系保留原有端点范围" style={{ marginBottom: 16 }} /> : <>
+    {fixedScope && !item?.source_entity_type_id ? <Alert type="info" message="全局关系保留原有端点范围" style={{ marginBottom: 16 }} /> : <>
       <SelectField name="source_entity_type_id" label="源实体类型" options={options}
         showSearch fieldProps={searchableOptions} disabled={fixedScope} rules={[{ required: true }]}
         placeholder="搜索并选择源实体类型" />

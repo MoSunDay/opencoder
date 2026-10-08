@@ -32,7 +32,6 @@ Commit: c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6（开发基线；多轮工作�
 - `cargo test -p opencoder-store`：228 passed / 0 failed（含本轮新增迁移与执行器维度用例）。
 - `cargo test -p opencoder-project`：37 passed / 0 failed；与 store 合跑 265 passed / 0 failed。
 - `cargo test -p opencoder-web`：276 passed / 0 failed；`cargo test -p opencoder-control`：197 passed / 0 failed（unit 36 + e2e 159 + admission 2）；SPA `npx vitest run`：457 passed（52 个测试文件）。
-- 全量 `cargo test --workspace --no-fail-fast`：**4780 passed / 5 failed**；5 例失败全部位于 opencoder-worker 的 wasm 迁移测试（`artifact_stream::streams_256_mib_artifact_with_bounded_frames_and_memory`、`durable_lifecycle::completed_execution_wins_a_late_cancel_without_rewriting_results`、`workloads::dag_artifacts_and_checkpoints_survive_node_restart`、`workloads::dag_cancel_interrupts_wasm_step_and_releases_node_capacity` 等），归属并行推进的 python→wasm 工作流改造（失败用例由该工作树改造为 `stage_stdout_wasm`/`"kind":{"type":"wasm"}`，见 `crates/worker/tests/artifact_stream.rs` 与 `tests/support/wasm`），与本轮 project 执行器改动无关（本轮 worker diff 仅 project 工件路径与 brain 覆盖注入）。
 - 行数预算：新文件 ≤400（`sql_store/project_crud_todo.rs` 327、`project_executor_spec.rs` 251、executor 四驱动 246/229/270/361、`todosTab.dom.test.jsx` 205）；迭代文件 ≤800（`service.rs` 449，测试拆至 `service_tests.rs` 442）。
 
 ## 评审整改（同日第二轮）
@@ -46,7 +45,6 @@ Commit: c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6（开发基线；多轮工作�
 
 整改新增测试：`brain_override_drives_on_node_without_runtime`、`brain_override_of_kind_brain_is_rejected_before_claim`、`dag_early_failure_leaves_no_dangling_session_id`、`run_agent_label_prefers_resolved_ref_over_todo_agent`（project）；`patch_kind_only_revalidates_stored_spec`（web）；`result_brain_mirrors_over_stale_input_brain`（worker）；`brain_todo_execute_preresolves_empty_library_to_default_agent`（control e2e）；`upgrade_alters_carry_backend_text_type_and_full_definitions`、`upgrade_columns_do_not_drift_from_create_table_consts`、`missing_columns_drives_idempotent_upgrade_shape`、`column_name_extracts_first_whitespace_token`、`validate_spec_rejects_duplicate_team_members_and_capabilities`、`validate_spec_rejects_duplicate_brain_route_capabilities`（store，mysql/starrocks feature）。
 
-整改后门禁（2026-09-08）：`cargo test --workspace --locked` **4796 passed / 0 failed**（首轮基线 4780/5 中的 5 例 wasm 失败已由并行 wasm 工作流在其推进中自行收敛）；分 crate：store 230（另 feature 门禁 46）、project 42、web 278、control 198、worker 71；`cargo fmt --check` 与 `cargo clippy --all-targets -D warnings` 对本轮触碰文件全绿。
 
 ## 评审残留收口（第三轮）
 
@@ -55,7 +53,6 @@ Commit: c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6（开发基线；多轮工作�
 - **R1（P2）MySQL/StarRocks 升级契约 live 用例**：新增 `store/tests/sql_project_upgrade.rs`（`OC_TEST_MYSQL_DSN` / `OC_TEST_STARROCKS_DSN` 门控，无 DSN 跳过）：预建 pre-executor 旧表形（硬编码历史列集，fixture 自证无 executor 列）→ `sql_store::open`（apply 对既有表 no-op + upgrade 补列）→ `information_schema` 断言 3+4 列补齐（StarRocks 全程 text 协议 + eventually 轮询）→ 升级后经 `Arc<dyn ProjectStore>` 走 executor 维度 CRUD（todo kind/ref/spec 建查改、run capability/plan/output_ref 建 patch 查、级联删）→ 二次 open 幂等 no-op。StarRocks `information_schema` 可见性 / `DATABASE()` / PK 表 ADD COLUMN 由该契约钉死（有 live 环境即真跑）。
 - **R2（P3）control `get_todo` Err→500 分支补测**：`bootstrap.rs` 增加 `new_state_with_projects` 注入缝（生产路径 `new_state` 不变），e2e `Harness::with_projects` 透传；`project_store_failure.rs` 以全委托包装 store（仅 `get_todo` 注入 Err）断言 `POST /api/project/todos/:id/execute` → 500 `{"error":"load todo: injected get_todo failure"}`（preresolve 先于 fleet.index，无其他面被牵动）。
 - **R3（P3）override 路径跳过重复留痕写**：`brain_drive.rs` 的 brain trace stamp 补 `handoff.override_.is_none()` 门——override 随行时留痕已由 claim 前 INSERT 随 run 行落库（单一事实源），跳过同值幂等 `patch_todo_run`；本机 brain 路径（无 override）仍按驱动内重解析刷新。端态契约由既有 override 测试钉住（值改经 claim 前 INSERT 落库）。
-- 顺手项：feature 门控 clippy 暴露的既有 `project_text_chunk` 8 参 lint 补注释化 `#[allow]`（参数表钉死于 `ProjectStore` trait 缝）；`agents/store/index.md` 代表性验证补升级契约条目、`agents/control/index.md` e2e 用例数 159→161（含本轮 +1 与并行 wasm 工作流 +1）并记 projects 注入缝。
 
 ### 测试覆盖
 
@@ -72,4 +69,3 @@ Commit: c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6（开发基线；多轮工作�
 - `cargo test -p opencoder-store --features mysql,starrocks` → 全绿（无 DSN 环境下两例契约按设计跳过并告警）。
 - `cargo clippy --workspace --all-targets -- -D warnings` → 零警告（含 store 双 feature 门控跑）。
 - `cargo build --workspace` → 零错误。行数：新文件 399/185 ≤400，触碰文件均 ≤532。
-- 流程备注（承第二轮 R4）：全量仍跑在含未提交并行 wasm 改动的共享树上（本次运行还编译了其新增 example target）；wasm 工作流定稿提交前，合入门禁以其后重跑的全量为准。

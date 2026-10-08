@@ -11,6 +11,7 @@ mod operations;
 mod resource_probe;
 mod resources;
 pub use resource_probe::MountHealthReader;
+pub mod result_reader;
 pub use resources::requires_agent_pool;
 mod runtime;
 mod service;

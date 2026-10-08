@@ -65,6 +65,9 @@ async fn execute_session(
     );
     opencoder_core::atomic_write(&meta.join("prompt.txt"), prompt.as_bytes())?;
     let mut env = io::step_env(ctx);
+    env.extend(opencoder_core::net::proxy_bypass_environment(|key| {
+        std::env::var(key).ok()
+    }));
     let mut config = deps.config.clone();
     if let StepKind::Agent {
         model: Some(model), ..

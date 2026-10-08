@@ -34,6 +34,45 @@ SELECT assignment FROM (
 ORDER BY id LIMIT ?2";
 
 impl FleetStore {
+    /// Caller serializes operations for this subject with request_lock.
+    pub async fn prepared_receipt_for(&self, scope: &str, subject: &str) -> Result<Option<String>> {
+        let _gate = self.gate.lock().await;
+        let mut rows = self.conn.query(
+            "SELECT id FROM dispatch_receipts WHERE scope=?1 AND phase='prepared' AND json_extract(payload,'$.subject')=?2 LIMIT 1",
+            params![scope, subject],
+        ).await?;
+        rows.next()
+            .await?
+            .map(|row| row.get(0).map_err(Into::into))
+            .transpose()
+    }
+
+    /// Bounded recovery of durable operations outside execution admission.
+    pub async fn pending_receipts(
+        &self,
+        scope: &str,
+        after: &str,
+        limit: u32,
+    ) -> Result<Vec<(String, super::Receipt)>> {
+        let _gate = self.gate.lock().await;
+        let mut rows = self.conn.query(
+            "SELECT id,fingerprint,phase,payload FROM dispatch_receipts WHERE scope=?1 AND phase='prepared' AND id>?2 ORDER BY id LIMIT ?3",
+            params![scope, after, i64::from(limit.clamp(1,128))],
+        ).await?;
+        let mut values = Vec::new();
+        while let Some(row) = rows.next().await? {
+            values.push((
+                row.get(0)?,
+                super::Receipt {
+                    fingerprint: row.get(1)?,
+                    phase: row.get(2)?,
+                    payload: serde_json::from_str(&row.get::<String>(3)?)?,
+                },
+            ));
+        }
+        Ok(values)
+    }
+
     pub async fn pending_assignments(&self, after: &str, limit: u32) -> Result<Vec<Assignment>> {
         let _gate = self.gate.lock().await;
         let mut rows = self

@@ -8,6 +8,8 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 调度范围是计划已绑定的能力，每次派发覆盖目标层全部节点；运行中不检索能力库来增加节点或替换能力。能力描述、输入输出描述及必填字段随能力定义冻结，进入调度与执行提示词。[字段校验](../../crates/brain/src/contracts.rs) 负责字段名、输入值和输出证据的纯函数校验；字段要求存于现有 `capability_target`，不扩展数据库表。
 
+[容量预算](../../crates/brain/src/layered/budget/mod.rs) 按完整计划、冻结能力、各节点结果上限和输出预留计算准入容量，包含 JSON 转义与嵌套回执。Control 携带真实请求探测支持 `brain_context_budget_v1` 的节点；[节点预算](../../crates/worker/src/brain/v4/budget/mod.rs) 按有效模型配置再次检查并冻结预算。人工输入按累计内容检查，实际决策上下文在模型调用前复核；超限不裁剪成功证据，准入返回 413，存量超限运行保留证据并明确阻塞。上限及部署顺序见调度规则。
+
 [Control gateway](../../crates/control/src/api/brain_runs/v4/gateway.rs) 解析实际输入，缺失引用或字段以 422 回执结束该次派发，原因与操作终态一同持久化并重新唤醒大脑；临时不可用继续重试。[Worker 输出适配](../../crates/worker/src/brain/v4/output.rs) 向大脑传递完整结构化结果，`summary` 不能覆盖其他字段。叶子能力的成功决策证据限 16 KiB；缺失必填输出或超限转为 Error，完整结果保留在子执行，失败上下文明确标记省略部分。Done 仅表示能力执行结束，里程碑是否达标由大脑判断。
 
 Brain 管理的执行各有工作区，见 [工作区解析](../../crates/worker/src/brain/workdir.rs)；跨执行的代码版本和产物需要显式传递。DAG 从 `layered_inputs` 取得命名输入及二进制参数。原生闭环与版本传递见 [brain_closed_loop.rs](../../crates/worker/tests/brain_closed_loop.rs)，输出和拒绝回执见 [brain_contracts.rs](../../crates/worker/tests/brain_contracts.rs)、[brain_dispatch_failures.rs](../../crates/worker/tests/brain_dispatch_failures.rs)。

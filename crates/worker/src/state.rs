@@ -35,6 +35,7 @@ pub(crate) struct Inner {
     pub state: Arc<opencoder_web::AppState>,
     pub client: Option<Arc<dyn ChatStream>>,
     pub layout: DirectoryLayout,
+    pub result_reader: crate::result_reader::ResultReader,
     pub registration: NodeRegistration,
     pub generation: String,
     pub sequence: AtomicU64,
@@ -194,7 +195,13 @@ impl Worker {
             }
         }
         state.project.cleanup_dag_containers().await?;
-        let journal = journal.recover()?;
+        if let Some(host) = &host_capacity {
+            host.verify_recovery(&data_dir).await?;
+        }
+        let mut journal = journal.recover()?;
+        if let Some(host) = &host_capacity {
+            host.recover(&data_dir, &id, &mut journal).await?;
+        }
         for record in journal.records.values().filter(|r| {
             r.assignment.index.kind == ExecutionKind::Project
                 && r.assignment.index.status == ExecutionStatus::Pending
@@ -217,6 +224,7 @@ impl Worker {
             .count();
         let worker = Self {
             inner: Arc::new(Inner {
+                result_reader: crate::result_reader::ResultReader::default(),
                 state,
                 client,
                 layout,

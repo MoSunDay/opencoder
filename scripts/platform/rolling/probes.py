@@ -116,12 +116,13 @@ def candidate(settings, record, operations, seconds):
 
 
 def candidate_locked(settings, record, operations, seconds):
-    resource = publish_probe(settings, record, operations)
     endpoint = f"http://127.0.0.1:{record['runtime_port']}"
     inventory = operations.wait(lambda: operations.http(endpoint, "/inventory"), seconds)
     if inventory.get("runtime_id") != record["id"] or inventory["build"]["git_commit"] != record["manifest"]["commit"]:
         raise ValueError("candidate runtime identity or compiled commit differs from release")
     node_id = inventory["registration"]["id"]
+    brain_capacity(record, endpoint, operations)
+    resource = publish_probe(settings, record, operations)
     identifier = probe_id(record)
     definition = spec(resource)
     # Creation time comes from the durable release record, never from a retry.
@@ -172,6 +173,32 @@ def candidate_locked(settings, record, operations, seconds):
         return index and index["status"] == "done" and view["snapshot"]["ready"]
     operations.wait(finished, seconds)
     return node_id
+
+
+def brain_capacity(record, endpoint, operations):
+    required = record["manifest"].get("required_runtime_features", [])
+    if not required:
+        return
+    if required != ["brain_context_budget_v1"]:
+        raise ValueError(f"unsupported candidate runtime requirements: {required}")
+    # Use the actual admission input, including its frozen capability. This
+    # reads the candidate's effective model capacity without creating a root.
+    request = {"schema_version": 7, "plan": {"schema_version": 7,
+        "title": "release capacity check", "objective": "verify admission",
+        "layers": [{"layer_id": "work", "title": "work", "task": "verify",
+                    "objective": "verify", "success_criteria": "evidence retained"}],
+        "nodes": [{"node_id": "verify", "layer_id": "work", "title": "verify",
+                   "objective": "verify", "capability_id": "agent"}], "edges": []}}
+    reply = operations.http(endpoint, "/rpc", "POST", {"operation": "brain",
+        "execution": {"id": "brain-release-capacity", "kind": "brain"},
+        "action": "capability_probe", "input": {"schema_version": 7,
+        "layered_request": request, "frozen_capabilities": [{"capability_id": "agent",
+        "kind": "agent", "target": "act", "input_desc": "task", "output_desc": "evidence",
+        "definition": {}, "version": "1"}]}})
+    body = reply.get("body", {})
+    if (not 200 <= reply.get("status", 500) < 300 or body.get("compatible") is not True
+            or any(feature not in body.get("features", []) for feature in required)):
+        raise ValueError(f"candidate Brain capacity admission failed: {reply}")
 
 
 def ready(settings, record, node_id, operations, seconds):

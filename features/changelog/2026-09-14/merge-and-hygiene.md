@@ -6,7 +6,6 @@ Commit: 39089267
 
 ## 合并裁决
 
-- **08e5f006**（merge `104c6b26` + `2280fb3c`）：特性线 brain plan flows 与 live execution logs（104c6b26，208 文件 +6362/−4797：本体计划编辑、条件动作执行、DAG step records、TODO 运行画布、TODO env 收敛与 node ENV 配置移除）合入 main@2280fb3c（该侧 playbook 双轨、成员即 agent、版本化 wasm 模块池及评审 fast-follow 已先行落库）。合并时重建 SPA、调和集成 fixture 与 Rust 格式（对第一父净入 158 文件）。
 - **6fd9e78e**（merge `08e5f006` + `5fc3b5ca`）：树与 08e5f006 完全一致（`git diff 08e5f006 6fd9e78e` 为空）——格式改动已包含在合并结果里，本合并仅统一历史，保留同时含两支的重建 SPA 产物。
 - **39089267**：agents/brain、agents/control 记忆戳从 `104c6b26 + 2280fb3c (merge working-tree)` 锚定为 6fd9e78e。
 

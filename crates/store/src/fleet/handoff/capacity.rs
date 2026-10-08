@@ -160,6 +160,60 @@ impl FleetStore {
         Ok(())
     }
 
+    /// Release a running slot during restart recovery after the caller has
+    /// proved that the owning process is gone.  The identity check is kept in
+    /// the transaction so a stale recovery receipt cannot release a ticket
+    /// that was reassigned or changed by another writer.
+    pub async fn recover_capacity(
+        &self,
+        ticket: &str,
+        execution: &str,
+        runtime: &str,
+    ) -> Result<bool> {
+        let _gate = self.gate.lock().await;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await?;
+        let row = {
+            let mut rows = tx
+                .query(
+                    "SELECT execution_id,runtime_id,phase FROM capacity_queue WHERE ticket=?1",
+                    [ticket],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => Some((
+                    row.get::<String>(0)?,
+                    row.get::<String>(1)?,
+                    row.get::<String>(2)?,
+                )),
+                None => None,
+            }
+        };
+        let Some((row_execution, row_runtime, phase)) = row else {
+            anyhow::bail!("unknown capacity ticket {ticket}");
+        };
+        ensure!(
+            row_execution == execution && row_runtime == runtime,
+            "capacity ticket identity differs"
+        );
+        if phase == "done" {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+        ensure!(phase == "running", "capacity ticket is not running");
+        let changed = tx
+            .execute(
+                "UPDATE capacity_queue SET phase='done' WHERE ticket=?1 AND execution_id=?2 AND runtime_id=?3 AND phase='running'",
+                [ticket, execution, runtime],
+            )
+            .await?;
+        ensure!(changed == 1, "capacity ticket changed during recovery");
+        tx.commit().await?;
+        Ok(true)
+    }
+
     pub async fn runtime_tickets(&self, runtime: &str) -> Result<Vec<(String, String, String)>> {
         let _gate = self.gate.lock().await;
         let mut rows = self.conn.query("SELECT ticket,execution_id,phase FROM capacity_queue INDEXED BY one_live_slot WHERE runtime_id=?1 AND phase!='done' ORDER BY sequence", [runtime]).await?;

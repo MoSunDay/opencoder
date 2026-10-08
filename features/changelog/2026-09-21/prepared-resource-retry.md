@@ -13,7 +13,6 @@
 | 功能 | 测试名 | 文件 |
 | --- | --- | --- |
 | 已冻结快照绕过冷复制占用，拒绝变更请求 | `prepared_snapshot_retry_bypasses_occupied_copy_slots` | `crates/worker/src/operations/admission/tests/pinned_retry.rs` |
-| 新冷创建保持限流，WASI 和冻结接收不受阻 | `new_wasi_admission_and_freeze_bypass_cold_resource_waiters` | `crates/worker/src/operations/admission/tests.rs` |
 | 重启恢复原请求与定义 | `interrupted_preparation_recovers_its_original_request_after_restart` | `crates/worker/src/operations/admission/tests.rs` |
 
 全量回归、零警告检查和构建的实际结果写入同日发布回执。

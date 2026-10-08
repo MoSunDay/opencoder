@@ -22,7 +22,9 @@ def run(env, capabilities):
         f'initially {original}. Apply later human guidance to the final marker. '
         'Only this diagnostic may create its ready file; no network or other file operations.')
     team = env.tag + '-guidance-team'
-    env.api('POST', '/api/teams', {'name': team, 'captain': 'act',
+    # Planning must not trigger Act's post-task memory maintenance before the
+    # actual member reaches its tool gate. Act still performs the diagnostic.
+    env.api('POST', '/api/teams', {'name': team, 'captain': 'plan',
                                  'members': [{'agent': 'act'}, {'agent': 'plan'}]})
     instruction = ('Collect the assigned Agent, Operator and Team reports. Their actual final results must '
         f'contain the latest marker, initially {original}. If a human supplies a new marker while they '

@@ -17,3 +17,4 @@
 | Brain 计划与人工输入超限 | `valid_wide_plan_is_rejected_before_any_child_can_run`、`rejected_human_input_does_not_append_events_or_advance_generation` |
 | 发布先确认 Worker 容量支持 | `test_capacity_is_checked_with_frozen_request_before_any_admission`、`test_missing_feature_or_rejected_capacity_prevents_warming_execution` |
 | 旧包回滚 | `test_rollback_to_release_without_capacity_requirement_keeps_native_probe` |
+| 退役 Runtime 的错误不影响当前 Runtime | `retired_runtime_storage_error_does_not_block_active_runtime`（独立配置，等待后台资源检查就绪后验证） |

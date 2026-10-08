@@ -19,9 +19,7 @@ const ARTIFACT_VERIFY_TIMEOUT: Duration = Duration::from_secs(120);
 fn request_timeout(operation: &NodeOperation) -> Duration {
     match operation {
         NodeOperation::Create { .. } => CREATE_REQUEST_TIMEOUT,
-        NodeOperation::Artifact { request }
-            if request.offset == 0 || request.version.is_none() =>
-        {
+        NodeOperation::Artifact { request } if request.offset == 0 || request.version.is_none() => {
             ARTIFACT_VERIFY_TIMEOUT
         }
         NodeOperation::Brain { action, input, .. }

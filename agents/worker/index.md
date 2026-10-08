@@ -28,7 +28,7 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 会话泳道：Operator 执行的 Primary Session 创建时打 `kind='operator'`（其他 kind 同理，见 store 索引），默认清单泳道排除 operator 行；`service.rs::indexes()` 按 `row.kind` 精确解析已打标行，存量 NULL 行保留 id 前缀/标题回退。Agent 和 Operator 空闲终态均从持久化会话取最后一条非空 assistant 文本，以有界 `output_text` 写入执行结果；Maintenance 保留会话指针结果。
 
 ## 接缝
-- [brain/v4/budget.rs](../../crates/worker/src/brain/v4/budget.rs) — 用有效配置检查并冻结完整证据预算；探测和实际受理均检查，人工输入在写事件前累计校验，模型调用前复核实际上下文。预算纯函数与边界见 [brain](../brain/index.md)
+- [brain/v4/budget/mod.rs](../../crates/worker/src/brain/v4/budget/mod.rs) — 用有效配置检查并冻结完整证据预算；探测和实际受理均检查，人工输入在写事件前累计校验，模型调用前复核实际上下文。预算纯函数与边界见 [brain](../brain/index.md)
 - [operations/query/chunks.rs](../../crates/worker/src/operations/query/chunks.rs)、[result_reader](../../crates/worker/src/result_reader/mod.rs) — Worker 与稳定 Host 共用持久化结果读取器，校验执行归属并拒绝符号链接；`result`、`team.topic` 分块携带内容摘要 `version`。最多缓存 16 份快照，Team 首次流式散列后按偏移读取，文件替换或原位修改使快照失效；不恢复原 Runtime，也不改写原生结果
 - [state.rs](../../crates/worker/src/state.rs)、[state/tests.rs](../../crates/worker/src/state/tests.rs) — 关闭时等待执行和后台任务的整个 future 析构；最后一个 Worker 持有者释放 `NodeLock` 时显式解锁，避免 fork 或复制的文件描述符延长节点目录占用。未获得锁的打开失败不能解锁其他 Worker。
 - `runtime/health.rs` 统一计算节点存储准入：可用磁盘块低于 10% 或可用 inode 低于 20% 拒绝新执行；Windows 读取字节容量，inode 字段为 `None`，不伪造值。容量读取失败、零容量仍拒绝准入。健康查询和新执行入口共用纯函数判断，已接收的工作可继续完成。

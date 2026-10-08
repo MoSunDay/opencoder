@@ -117,7 +117,7 @@ async fn layered_admission_requires_the_v4_advertisement_and_freezes_the_scope()
 
     h.node
         .set_capability_reply(opencoder_core::fleet::RpcReply::ok(json!({
-            "compatible":true,"features":["brain_scheduler_v7"]
+            "compatible":true,"features":["brain_scheduler_v7", "brain_context_budget_v1"]
         })));
     let (status, body) = h
         .req(Method::POST, "/api/brain/runs", Some(request()))

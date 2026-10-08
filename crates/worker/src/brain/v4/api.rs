@@ -51,8 +51,20 @@ pub async fn handle(
                 .await?
         }
     };
+    if snapshot.run.phase.terminal()
+        && matches!(
+            action,
+            "human_input" | "pause" | "resume" | "cancel" | "set_round_budget"
+        )
+    {
+        return Ok(RpcReply::error(
+            409,
+            "run is terminal; start a new Brain run",
+        ));
+    }
     let change = match action {
         "layered_intent" => {
+            ensure!(!snapshot.run.phase.terminal(), "run is terminal");
             let intent: LayeredDispatchIntent = serde_json::from_value(input.clone())?;
             ensure!(
                 intent.generation == snapshot.run.generation + 1,

@@ -48,9 +48,10 @@ async fn guidance(state: &Arc<AppState>, source: &ExecutionRef, input: Value) ->
     let history = read::events(state, &source.id, current.run.last_event_seq)
         .await
         .map_err(|reply| anyhow::anyhow!("layered guidance history: {}", reply.body))?;
-    let superseded = history
-        .iter()
-        .any(|event| event.seq > seq && event.event_type == "human_input");
+    let superseded = current.run.phase.terminal()
+        || history
+            .iter()
+            .any(|event| event.seq > seq && event.event_type == "human_input");
     for (index, action) in actions.iter().enumerate().filter(|_| !superseded) {
         if !current.operations.iter().any(|op| {
             op.execution_id == action.execution_id
@@ -190,6 +191,10 @@ async fn dispatch(
         .iter()
         .find(|op| op.operation_id == operation.operation_id)
         .context("layered operation disappeared")?;
+    if current.run.phase.terminal() {
+        acknowledge_dispatch(state, source, &operation.operation_id).await?;
+        return Ok(());
+    }
     let reply = gateway::dispatch(state, &current.run, operation, &assignment, &capability).await?;
     let receipt = runs::call(
         state,

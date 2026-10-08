@@ -39,11 +39,22 @@ pub struct Host {
 }
 
 impl Host {
+    #[cfg(test)]
     pub async fn open(
         data: &Path,
         name: String,
         token: String,
         max_runs: usize,
+    ) -> Result<Arc<Self>> {
+        Self::open_with_brain(data, name, token, max_runs, true).await
+    }
+
+    pub async fn open_with_brain(
+        data: &Path,
+        name: String,
+        token: String,
+        max_runs: usize,
+        brain: bool,
     ) -> Result<Arc<Self>> {
         ensure!(
             data.is_absolute() && max_runs > 0,
@@ -75,7 +86,10 @@ impl Host {
                 id,
                 name,
                 version: opencoder_core::version::VERSION_LONG.into(),
-                kinds: opencoder_core::platform::execution_kinds(true),
+                kinds: opencoder_core::platform::execution_kinds(true)
+                    .into_iter()
+                    .filter(|kind| brain || *kind != ExecutionKind::Brain)
+                    .collect(),
             },
             token,
             client: reqwest::Client::builder().no_proxy().build()?,

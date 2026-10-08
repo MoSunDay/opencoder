@@ -70,6 +70,9 @@ enum AgentCommand {
         port: u16,
         #[arg(long)]
         standby: bool,
+        /// Do not advertise Brain scheduling support on this Host.
+        #[arg(long)]
+        no_brain: bool,
     },
     /// Serve a version-isolated execution runtime on loopback.
     Runtime {
@@ -115,6 +118,13 @@ enum DagCommand {
 enum StorageCommand {
     /// Copy legacy execution trees into the typed directory layout.
     MigrateLayout,
+    /// Fail one crashed Brain and settle its proven, stopped runtime capacity.
+    SettleBrainCrash {
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        receipt_dir: PathBuf,
+    },
 }
 
 /// Resolve an explicitly supplied worker credential without logging it.
@@ -149,7 +159,10 @@ fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new("info,opencoder_agent=debug,opencoder_node=debug")
     });
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 /// `dag prepare-rootfs`: write the shared-rootfs scaffold and print the
@@ -272,13 +285,24 @@ async fn run(args: Args) -> Result<()> {
         .data_dir
         .clone()
         .unwrap_or_else(|| opencoder_core::data_dir_for(&workdir).join("node-v2"));
-    if matches!(
-        args.command,
-        Some(AgentCommand::Storage {
-            command: StorageCommand::MigrateLayout
-        })
-    ) {
-        return storage::migrate_layout(&data_dir, args.workflow_root.as_deref());
+    if let Some(AgentCommand::Storage { command }) = &args.command {
+        return match command {
+            StorageCommand::MigrateLayout => {
+                storage::migrate_layout(&data_dir, args.workflow_root.as_deref())
+            }
+            StorageCommand::SettleBrainCrash {
+                run_id,
+                receipt_dir,
+            } => {
+                storage::settle_brain_crash(
+                    &data_dir,
+                    args.workflow_root.as_deref(),
+                    run_id,
+                    receipt_dir,
+                )
+                .await
+            }
+        };
     }
 
     match args.command {
@@ -303,14 +327,20 @@ async fn run(args: Args) -> Result<()> {
             .unwrap_or_else(|_| "opencoder-agent".into())
     });
 
-    if let Some(AgentCommand::Host { port, standby }) = args.command {
-        let host = host::Host::open(
+    if let Some(AgentCommand::Host {
+        port,
+        standby,
+        no_brain,
+    }) = args.command
+    {
+        let host = host::Host::open_with_brain(
             &data_dir,
             name,
             token,
             args.max_runs
                 .unwrap_or_else(|| opencoder_node::fleet::cpu::capacity().ceil() as usize)
                 .max(1),
+            !no_brain,
         )
         .await?;
         return host::run(
@@ -392,7 +422,8 @@ mod tests {
             host.command,
             Some(AgentCommand::Host {
                 port: 19002,
-                standby: true
+                standby: true,
+                no_brain: false
             })
         ));
         let runtime = Args::try_parse_from([
@@ -410,6 +441,25 @@ mod tests {
             Some(AgentCommand::Runtime { port: 19001 })
         ));
         assert!(Args::try_parse_from(["opencoder-agent", "host", "--port", "65536"]).is_err());
+    }
+
+    #[test]
+    fn brain_opt_out_is_explicit_and_limited_to_host_mode() {
+        let host =
+            Args::try_parse_from(["opencoder-agent", "host", "--port", "19002", "--no-brain"])
+                .unwrap();
+        assert!(matches!(
+            host.command,
+            Some(AgentCommand::Host { no_brain: true, .. })
+        ));
+        assert!(Args::try_parse_from([
+            "opencoder-agent",
+            "runtime",
+            "--port",
+            "19001",
+            "--no-brain",
+        ])
+        .is_err());
     }
 
     #[test]
@@ -481,5 +531,42 @@ mod tests {
                 command: StorageCommand::MigrateLayout
             })
         ));
+    }
+
+    #[test]
+    fn brain_crash_settlement_requires_exact_run_and_receipt_directory() {
+        let command = [
+            "opencoder-agent",
+            "--data-dir",
+            "/tmp/runtime",
+            "storage",
+            "settle-brain-crash",
+        ];
+        assert!(Args::try_parse_from(command).is_err());
+        assert!(
+            Args::try_parse_from(command.into_iter().chain(["--run-id", "brain-owned"])).is_err()
+        );
+        let args = Args::try_parse_from(command.into_iter().chain([
+            "--run-id",
+            "brain-owned",
+            "--receipt-dir",
+            "/tmp/receipts",
+        ]))
+        .unwrap();
+        assert!(args.token.is_none() && args.remote.is_none());
+        assert_eq!(args.data_dir, Some(PathBuf::from("/tmp/runtime")));
+        match args.command {
+            Some(AgentCommand::Storage {
+                command:
+                    StorageCommand::SettleBrainCrash {
+                        run_id,
+                        receipt_dir,
+                    },
+            }) => {
+                assert_eq!(run_id, "brain-owned");
+                assert_eq!(receipt_dir, PathBuf::from("/tmp/receipts"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 }

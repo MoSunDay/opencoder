@@ -17,28 +17,49 @@ pub async fn cleanup_owned_containers(bundle_roots: &[PathBuf]) -> Result<usize>
             continue;
         }
         require_real_dir(bundles, "bundle root")?;
-        for run in real_child_dirs(bundles, "bundle root")? {
-            for step in real_child_dirs(&run, "bundle run")? {
-                let state = step.join("runc-state");
-                if !state.exists() {
-                    continue;
+        cleaned += cleanup_runs(&real_child_dirs(bundles, "bundle root")?).await?;
+    }
+    Ok(cleaned)
+}
+
+/// Clean only the explicitly selected execution, retaining other roots.
+pub async fn cleanup_owned_run(bundles: &Path, run_id: &str) -> Result<usize> {
+    validate_id(run_id)?;
+    if !bundles.exists() {
+        return Ok(0);
+    }
+    require_real_dir(bundles, "bundle root")?;
+    let run = bundles.join(run_id);
+    if !run.exists() {
+        return Ok(0);
+    }
+    require_real_dir(&run, "bundle run")?;
+    cleanup_runs(&[run]).await
+}
+
+async fn cleanup_runs(runs: &[PathBuf]) -> Result<usize> {
+    let mut cleaned = 0;
+    for run in runs {
+        for step in real_child_dirs(run, "bundle run")? {
+            let state = step.join("runc-state");
+            if !state.exists() {
+                continue;
+            }
+            require_real_dir(&state, "runc state root")?;
+            for entry in std::fs::read_dir(&state)? {
+                let entry = entry?;
+                if entry.file_type()?.is_symlink() || !entry.file_type()?.is_dir() {
+                    bail!("unknown runc state entry: {}", entry.path().display());
                 }
-                require_real_dir(&state, "runc state root")?;
-                for entry in std::fs::read_dir(&state)? {
-                    let entry = entry?;
-                    if entry.file_type()?.is_symlink() || !entry.file_type()?.is_dir() {
-                        bail!("unknown runc state entry: {}", entry.path().display());
-                    }
-                    let id = entry
-                        .file_name()
-                        .into_string()
-                        .map_err(|_| anyhow::anyhow!("non-UTF8 runc container id"))?;
-                    validate_id(&id)?;
-                    super::delete_force(&state, &id)
-                        .await
-                        .with_context(|| format!("cleanup owned container {id}"))?;
-                    cleaned += 1;
-                }
+                let id = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| anyhow::anyhow!("non-UTF8 runc container id"))?;
+                validate_id(&id)?;
+                super::delete_force(&state, &id)
+                    .await
+                    .with_context(|| format!("cleanup owned container {id}"))?;
+                cleaned += 1;
             }
         }
     }
@@ -90,6 +111,26 @@ mod tests {
         let bundles = directory.path().join("bundles");
         std::fs::create_dir_all(&bundles).unwrap();
         assert_eq!(cleanup_owned_containers(&[bundles]).await.unwrap(), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn selected_run_cleanup_never_visits_another_execution() {
+        let directory = tempfile::tempdir().unwrap();
+        let bundles = directory.path().join("bundles");
+        std::fs::create_dir_all(bundles.join("owned/1/runc-state")).unwrap();
+        std::fs::create_dir_all(bundles.join("other/1")).unwrap();
+        let outside = directory.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep"), "untouched").unwrap();
+        std::os::unix::fs::symlink(&outside, bundles.join("other/1/runc-state")).unwrap();
+        assert_eq!(cleanup_owned_run(&bundles, "owned").await.unwrap(), 0);
+        assert!(cleanup_owned_run(&bundles, "../other").await.is_err());
+        assert_eq!(
+            std::fs::read_to_string(outside.join("keep")).unwrap(),
+            "untouched"
+        );
+        assert!(cleanup_owned_containers(&[bundles]).await.is_err());
     }
 
     #[cfg(unix)]

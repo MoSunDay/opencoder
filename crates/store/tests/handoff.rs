@@ -178,6 +178,13 @@ async fn ownership_and_fifo_capacity_span_three_releases_and_rollback() {
         "r2"
     );
     store.finish_capacity("t1", "r1").await.unwrap();
+    assert_eq!(
+        store.capacity_ticket("t1").await.unwrap(),
+        Some(("agent-long".into(), "r1".into(), "done".into()))
+    );
+    assert!(store.capacity_ticket("unknown").await.unwrap().is_none());
+    assert!(store.finish_capacity("t1", "r2").await.is_err());
+    store.finish_capacity("t1", "r1").await.unwrap();
     assert!(!store.claim_capacity("t3", "r3").await.unwrap());
     assert!(store.claim_capacity("t2", "r2").await.unwrap());
     assert!(!store.claim_capacity("t2", "r2").await.unwrap());

@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 
 # web 模块
 
@@ -41,6 +41,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 
 ## 接缝
 - 会话执行复用 session 运行时；持久化经 `Arc<dyn Store>`。
+- [serve](../../crates/web/src/lib.rs) 为会话与 `ProjectService` 提供同一 `LibsqlStore` 实例，共享连接和锁；存储接口见 [store](../store/index.md)。
 - [全站验收入口](../../scripts/acceptance/ui/main.js) 以 `nav.js` 注册页和 `ui/scope.js` 功能覆盖表为范围，校验成套构建、SPA 产物、四种屏宽、真实功能与 Server TUI；缺页、异常、超时或构建摘要不一致使验收失败。
 - 验收 `--resume` 只复用覆盖范围及二进制摘要相同的成功记录，失败保留日志并重跑，SPA 漂移检查始终执行；`--brain-test` 可使用同批构建的测试可执行文件，其原生镜像版本检查仍然执行。
 - [项目能力对接验收](../../scripts/acceptance/project/README.md) 的 `capabilities/main.js` 覆盖浏览器创建项目、专项和 TODO，连接 Agent、Operator、DAG、Brain，核验同一执行详情、结论留存、完整结果绑定与看板进度；隔离环境只替换模型传输，正式环境模式保留具名数据和版本回执。

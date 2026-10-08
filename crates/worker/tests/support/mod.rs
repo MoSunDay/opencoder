@@ -28,6 +28,14 @@ pub fn isolated_config() -> (opencoder_core::config::ScopedConfigHome, tempfile:
     (guard, home)
 }
 
+pub fn isolated_brain_config() -> (opencoder_core::config::ScopedConfigHome, tempfile::TempDir) {
+    let scope = isolated_config();
+    let path = opencoder_core::Config::global_config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, r#"{"context_limit":1000000}"#).unwrap();
+    scope
+}
+
 pub fn mock() -> Arc<MockChatClient> {
     Arc::new(
         MockChatClient::new().with_default(vec![LlmEvent::Completed {

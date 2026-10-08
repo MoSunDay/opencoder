@@ -89,6 +89,28 @@ fn only_private_file_probes_use_the_digest_window() {
     }
 }
 
+#[test]
+fn artifact_digest_reads_have_time_to_verify_large_archives() {
+    for (offset, version, expected) in [
+        (0, None, ARTIFACT_VERIFY_TIMEOUT),
+        (0, Some("frozen-version"), ARTIFACT_VERIFY_TIMEOUT),
+        (1048576, None, ARTIFACT_VERIFY_TIMEOUT),
+        (1048576, Some("frozen-version"), DEFAULT_REQUEST_TIMEOUT),
+    ] {
+        let operation = NodeOperation::Artifact {
+            request: ArtifactRequest {
+                index: Some(0),
+                execution: execution().execution_ref(),
+                step: "execute".into(),
+                file: "client-logs-and-network.tar.gz".into(),
+                offset,
+                version: version.map(str::to_owned),
+            },
+        };
+        assert_eq!(request_timeout(&operation), expected);
+    }
+}
+
 async fn call_request_id(rx: &mut mpsc::Receiver<SocketCommand>) -> String {
     let SocketCommand::Frame(frame) = rx.recv().await.expect("socket command") else {
         panic!("unexpected socket close")

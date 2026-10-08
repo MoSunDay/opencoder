@@ -24,10 +24,18 @@ fn rpc(port: u16, program: u32, version: u32, procedure: u32, body: &[u8]) -> Ve
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(3)))
         .unwrap();
+    send(&mut stream, &message);
+    receive(&mut stream)
+}
+
+fn send(stream: &mut TcpStream, message: &[u8]) {
     stream
         .write_all(&(0x8000_0000u32 | message.len() as u32).to_be_bytes())
         .unwrap();
-    stream.write_all(&message).unwrap();
+    stream.write_all(message).unwrap();
+}
+
+fn receive(stream: &mut TcpStream) -> Vec<u8> {
     let mut header = [0u8; 4];
     stream.read_exact(&mut header).unwrap();
     let size = (u32::from_be_bytes(header) & 0x7fff_ffff) as usize;
@@ -86,5 +94,43 @@ fn readonly_acl_service_returns_file_permissions_and_rejects_all_writes() {
         std::fs::metadata(file).unwrap().permissions().mode() & 0o777,
         0o604
     );
+    server.shutdown();
+}
+
+#[test]
+fn retransmitted_nfs_request_does_not_block_later_nfs_or_acl_replies() {
+    let root = tempfile::tempdir().unwrap();
+    let server = spawn_nfs_server(&NfsServerOpts {
+        export_root: root.path().into(),
+        host: "127.0.0.1".into(),
+        port: 0,
+        read_only: true,
+    })
+    .unwrap();
+    let mut stream = TcpStream::connect(server.local_addr().unwrap()).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+        .unwrap();
+    let null_call = |xid, program| {
+        let mut message = vec![];
+        for value in [xid, 0, 2, program, 3, 0, 0, 0, 0, 0] {
+            word(&mut message, value);
+        }
+        message
+    };
+    send(&mut stream, &null_call(1, 100003));
+    assert_eq!(value(&receive(&mut stream), 0), 1);
+    // The real backend drops this duplicate without returning a reply.
+    send(&mut stream, &null_call(1, 100003));
+    send(&mut stream, &null_call(2, 100003));
+    send(&mut stream, &null_call(3, 100227));
+    let mut replies = [receive(&mut stream), receive(&mut stream)];
+    replies.sort_by_key(|reply| value(reply, 0));
+    for (reply, xid) in replies.iter().zip([2, 3]) {
+        assert_eq!(reply.len(), 24);
+        assert_eq!(value(reply, 0), xid);
+        assert_eq!(value(reply, 20), 0);
+    }
+    drop(stream);
     server.shutdown();
 }

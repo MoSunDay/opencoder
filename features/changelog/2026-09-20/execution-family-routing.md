@@ -12,8 +12,6 @@ Commit: 2866ae82c34999096efa8fe7e47003d114391120
 
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
-| DAG 输入参数 | `dispatch_input_args_append_to_the_wasm_command_line` | `tests/dag_e2e/input_args.rs` |
-| DAG Agent 步骤执行和详情 | `dag_spec_dispatch_runs_wasm_and_agent_steps_to_done` | `tests/dag_e2e/flow.rs` |
 | Web DAG Agent 步骤会话 | `claimed_run_executes_and_converges_done_on_the_server` | `crates/web/tests/dag_e2e_flow.rs` |
 | Team 成员执行与能力传参 | `team_members_execute_locally_with_capability_prefixes` | `crates/worker/tests/workloads.rs` |
 | Team 多轮执行 | `team_multiround_consensus_runs_alignment_subturn_and_next_round_hint` | `crates/worker/tests/platform/team_multiround_consensus.rs` |

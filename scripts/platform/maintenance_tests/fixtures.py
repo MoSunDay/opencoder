@@ -71,7 +71,7 @@ class Fixture:
         (self.rootfs / 'workspace').mkdir()
         for workdir in (self.settings.agent_workdir, self.settings.server_workdir):
             workdir.mkdir()
-            (workdir / 'opencoder.json').write_text(json.dumps({'dag': {'wasm_dir': '/old/wasm'},
+            (workdir / 'opencoder.json').write_text(json.dumps({'dag': {'binary_dir': '/old/binaries'},
                 'llm': {'api_key': 'private-fixture-credential'}}))
         self.desired = ({'dag': {'rootfs_dir': str(self.rootfs), 'binary_dir': '/mnt/binary',
                                 'workspace_dir': '/mnt/workspace'}, 'agent': {'agents_dir': '/mnt/agents'}},

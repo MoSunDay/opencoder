@@ -18,6 +18,7 @@ mod dag_step_events;
 mod executions_artifacts;
 mod executions_core;
 mod executions_paging;
+mod executions_results;
 mod executions_streams;
 mod executions_submit;
 mod fleet_admin_extra;

@@ -164,6 +164,23 @@ impl Host {
     ) -> Result<RpcReply> {
         let runtime = self.runtime(runtime_id).await?;
         let config: RuntimeConfig = serde_json::from_value(runtime.config.clone())?;
+        if let NodeOperation::DetailField { request } = operation {
+            if opencoder_worker::result_reader::ResultReader::supports(request) {
+                config.validate()?;
+                let _use = self
+                    .store
+                    .shared_request_lock("runtime-use", runtime_id)
+                    .await?;
+                return self
+                    .result_reader
+                    .read(
+                        config.data_dir,
+                        self.registration.id.clone(),
+                        request.clone(),
+                    )
+                    .await;
+            }
+        }
         if !matches!(operation, NodeOperation::Admission { .. })
             && self
                 .store

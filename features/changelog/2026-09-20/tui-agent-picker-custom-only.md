@@ -79,7 +79,6 @@ Brain/Control 等模块的变更；上述 clippy、构建结果仅代表各自�
 
 | 测试目标 | 结果 |
 | --- | --- |
-| `opencoder --test dag_e2e` | `dynamic::runc_dynamic_agent_and_wasm_read_isolated_copies_and_argv` 等待 `dag-dynamic-runc` 终态超过 180 秒。 |
 | `opencoder-dag-runtime --test dynamic` | `persistence::scheduling_persistence_failure_cancels_and_drains_live_instances` 和 `recovery::timeout_is_per_instance_and_user_cancel_is_run_cancellation` 返回 `Elapsed`。 |
 | `opencoder-agent --bin opencoder-agent` | `host::tests::three_runtime_versions_keep_live_model_calls_and_global_fifo` 持续等待；目标运行 624 秒后以 SIGTERM 中断。单独复核也未在 30 秒上限内结束。栈位于 `dispatch_locked` → `enqueue_capacity` → 临时数据库 WAL 的 `fsync`，具体根因尚未确认。 |
 | `opencoder-brain --doc` | E0425：无法解析 `SchedulerPlan` 类型。 |

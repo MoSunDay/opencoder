@@ -18,7 +18,6 @@
 - `cargo build --workspace --bins`：全部 bins 编译通过（agent 接线为纯启动调用，无行为分支）。
 - `cargo test --manifest-path crates/agent/Cargo.toml`：5 passed / 0 failed。
 - **workspace 全量回归**（`cargo test --workspace --no-fail-fast`）：389/391 套件 ok，**5183 passed / 2 failed**，实跑于隔离 `CARGO_TARGET_DIR`（并行会话持续占用共享 `target/`）。
-- 2 个失败均为 **HEAD 预存**、与本变更无因果：①`crates/worker/tests/dag_live_logs.rs:71` wasm 活日志 15s 超时（stash 掉本变更后同点复现，30.96s）；②`crates/worker/tests/runner_dispatch.rs:90` Runner 拒绝断言（期望 400）。worker 测试进程内跑 `Worker`，不链接也不 spawn `opencode-agent` 二进制。已列入问五跟进。
 - 环境备注：本会话中 cargo `-p <member>` 包名匹配对全部带连字符成员失效（`cargo metadata`/`--manifest-path`/`--workspace` 均正常），故全部命令改用 manifest-path / --workspace 形式。
 
 ## 测试覆盖表

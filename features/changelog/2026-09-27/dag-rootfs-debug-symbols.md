@@ -9,7 +9,6 @@ Commit: 720c3f03f784d857bbcac52fbf6bdc8992b2bcc6
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
 | Agent 步骤在 runc 内完成 | `agent_step_session_runs_inside_runc_container` | `tests/dag_e2e/agent_runc.rs` |
-| 动态 Agent 与 Wasm 步骤在 runc 内完成 | `runc_dynamic_agent_and_wasm_read_isolated_copies_and_argv` | `tests/dag_e2e/dynamic.rs` |
 
 - 精简后专项回归：两项均通过，分别用时约 25 秒和 20 秒。
 - 脚本语法：`bash -n scripts/prepare-dag-rootfs.sh` → 通过。

@@ -37,7 +37,6 @@ Fleet 集成测试在整个测试生命周期内隔离配置，避免复制宿�
 | 丢失回执后重试及依赖阻断 | `keeps one request identity across a lost response and closes only after durable queuing`、`unaccepted prerequisites prevent the rerun request` | `crates/web/spa/src/todo/review/rerun.dom.test.jsx` |
 | 稀疏事件倒序分页与大字段预算 | `reverse_todo_history_skips_global_sequence_gaps_and_respects_byte_budget` | `crates/store/tests/todos_workflow.rs` |
 | 历史分页及固定回看尝试 | `reads sparse history backward with one bounded request per page and selects the latest dispatch`、`keeps a selected historical attempt while live generations advance` | `crates/web/spa/src/todo/review/history.dom.test.jsx`、`inspector.dom.test.jsx` |
-| NFS 并发生命周期状态 | `named_export_start_reuse_stop`、`server_startup_starts_the_dag_wasm_export` | `crates/web/src/nfs_exports.rs`、`crates/control/src/bootstrap.rs` |
 | Brain 激活间事件重连 | `reloads the same brain run after an activation stream closes and stops at its terminal state` | `crates/web/spa/src/brain/workbench/tests/reconnect.dom.test.jsx` |
 | Brain 重启、重复回执与请求身份校验 | `prepared_action_replays_after_restart_and_duplicate_notice_keeps_watermark` | `crates/worker/tests/brain_recovery.rs` |
 | Fleet 路由、Codex 与调度配置隔离 | `list_filters_by_stored_kind_and_routes_with_typed_reference`、`server_dispatches_codex_to_node_and_replays_native_messages`、`managed_codex_is_pinned_and_node_obeys_fifo_lifo` | `crates/worker/tests/fleet_index_contract.rs`、`harness_codex.rs`、`harness_settings_queue.rs` |
@@ -58,7 +57,6 @@ Fleet 集成测试在整个测试生命周期内隔离配置，避免复制宿�
 - 发布提交：`a8ccb79b028fc53a3bb50df54ba1fec157693ed4`；发布包 `/tmp/opencoder-todo-release-20260915-final`，独立 release target 构建，4 个二进制的提交、协议与 SPA 摘要一致。
 - 发布证据目录：`/tmp/opencoder-todo-rollout-20260915-a8ccb79b`，保存备份、进程校验与观察记录。
 - 无活动任务时冻结接入并完成一致性备份，未中断现有任务。备份位于 `/tmp/opencoder-todo-rollout-20260915-a8ccb79b/data-backup`；随后安装 Server、Agent、CLI 和本地程序并重新开放接入。
-- 安装文件及 Server、Agent 实际进程 inode 的 SHA-256 均匹配发布清单，原 Node ID 恢复 Ready，DAG WASM NFS 保持只读。证据：发布证据目录中的 `installed-verification.json`。
 - 真实模型样本：`todos-live-20260915-131625-chain`（依赖链）、`todos-live-20260915-131625-parallel`（同批双分支）、`todos-live-20260915-131625-review`（产物哈希核验）全部完成且节点全部 passed。
 - 非里程碑节点 `verify` 重跑通过：上游会话历史仍为 1 次，目标变为 2 次；实际上下文包含已验收依赖结果与重跑原因，既有上游文件哈希不变。证据：`/tmp/todo-live-delivery-20260915-131625/result.json`、`rerun.json`、`parallel-history.json`。
 - 最后一次真实任务完成后，2026-09-15 13:18:00—13:33:01（PRC）连续观察 901 秒、61 次采样：PASS；节点持续 Ready，进程与配置未变化，无任务积压或服务错误。证据：发布证据目录中的 `observation-result.json`、`observation.jsonl`、`service-journal.log`。

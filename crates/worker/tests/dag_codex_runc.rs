@@ -163,7 +163,14 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
         assert_eq!(session["harness"], "codex");
         assert_eq!(session["thread_id"], "runc-codex-thread");
         assert!(std::fs::read_to_string(
-            accepted_root.join("upper").join(step).join("events.ndjson")
+            accepted_root
+                .join("upper")
+                .join(step)
+                .join("agent-events")
+                .join(format!(
+                    "{}.ndjson",
+                    session["session_id"].as_str().unwrap()
+                ))
         )
         .unwrap()
         .contains("runc-tool-ok"));

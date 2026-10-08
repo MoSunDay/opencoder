@@ -1,6 +1,4 @@
 //! NFS resource snapshotting for agent execution.
-#[path = "resources/probe.rs"]
-pub(crate) mod probe;
 #[cfg(not(windows))]
 use anyhow::bail;
 use anyhow::{Context, Result};

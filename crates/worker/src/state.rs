@@ -42,7 +42,7 @@ pub(crate) struct Inner {
     pub persistence_error: std::sync::Mutex<Option<String>>,
     pub admission_state: AdmissionState,
     pub runtime: WorkerRuntime,
-    pub resources: crate::resources::probe::MountProbe,
+    pub resources: crate::resource_probe::MountProbe,
     pub data_dir: PathBuf,
     pub cpu: f64,
     pub scheduling: crate::runtime::SchedulingState,
@@ -128,7 +128,7 @@ impl Worker {
             anyhow::bail!("invalid persisted node identity");
         }
         let initial_config = Config::load(&options.workdir)?;
-        let resources = crate::resources::probe::MountProbe::new(initial_config.agent.agents_dir);
+        let resources = crate::resource_probe::MountProbe::new(initial_config.agent.agents_dir);
         let runtime_db = data_dir.join("runtime.db");
         for path in [
             runtime_db.clone(),

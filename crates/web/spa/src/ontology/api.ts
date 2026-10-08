@@ -73,8 +73,8 @@ export const api = {
   createRelationship: (env: string, value: object) => request<{ item: Relationship }>(`${envPath(env)}/relationships`, { method: "POST", body: JSON.stringify(value) }),
   updateRelationship: (env: string, id: string, value: object) => request<{ item: Relationship }>(`${envPath(env)}/relationships/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   graph: (env: string, query: GraphQuery = {}) => request<GraphResponse>(graphPath(env, query)),
-  setText: (env: string, entity: string, attribute: string, value: object) => request(`${envPath(env)}/entities/${entity}/attributes/${attribute}/text`, { method: "PUT", body: JSON.stringify(value) }),
+  setText: (env: string, entity: string, attribute: string, value: object) => request<{ revision: number }>(`${envPath(env)}/entities/${entity}/attributes/${attribute}/text`, { method: "PUT", body: JSON.stringify(value) }),
   textHistory: (env: string, entity: string, attribute: string) => request<{ items: Record<string, unknown>[] }>(`${envPath(env)}/entities/${entity}/attributes/${attribute}/text`),
   textContent: (env: string, entity: string, attribute: string, revision: number) => request<{ format: "md" | "html" | "nfs_path"; content: string; revision: number }>(`${envPath(env)}/entities/${entity}/attributes/${attribute}/text/${revision}`),
-  setNfsPath: (env: string, entity: string, attribute: string, value: object) => request(`${envPath(env)}/entities/${entity}/attributes/${attribute}/nfs-path`, { method: "PUT", body: JSON.stringify(value) }),
+  setNfsPath: (env: string, entity: string, attribute: string, value: object) => request<{ revision: number }>(`${envPath(env)}/entities/${entity}/attributes/${attribute}/nfs-path`, { method: "PUT", body: JSON.stringify(value) }),
 };

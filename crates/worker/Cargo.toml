@@ -32,6 +32,7 @@ axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.5", features = ["util"] }
 fs2 = "0.4"
 sha2 = "0.10"
+tempfile.workspace = true
 libc = "0.2"
 
 [target.'cfg(not(windows))'.dependencies]
@@ -44,7 +45,6 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 opencoder-control.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 reqwest.workspace = true
 
 [[test]]

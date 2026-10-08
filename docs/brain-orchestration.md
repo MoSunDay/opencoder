@@ -10,6 +10,8 @@
 
 `POST /api/brain/plan-defs` 保存 `{id, version, plan, changelog, created_at, author, tags, confidence}`，同 ID/版本不可覆盖，相同提交幂等。`POST /api/brain/plan-defs/validate` 检查结构、能力及嵌套引用。
 
+启动还会按候选执行节点的有效 `context_limit` 检查完整证据容量，未配置时为 128000 tokens。预算包含全部节点的结果上限及 16384 tokens 输出预留，同时受 1 MiB 决策正文和 2 MiB 传输帧限制；因此结构校验通过的多节点计划仍可能返回 413。此时须缩小计划或输入，或者选择确实支持更大上下文窗口的模型并配置其容量。已受理运行冻结该容量，不能靠改配置后恢复扩大预算；超限的人工输入也返回 413，且不写入运行事件。
+
 ```json
 {
   "schema_version": 7,
@@ -43,7 +45,7 @@
 
 派发层号从 1 开始；`run.layer=0` 表示尚未派发，`layer_catalog` 给出实际层号与 `layer_id` 的映射。完整证据按实际冻结模型窗口、1 MiB 指令和 2 MiB 帧预算准入；超限运行或人工输入返回 413，不产生相应状态变更。已有运行的上下文超限时保留证据并阻塞。
 
-Server 重启与正常发布保持已有运行连续。Worker 或大脑决策进程意外崩溃时，根运行进入 `failed`，必须新建运行才能重新执行。`resume` 不能恢复失败根，已启动子执行的回执仍可保留真实结果。离线命令 `opencoder-agent --data-dir <目录> storage settle-brain-crash --run-id <根 ID> --receipt-dir <目录>` 在核验 Runtime 停止及进程清理后，先落盘根失败，再结清它的 Host 容量；命令可重复执行，不能继续任务。其他类型的未结清容量仍会阻止 Runtime 启动。
+Server 重启与正常发布保持已有运行连续。Worker 或大脑决策进程意外崩溃时，根运行进入 `failed`，必须新建运行才能重新执行。`resume` 不能恢复失败根，已启动子执行的回执仍可保留真实结果。离线命令 `opencoder-agent --data-dir <目录> storage settle-brain-crash --run-id <根 ID> --receipt-dir <目录>` 在核验 Runtime 停止及进程清理后，先落盘根失败，再结清它的 Host 容量；命令可重复执行，不能继续任务。普通执行的未结清容量只有在执行记录、Runtime 身份和内核进程清理均核验通过后才能恢复；无法核验时继续拒绝启动。
 
 限制：1–32 层、总共 1–256 个执行节点、每层 1–32 个节点、每节点一个能力。新计划不接受旧节点重试策略和旧 `edges` 连线。
 

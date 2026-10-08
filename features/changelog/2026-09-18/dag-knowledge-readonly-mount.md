@@ -11,10 +11,8 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
   `agent_sandbox: AgentSandbox`（`host` 默认 / `runc`，节点级开关）；
   serde 默认与 merge（`config/merge.rs`）对齐——partial 覆盖不泄漏。
 - `crates/dag-runtime/src/sandbox/oci.rs`：`BundleSpec` 新增
-  `knowledge: Option<KnowledgeMount>` 与 `argv: ArgvStyle`（WasmModule 默认 /
   Direct 原样 argv，供 agent-step-runner 这类 rootfs 内建二进制）；mounts
   追加 `{"destination":"/workspace/knowledge","options":["ro","rbind"]}`，
-  wasm argv 追加 `--dir=/workspace/knowledge`；`write_bundle` 对 knowledge 根
   fail-closed（缺失/符号链接/相对路径即 bail）并在私有 rootfs 预建挂载点。
 - `crates/dag-runtime/src/exec/`：`StepCtx.knowledge_root`（runtime 从
   `deps.config.dag.knowledge_root` 填充）；`step_env` 增设

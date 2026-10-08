@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkDetails, checkGraph } from './experience.mjs';
 import { chromium } from '../../../crates/web/spa/node_modules/playwright-core/index.mjs';
 
 const [base, output] = process.argv.slice(2);
@@ -64,7 +65,8 @@ try {
   await dialog.getByLabel('负责人', { exact: true }).fill('tester');
   await submit();
   await page.getByRole('cell', { name: '浏览器实体', exact: true }).waitFor();
-  await page.getByRole('textbox', { name: '搜索实体' }).fill('入口');
+  await checkDetails(page);
+  await page.getByRole('textbox', { name: '搜索名称或标识' }).fill('入口');
   assert.equal(await page.getByRole('cell', { name: '下游服务', exact: true }).count(), 0);
   await page.getByRole('menuitem', { name: /关系类型$/ }).click();
   await page.getByRole('heading', { name: '关系类型', exact: true }).waitFor();
@@ -80,18 +82,21 @@ try {
   await choose(dialog, '目标实体', '下游服务');
   await submit();
   await page.getByRole('menuitem', { name: /图谱$/ }).click();
+  await page.getByRole('checkbox', { name: '展开跨类型邻居' }).check();
+  await page.getByRole('button', { name: '调整范围', exact: true }).click();
   const types = page.getByRole('combobox', { name: '实体类型多选' });
   await types.click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').getByText('服务', { exact: true }).click();
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').getByRole('button', { name: /完\s*成/ }).click();
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').waitFor({ state: 'hidden' });
-  await page.getByRole('checkbox', { name: '展开跨类型邻居' }).check();
   const centers = page.getByRole('combobox', { name: '实体多选' });
   await centers.click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').getByText('入口服务', { exact: true }).click();
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').getByRole('button', { name: /完\s*成/ }).click();
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').waitFor({ state: 'hidden' });
   await page.locator('canvas:visible').first().waitFor();
+  await page.locator('.ant-popover:visible').getByRole('button', { name: /^完\s*成$/ }).click();
+  await checkGraph(page);
   await page.getByRole('button', { name: '保存切面', exact: true }).click();
   await dialog.getByLabel('名称', { exact: true }).fill('浏览器切面');
   await dialog.getByRole('button', { name: /保\s*存/, exact: true }).click();
@@ -123,7 +128,7 @@ try {
   await page.screenshot({ path: `${output}/mobile.png` });
   assert.deepEqual(failures, []);
   console.log(JSON.stringify({ passed: true, pages: 5, attribute_action_config: true, entity_created: true,
-    relationship_created: true, aspect_saved: true, environment_isolation: true, desktop: category, mobile: narrow }));
+    relationship_created: true, aspect_saved: true, draft_guard: true, detail_tabs: true, graph_controls: true, observation_restored: true, environment_isolation: true, desktop: category, mobile: narrow }));
 } catch (error) {
   await page.screenshot({ path: `${output}/browser-failure.png` });
   console.error(JSON.stringify({ error: error.message, failures }));

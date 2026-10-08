@@ -11,6 +11,8 @@ use opencoder_core::fleet::{ExecutionKind, NodeOperation, RpcReply};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+mod fields;
+
 fn text(value: &Value) -> Option<String> {
     match value {
         Value::String(value) if !value.trim().is_empty() && value.trim() != "null" => {
@@ -23,8 +25,13 @@ fn text(value: &Value) -> Option<String> {
     }
 }
 
-fn bounded(value: String) -> String {
-    value.chars().take(64 * 1024).collect()
+fn bounded(mut value: String) -> String {
+    let mut end = value.len().min(64 * 1024);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
+    value
 }
 
 fn direct_conclusion(kind: ExecutionKind, detail: &Value) -> Option<String> {
@@ -63,7 +70,36 @@ async fn read(state: &AppState, id: &str) -> RpcReply {
     if reply.status >= 300 {
         return reply;
     }
-    let detail = reply.body;
+    let mut detail = reply.body;
+    let omitted = detail["result"].get("omitted").is_some()
+        || detail["topic"].get("omitted").is_some()
+        || detail["topic"]["final_summary"].get("omitted").is_some()
+        || detail["result"]["output_text"].get("omitted").is_some();
+    if omitted
+        && matches!(
+            index.kind,
+            ExecutionKind::Agent
+                | ExecutionKind::Operator
+                | ExecutionKind::Team
+                | ExecutionKind::Todos
+        )
+    {
+        let field = if index.kind == ExecutionKind::Team {
+            "team.topic"
+        } else {
+            "result"
+        };
+        match fields::read(state, id, field).await {
+            Ok(value) => {
+                detail[if field == "team.topic" {
+                    "topic"
+                } else {
+                    "result"
+                }] = value
+            }
+            Err(reply) => return reply,
+        }
+    }
     let summary = if index.kind == ExecutionKind::Brain {
         let reply = executions::for_id(state, id, |execution| NodeOperation::Brain {
             execution,
@@ -82,10 +118,7 @@ async fn read(state: &AppState, id: &str) -> RpcReply {
     } else {
         direct_conclusion(index.kind, &detail)
     };
-    let truncated = summary
-        .as_ref()
-        .is_some_and(|text| text.chars().count() > 64 * 1024);
-    let omitted = detail["result"].get("omitted").is_some();
+    let truncated = summary.as_ref().is_some_and(|text| text.len() > 64 * 1024);
     RpcReply::ok(json!({
         "execution_id":id,"kind":index.kind,"node_id":index.node_id,
         "status":detail["execution"]["status"],"summary":summary.map(bounded),
@@ -97,6 +130,13 @@ async fn read(state: &AppState, id: &str) -> RpcReply {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn summary_bound_is_in_bytes_and_preserves_utf8() {
+        let output = bounded("界".repeat(30_000));
+        assert!(output.len() <= 64 * 1024);
+        assert_eq!(output.chars().count(), (64 * 1024) / 3);
+    }
 
     #[test]
     fn native_conclusions_use_their_authoritative_result_fields() {

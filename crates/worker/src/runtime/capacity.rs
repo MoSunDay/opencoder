@@ -7,6 +7,8 @@ use std::{
     sync::Arc,
 };
 
+mod recovery;
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct HostBinding {
     pub database: PathBuf,
@@ -32,10 +34,6 @@ impl HostCapacity {
         );
         let store = Arc::new(FleetStore::open(&binding.database).await?);
         store.capacity().await?;
-        // A reservation is never expired. Restart recovery must prove process
-        // cleanup before resolving any running ticket; refuse ambiguous state.
-        ensure!(store.runtime_tickets(&binding.runtime_id).await?.iter().all(|(_,_,phase)| phase != "running"),
-            "runtime has unresolved running capacity reservations; verify owned process cleanup before recovery");
         Ok(Some(Self {
             store,
             runtime_id: binding.runtime_id,

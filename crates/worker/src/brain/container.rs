@@ -77,7 +77,8 @@ async fn activate_json<T: serde::de::DeserializeOwned>(
     }
     private_json(&activation.join("context.json"), context)?;
     private_json(&activation.join("config.json"), config)?;
-    write_bundle(&bundle, &activation, &cli)?;
+    let exclusions = opencoder_core::net::proxy_bypass_environment(|key| std::env::var(key).ok());
+    write_bundle(&bundle, &activation, &cli, &exclusions)?;
     let id = format!("{run_id}-a{generation}");
     let (code, output) = opencoder_dag_runtime::sandbox::runc::run_step_cancellable(
         &bundle,
@@ -125,7 +126,12 @@ fn private_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 
-fn write_bundle(bundle: &Path, activation: &Path, cli: &Path) -> Result<()> {
+fn write_bundle(
+    bundle: &Path,
+    activation: &Path,
+    cli: &Path,
+    exclusions: &[(String, String)],
+) -> Result<()> {
     let rootfs = bundle.join("rootfs");
     for dir in [
         "usr",
@@ -174,9 +180,42 @@ fn write_bundle(bundle: &Path, activation: &Path, cli: &Path) -> Result<()> {
     }
     std::fs::write(rootfs.join("runtime/opencoder-cli"), [])?;
     mounts.push(json!({"destination":"/runtime/opencoder-cli","type":"bind","source":cli,"options":["bind","ro"]}));
+    let environment = process_environment(exclusions);
     let config = json!({"ociVersion":"1.0.0","hostname":"brain-activation","root":{"path":"rootfs","readonly":true},
-        "process":{"terminal":false,"user":{"uid":0,"gid":0},"cwd":"/workspace","args":["/runtime/opencoder-cli","brain","activate-local","--context","/workspace/context.json","--config","/workspace/config.json","--output","/workspace/decision.json"],"env":["PATH=/runtime:/usr/bin:/bin","HOME=/tmp"]},
+        "process":{"terminal":false,"user":{"uid":0,"gid":0},"cwd":"/workspace","args":["/runtime/opencoder-cli","brain","activate-local","--context","/workspace/context.json","--config","/workspace/config.json","--output","/workspace/decision.json"],"env":environment},
         "mounts":mounts,"linux":{"namespaces":[{"type":"pid"},{"type":"ipc"},{"type":"uts"},{"type":"mount"}]}});
     opencoder_core::atomic_write_json(&bundle.join("config.json"), &config)?;
     Ok(())
+}
+
+fn process_environment(exclusions: &[(String, String)]) -> Vec<String> {
+    let mut environment = vec!["PATH=/runtime:/usr/bin:/bin".into(), "HOME=/tmp".into()];
+    environment.extend(
+        exclusions
+            .iter()
+            .map(|(key, value)| format!("{key}={value}")),
+    );
+    environment
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activation_environment_carries_both_proxy_exclusions() {
+        let exclusions = vec![
+            ("NO_PROXY".into(), "model.internal".into()),
+            ("no_proxy".into(), "other.internal".into()),
+        ];
+        assert_eq!(
+            process_environment(&exclusions),
+            [
+                "PATH=/runtime:/usr/bin:/bin",
+                "HOME=/tmp",
+                "NO_PROXY=model.internal",
+                "no_proxy=other.internal",
+            ]
+        );
+    }
 }

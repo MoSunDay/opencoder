@@ -98,7 +98,15 @@ pub(super) async fn launch_locked(
             && record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Brain;
         let outcome = outcome.unwrap_or_else(|_| Err(anyhow::anyhow!("execution panicked")));
         let (status, result, error) = match outcome {
-            Ok((status, result)) => (status, result, None),
+            Ok((status, result)) => {
+                // DAG failures retain their result/artifact receipt as well as
+                // the scheduler's terminal diagnostic in the execution index.
+                let error = (status == ExecutionStatus::Error
+                    && record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Dag)
+                    .then(|| result["error"].as_str().map(str::to_owned))
+                    .flatten();
+                (status, result, error)
+            }
             Err(error) => (
                 if cancel.is_cancelled()
                     && record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Brain

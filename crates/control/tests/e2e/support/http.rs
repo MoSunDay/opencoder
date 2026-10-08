@@ -23,6 +23,9 @@ pub struct Harness {
 }
 
 impl Harness {
+    pub fn data_dir(&self) -> std::path::PathBuf {
+        self._dir.path().join("data")
+    }
     /// Full topology: server (auth + web assets) + one scripted WS node.
     pub async fn new() -> Arc<Self> {
         Self::new_inner(None, false, None).await

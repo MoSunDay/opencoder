@@ -28,6 +28,7 @@ Decisions:
 {"decision":"dispatch_layer","layer":1,"assignments":[{"node_id":"coding","capability_id":"attached-id","inputs":{"task":{"kind":"value","value":"specific task"}},"reason":"why this capability"}],"reason":"assessment and next-layer rationale","reflection":null,"evidence_execution_ids":[],"assessments":{}}
 For a return use the same dispatch decision with a nonempty reflection and previously executed target layer.
 Input bindings: {"kind":"root","name":"key"}, {"kind":"execution","execution_id":"id","path":"/json/pointer"}, {"kind":"artifact","reference":"key"}, or {"kind":"value","value":<generated task input>}.
+Execution binding path is a JSON Pointer: use path="" for the complete output, including a text result. path="/" selects an empty property name, not the complete output. A subfield such as passed uses path="/passed"; escape property names with ~0 for ~ and ~1 for /.
 {"decision":"complete","reason":"final layer milestone met","evidence_execution_ids":["id"],"summary":"final deliverables","assessments":{"<current-layer-id>":{"met":true,"reason":"criteria evidence"}}}
 {"decision":"block","reason":"specific missing prerequisite"}
 {"decision":"fail","reason":"irrecoverable reason","error_type":"type"}

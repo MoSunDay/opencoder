@@ -19,7 +19,7 @@ def assert_failed(env, root, before, proxy):
     final = env.terminal(root, 90)
     require(final['run']['phase'] == 'failed' and not final['operations'], 'crash did not fail the entire root')
     status, _ = env.request('POST', f'/api/brain/runs/{root}/commands', {'action': 'resume'})
-    require(status == 409, 'failed root accepted resume')
+    require(status == 409, f'failed root resume must return 409, received {status}')
     after = journal(env, root)['annotations']['layered_decision_attempt']
     require(after == before and proxy.calls[root] == 1, 'crash replayed a decision or reset its budget')
     # Check several report cycles, including public and authoritative snapshots.

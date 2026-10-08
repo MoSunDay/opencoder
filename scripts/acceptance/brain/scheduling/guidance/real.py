@@ -40,8 +40,7 @@ def run(env, capabilities):
             view = env.view(root)
             require(view['run']['phase'] not in ('blocked', 'failed', 'cancelled'), 'steering plan failed before guidance')
             return view if len(view['operations']) == 4 and all(op['status'] == 'running' for op in view['operations']) and gates.ready(env, view) else None
-        # 240 seconds to start + the full 330-second decision window stay
-        # within the first child's 600-second tool deadline.
+        # Startup, decision and delivery windows fit the 600-second tool deadline.
         before = env.wait(started, 240, 'all four guidance targets admitted')
         env.api('POST', f'/api/brain/runs/{root}/inputs', {'text':
             f'最终报告标记变更为 {updated}。请立即把这个新要求传给本层仍在运行的 Agent、Operator 和 Team；'
@@ -51,11 +50,13 @@ def run(env, capabilities):
             require(view['run']['activation'] == before['run']['activation'], 'steering crossed the layer barrier')
             return view if events(view, 'guidance_processed') else None
         guidance = env.wait(guided, 330, 'real child guidance')
-        actions = events(guidance, 'guidance_processed')[-1]['guidance']
+        receipt = events(guidance, 'guidance_processed')[-1]
+        actions = receipt['guidance']
         supported = {op['execution_id'] for op in before['operations'] if op['execution_kind'] in ('agent', 'operator', 'team')}
         require({action['execution_id'] for action in actions} == supported,
                 'guide omitted a supported running child or targeted the DAG')
         require(all(updated in action['message'] for action in actions), 'guidance lost the human marker')
+        env.wait(lambda: gates.delivered(env, root, receipt['seq']), 30, 'all child guidance deliveries acknowledged')
         gates.release(env, guidance)
         final = pump(env, root, 1200)
         require(final['run']['phase'] == 'completed', 'steered layer did not complete')

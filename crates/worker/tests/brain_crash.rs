@@ -67,17 +67,29 @@ async fn unclean_worker_exit_fails_waiting_root_and_clean_restart_retains_it() {
             for action in ["layered_wake", "layered_dispatch", "layered_guidance"] {
                 assert!(control::actions(&frames, action).is_empty());
             }
-            let reply = node
-                .handle(NodeOperation::Brain {
-                    execution: ExecutionRef {
-                        id: id.into(),
-                        kind: ExecutionKind::Brain,
-                    },
-                    action: "resume".into(),
-                    input: Value::Null,
-                })
-                .await;
-            assert!(reply.status >= 400);
+            for (action, input) in [
+                ("resume", Value::Null),
+                ("pause", Value::Null),
+                ("cancel", Value::Null),
+                ("set_round_budget", json!({"max_rounds": 2})),
+                ("human_input", json!({"text": "continue the failed root"})),
+            ] {
+                let reply = node
+                    .handle(NodeOperation::Brain {
+                        execution: ExecutionRef {
+                            id: id.into(),
+                            kind: ExecutionKind::Brain,
+                        },
+                        action: action.into(),
+                        input,
+                    })
+                    .await;
+                assert_eq!(reply.status, 409, "{action}: {reply:?}");
+                assert_eq!(
+                    serde_json::to_value(control::snapshot(&node, id).await).unwrap(),
+                    serde_json::to_value(&after).unwrap()
+                );
+            }
             let generation = after.run.generation;
             node.shutdown().await.unwrap();
             drop(node);

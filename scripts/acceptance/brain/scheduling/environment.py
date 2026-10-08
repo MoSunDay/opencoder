@@ -31,6 +31,7 @@ class Environment(Operations):
         self.tag = 'brain-e2e-' + secrets.token_hex(6)
         self.counter = 0
         self.created = []
+        self.execution_directories = {}
         self.record = self.release()
         self.runtime_url = 'http://127.0.0.1:' + str(self.record['runtime_port'])
         self.node_id = (Path(self.record['runtime_data']) / 'node-id').read_text().strip()
@@ -183,9 +184,11 @@ class Environment(Operations):
         self.save('executions/' + identifier, detail)
         return detail
 
-    def cleanup(self):
+    def cleanup(self, identifiers=None, receipt_name='cleanup'):
+        identifiers = self.created if identifiers is None else identifiers
+        require(all(identifier in self.created for identifier in identifiers), 'cleanup target is not owned')
         results = []
-        for identifier in self.created:
+        for identifier in identifiers:
             try:
                 self.capture_decisions(identifier)
                 view = self.cleanup_snapshot(identifier)
@@ -204,7 +207,7 @@ class Environment(Operations):
                                 'phase': final['run']['phase'], 'children_settled': True})
             except Exception as error:
                 results.append({'id': identifier, 'error': str(error)})
-        self.save('cleanup', results)
+        self.save(receipt_name, results)
         require(not any('error' in row for row in results), 'acceptance cleanup incomplete')
 
     def cleanup_snapshot(self, identifier):
@@ -228,10 +231,23 @@ class Environment(Operations):
         require(reply['status'] == 200, f'cleanup snapshot: {reply}')
         return reply['body']
 
+    def execution_data(self, operation):
+        require(operation['run_id'] in self.created, 'workspace target is not owned by this acceptance')
+        identifier = operation['execution_id']
+        if identifier not in self.execution_directories:
+            from workspaces import owned_directory, runtime_directories
+            detail = self.detail(operation)
+            index = detail['execution']
+            require(index['id'] == identifier and index['kind'] == operation['execution_kind'],
+                    'execution detail identity mismatch')
+            directories = runtime_directories() | {Path(self.record['runtime_data'])}
+            self.execution_directories[identifier] = owned_directory(operation, index['node_id'], directories)
+        return self.execution_directories[identifier]
+
     def release_gate(self, operation):
         require(operation['run_id'] in self.created, 'gate is not owned by this acceptance')
         identifier = operation['execution_id']
-        journal = Path(self.record['runtime_data']) / 'dag' / identifier / 'execution.json'
+        journal = self.execution_data(operation) / 'dag' / identifier / 'execution.json'
         if not journal.exists():
             return False
         record = json.loads(journal.read_text())

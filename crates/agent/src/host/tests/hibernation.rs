@@ -3,6 +3,7 @@ use super::*;
 #[tokio::test]
 async fn admission_changes_leave_hibernated_runtimes_stopped() {
     let root = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let host = Host::open(
         &root.path().join("host"),
         "node".into(),
@@ -49,6 +50,7 @@ async fn admission_changes_leave_hibernated_runtimes_stopped() {
 #[tokio::test]
 async fn accessed_hibernated_runtime_inherits_current_admission_mode() {
     let root = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let host = Host::open(
         &root.path().join("host"),
         "node".into(),
@@ -104,6 +106,7 @@ async fn accessed_hibernated_runtime_inherits_current_admission_mode() {
 #[tokio::test]
 async fn retired_runtime_storage_error_does_not_block_active_runtime() {
     let root = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let host = Host::open(
         &root.path().join("host"),
         "node".into(),
@@ -140,7 +143,8 @@ async fn retired_runtime_storage_error_does_not_block_active_runtime() {
     retired_http.abort();
     let _ = retired_http.await;
 
-    assert!(active.snapshot().ready);
+    let active_snapshot = active.snapshot();
+    assert!(active_snapshot.ready, "{active_snapshot:?}");
     host.sync_inventory().await.unwrap();
     let snapshot = host.snapshot();
     assert!(snapshot.ready, "{snapshot:?}");
@@ -150,6 +154,7 @@ async fn retired_runtime_storage_error_does_not_block_active_runtime() {
 #[tokio::test]
 async fn busy_runtime_hibernation_releases_the_fleet_activation_lock() {
     let root = tempfile::tempdir().unwrap();
+    let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
     let host = Host::open(
         &root.path().join("host"),
         "node".into(),

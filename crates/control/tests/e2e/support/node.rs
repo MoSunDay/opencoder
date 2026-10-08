@@ -41,6 +41,10 @@ struct Tables {
     payloads: HashMap<(String, i64), RpcReply>,
     /// (id, field) -> reply (DetailFieldChunk json).
     fields: HashMap<(String, String), RpcReply>,
+    field_bytes: HashMap<(String, String), Vec<u8>>,
+    field_failures: HashMap<(String, String, u64), RpcReply>,
+    field_reads: Vec<u64>,
+    dag_steps: HashMap<(String, String), RpcReply>,
     /// id -> reply (MessagePage / items / runs / turns json).
     messages: HashMap<String, RpcReply>,
     todo_items: HashMap<String, RpcReply>,
@@ -88,6 +92,30 @@ pub struct MockNode {
 }
 
 impl MockNode {
+    pub fn fail_field_once(&self, id: &str, field: &str, offset: u64) {
+        self.tables.lock().unwrap().field_failures.insert(
+            (id.into(), field.into(), offset),
+            RpcReply::error(503, "transient read failure"),
+        );
+    }
+    pub fn field_read_offsets(&self) -> Vec<u64> {
+        self.tables.lock().unwrap().field_reads.clone()
+    }
+    pub fn set_field_bytes(&self, id: &str, field: &str, bytes: Vec<u8>) {
+        self.tables
+            .lock()
+            .unwrap()
+            .field_bytes
+            .insert((id.into(), field.into()), bytes);
+    }
+
+    pub fn set_dag_step(&self, id: &str, step: &str, reply: RpcReply) {
+        self.tables
+            .lock()
+            .unwrap()
+            .dag_steps
+            .insert((id.into(), step.into()), reply);
+    }
     pub fn new(id: &str) -> Arc<Self> {
         Self::build(id, false)
     }

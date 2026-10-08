@@ -106,7 +106,7 @@ async fn accessed_hibernated_runtime_inherits_current_admission_mode() {
 #[tokio::test]
 async fn retired_runtime_storage_error_does_not_block_active_runtime() {
     let root = tempfile::tempdir().unwrap();
-    let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let _scope = opencoder_core::config::scoped_config_home(root.path().join("config"));
     let host = Host::open(
         &root.path().join("host"),
         "node".into(),
@@ -143,8 +143,8 @@ async fn retired_runtime_storage_error_does_not_block_active_runtime() {
     retired_http.abort();
     let _ = retired_http.await;
 
-    let active_snapshot = active.snapshot();
-    assert!(active_snapshot.ready, "{active_snapshot:?}");
+    wait(async || active.snapshot().ready).await;
+    assert!(active.snapshot().ready, "{:?}", active.snapshot());
     host.sync_inventory().await.unwrap();
     let snapshot = host.snapshot();
     assert!(snapshot.ready, "{snapshot:?}");

@@ -13,7 +13,7 @@ Commit: c854143bd187656f4d74be6cca0f153176e44a21
 | 项目 | 承载整体目标、说明与总体进度 | 名称、说明、排序；`active` 进行中、`archived` 已归档 |
 | 专项 | 组织某一方向的一组工作 | 名称、说明、可选所属项目、排序；`planned` 未开始、`in_progress` 进行中、`done` 已完成 |
 | TODO | 跟踪具体任务及交付结果 | 标题、任务说明、可选所属专项、看板列、位置、标签、执行方式和指派历史 |
-| 执行记录 | 记录为 TODO 发起或关联的一次执行 | 执行类型、名称、ID、执行状态，以及该条关联的同步状态和独立结论 |
+| 执行记录 | 记录为 TODO 发起或关联的一次执行 | 执行类型、名称、ID、可选能力 ID；状态和结论按执行 ID 从所属节点读取 |
 
 - 层级是 TODO → 可选专项 → 可选项目。一个项目可含多个专项，一个专项可含多个 TODO；每个专项最多归属一个项目，每个 TODO 最多归属一个专项。
 - 专项可以独立存在，TODO 可以未归属专项；TODO 通过专项确定所属项目，不直接挂载项目。新建或调整归属时须验证目标存在。
@@ -31,7 +31,7 @@ flowchart TD
     T --> L[选择执行方式，进入原生发起界面]
     L --> E[提交执行并关联执行 ID]
     X[已有执行 ID] --> E
-    E --> R[后台读取执行结果，回写对应指派记录]
+    E --> R[打开页面时读取所属节点的执行结果]
     R --> U[用户查看结果并维护 TODO 看板状态]
     U --> G[按完成的 TODO 数汇总专项与项目进度]
 ```
@@ -40,33 +40,26 @@ flowchart TD
 2. 选择 Agent、Operator、Team、DAG 工作流、TODO 工作流或 Brain，进入对应原生界面。TODO 标题和说明预填为可修改的任务输入；具体执行对象、计划及参数在原生界面确定。
 3. 用户提交后，将返回的执行 ID 关联到 TODO；也可直接粘贴已有执行 ID。关联接口只接受实际存在且属于上述六种类型的执行。
 4. 同一 TODO 重复关联同一执行须幂等，不产生重复记录，也不覆盖已有结论。执行已创建但关联失败时保留 ID，允许重试关联，不能为补关联再次创建执行。
-5. 后台读取执行节点上的结果，写入对应指派记录；用户可按执行 ID 打开原生明细，并据结果决定后续工作和看板状态。
+5. 通过 `GET /api/executions/:id/result` 按需读取所属节点上的结论；用户可按执行 ID 打开原生明细，并据结果维护看板状态。Server 不保存另一份结果。
 
-指派历史必须保留各次执行的类型、名称、ID、状态和结论；新的指派不能覆盖旧指派。TODO 抽屉展示指派历史及最新指派已有的结论，旧结论仍可从各自记录查看。
+指派历史保留各次执行的类型、名称、ID 与能力 ID；新的指派不能覆盖旧指派。TODO 抽屉按原执行 ID 读取状态和结论，历史执行保留所属节点和 Runtime。
 
-## 看板状态、执行状态与回写状态
+## 看板状态与执行结果
 
-三种状态分别维护，不能相互替代：
+- TODO 看板状态由用户编辑或拖动；执行状态由原生执行系统维护。执行成功、结束或读取到结论均不能自动将 TODO 标为完成。
+- 看板列固定为 `backlog`、`todo`、`in_progress`、`done`。旧 `ProjectTodoStatus` 属于历史执行路径，不能用于计算当前看板进度。
+- 执行关联只保存引用，不保存 `result_md`、`sync_state`、收集断点或重收集任务。重复关联同一执行须幂等；解除关联不取消执行。
+- 用户从能力库选择实际能力 ID，以稳定执行 ID 调用 `POST /api/project/todos/:id/dispatch`。回复丢失时重试同一请求，不能重新创建执行。
+- Operator 能力复用已经注册的执行引用、原会话和原所属节点；不从 capability 输入拼装新的独立 Operator。
 
-| 状态 | 含义 | 更新来源 |
-|------|------|----------|
-| TODO 看板状态 `board_status` | 这件任务目前推进到哪一步 | 用户编辑或拖动 |
-| 执行状态 | 某一次执行正在等待、运行、结束、失败或取消 | 对应执行系统 |
-| 关联的 `sync_state` | 该次执行的结论是否已收集 | 后台同步 |
+## 结论读取
 
-- 看板列固定为 `backlog` 待整理、`todo` 待办、`in_progress` 进行中、`done` 已完成。允许调整列和列内顺序，不由执行回执自动移动卡片。
-- 执行成功、执行结束或结论回写都不能自动将 TODO 标为已完成；“结论已回写”只代表取得了非空结果，不代表任务通过验收。
-- 同步状态区分 `pending` 待结论、`complete` 已回写、`empty` 已结束但无结论、`error` 执行失败和 `cancelled` 已取消。不能以空字符串、占位提示或读取失败冒充结论。
-- 回写只更新对应的执行关联记录，不覆盖 TODO 的任务说明、旧计划字段或看板列。节点查询失败保留待同步状态，后续继续尝试；概览中的已保存任务不因节点不可读而消失或改状态。
-- 原生执行明细由执行 ID 和所属节点定位；不能由项目页面另造一份执行状态机。运行中的 Team 可通过原生详情提交引导。
-- 数据中旧 `ProjectTodoStatus` 的 `draft/planned/running/done/failed` 属于旧项目执行路径；当前看板、进度和用户状态编辑以 `board_status` 为准。
-
-## 结论来源
-
-- Agent、Operator 使用节点保存的助手输出正文；Team 使用最终总结；TODO 工作流汇总各任务候选结果；DAG 读取步骤输出；Brain 使用调度运行结果。
-- Agent、Operator 在已有可读输出的 `Idle` 状态也可回写；其他类型按执行完成状态收集。不能把仍未完成的中间输出写成最终结论。
-- 执行结束与产物可读之间允许等待；最终没有结论、执行失败和取消须分别展示，读取错误须可见且可重试。
-- 结论存于各条 TODO 与执行的关联记录；完整过程和产物仍由原生执行系统提供。解除关联只移除该条关联，不发送取消执行命令。
+- Agent、Operator 读取助手输出；Team 读取最终总结；TODO 工作流读取各任务候选结果；Brain 读取调度总结；DAG 从原生步骤和产物接口读取全部步骤（最多 64 个）。
+- 结果接口保持 `execution_id`、`kind`、`node_id`、`status`、`summary`、`truncated`、`omitted`、`error`、`steps`；展示摘要最多 64 KiB，完整结果仍从执行详情读取。
+- 详情省略长字段时，向所属节点按版本和偏移读取。校验版本、字段、块长度与结束标记；版本改变、读取失败或源过大时明确返回错误，不能冒充空结论或展示部分成功。
+- Host 与独立 Worker 共用版本化结果读取器；读取旧 Runtime 的保存结果不能迁移、改写或启动原执行。先升级有关 Host／Worker，再使用严格校验的 Server。
+- 节点离线或读取失败时展示错误及重试入口，清除当前页面中的旧结果；Server 不提供离线结论缓存或重收集接口。
+- 原生明细复用执行 ID、会话、事件及引导入口。正在运行的 Team 可通过原生详情提交引导。
 
 ## 进度计算
 
@@ -102,7 +95,7 @@ flowchart TD
 - 旧 `ProjectService` 的 plan/execute 路径与历史记录仍有独立实现，当前项目页面不提供旧的专属计划、执行或回放入口；维护时不能把旧路径的状态规则套到看板指派链路。
 - 项目业务数据通过 `ProjectStore` 持久化；关系投影、进度、标签选择与重匹配使用纯函数，API、UI 和执行回写复用相同规则。
 
-代码入口：[数据定义](../crates/store/src/project_types.rs)、[存储接缝](../crates/store/src/project.rs)、[概览与进度](../crates/store/src/project/overview.rs)、[标签规则](../crates/store/src/project/tags.rs)、[原生执行入口](../crates/web/spa/src/project/execute/launcher.jsx)、[执行关联](../crates/control/src/api/project_links.rs)、[结论同步](../crates/control/src/scheduler/project_assignments.rs)。
+代码入口：[数据定义](../crates/store/src/project_types.rs)、[存储接缝](../crates/store/src/project.rs)、[概览与进度](../crates/store/src/project/overview.rs)、[标签规则](../crates/store/src/project/tags.rs)、[原生执行入口](../crates/web/spa/src/project/execute/launcher.jsx)、[执行关联](../crates/control/src/api/project_links.rs)、[原生结论读取](../crates/control/src/api/executions/results/mod.rs)。
 
 ## 变更验收
 

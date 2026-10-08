@@ -1,0 +1,52 @@
+.graph-workspace { min-height: 0; }
+.graph-workspace > .ant-card, .graph-workspace > .ant-card > .ant-card-body { height: 100%; }
+.graph-workspace > .ant-card > .ant-card-body { display: flex; flex-direction: column; padding: 12px; min-height: 0; }
+.graph-workspace .ant-tabs { flex: 1; min-height: 0; }
+.graph-workspace .ant-tabs-body-holder { min-height: 0; flex: 1; }
+.graph-workspace .ant-tabs-body, .graph-workspace [role="tabpanel"] { height: 100%; }
+.graph-workspace [role="tabpanel"][aria-hidden="false"] { display: flex; flex-direction: column; min-height: 0; }
+.graph-workspace .ant-tabs-nav { margin-bottom: 8px; flex-shrink: 0; }
+.graph-filters { flex-shrink: 0; margin-bottom: 8px; }
+.graph-filter-summary { display: flex; align-items: center; gap: 12px; }
+.graph-filter-summary > .ant-typography { flex: 1; min-width: 0; }
+.graph-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.graph-filter-grid .ant-form-item { margin-bottom: 0; min-width: 0; }
+.graph-filter-grid .ant-form-item-label { padding-bottom: 4px; }
+.graph-filter-grid .ant-select { width: 100%; }
+.graph-hops { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.graph-aspect-header { display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-bottom: 8px; }
+.graph-aspect-header > .ant-select { width: 220px; max-width: 100%; }
+.graph-aspect-header .graph-filters { flex: 1; min-width: 0; margin-bottom: 0; }
+.graph-surface { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; overflow: hidden; }
+.graph-surface-expanded { position: fixed; inset: 0; z-index: 999; padding: 16px; }
+.graph-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; padding: 4px 0 8px; flex-shrink: 0; }
+.graph-toolbar-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.graph-result-summary { display: flex; gap: 8px; align-items: center; min-width: 0; flex: 1; }
+.graph-result-summary > .ant-typography { min-width: 0; }
+.graph-node-search { width: 160px; }
+.graph-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: 8px; }
+.graph-viewport > .graph-renderer { position: absolute; inset: 0; }
+.graph-viewport .graph-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.graph-surface .ant-alert { flex-shrink: 0; margin-bottom: 8px; }
+.graph-result-list { flex: 1; min-height: 0; overflow: auto; }
+.graph-node { display: flex; flex-direction: column; justify-content: center; gap: 6px; width: 100%; height: 100%; padding: 10px 12px; border: 1px solid; border-radius: 8px; text-align: left; cursor: pointer; box-sizing: border-box; }
+.graph-node-title { font-size: 14px; line-height: 20px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.graph-node-type { font-size: 12px; line-height: 16px; display: flex; align-items: center; justify-content: space-between; }
+.graph-node-expand { font-size: 11px; line-height: 14px; }
+.graph-node:focus-visible { outline: 3px solid #1677ff; outline-offset: 3px; }
+@media (max-width: 1200px) { .graph-toolbar { align-items: stretch; } .graph-result-summary { flex-basis: 100%; } }
+@media (max-width: 767px) {
+  .graph-workspace > .ant-card > .ant-card-body { padding: 8px; }
+  .graph-aspect-header { flex-wrap: wrap; }
+  .graph-aspect-header > .ant-select { width: 180px; flex: 1; }
+  .graph-aspect-header .graph-filters { flex-basis: 100%; }
+  .graph-aspect-header .ant-btn { padding-inline: 8px; }
+  .graph-filter-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .graph-toolbar-actions { width: 100%; flex-wrap: nowrap; gap: 4px; }
+  .graph-node-search { flex: 1; min-width: 0; width: auto; }
+  .graph-result-summary { flex-wrap: wrap; }
+  .graph-result-summary > .ant-typography { font-size: 12px; flex: 1; }
+  .graph-surface-expanded { padding: 8px; }
+  .graph-workspace .ant-tabs-nav { margin-bottom: 6px; }
+  .graph-workspace .ant-tabs-tab { padding-block: 8px; }
+}

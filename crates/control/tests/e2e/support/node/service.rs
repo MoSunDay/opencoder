@@ -163,11 +163,19 @@ impl NodeService for MockNode {
                 .get(&(request.execution.id.clone(), request.seq))
                 .cloned()
                 .unwrap_or_else(|| miss404("event payload not found")),
-            NodeOperation::DetailField { request } => t
-                .fields
-                .get(&(request.execution.id.clone(), request.field.clone()))
-                .cloned()
-                .unwrap_or_else(|| miss404("detail field not found")),
+            NodeOperation::DetailField { request } => {
+                let key = (request.execution.id.clone(), request.field.clone());
+                t.field_reads.push(request.offset);
+                if let Some(reply) = t.field_failures.remove(&(request.execution.id.clone(), request.field.clone(), request.offset)) { return reply; }
+                if let Some(bytes) = t.field_bytes.get(&key) {
+                    use base64::Engine;
+                    let offset = request.offset as usize;
+                    if offset > bytes.len() { return RpcReply::error(400, "offset out of range"); }
+                    let next = bytes.len().min(offset + CHUNK);
+                    return RpcReply::ok(json!({"field":request.field,"offset":offset,"next_offset":next,"total_bytes":bytes.len(),"eof":next == bytes.len(),"encoding":"json-base64","bytes_b64":base64::engine::general_purpose::STANDARD.encode(&bytes[offset..next]),"version":opencoder_core::token_hash(std::str::from_utf8(bytes).unwrap())}));
+                }
+                t.fields.get(&key).cloned().unwrap_or_else(|| miss404("detail field not found"))
+            }
             NodeOperation::Messages { execution, .. } => t
                 .messages
                 .get(&execution.id)
@@ -218,7 +226,7 @@ impl NodeService for MockNode {
                     .collect();
                 RpcReply::ok(json!({"events":rows,"finished":finished,"more":more,"head_seq":0}))
             }
-            NodeOperation::DagSteps { .. } => miss404("dag execution not found"),
+            NodeOperation::DagSteps { execution, step } => t.dag_steps.get(&(execution.id, step.unwrap_or_default())).cloned().unwrap_or_else(|| miss404("dag execution not found")),
             NodeOperation::DagStepEvents {
                 execution,
                 step,

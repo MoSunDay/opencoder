@@ -1,0 +1,9 @@
+.entity-detail-body { flex: 1; min-height: 0; overflow: auto; overflow-wrap: anywhere; }
+.entity-text-preview { overflow-wrap: anywhere; }
+.entity-text-preview pre { overflow: auto; }
+.entity-text-preview img { max-width: 100%; }
+.entity-text-preview table { display: block; overflow: auto; max-width: 100%; }
+.entity-html-preview { display: block; width: 100%; height: 320px; border: 1px solid #f0f0f0; border-radius: 6px; background: white; }
+.entity-editor-actions { position: sticky; bottom: 0; background: var(--ant-color-bg-container, #fff); padding: 8px 0; z-index: 1; width: 100%; }
+.entity-detail-body a, .entity-detail-body .ant-typography { overflow-wrap: anywhere; }
+@media (max-width: 575px) { .ant-drawer-body .ant-tabs-tab { padding-inline: 0; margin-inline-start: 12px !important; } .ant-drawer-body { padding-inline: 16px; } }

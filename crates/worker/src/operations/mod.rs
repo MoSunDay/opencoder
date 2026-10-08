@@ -83,18 +83,16 @@ async fn validate_reference(worker: &Worker, execution: &ExecutionRef) -> Result
     if !valid_id(&execution.id) {
         return Ok(Some(RpcReply::error(400, "invalid execution id")));
     }
-    if let Some(record) = worker
+    if let Some((index_kind, request_kind)) = worker
         .inner
         .journal
         .lock()
         .await
         .records
         .get(&execution.id)
-        .cloned()
+        .map(|record| (record.assignment.index.kind, record.assignment.request.kind))
     {
-        if record.assignment.index.kind != execution.kind
-            || record.assignment.request.kind != execution.kind
-        {
+        if index_kind != execution.kind || request_kind != execution.kind {
             return Ok(Some(RpcReply::error(409, "execution kind mismatch")));
         }
         return Ok(None);

@@ -56,6 +56,10 @@ beforeEach(() => {
     if (String(path).startsWith('/api/dag/runs')) {
       return jsonResponse(RUNS);
     }
+    if (path === '/api/nodes') return jsonResponse({ nodes: [{
+      id: 'node-1', name: 'worker-a', online: true, kinds: ['dag'],
+      snapshot: { ready: true, active_agent_loops: 0, cpu_capacity: 4 },
+    }] });
     return jsonResponse({});
   });
   apiPostMock.mockReset().mockResolvedValue({ run_id: 'run-new12345678' });
@@ -102,7 +106,8 @@ describe('DefsTab', () => {
     expect(onDispatched).toHaveBeenCalledWith('run-new12345678');
   });
 
-  it('dispatch pins a node picked from the fleet snapshot', async () => {
+  it('loads dispatch nodes without first visiting the fleet page', async () => {
+    setNodes([]);
     render(<DefsTab onNotice={vi.fn()} onDispatched={vi.fn()} />);
     fireEvent.click((await screen.findAllByText('派发'))[0]);
     expect(await screen.findByText(/整个工作流会在同一个节点完成/)).toBeTruthy();
@@ -119,6 +124,15 @@ describe('DefsTab', () => {
     await waitFor(() =>
       expect(apiPostMock).toHaveBeenCalledWith('/api/dag/defs/dag-etl/dispatch', { id: expect.stringMatching(/^dag-/), node_id: 'node-1' }),
     );
+    expect(apiGetMock).toHaveBeenCalledWith('/api/nodes');
+  });
+
+  it('shows node fetch failures in the dispatch drawer', async () => {
+    apiGetMock.mockImplementation((path) => path === '/api/nodes'
+      ? Promise.reject(new Error('connection lost')) : jsonResponse(DEFS));
+    render(<DefsTab onNotice={vi.fn()} />);
+    fireEvent.click((await screen.findAllByText('派发'))[0]);
+    expect(await screen.findByText('获取节点失败: connection lost')).toBeTruthy();
   });
 
   it('deletes a def through the confirm popover', async () => {

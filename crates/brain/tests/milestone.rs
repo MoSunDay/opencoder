@@ -311,3 +311,34 @@ fn resumed_decision_receives_exact_assessment_keys_and_previous_rejection() {
     assert_eq!(completed.run.phase, LayeredPhase::Completed);
     assert!(completed.run.error.is_none());
 }
+
+#[test]
+fn decision_context_maps_layer_ids_to_one_based_targets() {
+    let req = request();
+    let mut initial = snap(initialize("brain-layer-numbers", &req, 1).unwrap());
+    initial.run.phase = LayeredPhase::Deciding;
+    let context = layer_context(&initial, &req, &catalog(), Default::default(), None).unwrap();
+    let prompt: serde_json::Value = serde_json::from_str(&instruction(&context).unwrap()).unwrap();
+    assert_eq!(prompt["run"]["layer"], 0);
+    let expected: Vec<_> = req
+        .plan
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(index, layer)| json!({"layer":index + 1,"layer_id":layer.layer_id}))
+        .collect();
+    assert_eq!(prompt["layer_numbers"], json!(expected));
+    let mut invalid = proposal(&initial, &req, 1);
+    if let LayeredDecision::DispatchLayer { layer, .. } = &mut invalid {
+        *layer = 0;
+    }
+    let error = decide(&initial, &req, &catalog(), &invalid, 2)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("1-based integer in 1..=2"), "{error}");
+    assert!(
+        error.contains("layer 0 is only the initial run state"),
+        "{error}"
+    );
+    assert!(decide(&initial, &req, &catalog(), &proposal(&initial, &req, 1), 2).is_ok());
+}

@@ -43,7 +43,6 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 - 「连线模式点击两个步骤建立依赖并保存」连 `review→fetch`——与既有 `fetch→review` 边成环被 `canConnect` 拒绝，用例必红；
 - 「连线模式拒绝成环依赖且不改 spec」连 `fetch→review` 只会命中「依赖已存在」，其 `不能形成循环依赖` 断言靠上一用例残留的 message DOM 假绿。
 
-本提交把用例 1 改为连到新添加的 wasm 步骤（先补 command 过校验），用例 2 改为 `review→fetch` 真成环方向，两用例断言自此真实成立；并重建 `dist/static/{app.js,app.css}`（30108c8b 收编的 dist 与 src 存在 DRIFT，重建后 no drift）。
 
 ## 验证
 

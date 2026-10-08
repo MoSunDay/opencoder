@@ -123,8 +123,8 @@ def provision(bundle, model_config, source_rootfs, root, port_base):
     incompatible_binary = state / 'releases' / record['id'] / 'bundle/bin/opencoder-agent'
     incompatible_command = [incompatible_binary, '--remote', settings.public_url,
         '--token-file', token, '--name', suffix + '-incompatible', '--workdir', agent_workdir,
-        '--data-dir', incompatible_data, '--max-runs', 1, '--no-brain', 'host',
-        '--port', port + 7]
+        '--data-dir', incompatible_data, '--max-runs', 1, 'host',
+        '--port', port + 7, '--no-brain']
     incompatible_content = units.service(incompatible_command, incompatible_unit, workdir=agent_workdir)
     incompatible_content = incompatible_content.replace('Type=simple',
         'Type=simple\nEnvironment="HOME=' + str(root / 'home') + '"\nEnvironment="PATH=/root/.local/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"')

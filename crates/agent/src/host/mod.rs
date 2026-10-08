@@ -38,6 +38,7 @@ pub struct Host {
 }
 
 impl Host {
+    #[cfg(test)]
     pub async fn open(
         data: &Path,
         name: String,

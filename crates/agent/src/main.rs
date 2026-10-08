@@ -60,9 +60,6 @@ struct Args {
     /// Do not accept DAG workflows on this node.
     #[arg(long)]
     no_dag: bool,
-    /// Do not advertise Brain scheduling support (host fixtures and special-purpose nodes).
-    #[arg(long)]
-    no_brain: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -73,6 +70,9 @@ enum AgentCommand {
         port: u16,
         #[arg(long)]
         standby: bool,
+        /// Do not advertise Brain scheduling support on this Host.
+        #[arg(long)]
+        no_brain: bool,
     },
     /// Serve a version-isolated execution runtime on loopback.
     Runtime {
@@ -324,7 +324,12 @@ async fn run(args: Args) -> Result<()> {
             .unwrap_or_else(|_| "opencoder-agent".into())
     });
 
-    if let Some(AgentCommand::Host { port, standby }) = args.command {
+    if let Some(AgentCommand::Host {
+        port,
+        standby,
+        no_brain,
+    }) = args.command
+    {
         let host = host::Host::open_with_brain(
             &data_dir,
             name,
@@ -332,7 +337,7 @@ async fn run(args: Args) -> Result<()> {
             args.max_runs
                 .unwrap_or_else(|| opencoder_node::fleet::cpu::capacity().ceil() as usize)
                 .max(1),
-            !args.no_brain,
+            !no_brain,
         )
         .await?;
         return host::run(
@@ -414,7 +419,8 @@ mod tests {
             host.command,
             Some(AgentCommand::Host {
                 port: 19002,
-                standby: true
+                standby: true,
+                no_brain: false
             })
         ));
         let runtime = Args::try_parse_from([
@@ -432,6 +438,25 @@ mod tests {
             Some(AgentCommand::Runtime { port: 19001 })
         ));
         assert!(Args::try_parse_from(["opencoder-agent", "host", "--port", "65536"]).is_err());
+    }
+
+    #[test]
+    fn brain_opt_out_is_explicit_and_limited_to_host_mode() {
+        let host =
+            Args::try_parse_from(["opencoder-agent", "host", "--port", "19002", "--no-brain"])
+                .unwrap();
+        assert!(matches!(
+            host.command,
+            Some(AgentCommand::Host { no_brain: true, .. })
+        ));
+        assert!(Args::try_parse_from([
+            "opencoder-agent",
+            "runtime",
+            "--port",
+            "19001",
+            "--no-brain",
+        ])
+        .is_err());
     }
 
     #[test]

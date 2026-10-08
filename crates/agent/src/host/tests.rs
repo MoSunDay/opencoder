@@ -16,6 +16,32 @@ mod read_reports;
 #[path = "tests/runtime_lifecycle.rs"]
 mod runtime_lifecycle;
 
+#[tokio::test]
+async fn brain_opt_out_does_not_make_an_empty_host_schedulable() {
+    let root = tempfile::tempdir().unwrap();
+    let default = Host::open(
+        &root.path().join("default"),
+        "default".into(),
+        "test".into(),
+        1,
+    )
+    .await
+    .unwrap();
+    assert!(default.registration.kinds.contains(&ExecutionKind::Brain));
+    let disabled = Host::open_with_brain(
+        &root.path().join("disabled"),
+        "disabled".into(),
+        "test".into(),
+        1,
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(!disabled.registration.kinds.contains(&ExecutionKind::Brain));
+    assert!(!disabled.snapshot().ready);
+    assert!(disabled.active_runtime().await.is_err());
+}
+
 struct HeldModel {
     entered: AtomicUsize,
     release: Arc<tokio::sync::Notify>,

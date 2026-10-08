@@ -30,7 +30,7 @@ impl Default for DrainPolicy {
 pub struct WorkerRuntime {
     pub drain: DrainPolicy,
     pub health: HealthReader,
-    pub mount_health: crate::resources::probe::MountHealthReader,
+    pub mount_health: crate::resource_probe::MountHealthReader,
 }
 
 impl Default for WorkerRuntime {

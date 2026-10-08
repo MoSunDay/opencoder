@@ -7,8 +7,10 @@ mod lifecycle;
 mod migration;
 mod migration_io;
 mod operations;
+#[path = "resources/probe.rs"]
+mod resource_probe;
 mod resources;
-pub use resources::probe::MountHealthReader;
+pub use resource_probe::MountHealthReader;
 pub use resources::requires_agent_pool;
 mod runtime;
 mod service;

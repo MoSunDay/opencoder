@@ -63,7 +63,8 @@ async function main() {
     await page.mouse.move(target.x + target.width / 2, target.y + Math.min(target.height / 2, 70), { steps: 18 }); await page.mouse.up();
     return response;
   }
-  const errors = []; page.on('pageerror', (error) => { errors.push(error.message); console.error('PAGE ERROR', error.stack); });
+  const errors = []; const fullscreenDrawers = [];
+  page.on('pageerror', (error) => { errors.push(error.message); console.error('PAGE ERROR', error.stack); });
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'fixture-token'));
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: 'networkidle' });
@@ -90,6 +91,32 @@ async function main() {
     await project.getByRole('button', { name: '专项浏览器验收' }).click();
     const board = page.getByRole('dialog', { name: '专项 · 专项浏览器验收' });
     await board.getByRole('button', { name: '拖动 可拖动任务', exact: true }).waitFor();
+    async function verifyFullscreen(drawer, kind, width) {
+      await page.waitForFunction((title) => {
+        const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.getAttribute('aria-labelledby') && document.getElementById(item.getAttribute('aria-labelledby'))?.textContent === title);
+        if (!dialog) return false;
+        const bounds = dialog.getBoundingClientRect();
+        return Math.abs(bounds.left) < 1 && Math.abs(bounds.width - innerWidth) < 1;
+      }, kind === 'initiative' ? '专项 · 专项浏览器验收' : 'TODO · 可拖动任务');
+      const bounds = await drawer.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      });
+      assert(Math.abs(bounds.x) <= 1 && Math.abs(bounds.y) <= 1 && Math.abs(bounds.width - width) <= 1 && Math.abs(bounds.height - 1000) <= 1, `${kind} fullscreen ${width}: ${JSON.stringify(bounds)}`);
+      fullscreenDrawers.push({ kind, viewport: { width, height: 1000 }, bounds });
+      await page.screenshot({ path: path.join(out, `${kind}-fullscreen-${width}.png`), animations: 'disabled' });
+    }
+    for (const width of [1920, 1280, 768, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await verifyFullscreen(board, 'initiative', width);
+      await board.getByRole('button', { name: '可拖动任务', exact: true }).click();
+      const todoDetail = page.getByRole('dialog', { name: 'TODO · 可拖动任务' });
+      await verifyFullscreen(todoDetail, 'todo', width);
+      await todoDetail.locator('.ant-drawer-close').click();
+      await todoDetail.waitFor({ state: 'hidden' });
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    console.log('PASS fullscreen initiative and TODO drawers');
     await board.getByLabel('搜索专项 TODO', { exact: true }).fill('任务');
     await board.getByRole('combobox', { name: '筛选 Tag', exact: true }).click();
     await page.locator('.ant-select-item-option-content').getByText('模块', { exact: true }).click();
@@ -159,7 +186,7 @@ async function main() {
     await page.getByRole('dialog', { name: '删除该项目？' }).getByRole('button', { name: /确.*定/ }).click();
     await page.getByRole('button', { name: 'CRUD 已修改项目', exact: true }).waitFor({ state: 'hidden' });
     assert.deepEqual(errors, []);
-    const receipt = { result: 'PASS', screenshots: out, widths: [1920, 1280, 768, 390], filtered_drag: move.body, grouped_cards: true, grouped_move_sync: true, failed_save_rollback: true, scope_precedence: true, tag_crud: true, project_crud: true, page_errors: errors };
+    const receipt = { result: 'PASS', screenshots: out, widths: [1920, 1280, 768, 390], fullscreen_drawers: fullscreenDrawers, filtered_drag: move.body, grouped_cards: true, grouped_move_sync: true, failed_save_rollback: true, scope_precedence: true, tag_crud: true, project_crud: true, page_errors: errors };
     await writeFile(path.join(out, 'receipt.json'), JSON.stringify(receipt, null, 2));
     console.log(JSON.stringify(receipt));
   } catch (error) {

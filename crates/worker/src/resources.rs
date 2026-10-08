@@ -8,11 +8,17 @@ use std::path::PathBuf;
 
 pub(crate) use opencoder_agents::snapshot::{pin, pin_selected};
 
-/// native-only DAGs have no Agent resource dependency. Their modules are pinned
-/// separately; copying every prompt, skill and tool would block admission on
-/// unrelated files. Unknown definitions and declared agent pins fail closed.
+/// Finite Brain decisions use frozen control evidence and no Agent tools.
+/// Native-only DAG modules are pinned separately. Neither execution needs the
+/// Agent pool; unknown definitions and declared Agent pins fail closed.
 pub fn requires_agent_pool(assignment: &opencoder_core::fleet::Assignment) -> bool {
     use opencoder_core::fleet::ExecutionKind;
+    if assignment.request.kind == ExecutionKind::Brain
+        && assignment.request.input["schema_version"]
+            == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION
+    {
+        return false;
+    }
     if assignment.request.kind != ExecutionKind::Dag
         || assignment.request.input["_brain"]["action"]["agent_manifests"]
             .as_object()

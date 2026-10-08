@@ -15,6 +15,26 @@ from guidance import real
 
 
 class GuidanceGateTests(unittest.TestCase):
+    def test_admission_timeout_is_preserved_when_children_are_not_created(self):
+        operations = [{'run_id': 'owned', 'execution_kind': kind,
+                       'execution_id': kind + '-pending', 'node_id': kind, 'status': 'creating'}
+                      for kind in gates.KINDS]
+        env = SimpleNamespace(node_id='local', tag='owned', created=['owned'],
+            api=Mock(return_value={'max_runs': 5}), create=Mock(return_value='owned'),
+            wait=Mock(side_effect=TimeoutError('all four guidance targets admitted timed out')),
+            view=Mock(return_value={'operations': operations}),
+            execution_data=Mock(side_effect=AssertionError('execution not found')))
+        with self.assertRaisesRegex(TimeoutError, 'all four guidance targets admitted timed out'):
+            real.run(env, {'hold': 'held-dag'})
+        env.execution_data.assert_not_called()
+
+    def test_cleanup_does_not_touch_terminal_child_workspaces(self):
+        env = SimpleNamespace(execution_data=Mock(side_effect=AssertionError('terminal workspace accessed')))
+        gates.release(env, {'operations': [
+            {'execution_kind': kind, 'status': status}
+            for kind in gates.KINDS for status in ('creating', 'done', 'error', 'cancelled')]})
+        env.execution_data.assert_not_called()
+
     def test_old_or_missing_delivery_receipt_cannot_release_current_guidance(self):
         with tempfile.TemporaryDirectory() as directory:
             env = SimpleNamespace(created=['owned'], record={'runtime_data': directory})

@@ -115,10 +115,20 @@ fn run() -> Result<(), i32> {
     write_session_json(&step_dir, &session, "running", None)?;
 
     // 5. Run exactly one turn, keeping a bounded transcript tail.
-    let file = std::fs::File::create(step_dir.join("events.ndjson")).map_err(|e| {
-        eprintln!("agent-step-runner: cannot create event stream: {e}");
+    // A retry owns a new stream; never truncate a file the host may still read.
+    let events_dir = step_dir.join("agent-events");
+    std::fs::create_dir_all(&events_dir).map_err(|e| {
+        eprintln!("agent-step-runner: cannot create event directory: {e}");
         2
     })?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(events_dir.join(format!("{session_id}.ndjson")))
+        .map_err(|e| {
+            eprintln!("agent-step-runner: cannot create event stream: {e}");
+            2
+        })?;
     let events = Arc::new(Mutex::new(file));
     let event_error = Arc::new(Mutex::new(None));
     let failure = event_error.clone();

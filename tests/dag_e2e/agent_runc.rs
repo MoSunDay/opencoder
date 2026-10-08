@@ -196,3 +196,101 @@ fn agent_step_session_runs_inside_runc_container() {
         "knowledge mount must be read-only: {knowledge_mount}"
     );
 }
+
+#[test]
+fn event_stream_failure_is_resumable_and_retry_preserves_old_streams() {
+    if !runc_available() {
+        eprintln!("SKIP: runc unavailable");
+        return;
+    }
+    let stub = LlmStub::spawn(vec![
+        Script::Hold,
+        Script::Text("Recovered.\n```json\n{\"verdict\":\"recovered\"}\n```".into()),
+    ]);
+    let tmp = tempfile::tempdir().unwrap();
+    let fleet = Fleet::spawn_native(tmp.path(), stub.port(), json!({}), "event-retry-node");
+    let definition = "e2e-event-retry";
+    let run = "dag-e2e-event-retry";
+    let (status, body) = fleet.http(
+        "POST",
+        "/api/dag/defs",
+        &json!({"spec": {
+            "name": definition,
+            "steps": [{"name": STEP, "kind": {"type": "agent", "prompt": "Return a verdict"}}]
+        }}),
+    );
+    assert_eq!(status, 200, "save: {body}");
+    let (status, body) = fleet.http(
+        "POST",
+        &format!("/api/dag/defs/{definition}/dispatch"),
+        &json!({"id": run}),
+    );
+    assert_eq!(status, 202, "dispatch: {body}");
+    stub.wait_until_entered();
+    let root = fleet.run_root(run);
+    let guest_step = root.join("workspace").join(STEP);
+    let first_session = read_json(&guest_step.join("session.json"));
+    let first_id = first_session["session_id"].as_str().unwrap();
+    let first_events = guest_step
+        .join("agent-events")
+        .join(format!("{first_id}.ndjson"));
+    // Inject an actual stream I/O contract failure while the container is alive.
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&first_events)
+        .unwrap()
+        .write_all(b"invalid-event\n")
+        .unwrap();
+    let failed = fleet.wait_terminal(run);
+    stub.release();
+    assert_eq!(
+        failed["execution"]["status"], "error",
+        "internal failure must not cancel the run: {failed}"
+    );
+    let meta = read_json(&root.join(STEP).join("meta.json"));
+    assert!(
+        meta["error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid container event"),
+        "{meta}"
+    );
+    // The merged workspace is unmounted at terminal state; inspect retained upper files.
+    let guest_step = root.join("upper").join(STEP);
+    let first_events = guest_step
+        .join("agent-events")
+        .join(format!("{first_id}.ndjson"));
+    let old_bytes = std::fs::read(&first_events).unwrap();
+    let legacy = guest_step.join("events.ndjson");
+    std::fs::write(&legacy, b"old-attempt-truncated-event\n").unwrap();
+    let (status, body) = fleet.http(
+        "POST",
+        &format!("/api/executions/{run}/commands"),
+        &json!({"action":"resume", "input":{}}),
+    );
+    assert_eq!(status, 200, "resume after event error: {body}");
+    let done = fleet.wait_terminal(run);
+    assert_eq!(done["execution"]["status"], "done", "retry: {done}");
+    let session = read_json(&guest_step.join("session.json"));
+    let new_id = session["session_id"].as_str().unwrap();
+    assert_ne!(first_id, new_id);
+    assert_eq!(std::fs::read(&first_events).unwrap(), old_bytes);
+    assert_eq!(
+        std::fs::read(&legacy).unwrap(),
+        b"old-attempt-truncated-event\n"
+    );
+    let events = read_text(
+        &guest_step
+            .join("agent-events")
+            .join(format!("{new_id}.ndjson")),
+    );
+    assert!(!events.is_empty());
+    for line in events.lines() {
+        serde_json::from_str::<Value>(line).expect("new session events are complete JSON");
+    }
+    assert_eq!(
+        read_json(&root.join(STEP).join("output.json"))["verdict"],
+        "recovered"
+    );
+}

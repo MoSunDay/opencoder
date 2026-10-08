@@ -62,7 +62,13 @@ async fn act_step_with_local_memory_uses_runner_skills_inside_the_container() {
         serde_json::from_slice(&std::fs::read(run_root.join("memory/output.json")).unwrap())
             .unwrap();
     assert_eq!(output, json!({"checked":true}));
-    let events = std::fs::read_to_string(written.join("events.ndjson")).unwrap();
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(run_root.join("memory/meta.json")).unwrap())
+            .unwrap();
+    let session = meta["session_id"].as_str().unwrap();
+    let events =
+        std::fs::read_to_string(written.join("agent-events").join(format!("{session}.ndjson")))
+            .unwrap();
     assert!(events.contains("local memory updated"), "{events}");
     assert!(!events.contains("skill is missing"), "{events}");
 }

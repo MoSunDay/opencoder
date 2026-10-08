@@ -48,6 +48,7 @@ fn parse_declarations(documents: &[(&str, Value)]) -> Result<Vec<(String, u64, S
                             | "output.json"
                             | "session.json"
                             | "events.ndjson"
+                            | "agent-events"
                             | "transcript.txt"
                             | "artifacts.json"
                     )
@@ -175,6 +176,7 @@ mod tests {
             "meta/program",
             "instances/0/output.json",
             "events.ndjson",
+            "agent-events/session.ndjson",
             "file\0",
             "a\\b",
         ] {

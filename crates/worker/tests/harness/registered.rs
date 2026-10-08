@@ -43,13 +43,16 @@ pub async fn verify(fleet: &Fleet) {
         let name = step["name"].as_str().unwrap();
         let dir = root.join(name);
         assert_eq!(read(&dir.join("output.json")), json!({"runc":true}));
-        assert_eq!(read(&dir.join("session.json"))["harness"], "codex");
+        let session = read(&dir.join("session.json"));
+        assert_eq!(session["harness"], "codex");
         let argv = std::fs::read_to_string(root.join("upper").join(name).join("argv.txt")).unwrap();
         assert!(argv.contains("employee-model"), "{argv}");
         assert!(
-            std::fs::read_to_string(root.join("upper").join(name).join("events.ndjson"))
-                .unwrap()
-                .contains("runc-tool-ok")
+            std::fs::read_to_string(root.join("upper").join(name).join("agent-events").join(
+                format!("{}.ndjson", session["session_id"].as_str().unwrap())
+            ))
+            .unwrap()
+            .contains("runc-tool-ok")
         );
     }
     assert!(root.join("bundle/config.json").is_file());

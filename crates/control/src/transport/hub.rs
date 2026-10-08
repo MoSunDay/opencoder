@@ -12,10 +12,16 @@ use super::SocketCommand;
 /// a successful operator/agent submission into a spurious 504.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CREATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+// The first artifact chunk verifies the entire file before returning bytes.
+// Large evidence archives can exceed the ordinary read deadline on busy nodes.
+const ARTIFACT_VERIFY_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn request_timeout(operation: &NodeOperation) -> Duration {
     match operation {
         NodeOperation::Create { .. } => CREATE_REQUEST_TIMEOUT,
+        NodeOperation::Artifact { request } if request.offset == 0 || request.version.is_none() => {
+            ARTIFACT_VERIFY_TIMEOUT
+        }
         NodeOperation::Brain { action, input, .. }
             if action == "capability_probe" && input["private_files"] == true =>
         {

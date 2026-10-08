@@ -147,6 +147,7 @@ pub struct SaveBody {
 pub struct SaveFile {
     pub path: String,
     pub content_b64: String,
+    pub mode: Option<u32>,
 }
 
 /// Decode + validate the whole request body before any filesystem work:
@@ -189,7 +190,11 @@ fn decode_files(cat: &str, body: &SaveBody) -> Result<(String, Vec<VersionFile>)
         files.push(VersionFile {
             rel_path: file.path.clone(),
             bytes,
+            mode: file.mode.unwrap_or(0o600),
         });
+    }
+    if files.iter().any(|file| file.mode & !0o777 != 0) {
+        return Err("resource mode must contain only rwx permission bits".into());
     }
     Ok((name, files))
 }
@@ -290,6 +295,22 @@ pub async fn meta(
     }
 }
 
+/// GET /api/agents/resources/:cat/:name/versions/:v — complete immutable file set.
+pub async fn version_files(
+    State(_state): State<Arc<AppState>>,
+    Path((cat, name, version)): Path<(String, String, u32)>,
+) -> Response {
+    if let Some(response) = unknown_category(&cat) {
+        return response;
+    }
+    match opencoder_agents::resources::version_files(&cat, &name, version) {
+        Ok(files) => {
+            Json(json!({"ok":true,"name":name,"version":version,"files":files})).into_response()
+        }
+        Err(error) => io_error_response("read resource version", error),
+    }
+}
+
 /// GET /api/agents/resources/:cat/:name/versions/:v/files/*path — one
 /// file's bytes from a pinned version (base64 round-trip).
 pub async fn read_file(
@@ -303,13 +324,20 @@ pub async fn read_file(
         return error_400(msg);
     }
     match opencoder_agents::resources::read_file(&cat, &name, version, &path) {
-        Ok(bytes) => Json(json!({
-            "ok": true,
-            "path": path,
-            "content_b64": B64.encode(&bytes),
-            "size": bytes.len(),
-        }))
-        .into_response(),
+        Ok(bytes) => {
+            let mode = match opencoder_agents::resources::file_mode(&cat, &name, version, &path) {
+                Ok(mode) => mode,
+                Err(error) => return io_error_response("read resource file mode", error),
+            };
+            Json(json!({
+                "ok": true,
+                "path": path,
+                "content_b64": B64.encode(&bytes),
+                "size": bytes.len(),
+                "mode": mode,
+            }))
+            .into_response()
+        }
         Err(e) => io_error_response("read resource file", e),
     }
 }

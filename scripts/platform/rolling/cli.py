@@ -2,7 +2,7 @@ import argparse
 import contextlib
 import json
 from pathlib import Path
-from . import backup, config, deployment, migration, maintenance
+from . import backup, config, deployment, migration, maintenance, resources
 from .io import Operations
 from .state import Journal, locked
 from signal_release import controller
@@ -23,9 +23,15 @@ def main():
     actions.add_argument("--status", action="store_true")
     actions.add_argument("--backup", type=Path, help="independent online database backups")
     actions.add_argument("--stage", action="store_true", help="verify and retain a candidate for a later SIGUSR2")
+    actions.add_argument("--resources-only", action="store_true", help="upgrade only the independent resource service")
+    parser.add_argument("--resource-nodes", nargs='+', help="exact consumer node IDs for a resource-only upgrade")
     args = parser.parse_args()
     if args.wait_seconds <= 0:
         parser.error("--wait-seconds must be positive")
+    if args.resources_only and (args.signal or args.maintenance or not args.resource_nodes):
+        parser.error('--resources-only requires --resource-nodes and cannot use --signal or --maintenance')
+    if args.resource_nodes and not args.resources_only:
+        parser.error('--resource-nodes requires --resources-only')
     if args.signal and (args.migrate or args.migration_receipt or args.backup or args.status or args.stage):
         parser.error("--signal supports deploy or --rollback only")
     if args.rollback and args.bundle:
@@ -44,7 +50,11 @@ def main():
     operations = Operations(settings.token_file)
     with controller.request_lock(settings) if args.signal or args.stage else contextlib.nullcontext():
         with locked(settings.state_dir):
-            if args.backup:
+            if args.resources_only:
+                if not args.bundle:
+                    parser.error('--bundle is required')
+                result = resources.deploy(settings, args.bundle, operations, args.resource_nodes)
+            elif args.backup:
                 backup.snapshot(settings, args.backup)
                 result = {"backup": str(args.backup), "cross_database_snapshot": False}
             elif args.rollback:

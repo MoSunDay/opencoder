@@ -16,7 +16,7 @@ export function InitiativeDrawer({ initiativeId, overview, refresh, onNotice, on
     try { await apiPatch(`/api/project/initiatives/${encodeURIComponent(initiativeId)}`, { ...values, goal_id: values.goal_id ?? null }); await refresh(); setEditing(false); onNotice(ok('专项已保存，TODO 标签已重新匹配')); return true; }
     catch (error) { onNotice(err(error.message)); return false; }
   };
-  return <Drawer open={!!initiativeId} title={`专项 · ${initiative?.title || ''}`} onClose={onClose} size="min(1200px, 100vw)" className="project-initiative-drawer">
+  return <Drawer open={!!initiativeId} title={`专项 · ${initiative?.title || ''}`} onClose={onClose} size="100vw" className="project-initiative-drawer">
     {initiative ? <Space orientation="vertical" size={18} style={{ width: '100%' }}>
       <Space wrap><Typography.Text type="secondary">所属项目：{initiative.goal_title || '独立专项'}</Typography.Text><Button onClick={() => setEditing(true)}>编辑专项</Button></Space>
       <Markdown text={initiative.detail_md} /><TodoProgress progress={progressOf(initiative.todos)} />

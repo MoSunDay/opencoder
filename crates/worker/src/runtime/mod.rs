@@ -31,6 +31,7 @@ impl Default for DrainPolicy {
 pub struct WorkerRuntime {
     pub drain: DrainPolicy,
     pub health: HealthReader,
+    pub mount_health: crate::resource_probe::MountHealthReader,
 }
 
 impl Default for WorkerRuntime {
@@ -38,6 +39,7 @@ impl Default for WorkerRuntime {
         Self {
             drain: DrainPolicy::default(),
             health: Arc::new(health::read_storage_capacity),
+            mount_health: Arc::new(crate::resources::check_mount),
         }
     }
 }

@@ -9,6 +9,7 @@ fn vf(rel: &str) -> VersionFile {
     VersionFile {
         rel_path: rel.into(),
         bytes: rel.as_bytes().to_vec(),
+        mode: 0o600,
     }
 }
 

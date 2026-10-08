@@ -115,6 +115,13 @@ enum DagCommand {
 enum StorageCommand {
     /// Copy legacy execution trees into the typed directory layout.
     MigrateLayout,
+    /// Fail one crashed Brain and settle its proven, stopped runtime capacity.
+    SettleBrainCrash {
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        receipt_dir: PathBuf,
+    },
 }
 
 /// Resolve an explicitly supplied worker credential without logging it.
@@ -272,13 +279,24 @@ async fn run(args: Args) -> Result<()> {
         .data_dir
         .clone()
         .unwrap_or_else(|| opencoder_core::data_dir_for(&workdir).join("node-v2"));
-    if matches!(
-        args.command,
-        Some(AgentCommand::Storage {
-            command: StorageCommand::MigrateLayout
-        })
-    ) {
-        return storage::migrate_layout(&data_dir, args.workflow_root.as_deref());
+    if let Some(AgentCommand::Storage { command }) = &args.command {
+        return match command {
+            StorageCommand::MigrateLayout => {
+                storage::migrate_layout(&data_dir, args.workflow_root.as_deref())
+            }
+            StorageCommand::SettleBrainCrash {
+                run_id,
+                receipt_dir,
+            } => {
+                storage::settle_brain_crash(
+                    &data_dir,
+                    args.workflow_root.as_deref(),
+                    run_id,
+                    receipt_dir,
+                )
+                .await
+            }
+        };
     }
 
     match args.command {
@@ -481,5 +499,42 @@ mod tests {
                 command: StorageCommand::MigrateLayout
             })
         ));
+    }
+
+    #[test]
+    fn brain_crash_settlement_requires_exact_run_and_receipt_directory() {
+        let command = [
+            "opencoder-agent",
+            "--data-dir",
+            "/tmp/runtime",
+            "storage",
+            "settle-brain-crash",
+        ];
+        assert!(Args::try_parse_from(command).is_err());
+        assert!(
+            Args::try_parse_from(command.into_iter().chain(["--run-id", "brain-owned"])).is_err()
+        );
+        let args = Args::try_parse_from(command.into_iter().chain([
+            "--run-id",
+            "brain-owned",
+            "--receipt-dir",
+            "/tmp/receipts",
+        ]))
+        .unwrap();
+        assert!(args.token.is_none() && args.remote.is_none());
+        assert_eq!(args.data_dir, Some(PathBuf::from("/tmp/runtime")));
+        match args.command {
+            Some(AgentCommand::Storage {
+                command:
+                    StorageCommand::SettleBrainCrash {
+                        run_id,
+                        receipt_dir,
+                    },
+            }) => {
+                assert_eq!(run_id, "brain-owned");
+                assert_eq!(receipt_dir, PathBuf::from("/tmp/receipts"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 }

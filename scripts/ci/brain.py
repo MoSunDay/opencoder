@@ -15,6 +15,8 @@ SUITES = {
     'project': ('opencoder-project', None, []),
     'milestone': ('opencoder-brain', 'milestone', []),
     'scheduler': ('opencoder-worker', 'brain_scheduler_v4', []),
+    'crash': ('opencoder-worker', 'brain_crash', []),
+    'capacity': ('opencoder-worker', 'brain_context_budget', []),
     'restart': ('opencoder-worker', 'brain_server_restart', []),
     'browser': ('opencoder-worker', 'brain_browser', [
         '--exact', 'schema_seven_canvas_parallel_return_and_execution_detail',

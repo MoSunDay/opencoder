@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn rejected_dispatch_keeps_diagnostics_and_replay_cannot_duplicate_the_failure() {
-    let (_scope, _home) = support::isolated_config();
+    let (_scope, _home) = support::isolated_brain_config();
     let directory = tempfile::tempdir().unwrap();
     let node = support::worker(directory.path(), Arc::new(client::LayeredClient::new())).await;
     let id = "brain-rejected-dispatch";
@@ -24,7 +24,7 @@ async fn rejected_dispatch_keeps_diagnostics_and_replay_cannot_duplicate_the_fai
                 &node,
                 id,
                 ExecutionKind::Brain,
-                json!({"schema_version":7,"layered_request":plan::request(id)}),
+                json!({"schema_version":7,"layered_request":plan::request(id),"frozen_capabilities":plan::catalog()}),
                 Some(json!({})),
             ),
         })

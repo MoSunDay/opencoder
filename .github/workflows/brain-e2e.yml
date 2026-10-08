@@ -74,7 +74,10 @@ jobs:
       - name: Milestone state machine
         run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" milestone
       - name: Worker scheduler
-        run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" scheduler
+        run: |
+          python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" scheduler
+          python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" crash
+          python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" capacity
       - name: Server restart and task continuity
         run: python3 scripts/ci/brain.py --output "$RUNNER_TEMP/brain-e2e" restart
       - name: Browser, API and execution detail acceptance

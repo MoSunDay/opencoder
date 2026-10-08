@@ -1,3 +1,4 @@
+use crate::runtime::crash::ProcessCrash;
 use crate::Worker;
 use anyhow::{ensure, Context, Result};
 use opencoder_core::{brain::layered::*, Config};
@@ -67,14 +68,47 @@ async fn activate_json<T: serde::de::DeserializeOwned>(
         .join(run_id)
         .join(generation.to_string());
     std::fs::create_dir_all(&activation)?;
+    for name in ["decision.json", "decision.error.json"] {
+        match std::fs::remove_file(activation.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
     private_json(&activation.join("context.json"), context)?;
     private_json(&activation.join("config.json"), config)?;
     write_bundle(&bundle, &activation, &cli)?;
     let id = format!("{run_id}-a{generation}");
-    let (code, output) =
-        opencoder_dag_runtime::sandbox::runc::run_step_cancellable(&bundle, &id, Some(300), cancel)
-            .await?;
-    ensure!(code == 0, "Brain container exited {code}: {output}");
+    let (code, output) = opencoder_dag_runtime::sandbox::runc::run_step_cancellable(
+        &bundle,
+        &id,
+        Some(300),
+        cancel.clone(),
+    )
+    .await?;
+    if code != 0 && !cancel.is_cancelled() {
+        let receipt = activation.join("decision.error.json");
+        if (1..128).contains(&code) && receipt.is_file() {
+            let bytes = std::fs::read(receipt)?;
+            ensure!(
+                bytes.len() <= 32 * 1024,
+                "activation error receipt exceeds limit"
+            );
+            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+            anyhow::bail!(
+                "{}",
+                value["error"]
+                    .as_str()
+                    .context("activation error receipt is invalid")?
+            );
+        }
+        return Err(ProcessCrash(format!(
+            "exit {code}: {}",
+            output.chars().take(1024).collect::<String>()
+        ))
+        .into());
+    }
+    ensure!(!cancel.is_cancelled(), "brain activation interrupted");
     let bytes = std::fs::read(activation.join("decision.json"))
         .context("activation omitted decision receipt")?;
     ensure!(

@@ -91,6 +91,27 @@ pub async fn run(
     }
     let _guard = gate.lock().await;
     let current = state::load(worker, id).await?;
+    // A real process crash ends the root even if newer human input has made
+    // the crashed process's context stale.
+    if let Err(error) = &decision {
+        if error.is::<crate::runtime::crash::ProcessCrash>() {
+            if let Some(change) = layered::fail(
+                &current,
+                format!("{error:#}; start a new Brain run"),
+                now_ms(),
+            ) {
+                let next = worker
+                    .inner
+                    .state
+                    .store
+                    .commit_brain_layered(&change)
+                    .await?;
+                state::annotate(worker, id, "layered_context", Value::Null).await?;
+                return Ok(state::outcome(&next));
+            }
+            return Ok(state::outcome(&current));
+        }
+    }
     if current.run.generation != context.generation {
         return Ok(state::outcome(&current));
     }

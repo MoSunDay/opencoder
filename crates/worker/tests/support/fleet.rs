@@ -48,6 +48,10 @@ impl Fleet {
         // pools and credentials outside the fixture for its entire lifetime,
         // including requests served by spawned node-channel tasks.
         let config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
+        // Match the real Brain model's window for complete multi-layer evidence.
+        let config_path = opencoder_core::Config::global_config_path().unwrap();
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(config_path, r#"{"context_limit":1000000}"#).unwrap();
         setup(&opencoder_core::agent::agents_dir().unwrap());
         let state = opencoder_control::new_state(
             dir.path().join("server-work"),

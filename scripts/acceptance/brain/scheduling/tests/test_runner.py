@@ -115,7 +115,7 @@ class RunnerTests(unittest.TestCase):
             result = blockers(env)
             self.assertEqual([r['id'] for r in result['local_executions']], ['owned-but-other-task'])
             self.assertEqual(result['other_busy_nodes'], ['remote'])
-            with self.assertRaisesRegex(AssertionError, 'unrelated work'):
+            with patch('faults.runtime.require_isolated'), self.assertRaisesRegex(AssertionError, 'unrelated work'):
                 FrozenWindow(env).__enter__()
 
     def test_fault_stream_carries_a_single_structured_decision(self):

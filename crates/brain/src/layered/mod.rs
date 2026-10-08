@@ -1,5 +1,6 @@
 //! Pure milestone scheduling: layer barriers, business assessments, and reflection.
 mod activation;
+pub mod budget;
 mod context;
 mod decide;
 mod levels;
@@ -96,4 +97,20 @@ pub fn block(snapshot: &LayeredSnapshot, reason: String, now: i64) -> LayeredCha
         .events
         .push(event(&update.run, "decision_blocked", Some(reason)));
     update
+}
+
+/// Infrastructure failure ends the root without cancelling or rewriting its
+/// children. Repeating settlement cannot change an already terminal root.
+pub fn fail(snapshot: &LayeredSnapshot, reason: String, now: i64) -> Option<LayeredChange> {
+    if snapshot.run.phase.terminal() {
+        return None;
+    }
+    let mut update = change(snapshot, now);
+    update.run.phase = LayeredPhase::Failed;
+    update.run.pending_guidance = false;
+    update.run.error = Some(reason.clone());
+    update
+        .events
+        .push(event(&update.run, "run_failed", Some(reason)));
+    Some(update)
 }

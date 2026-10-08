@@ -9,7 +9,8 @@ from pathlib import Path
 from environment import Environment, require
 from scenario import prepare
 from cases import admission, closed_loop, contracts, control, correction, definitions, execution_types, negative, recovery, replay
-from faults.runtime import NotRun, wait_idle
+from faults.runtime import NotRun, wait_idle, require_isolated
+from faults import crash
 from guidance import real as guidance
 from placement import queue as placement
 
@@ -24,8 +25,9 @@ CASES = {'admission': admission.run, 'definitions': definitions.run, 'closed-loo
          'context-capacity': admission.capacity, 'dispatch-retry': recovery.retry_receipts,
          'process-recovery': recovery.run, 'correction-budget': correction.run,
          'correction-deadline': correction.deadline,
+         'worker-crash': crash.worker, 'decision-crash': crash.decision,
          'capacity-queue': placement.run}
-FAULT_CASES = {'dispatch-retry', 'process-recovery', 'correction-budget', 'correction-deadline', 'capacity-queue'}
+FAULT_CASES = {'dispatch-retry', 'process-recovery', 'correction-budget', 'correction-deadline', 'capacity-queue', 'worker-crash', 'decision-crash'}
 
 
 def wait_ready(env, seconds):
@@ -77,6 +79,7 @@ def main():
                     if not fault_checked:
                         fault_checked = True
                         try:
+                            require_isolated(env)
                             wait_idle(env)
                         except Exception as error:
                             fault_error = str(error)

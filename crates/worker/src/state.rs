@@ -176,7 +176,9 @@ impl Worker {
             }
         }
         let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
-        let journal = Journal::load(layout.clone())?;
+        let mut journal = Journal::load(layout.clone())?;
+        crate::runtime::crash::recover_failed(state.store.as_ref(), &mut journal, &data_dir)
+            .await?;
         #[cfg(not(windows))]
         for record in journal.records.values().filter(|record| {
             record.assignment.index.kind == ExecutionKind::Dag
@@ -249,6 +251,7 @@ impl Worker {
                 _lock: lock,
             }),
         };
+        crate::runtime::crash::mark(&worker.inner.data_dir, false)?;
         crate::operations::queue::start_scheduler(&worker);
         Ok(worker)
     }
@@ -267,7 +270,7 @@ impl Worker {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         self.wait_for_cleanup(deadline).await?;
-        Ok(())
+        crate::runtime::crash::mark(&self.inner.data_dir, true)
     }
 
     /// Drain naturally, interrupt leftovers, and prove owned cleanup completed.
@@ -314,7 +317,8 @@ impl Worker {
                 stop_errors.join("; ")
             );
         }
-        cleanup
+        cleanup?;
+        crate::runtime::crash::mark(&self.inner.data_dir, true)
     }
 
     pub async fn freeze_admission(&self) -> Result<()> {

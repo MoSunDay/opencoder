@@ -161,6 +161,14 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             ));
         }
     };
+    let brain_budget = if assignment.request.kind == ExecutionKind::Brain {
+        match crate::brain::v4::budget::admit(&assignment.request.input, &config) {
+            Ok(budget) => Some(budget),
+            Err(error) => return Ok(RpcReply::error(413, error.to_string())),
+        }
+    } else {
+        None
+    };
     // Fresh creations of operator executions materialize the per-execution
     // home/workspace (frozen config snapshot) BEFORE the record is enqueued,
     // so the first turn — and every restart resume — already resolves the
@@ -223,6 +231,8 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             json!({"dag_parent":crate::layout::dag::parent(worker, &config, &assignment)?, "dag_config":config.dag})
         } else if assignment.request.kind == ExecutionKind::Operator {
             json!({"operator_environment_version": 1})
+        } else if let Some(budget) = brain_budget {
+            json!({"brain_context_budget": budget})
         } else {
             Value::Null
         },

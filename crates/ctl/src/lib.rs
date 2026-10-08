@@ -117,7 +117,18 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         output,
     }) = &command
     {
-        return cmd::brain::ontology::activate(context, config, output).await;
+        return match cmd::brain::ontology::activate(context, config, output).await {
+            Ok(code) => Ok(code),
+            Err(error) => {
+                // A handled model/validation error is distinct from a killed
+                // decision process, which cannot produce this receipt.
+                opencoder_core::atomic_write_json(
+                    &output.with_extension("error.json"),
+                    &serde_json::json!({"error":format!("{error:#}").chars().take(4096).collect::<String>()}),
+                )?;
+                Err(error)
+            }
+        };
     }
     let ctx: Ctx = ctx::resolve(
         cli.server.as_deref(),

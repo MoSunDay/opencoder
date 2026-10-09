@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import "../../../../test/setup-dom.js";
+import { ConfigProvider } from "antd";
+import "../../../testSetup";
 import { App as AntdApp } from "antd";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -10,7 +11,7 @@ vi.mock("../../../api", () => ({ api: { updateRelationship } }));
 
 function renderDrawer(onChanged = vi.fn().mockResolvedValue(undefined)) {
   render(
-    <AntdApp>
+    <ConfigProvider theme={{ token: { motion: false } }}><AntdApp>
       <RelationshipDrawer
         env="debug"
         relationship={{
@@ -33,7 +34,7 @@ function renderDrawer(onChanged = vi.fn().mockResolvedValue(undefined)) {
         onClose={vi.fn()}
         onChanged={onChanged}
       />
-    </AntdApp>,
+    </AntdApp></ConfigProvider>,
   );
   return onChanged;
 }
@@ -41,12 +42,12 @@ function renderDrawer(onChanged = vi.fn().mockResolvedValue(undefined)) {
 describe("RelationshipDrawer", () => {
   it("shows endpoints, relationship type and description without pinning controls", async () => {
     renderDrawer();
-    expect(await screen.findByText("源")).toBeTruthy();
-    expect(screen.getByText("目标")).toBeTruthy();
-    expect(screen.getByText("依赖")).toBeTruthy();
-    expect(screen.getAllByText("依赖关系").length).toBeGreaterThan(0);
-    expect(screen.queryByText("固定观测")).toBeNull();
-    expect(screen.queryByRole("switch")).toBeNull();
+    expect(await screen.findByText("源")).toBeInTheDocument();
+    expect(screen.getByText("目标")).toBeInTheDocument();
+    expect(screen.getByText("依赖")).toBeInTheDocument();
+    expect(screen.getByText("依赖关系", { selector: ".ant-descriptions-item-content" })).toBeInTheDocument();
+    expect(screen.queryByText("固定观测")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
   it("edits the description with revision protection", async () => {

@@ -4,7 +4,6 @@ Commit: e797e184412ac6df34cd5e8189634e1361945362
 
 ## 背景
 
-Operator（会话编排面）与 DAG（结构化执行面）此前只有 mock/内嵌层测试，缺少「真二进制 + 真 HTTP/SSE + 真 wasm」的进程级固化：`opencoder-server` 与 `opencoder-agent` 以子进程拉起、控制面走真实 HTTP/SSE、LLM 用 loopback 确定性桩、wasm 用 wat 现场编译。本次不改生产代码，把已核实的 wire 契约固化为两个根包 layer-2 套件（`cargo test` 即跑，零凭据）。
 
 ## 变更
 
@@ -20,9 +19,7 @@ Operator（会话编排面）与 DAG（结构化执行面）此前只有 mock/�
 - O3 `gating` — `POST /api/users` 铸造 `oc_` 令牌；非管理员可跑 operator 执行全程（提交/inspect/读会话）但 `/api/users` 403「admin role required」、非 operator 提交 403「non-admin roles may only submit operator executions」；admin 全量面不受限。
 - O4 `lifecycle` — `Script::Hold` 挂住 drain 后 relay interrupt → 执行折叠为 `cancelled` 且事件流含 `status:interrupted`；agent 重启后旧会话转录仍在、新会话正常 drain（libsql 持久化跨进程恢复）。
 - D1 `flow` — dag defs 保存/dispatch（走真 CLI：exit 0 + 纯 JSON stdout）/终态 done/progress 2 done/步产物与 meta/agent 步子会话经中继 GET（title `dag/<run>/<step>`）/运行事件 `run_started→…→run_finished{status:done}`（`stream_end` 为传输尾帧）/CLI `dag runs get` 兼容视图。
-- D2 `wasm_pool` — 版本池 REST（201/409/400/404）、v1→v2→回滚 v1 的 current 指针、`echo@v2.wasm` 显式 pin 压过 current、冻结库 `_modules` 双 token 并存、`/versions/:v/wasm.bin` 二进制下载逐字节一致、`dag.wasm_dir` 覆盖 + `/api/dag/wasm/nfs` root 回显。
 - D3 `cancel_fail` — 运行中 cancel（phase `cancelling`）→ 折叠 `cancelled`、progress `cancelled==2`、两步 meta.json 保留（`after` error == "run cancelled"）；agent 步桩回 400（非重试集）→ run `error` + progress.execution_error 非空。
-- D5 `runc` — preflight 契约：无 rootfs 目录 400 提及 rootfs；搭好 rootfs 脚手架后无 `runc` 二进制 400 提及 runc（并 SKIP 沙箱运行段）；有 `runc` 则 dispatch 202 接受、运行时因脚手架无 wasmtime fail-closed 报 error。
 
 ## 关键发现（记录）
 
@@ -33,7 +30,6 @@ Operator（会话编排面）与 DAG（结构化执行面）此前只有 mock/�
 
 ## Impact Surface
 
-- 新增 `tests/support/{llm_stub,http_util,fleet_proc}.rs`、`tests/operator_e2e/{main,flow,relay_sse,gating,lifecycle}.rs`、`tests/dag_e2e/{main,fixtures,flow,wasm_pool,cancel_fail}.rs`
 - 修改 `tests/running_mode_switch_e2e.rs`（改用共享桩）、根 `Cargo.toml`（wat dev-dep）
 - 生产代码零改动
 
@@ -46,8 +42,6 @@ Operator（会话编排面）与 DAG（结构化执行面）此前只有 mock/�
 | 非 admin 角色门禁（正向 + 403 文案） | O3 | `operator_e2e::gating` |
 | admin 全量面保留 | O3 | `operator_e2e::gating`（admin_keeps_everything） |
 | drain 中断 → cancelled + 事件流 + 重启恢复 | O4 | `operator_e2e::lifecycle` |
-| spec 保存/dispatch/wasm+agent 步/产物/progress/事件/CLI | D1 | `dag_e2e::flow` |
-| 版本池 REST + 指针回滚 + 显式 pin + 冻结库 + 下载 | D2 | `dag_e2e::wasm_pool` |
 | 运行中取消折叠 + 未启步标记 + 产物保留 | D3 | `dag_e2e::cancel_fail` |
 | agent 步非重试失败 → run error | D3 | 同上 |
 | runc preflight 契约（无 runc 时跳过运行段） | D5 | `dag_e2e::runc_preflight_contract_or_skip` |

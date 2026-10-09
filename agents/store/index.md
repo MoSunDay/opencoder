@@ -1,4 +1,4 @@
-Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # store 模块
 
@@ -19,7 +19,7 @@ Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 - `src/fleet/records.rs` — 终态执行索引批删
 - `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 33）
 - [project.rs](../../crates/store/src/project.rs)、[project_links.rs](../../crates/store/src/libsql_store/project_links.rs) — TODO 看板及执行引用；关联只保存能力 ID、执行 ID、类型、名称和创建时间，删除关联不删除节点执行；排序按专项或未归属范围校验，拒绝缺失或外部 TODO，在 libsql 事务内提交。
-- [project/tags.rs](../../crates/store/src/project/tags.rs)、[libsql_store/project/tags.rs](../../crates/store/src/libsql_store/project/tags.rs) — Tag 范围解析与关联整理；定义范围固定且所属项目或专项必须存在，Tag 与 TODO 变更原子提交。
+- [project/tags.rs](../../crates/store/src/project/tags.rs)、[libsql_store/project/tags.rs](../../crates/store/src/libsql_store/project/tags.rs) — Tag 范围解析与关联整理；名称与归属可修改，保留 ID，目标项目或专项必须存在；按保存后的名称重匹配已有选择，不给未选 TODO 添加关联，Tag 与 TODO 变更原子提交。
 - [schema/catalog.rs](../../crates/store/src/libsql_store/schema/catalog.rs) — schema v32 的专项、Tag 与 TODO 关联结构；迁移校验专项复制结果，解除旧里程碑的 TODO 归属并移除旧容器，保留执行记录。
 - [libsql_store/schema/project_links.rs](../../crates/store/src/libsql_store/schema/project_links.rs) — schema v33 在事务内复制、校验并替换 TODO 执行引用表，移除结论与同步状态缓存，保留执行关联和手工看板字段。
 - [libsql_store/schema.rs](../../crates/store/src/libsql_store/schema.rs) — 初始化先读取版本，超出当前支持版本时在业务 DDL 前拒绝打开；已有旧版本记录或版本跟踪前的会话表时创建历史项目结构，再运行升级链，支持只有部分业务表的旧数据库
@@ -27,5 +27,5 @@ Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 
 - [fleet/report/rows.rs](../../crates/store/src/fleet/report/rows.rs)：批量核验索引不可变字段，仅写入新增或变化行，冲突整批回滚。
 - [fleet/handoff/pending.rs](../../crates/store/src/fleet/handoff/pending.rs)：先筛选 prepared 回执，再读取冻结请求，校验 ID 与类型一致性。
-- [fleet/handoff/capacity.rs](../../crates/store/src/fleet/handoff/capacity.rs)：复用活跃票据部分索引，保持全机 FIFO 与事务内容量复核。
+- [fleet/handoff/capacity.rs](../../crates/store/src/fleet/handoff/capacity.rs)：复用活跃票据部分索引，保持全机 FIFO 与事务内容量复核；容量恢复按 ticket、execution、runtime 三重身份校验，只恢复精确匹配的 running 票据，重复恢复幂等。
 - [project_store/reopen.rs](../../crates/store/tests/project_store/reopen.rs)：关闭重开后核验项目、Tag、看板、执行引用与旧运行结果；无效 Tag 修改不能部分提交。完整存储回归入口为 [project-store-tests.yml](../../.github/workflows/project-store-tests.yml)。

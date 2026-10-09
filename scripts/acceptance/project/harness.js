@@ -54,7 +54,7 @@ async function harness() {
     const dir = path.join(root, name); fs.mkdirSync(dir);
     fs.writeFileSync(path.join(dir, 'opencoder.json'), JSON.stringify({
       providers: { fixture: { base_url: `http://127.0.0.1:${mock.address().port}/v1`, api_key: crypto.randomBytes(12).toString('hex') } },
-      model: 'fixture/model', cache_salt: false, agent: { agents_dir: name === 'server' ? agents : mount, nfs: { host: '127.0.0.1', port: 0 } },
+      model: 'fixture/model', context_limit: 1000000, cache_salt: false, agent: { agents_dir: name === 'server' ? agents : mount, nfs: { host: '127.0.0.1', port: 0 } },
     }));
     fs.writeFileSync(path.join(dir, 'report.txt'), 'original immutable artifact 界\n');
     return dir;

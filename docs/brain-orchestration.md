@@ -10,6 +10,8 @@
 
 `POST /api/brain/plan-defs` 保存 `{id, version, plan, changelog, created_at, author, tags, confidence}`，同 ID/版本不可覆盖，相同提交幂等。`POST /api/brain/plan-defs/validate` 检查结构、能力及嵌套引用。
 
+启动还会按候选执行节点的有效 `context_limit` 检查完整证据容量，未配置时为 128000 tokens。预算包含全部节点的结果上限及 16384 tokens 输出预留，同时受 1 MiB 决策正文和 2 MiB 传输帧限制；因此结构校验通过的多节点计划仍可能返回 413。此时须缩小计划或输入，或者选择确实支持更大上下文窗口的模型并配置其容量。已受理运行冻结该容量，不能靠改配置后恢复扩大预算；超限的人工输入也返回 413，且不写入运行事件。
+
 ```json
 {
   "schema_version": 7,

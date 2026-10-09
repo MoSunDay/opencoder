@@ -95,7 +95,10 @@ pub fn decide(
             let target = layer
                 .checked_sub(1)
                 .and_then(|i| groups.get(i as usize))
-                .context("unknown target layer")?;
+                .with_context(|| format!(
+                    "unknown target layer {layer}; dispatch layer must be a 1-based integer in 1..={}; layer 0 is only the initial run state",
+                    groups.len()
+                ))?;
             if request.schema_version == 7 && snapshot.run.layer == 0 {
                 ensure!(*layer == 1, "first dispatch must enter the first milestone");
             }

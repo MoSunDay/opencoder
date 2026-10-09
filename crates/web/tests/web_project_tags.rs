@@ -129,9 +129,21 @@ async fn tag_list_rename_and_delete_validate_scope_and_missing_records() {
     )
     .await;
     let path = format!("/api/project/tags/{}", tag["id"].as_str().unwrap());
-    let (status, _) = call(&h.app, "PATCH", &path, Some(json!({"name":"  "}))).await;
+    let (status, _) = call(
+        &h.app,
+        "PATCH",
+        &path,
+        Some(json!({"name":"  ","scope_type":"initiative","scope_id":id})),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, _) = call(&h.app, "PATCH", &path, Some(json!({"name":" 改名 "}))).await;
+    let (status, _) = call(
+        &h.app,
+        "PATCH",
+        &path,
+        Some(json!({"name":" 改名 ","scope_type":"initiative","scope_id":id})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let (_, listed) = call(
         &h.app,
@@ -153,6 +165,12 @@ async fn tag_list_rename_and_delete_validate_scope_and_missing_records() {
     assert_eq!(status, StatusCode::OK);
     let (status, _) = call(&h.app, "DELETE", &path, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = call(&h.app, "PATCH", &path, Some(json!({"name":"x"}))).await;
+    let (status, _) = call(
+        &h.app,
+        "PATCH",
+        &path,
+        Some(json!({"name":"x","scope_type":"initiative","scope_id":id})),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

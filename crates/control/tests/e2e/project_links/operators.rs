@@ -15,7 +15,8 @@ async fn six_registered_codex_employees_are_reusable_by_agent_dag_and_brain() {
     let h = Harness::with_brain_kind().await;
     h.node
         .set_capability_reply(RpcReply::ok(json!({"compatible":true,"features":[
-            "dag_container_v1","brain_scheduler_v7","brain_contracts_v1"
+            "dag_container_v1","brain_scheduler_v7","brain_contracts_v1",
+            opencoder_brain::layered::budget::CAPABILITY
         ]})));
     let prompt = base64::engine::general_purpose::STANDARD.encode("registered employee v1");
     save(

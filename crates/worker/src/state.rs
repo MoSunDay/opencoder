@@ -35,6 +35,7 @@ pub(crate) struct Inner {
     pub state: Arc<opencoder_web::AppState>,
     pub client: Option<Arc<dyn ChatStream>>,
     pub layout: DirectoryLayout,
+    pub result_reader: crate::result_reader::ResultReader,
     pub registration: NodeRegistration,
     pub generation: String,
     pub sequence: AtomicU64,
@@ -175,7 +176,6 @@ impl Worker {
                 tracing::warn!(workdir = %dir, error = %error, "scheduling workdir unavailable");
             }
         }
-        let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
         let journal = Journal::load(layout.clone())?;
         #[cfg(not(windows))]
         for record in journal.records.values().filter(|record| {
@@ -191,6 +191,7 @@ impl Worker {
         }
         state.project.cleanup_dag_containers().await?;
         let journal = journal.recover()?;
+        let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
         for record in journal.records.values().filter(|r| {
             r.assignment.index.kind == ExecutionKind::Project
                 && r.assignment.index.status == ExecutionStatus::Pending
@@ -213,6 +214,7 @@ impl Worker {
             .count();
         let worker = Self {
             inner: Arc::new(Inner {
+                result_reader: crate::result_reader::ResultReader::default(),
                 state,
                 client,
                 layout,

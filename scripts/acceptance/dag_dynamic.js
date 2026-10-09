@@ -75,6 +75,15 @@ async function main() {
   const inputRun = (await dispatchReply.json()).run_id;
   await until(async () => (await api('GET', `/api/dag/runs/${inputRun}/steps/batch/instances`)).progress?.done === 1, 'UI text batch dispatch');
   assert.equal((await api('GET', `/api/dag/runs/${inputRun}/steps/batch/instances/0`)).input, 'INSTANCE_ZERO');
+  // Instance results precede container cleanup and the parent terminal receipt.
+  // Finish both accepted runs before asking the node to stop.
+  for (const runId of [id, inputRun]) {
+    const index = await until(async () => {
+      const value = await api('GET', `/api/executions/${runId}/index`);
+      return ['done', 'error', 'cancelled'].includes(value.status) ? value : false;
+    }, 'DAG terminal receipt: ' + runId, 180000);
+    assert.equal(index.status, 'done');
+  }
   assert.deepEqual(h.errors, []);
   assert(requests.some((url) => url.includes('/instances/0/events')));
   assert(requests.some((url) => url.includes('/instances/1/events')));

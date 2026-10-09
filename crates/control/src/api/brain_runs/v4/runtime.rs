@@ -75,6 +75,14 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
         .filter(|event| event.event_type == "guidance_processed")
         .filter_map(|event| event.reason_summary)
         .collect();
+    if let Err(error) = opencoder_brain::layered::instruction(&context).and_then(|_| {
+        ensure!(serde_json::to_vec(&context)?.len() + 4096 <= opencoder_brain::layered::budget::FRAME_BYTES, "Brain complete context exceeds transport capacity; evidence retained, start a smaller plan");
+        Ok(())
+    }) {
+        let reply = runs::call(state, run_id, "layered_block", json!({"generation":snapshot.run.generation,"error":error.to_string()})).await;
+        ensure!(reply.status < 300, "block oversized Brain context failed");
+        return Ok(None);
+    }
     let reply = runs::call(state, run_id, "layered_context", json!(context)).await;
     ensure!(reply.status < 300, "layered activation: {}", reply.body);
     if reply.body["stale"] == true {
@@ -116,7 +124,7 @@ async fn todo(
     };
     Ok(Some(LayeredTodoSummary {
         id: record.id,
-        title: record.title,
+        title: record.title.chars().take(1024).collect(),
         status: record.status.as_str().into(),
         draft: record.draft.chars().take(4096).collect(),
     }))

@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # Agent 调度平台
 
@@ -14,7 +14,8 @@ Server/Node 调度、DAG 定义管理、执行查看与平滑发布；细节以�
 - 兼容发布由当前 Server 信号触发独立作业；新任务转入新版本，既有任务保留所属 runtime。
 - 平滑切换受理与连续调度的验收上限为 30 秒；公共入口不得出现失败请求。详细门槛与维护切换要求见 [发布说明](../../docs/smooth-release.md)。
 - Host 的新任务就绪状态由活动 Runtime 决定；已退休 Runtime 的休眠库存仍用于历史执行索引，但其中的旧资源错误不阻断新任务。候选 Host 在切换前以自身与 Runtime 状态验证，切换后再由公共入口验证。
-- 节点冻结或复开不会启动已休眠 Runtime；查询原任务或继续执行时才唤醒，并在放行请求前同步当前准入模式。
+- 节点冻结或复开不会启动已休眠 Runtime；持久化结果与 Team topic 的分块读取由 Host 直接从原执行目录提供，也不会唤醒。其他需要 Runtime 的查询或继续执行会唤醒原版本，并在放行请求前同步当前准入模式。
+- Runtime 重启后的容量恢复只处理已证明属于当前受管 Runtime 的遗留 `running` reservation：先完成节点锁、runc 容器和 journal 恢复，再检查 systemd cgroup 内无其他进程，最后按 ticket、execution、runtime 精确身份事务化释放；任何归属、阶段或进程状态不明确都会拒绝恢复。
 
 ## 维护升级
 

@@ -1,4 +1,4 @@
-Commit: d36b429017d77f79b4f95741645d8f8e8cd1ef79
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # server 模块
 
@@ -13,7 +13,6 @@ Commit: d36b429017d77f79b4f95741645d8f8e8cd1ef79
 - [maintenance/preflight.py](../../scripts/platform/rolling/maintenance/preflight.py)、[services.py](../../scripts/platform/rolling/maintenance/services.py) — 检查源工作区已存在且实际 Server 用户可读、可遍历；拒绝与可写管理路径重叠及软链接别名。资源升级仅置备应用目录，不创建或改动源目录。
 - [maintenance/archive.py](../../scripts/platform/rolling/maintenance/archive.py)、[restore.py](../../scripts/platform/rolling/maintenance/restore.py) — 已停止写入并验证的 SQLite 备份使用只读 immutable URI，检查和恢复不会向备份添加 WAL/SHM 文件；活动数据库仍使用普通只读连接。
 - [rolling/native/ontology.py](../../scripts/platform/rolling/native/ontology.py)、[rolling/backup.py](../../scripts/platform/rolling/backup.py)、[data_archive.py](../../scripts/platform/data_archive.py) — 从 ontology.db 读取实际正文根，备份数据库及正文树并核验引用摘要；维护恢复同时恢复这两部分，支持显式配置的外部正文根。
-- [维护验收入口](../../scripts/acceptance/maintenance_release/README.md) — 私有挂载命名空间内执行实际旧 Server、迁移、崩溃回滚、拒绝旧回滚与同候选续跑；服务命令由专属子进程适配器执行，不操作宿主 systemd 单元。保留原始构建信息并执行严格发布包校验，不把开发二进制伪装成正式包。
 - [在线发布验收](../../scripts/acceptance/smooth_release/live.py) — 回滚、再发布和观察持续使用同一原生探针定义；等待标记须在任务所属 Runtime 的挂载及根目录视图中释放。[信号失败演练](../../scripts/acceptance/signal_release/main.py) 显式要求配套 `--rootfs`。
 
 常规兼容发布保留资源服务与已有挂载；数据契约升级通过维护流程切换。参见 [发布说明](../../docs/smooth-release.md)、[DAG 执行约定](../../rules/04-dag-execution-contract.md)。

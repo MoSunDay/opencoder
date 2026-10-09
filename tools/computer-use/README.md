@@ -73,7 +73,7 @@ GLM-5.3-flash 使用 [computer-glm.json](examples/computer-glm.json)。从现有
 
 ```bash
 opencoder-computer doctor --target linux
-opencoder-computer doctor --target win-11 --check-model --timeout 120
+opencoder-computer doctor --target windows --check-model --timeout 120
 opencoder-computer run --target linux --task-file task.txt \
   --output-dir .opencoder/computer/runs/demo --timeout 600 --max-actions 50
 opencoder-computer status --run-dir .opencoder/computer/runs/demo

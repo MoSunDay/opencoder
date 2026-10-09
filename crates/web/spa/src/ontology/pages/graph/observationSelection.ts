@@ -9,7 +9,7 @@ export type ObservationSelection = {
 };
 
 export const initialSelection = (): ObservationSelection => ({
-  entityTypeIds: [], relationshipTypeIds: [], centerIds: [], upstreamDepth: 1, downstreamDepth: 1,
+  entityTypeIds: [], relationshipTypeIds: [], centerIds: [], upstreamDepth: 3, downstreamDepth: 3,
 });
 
 /** Preserve the reference when no selection has become invalid. */

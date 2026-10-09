@@ -15,9 +15,9 @@ Commit: fd9fdc34a732e0fab72d1a664792c7654528ab63
 | 规划资源清单准确 | `seeded_task_plan_skill_requires_launch_closure_contract` | `crates/core/tests/skill_contract/planning.rs` |
 
 - 合并基线的全量结果：5593 Rust 用例通过、7 项原有手动用例另行通过；928 项 SPA 用例、全站 UI、真实 runc 与发布演练通过，见同日 `ui-native-dag-closure.md`。
-- 本轮补充验证：技能契约 28 项通过；Core 全目标 Clippy 零警告，工作区格式、SPA 产物严格一致性、仓库外组装 3 项校验通过。
+- 本轮补充验证：技能契约 28 项通过；Core 全目标 Clippy 零警告，工作区格式、SPA 产物严格一致性通过。
 - 本轮也完成较大固定源码版本的全量回归：5634 Rust、949 SPA 用例通过；该版本的其他通用功能仍保留在共享工作区，未并入本提交。
-- 新基线上的 3060 份文件扫描无业务残留；201 份迁移文件摘要一致。42 处外部接入的业务新增内容完整保留，补丁可用于本提交及共享工作区。
-- 原始输出与源码对照位于 `/data00/opencoder-safety/20261001-103221/commit-cleanup-*.log`、`commit-cleanup-preparation.json`、`commit-cleanup-overlay-rebase.json`；业务原稿与实现位于 `/data00/opencoder-tools/`。
+- 新基线上的 3060 份文件扫描无业务残留；201 份迁移文件摘要一致。
+- 原始输出与源码对照位于 `/data00/opencoder-safety/20261001-103221/commit-cleanup-*.log`、`commit-cleanup-preparation.json`、`commit-cleanup-overlay-rebase.json`。
 
 [Core](../../../agents/core/index.md) · [全站与原生 DAG 验证](ui-native-dag-closure.md)

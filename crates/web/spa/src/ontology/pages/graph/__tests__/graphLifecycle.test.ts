@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import "../../../testSetup";
 import { describe, expect, it, vi } from "vitest";
 import { coordinateGraphLifecycle } from "../graphLifecycle";
 

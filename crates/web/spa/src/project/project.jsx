@@ -4,6 +4,7 @@ import { PageShell } from '../shell/pageShell.jsx';
 import { ProjectsTab } from './projectsTab.jsx';
 import { InitiativesTab } from './initiativesTab.jsx';
 import { TodosTab } from './todosTab.jsx';
+import { TagsTab } from './tags/tab.jsx';
 import { TodoDrawer } from './todoDrawer.jsx';
 import { ProjectDrawer } from './views/projectDrawer.jsx';
 import { InitiativeDrawer } from './views/initiativeDrawer.jsx';
@@ -23,6 +24,7 @@ function ProjectPage({ onNotice }) {
     { key: 'projects', label: '项目', children: <ProjectsTab {...shared} openProject={setProjectId} /> },
     { key: 'initiatives', label: '专项', children: <InitiativesTab {...shared} openInitiative={setInitiativeId} /> },
     { key: 'todos', label: 'TODO', children: <TodosTab {...shared} openTodo={setTodoId} /> },
+    { key: 'tags', label: 'Tag', children: <TagsTab {...shared} /> },
   ];
   return <PageShell page="project">
     {error && <Alert type="error" showIcon title={error} />}

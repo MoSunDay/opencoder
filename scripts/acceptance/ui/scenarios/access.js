@@ -33,6 +33,7 @@ async function access({ page, browser, base, api, root }) {
     await reader.getByText('accept-viewer · 只读', { exact: true }).waitFor();
     await reader.locator('.fleet-nav-category').getByRole('tab', { name: '项目', exact: true }).click();
     await reader.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
+    await reader.getByRole('menuitem', { name: /项目$/ }).waitFor();
     assert.equal(await reader.getByRole('tab', { name: '后台管理' }).count(), 0);
     assert(await reader.getByRole('button', { name: '新建项目' }).isDisabled());
     await reader.screenshot({ path: path.join(root, 'access-viewer.png') });

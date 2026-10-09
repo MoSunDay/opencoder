@@ -6,7 +6,8 @@ import { err } from '../notice.js';
 import { ExecutionsPanel } from './executions.jsx';
 import { ExecutionTranscript, appendEvent, messageRefreshMode } from './detail.jsx';
 import { FleetNodesPanel } from './nodes.jsx';
-import { FleetTeamsPanel, rosterRowsOf } from './teams.jsx';
+import { FleetTeamsPanel } from './teams.jsx';
+import { rosterRowsOf } from './teams/model.js';
 import { PayloadWindows, detailMarkers } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
 import { CREATABLE_KINDS, KINDS, LARGE_MESSAGE_BYTES, appendMessagePage, executionActions, executionPagePath, newId, nodeOptions, textOf } from './model.js';
@@ -234,12 +235,12 @@ describe('fleet execution boundaries', () => {
     const submit = [...document.querySelectorAll('.ant-drawer button')].find((button) => button.textContent.replace(/\s+/g, '') === '启动');
     expect(submit).toBeTruthy(); fireEvent.click(submit);
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
-    expect(onNotice).toHaveBeenLastCalledWith(err(expect.stringContaining('connection lost')));
-    await waitFor(() => expect(submit.disabled).toBe(false)); fireEvent.click(submit);
+    expect(await screen.findByText('提交较慢，正在自动确认启动结果')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '重试原请求' }));
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost.mock.calls[0][1].id).toBe(apiPost.mock.calls[1][1].id);
-    expect(apiPost).toHaveBeenLastCalledWith('/api/executions', expect.objectContaining({ kind: 'team', target: 'release', id: expect.stringMatching(/^team-/), input: { prompt: '准备发布' } }));
-    expect(onNotice).toHaveBeenLastCalledWith(err(''));
+    expect(apiPost).toHaveBeenLastCalledWith('/api/executions', expect.objectContaining({ kind: 'team', target: 'release', id: expect.stringMatching(/^team-/), input: { prompt: '准备发布' } }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(onNotice).toHaveBeenLastCalledWith({ type: 'info', text: 'Team 已启动，可在执行记录中继续查看讨论过程。' });
   });
   it('builds a captain-first roster from agent identity and posts deduped members', async () => {
     const longPlanDescription = `规划拆解：${'这是一段用于验证表格省略和自适应滚动的超长描述。'.repeat(12)}`;
@@ -290,7 +291,7 @@ describe('fleet execution boundaries', () => {
     expect(rosterRow('plan').compareDocumentPosition(rosterRow('act')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(screen.getByText('保存 Team'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/teams', { name: 'release', captain: 'plan', members: [{ agent: 'plan' }, { agent: 'act' }, { agent: 'explore' }] }));
-    expect(onNotice).toHaveBeenLastCalledWith(err(''));
+    expect(onNotice).toHaveBeenLastCalledWith({ type: 'success', text: 'Team 已保存' });
   });
   it('keeps roster mapping pure and captain-first when selections contain duplicates', () => {
     expect(rosterRowsOf('plan', ['act', 'plan', 'act'], [

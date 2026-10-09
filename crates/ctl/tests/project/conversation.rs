@@ -10,6 +10,10 @@ use std::sync::{Arc, Mutex};
 
 #[tokio::test]
 async fn todo_input_and_reads_use_the_same_native_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("ctl.json");
+    std::fs::write(&config, "{}").unwrap();
+    let config = config.to_str().unwrap();
     let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
     let router=Router::new()
         .route("/api/project/todos/:id/executions",get(||async {Json(json!({"current_execution_id":"operator-current","assignments":[{"execution_id":"operator-current","kind":"operator"},{"execution_id":"agent-old","kind":"agent"},{"execution_id":"dag-old","kind":"dag"}]}))}))
@@ -38,6 +42,8 @@ async fn todo_input_and_reads_use_the_same_native_execution() {
     ] {
         let mut argv = vec![
             "opencoder-cli",
+            "--client-config",
+            config,
             "--server",
             &base,
             "--token",
@@ -55,6 +61,8 @@ async fn todo_input_and_reads_use_the_same_native_execution() {
     }
     let argv = vec![
         "opencoder-cli",
+        "--client-config",
+        config,
         "--server",
         &base,
         "--token",

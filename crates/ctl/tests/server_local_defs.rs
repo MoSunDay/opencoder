@@ -59,6 +59,7 @@ impl Server {
     /// workspace config for the share-tree (todo) APIs.
     pub async fn new(share_dir: Option<PathBuf>) -> Self {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ctl.json"), "{}").unwrap();
         let work = dir.path().join("work");
         std::fs::create_dir_all(&work).unwrap();
         let mut agent = serde_json::json!({"agents_dir": dir.path().join("agents")});
@@ -102,6 +103,13 @@ impl Drop for Server {
 pub async fn cli(server: &Server, token: &str, args: &[&str]) -> i32 {
     let mut argv: Vec<String> = vec![
         "opencoder-cli".into(),
+        "--client-config".into(),
+        server
+            ._dir
+            .path()
+            .join("ctl.json")
+            .to_string_lossy()
+            .into_owned(),
         "--server".into(),
         server.base.clone(),
         "--token".into(),

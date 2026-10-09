@@ -104,6 +104,10 @@ async function run(h, state, save) {
     await h.page.reload({ waitUntil: 'networkidle' });
     const inspected = await ui.inspect(h.page, todo, state.executions[kind], h.root, state.results[kind].index.status);
     if (kind !== 'dag') assertResult(inspected.result, todo.marker);
+    if (!h.live && ['agent', 'operator'].includes(kind)) {
+      state.conversations ||= {};
+      state.conversations[kind] = await require('./conversation').verify(h, todo, state.executions[kind]);
+    }
     state.uiFeatures = { todoExecutionStatusColumn: inspected.statusColumn };
     if (kind === 'brain') {
       state.brain = await verifyBrain(h, state.executions.brain, todo.marker);

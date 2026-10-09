@@ -1,4 +1,4 @@
-//! Control-plane cron scheduler: fires `schedules.json` jobs through the
+//! Control-plane cron scheduler: fires stored schedule jobs through the
 //! existing execution entries (`executions::submit` for agent/team/todos/dag,
 //! `brain_runs::create` for brain).
 //!
@@ -14,33 +14,27 @@
 //! Timing contract: every fire gets a deterministic id
 //! `<kind>-<schedule_id>-<scheduled_for_ms>`, so re-firing a tick is
 //! idempotent end to end. On catch-up only the most recent missed tick
-//! fires — older ticks are recorded as `missed`. An errored fire retries
-//! on later scans while inside [`RETRY_WINDOW_MS`], then gives up.
+//! fires — older ticks are recorded as `missed`. Creation, edits and re-enabling
+//! start a new scheduling baseline; ticks before it are never backfilled.
+//! An errored fire retries for up to one hour while its definition is unchanged.
 
 use crate::{api, AppState};
 use opencoder_core::{
     config::{ScheduleJob, ScheduleKind, ScheduleOverlap},
     fleet::*,
     message::now_ms,
-    schedule::{parse_timezone, render_params, to_utc, CronExpr},
+    schedule::{parse_timezone, render_params, CronExpr},
 };
 use opencoder_store::{
-    ScheduleRunRecord, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED, SCHEDULE_RUN_MISSED,
+    ScheduleDefRecord, ScheduleRunRecord, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED,
+    SCHEDULE_RUN_MISSED,
 };
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 
 pub mod telemetry;
+mod timing;
 
-/// How far back a tick can be and still fire: server downtime up to a day
-/// still catches up on the last cron tick; anything older is `missed`.
-const CATCHUP_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
-/// An errored fire retries on later scans inside this window, then waits
-/// for the next cron tick instead of spinning.
-const RETRY_WINDOW_MS: i64 = 60 * 60 * 1000;
-/// Hard cap on candidate ticks per scan: the 24h walk-back of the densest
-/// sane cron (every minute) still fits, denser 6-field crons collapse.
-const MAX_CANDIDATE_TICKS: usize = 2_000;
 /// Scan cadence when `schedules.json` does not pin `scan_interval_secs`.
 const DEFAULT_SCAN_SECS: u64 = 15;
 
@@ -107,7 +101,7 @@ async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
             tracing::warn!(schedule = %job.id, %error, "invalid schedule skipped");
             continue;
         }
-        if let Err(error) = fire_due(state, job).await {
+        if let Err(error) = fire_due(state, def).await {
             state.lifecycle.scheduler.scan_error();
             tracing::warn!(schedule = %job.id, %error, "schedule fire failed");
         }
@@ -116,7 +110,8 @@ async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
 }
 
 /// Compute the ticks due for `job` and fire the newest (older → `missed`).
-async fn fire_due(state: &Arc<AppState>, job: &ScheduleJob) -> anyhow::Result<()> {
+async fn fire_due(state: &Arc<AppState>, def: &ScheduleDefRecord) -> anyhow::Result<()> {
+    let job = &def.job;
     let expr = CronExpr::parse(&job.cron, job.timezone.as_deref())
         .map_err(|error| anyhow::anyhow!("cron: {error}"))?;
     let now = opencoder_core::message::now_ms();
@@ -139,38 +134,13 @@ async fn fire_due(state: &Arc<AppState>, job: &ScheduleJob) -> anyhow::Result<()
         }
     }
 
-    // An errored fire retries in place while inside the retry window.
-    if let Some(last) = &last {
-        if last.status == SCHEDULE_RUN_ERROR
-            && now.saturating_sub(last.scheduled_for_ms) < RETRY_WINDOW_MS
-        {
-            fire_tick(state, job, last.scheduled_for_ms, now).await?;
-            return Ok(());
-        }
-    }
-
-    // Due ticks: strictly after the last recorded tick, inside the catch-up
-    // window, not in the future. The newest one fires; older ticks collapse
-    // into a single `missed` representative row (their fire time is the
-    // walk-back start), so a very dense cron cannot flood the ledger.
-    let after = last
-        .as_ref()
-        .map(|run| run.scheduled_for_ms)
-        .unwrap_or(0)
-        .max(now - CATCHUP_WINDOW_MS);
-    let Some(newest) = due_ticks(&expr, after, now).pop() else {
+    let Some(due) = timing::plan_due(&expr, def, last.as_ref(), now) else {
         return Ok(());
     };
-    let first = expr.next_after(to_utc(after));
-    match first {
-        // More than one tick was due: audit the skipped window with its
-        // oldest tick, then fire the newest.
-        Some(first) if first.timestamp_millis() < newest => {
-            record_missed(state, job, first.timestamp_millis(), now).await
-        }
-        _ => {}
+    if let Some(missed) = due.missed_for_ms {
+        record_missed(state, job, missed, now).await;
     }
-    fire_tick(state, job, newest, now).await?;
+    fire_tick(state, job, due.scheduled_for_ms, now).await?;
     Ok(())
 }
 
@@ -288,28 +258,6 @@ async fn dispatch(
     }
 }
 
-/// Newest due tick for the walk-back window, or `None`. Iterates the cron
-/// forward from `after_ms`; when the window is denser than
-/// [`MAX_CANDIDATE_TICKS`] the scan narrows toward `now` so the newest tick
-/// is still found (dense-cron catch-up history is collapsed anyway).
-fn due_ticks(expr: &CronExpr, after: i64, now: i64) -> Vec<i64> {
-    let mut span = CATCHUP_WINDOW_MS;
-    loop {
-        let start = after.max(now - span);
-        let upcoming = expr.upcoming(to_utc(start), MAX_CANDIDATE_TICKS + 1);
-        let due: Vec<i64> = upcoming
-            .iter()
-            .map(|tick| tick.timestamp_millis())
-            .take_while(|ms| *ms <= now)
-            .collect();
-        if due.len() <= MAX_CANDIDATE_TICKS || start >= now {
-            return due;
-        }
-        // Truncated: a dense cron fills the scan. Zoom into the recent past.
-        span /= 4;
-    }
-}
-
 fn json_params(job: &ScheduleJob) -> Value {
     Value::Object(
         job.params
@@ -332,54 +280,4 @@ fn brain_run(execution_id: &str, node_id: Option<String>, params: &Value) -> any
         request["node_id"] = serde_json::json!(node);
     }
     Ok(request)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Fixed epoch: 2027-01-15T08:00:00Z, safely in the future.
-    const NOW_MS: i64 = 1_800_000_000_000;
-
-    #[test]
-    fn per_second_cron_zooms_to_the_newest_ticks() {
-        let expr = CronExpr::parse("* * * * * *", None).unwrap();
-        let now = NOW_MS;
-        let after = now - CATCHUP_WINDOW_MS;
-        let due = due_ticks(&expr, after, now);
-        assert!(
-            !due.is_empty(),
-            "a due tick must be found in a dense window"
-        );
-        assert!(due.len() <= MAX_CANDIDATE_TICKS, "candidate cap must hold");
-        // Ascending, within the (clipped) walk-back window, none in the future.
-        assert!(due.windows(2).all(|w| w[0] < w[1]));
-        assert!(due.iter().all(|ms| *ms <= now && *ms > after));
-        // The zoom must land on recent ticks: the newest second boundary at or
-        // before `now` — not the first 2000 seconds of the 24h walk-back.
-        let newest = now - now.rem_euclid(1000);
-        assert_eq!(*due.last().unwrap(), newest);
-        assert!(*due.last().unwrap() > now - 1_400_000);
-    }
-
-    #[test]
-    fn daily_cron_walks_back_within_the_catchup_window() {
-        let expr = CronExpr::parse("0 5 * * *", None).unwrap();
-        let now = NOW_MS; // 2027-01-15T08:00:00Z
-                          // Walk-back clipped to 24h: only today's 05:00Z fires, never older ones.
-        let due = due_ticks(&expr, now - 3 * CATCHUP_WINDOW_MS, now);
-        assert_eq!(due, vec![1_799_989_200_000]); // 2027-01-15T05:00:00Z
-                                                  // One day earlier the window starts exactly at that fire, which is
-                                                  // exclusive: nothing due.
-        let earlier = 1_799_989_200_000;
-        assert!(due_ticks(&expr, earlier, earlier).is_empty());
-    }
-
-    #[test]
-    fn at_or_after_now_yields_no_ticks() {
-        let expr = CronExpr::parse("* * * * *", None).unwrap();
-        let now = NOW_MS;
-        assert!(due_ticks(&expr, now, now).is_empty());
-        assert!(due_ticks(&expr, now + 3_600_000, now).is_empty());
-    }
 }

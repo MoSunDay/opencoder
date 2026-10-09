@@ -93,6 +93,20 @@ async fn admin_credential_is_preserved_when_users_and_tokens_are_separated() {
     )
     .await
     .unwrap();
+    conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+        .await
+        .unwrap();
+    conn.execute("INSERT INTO schema_version VALUES (34)", ())
+        .await
+        .unwrap();
+    for role in ["user", "root"] {
+        conn.execute(
+            "INSERT INTO platform_users VALUES (?1,?2,?1,100)",
+            libsql::params![role, token_hash(role)],
+        )
+        .await
+        .unwrap();
+    }
     drop(conn);
     drop(db);
     let store = LibsqlStore::open(&path).await.unwrap();
@@ -104,10 +118,22 @@ async fn admin_credential_is_preserved_when_users_and_tokens_are_separated() {
     assert_eq!(user.role, Role::Admin);
     assert_eq!(user.created_at, 100);
     let tokens = store.list_access_tokens().await.unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].expires_at, None);
-    assert_eq!(tokens[0].revoked_at, None);
-    assert!(!store.revoke_access_token(&tokens[0].id, 200).await.unwrap());
+    assert_eq!(tokens.len(), 3);
+    assert!(tokens
+        .iter()
+        .all(|token| token.expires_at.is_none() && token.revoked_at.is_none()));
+    assert!(!store.revoke_access_token("user:admin", 200).await.unwrap());
+    for role in ["user", "root"] {
+        assert_eq!(
+            store
+                .find_user_by_token_hash(&token_hash(role))
+                .await
+                .unwrap()
+                .unwrap()
+                .role,
+            Role::Viewer
+        );
+    }
     assert!(!store.update_user_role("admin", Role::Viewer).await.unwrap());
     drop(store);
     let reopened = LibsqlStore::open(&path).await.unwrap();
@@ -116,5 +142,5 @@ async fn admin_credential_is_preserved_when_users_and_tokens_are_separated() {
         .await
         .unwrap()
         .is_some());
-    assert_eq!(reopened.list_access_tokens().await.unwrap().len(), 1);
+    assert_eq!(reopened.list_access_tokens().await.unwrap().len(), 3);
 }

@@ -8,6 +8,11 @@ const page = await browser.newPage({ viewport: { width: 1200, height: 850 } });
 const failures = [];
 page.on('pageerror', (error) => failures.push(error.message));
 const dialog = page.locator('.ant-modal[role="dialog"]:visible');
+const headerless = async (ready) => {
+  await ready.waitFor();
+  assert.equal(await page.locator('.oc-page-title, .oc-page-desc').count(), 0);
+  await page.getByRole('combobox', { name: 'Ontology 环境', exact: true }).waitFor();
+};
 const choose = async (scope, label, text, multiple = false) => {
   await scope.getByLabel(label, { exact: true }).click();
   const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
@@ -23,14 +28,14 @@ try {
   await page.goto(`${base}/?token=ontology-fixture`);
   const tabs = page.locator('.fleet-sidebar [role=tablist]');
   await tabs.getByRole('tab', { name: 'Ontology', exact: true }).click();
-  await page.getByRole('heading', { name: '图谱', exact: true }).waitFor();
+  await headerless(page.getByRole('button', { name: '调整范围', exact: true }));
   const category = await tabs.evaluate((element) => ({ width: element.clientWidth, total: element.scrollWidth, left: element.scrollLeft,
     labels: [...element.children].map((tab) => ({ label: tab.textContent, overflow: tab.scrollWidth > tab.clientWidth, shrink: getComputedStyle(tab).flexShrink })) }));
   assert(category.total > category.width);
   assert(category.left > 0);
   assert(category.labels.every((tab) => !tab.overflow && tab.shrink === '0'));
   await page.getByRole('menuitem', { name: /实体类型$/ }).click();
-  await page.getByRole('heading', { name: '实体类型', exact: true }).waitFor();
+  await headerless(page.getByRole('cell', { name: '服务', exact: true }));
   await page.getByRole('button', { name: /新\s*增/ }).click();
   await dialog.getByLabel('类型 Key').fill('browser_type');
   await dialog.getByLabel('名称', { exact: true }).fill('浏览器类型');
@@ -55,7 +60,7 @@ try {
   await drawer.locator('.ant-drawer-close').click();
   await drawer.waitFor({ state: 'hidden' });
   await page.getByRole('menuitem', { name: /实体$/ }).click();
-  await page.getByRole('heading', { name: '实体', exact: true }).waitFor();
+  await headerless(page.getByRole('cell', { name: '入口服务', exact: true }));
   await page.getByRole('cell', { name: '入口服务', exact: true }).waitFor();
   await page.getByRole('button', { name: /新增实体$/ }).click();
   await choose(dialog, '实体类型', '浏览器类型');
@@ -69,7 +74,7 @@ try {
   await page.getByRole('textbox', { name: '搜索名称或标识' }).fill('入口');
   assert.equal(await page.getByRole('cell', { name: '下游服务', exact: true }).count(), 0);
   await page.getByRole('menuitem', { name: /关系类型$/ }).click();
-  await page.getByRole('heading', { name: '关系类型', exact: true }).waitFor();
+  await headerless(page.getByRole('cell', { name: '调用', exact: true }));
   await page.getByRole('button', { name: /新\s*增/, exact: true }).click();
   await dialog.getByLabel('类型 Key').fill('browser_relation');
   await dialog.getByLabel('名称', { exact: true }).fill('浏览器关系');
@@ -106,6 +111,7 @@ try {
   await page.locator('canvas:visible').first().waitFor();
   await page.screenshot({ path: `${output}/desktop.png` });
   await page.getByRole('menuitem', { name: /环境管理$/ }).click();
+  await headerless(page.getByRole('button', { name: /新增 ENV$/ }));
   await page.getByRole('button', { name: /新增 ENV$/ }).click();
   await dialog.getByLabel('ENV Key').fill('browser_env');
   await dialog.getByLabel('名称', { exact: true }).fill('浏览器环境');

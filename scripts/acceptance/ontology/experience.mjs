@@ -43,7 +43,7 @@ export async function checkGraph(page) {
   await page.getByRole('button', { name: '恢复 100%', exact: true }).filter({ hasText: '120%' }).waitFor();
   await page.getByRole('button', { name: '放大画布', exact: true }).click();
   await page.getByRole('button', { name: '恢复画布', exact: true }).click();
-  await page.getByRole('heading', { name: '图谱', exact: true }).click();
+  await page.locator('.oc-page-extra').getByText('环境', { exact: true }).click();
   await page.waitForFunction(() => [...document.querySelectorAll('[role="tooltip"]')]
     .every((tooltip) => !tooltip.getClientRects().length || getComputedStyle(tooltip).visibility !== 'visible'));
   assert.equal(await page.getByRole('button', { name: '恢复 100%', exact: true }).innerText(), '120%');

@@ -8,7 +8,7 @@
 // ExecutionDetail drawer where 取消/恢复 live now.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const { apiGetMock, apiPostMock, apiPatchMock } = vi.hoisted(() => ({
   apiGetMock: vi.fn(),
@@ -134,8 +134,8 @@ afterEach(() => {
 /// buttons on whitespace-squashed textContent (same trick as
 /// agentDetail.dom.test.jsx / fleet.dom.test.jsx). 混排文案（如「启动 Team」）
 /// 自带空格，指针也一并去空白再比。
-const findButton = (txt) => screen.getAllByRole('button')
-  .find((b) => (b.textContent || '').replace(/\s+/g, '') === txt.replace(/\s+/g, ''));
+const findButton = (txt) => screen.queryAllByText((_text, button) =>
+  (button.textContent || '').replace(/\s+/g, '') === txt.replace(/\s+/g, ''), { selector: 'button' })[0];
 
 /// Open an antd Select and pick the dropdown option with the exact label —
 /// the same interaction helper agentDetail.dom.test.jsx uses (options render
@@ -201,7 +201,7 @@ describe('TeamPanel', () => {
         .map((o) => o.getAttribute('title') || o.textContent);
       expect(labels).toEqual(expect.arrayContaining(['act', 'explore'])); // from /api/brain/agents
     });
-    expect(apiGetMock).toHaveBeenCalledWith('/api/brain/agents');
+    expect(apiGetMock).toHaveBeenCalledWith('/api/brain/agents', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(findButton('保存 Team')).toBeTruthy();
   });
 
@@ -217,30 +217,26 @@ describe('TeamPanel', () => {
     // the '' option is both the selected value and a dropdown option
     expect((await screen.findAllByText('自动调度（活跃 loop / CPU 最低）')).length).toBeGreaterThan(1);
     expect(screen.getByText('alpha · 2 loops / 8 CPU')).toBeTruthy(); // node label from the snapshot
-    expect(apiGetMock).toHaveBeenCalledWith('/api/nodes');
+    expect(apiGetMock).toHaveBeenCalledWith('/api/nodes', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('dispatches a team execution on confirm and opens its detail drawer', async () => {
     render(<TeamPanel onNotice={() => {}} />);
-    await screen.findByText('t1');
-    fireEvent.click(findButton('启动 Team')); // 行操作按钮按去空白匹配唯一载体
-    expect(await screen.findByText('启动 t1')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('任务要求'), { target: { value: '准备发布' } });
-    // antd inserts a space inside two-CJK-char buttons ("启 动"), so match the
-    // squashed text the same way fleet.dom.test.jsx does.
-    const submit = [...document.querySelectorAll('.ant-drawer button')]
-      .find((button) => button.textContent.replace(/\s+/g, '') === '启动');
-    expect(submit).toBeTruthy();
-    fireEvent.click(submit);
-    await act(async () => {});
-    expect(apiPostMock).toHaveBeenCalledWith('/api/executions', expect.objectContaining({
+    const row = within((await screen.findByText('t1')).closest('tr'));
+    fireEvent.click(row.getByText('启动 Team').closest('button'));
+    const launch = within((await screen.findByText('启动 t1')).closest('[role=dialog]'));
+    fireEvent.change(launch.getByLabelText('任务要求'), { target: { value: '准备发布' } });
+    fireEvent.click(launch.getByText(/^启\s*动$/).closest('button'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/executions', expect.objectContaining({
       kind: 'team',
       target: 't1',
       input: { prompt: '准备发布' },
       id: expect.stringMatching(/^team-/),
-    }));
-    expect(await screen.findByText(/^team-[a-f0-9]{32}$/)).toBeTruthy(); // drawer title = dispatched id
-    expect(screen.getByText('刷新明细')).toBeTruthy();
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(apiPostMock).toHaveBeenCalledTimes(1);
+    const id = apiPostMock.mock.calls[0][1].id;
+    const detail = within((await screen.findByText(`t1 (${id})`)).closest('[role=dialog]'));
+    expect(detail.getByText('刷新明细').closest('button')).toBeTruthy();
   });
 });
 

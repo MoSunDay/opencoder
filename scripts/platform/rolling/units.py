@@ -145,7 +145,7 @@ def freeze_rootfs(record, source, binaries=None):
         if target.is_symlink() or not target.is_dir():
             raise ValueError("Runtime OCI image must be a real directory")
         if binaries:
-            for name in ['dag-runner', 'agent-step-runner']:
+            for name in ['dag-runner', 'agent-step-runner', 'agent-session-runner']:
                 if (target / 'usr/bin' / name).read_bytes() != (binaries / name).read_bytes():
                     raise ValueError('retained DAG runner differs from the candidate release')
         return target
@@ -167,7 +167,7 @@ def freeze_rootfs(record, source, binaries=None):
         return destination
     shutil.copytree(source,stage,symlinks=True,ignore=ignored,copy_function=copy_file)
     if binaries:
-        for name in ['dag-runner', 'agent-step-runner']:
+        for name in ['dag-runner', 'agent-step-runner', 'agent-session-runner']:
             runner = stage / 'usr/bin' / name
             runner.unlink(missing_ok=True)
             shutil.copy2(binaries / name, runner)

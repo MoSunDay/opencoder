@@ -83,6 +83,7 @@ def create(settings, output, original, scope):
         paths.extend([workdir / 'opencoder.json', workdir / '.opencoder'])
     paths.extend(settings.bin_dir / name for name in
                  ('opencoder', 'opencoder-cli', 'opencoder-server', 'opencoder-agent',
+                  'dag-runner', 'agent-step-runner', 'agent-session-runner',
                   '.opencoder-platform-current', '.opencoder-platform-manifest.json'))
     controls = [capture_file(stage, path, str(i)) for i, path in enumerate(dict.fromkeys(paths))]
     import base64
@@ -171,32 +172,58 @@ def unrelated(conn, schema='main'):
     return result
 
 
+def identity_tables(conn, before, saved):
+    """Recognize only the exact v35 split, with every credential unchanged."""
+    if before == saved:
+        return set()
+    names = {'platform_users', 'platform_tokens'}
+    if {k: v for k, v in before.items() if k not in names} != {k: v for k, v in saved.items() if k not in names}:
+        raise ValueError('non-project data changed; refusing backup restoration')
+    def columns(schema, table):
+        return [row[1] for row in conn.execute(f'PRAGMA {schema}.table_info({quote(table)})')]
+    if (conn.execute('SELECT version FROM main.schema_version').fetchone() != (35,)
+            or conn.execute('SELECT version FROM saved.schema_version').fetchone()[0] > 34
+            or columns('saved', 'platform_users') != ['name', 'token_hash', 'role', 'created_at']
+            or columns('saved', 'platform_tokens')
+            or columns('main', 'platform_users') != ['name', 'role', 'created_at']
+            or columns('main', 'platform_tokens') != ['id', 'user_name', 'name', 'token_hash', 'created_at', 'expires_at', 'revoked_at']):
+        raise ValueError('non-project identity schema differs from the v35 migration')
+    rows = conn.execute('SELECT name,role,token_hash,created_at FROM saved.platform_users ORDER BY name').fetchall()
+    users = [(name, 'viewer' if role in ('user', 'root') else role, created) for name, role, _, created in rows]
+    tokens = [('user:' + name, name, '初始 Token', digest, created, None, None) for name, _, digest, created in rows]
+    if (conn.execute('SELECT name,role,created_at FROM main.platform_users ORDER BY name').fetchall() != users
+            or conn.execute('SELECT * FROM main.platform_tokens ORDER BY user_name').fetchall() != tokens):
+        raise ValueError('non-project identity or credential changed; refusing backup restoration')
+    return names
+
+
 def restore_projects(source, target):
-    """Restore project DDL, indexes and schema version without writing auth data."""
+    """Restore projects and an unchanged v35 identity split before writes reopen."""
     with closing(sqlite3.connect(target.resolve().as_uri() + '?mode=rw', uri=True)) as conn:
         conn.execute('ATTACH DATABASE ? AS saved', (snapshot_uri(source),))
         before = unrelated(conn)
-        if before != unrelated(conn, 'saved'):
-            raise ValueError('non-project data changed; refusing backup restoration')
+        saved = unrelated(conn, 'saved')
+        identities = identity_tables(conn, before, saved)
+        selected = lambda name: project_table(name) or name in identities
         conn.execute('PRAGMA foreign_keys=OFF')
         conn.execute('BEGIN IMMEDIATE')
         try:
             tables = conn.execute("SELECT name FROM main.sqlite_schema WHERE type='table'").fetchall()
-            for (name,) in tables:
-                if project_table(name):
+            for (name,) in sorted(tables, key=lambda row: row[0] != 'platform_tokens'):
+                if selected(name):
                     conn.execute(f'DROP TABLE {quote(name)}')
             objects = conn.execute('SELECT type,name,tbl_name,sql FROM saved.sqlite_schema WHERE sql IS NOT NULL').fetchall()
             for kind, name, table, sql in objects:
-                if kind != 'table' or not project_table(name):
+                if kind != 'table' or not selected(name):
                     continue
                 conn.execute(sql)
                 columns = [row[1] for row in conn.execute(f'PRAGMA saved.table_xinfo({quote(name)})') if row[6] == 0]
                 names = ','.join(map(quote, columns))
                 conn.execute(f'INSERT INTO main.{quote(name)} ({names}) SELECT {names} FROM saved.{quote(name)}')
             for kind, name, table, sql in objects:
-                if kind in ('index', 'trigger') and project_table(table):
+                if kind in ('index', 'trigger') and selected(table):
                     conn.execute(sql)
-            if unrelated(conn) != before:
+            if unrelated(conn) != saved:
                 raise ValueError('restoration changed non-project data')
             if conn.execute('PRAGMA quick_check').fetchone() != ('ok',):
                 raise ValueError('restored project database failed integrity check')

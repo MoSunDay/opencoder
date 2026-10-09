@@ -273,7 +273,9 @@ async fn run_cli_binary(base: &str, token: &str, args: &[&str]) -> (i32, String)
     let token = token.to_string();
     let argv: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
     let run = tokio::task::spawn_blocking(move || {
+        let config = tempfile::tempdir().unwrap();
         let output = std::process::Command::new(&program)
+            .env("XDG_CONFIG_HOME", config.path())
             .arg("--server")
             .arg(&base)
             .arg("--token")

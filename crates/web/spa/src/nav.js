@@ -106,10 +106,15 @@ export const HEADERLESS_REASONS = {
   schedules: 'menu-only',
   dag: 'body-title',
   todos: 'body-title',
-  team: 'menu-only',
+  team: 'body-title',
   chat: 'menu-only',
   agents: 'body-title',
   nodes: 'menu-only',
+  ontologyGraph: 'menu-only',
+  ontologyEntities: 'menu-only',
+  ontologyTypes: 'menu-only',
+  ontologyRelationships: 'menu-only',
+  ontologyEnvironments: 'menu-only',
 };
 
 /// Derived from the reasons registry so the two lists can never drift.
@@ -124,11 +129,6 @@ export const PAGE_META = {
   users: { title: '用户权限', desc: '管理用户及其资源权限' },
   tokens: { title: 'Token 管理', desc: '为用户签发和撤销访问 Token' },
   project: { title: '项目', desc: '项目、专项与 TODO 工作台' },
-  ontologyGraph: { title: '图谱', desc: '关系观测与切面管理' },
-  ontologyEntities: { title: '实体', desc: '目录、属性与正文' },
-  ontologyTypes: { title: '实体类型', desc: '类型、属性定义与 Action 配置' },
-  ontologyRelationships: { title: '关系类型', desc: '关系约束与关联记录' },
-  ontologyEnvironments: { title: '环境管理', desc: 'Ontology 数据环境' },
 };
 
 /// Category lookup with the default as the safety net (unknown keys never

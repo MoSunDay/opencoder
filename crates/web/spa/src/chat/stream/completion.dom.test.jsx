@@ -34,7 +34,7 @@ beforeEach(() => {
       { role: 'assistant', blocks: [{ kind: 'text', text: 'saved answer' }] },
     ] });
 });
-afterEach(() => { refs.streamRef.current?.abort(); vi.resetAllMocks(); });
+afterEach(() => { refs.streamRef.current?.abort(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 it('loads the saved answer and releases waiting when the only event is stream_end', async () => {
   const { result } = renderHook(useChatStream);
@@ -81,4 +81,30 @@ it('does not let a late completion replace a new subscription to the same conver
   expect(result.current.stream.status).toBe('streaming');
   expect(result.current.stream.turns[0].text).toBe('next prompt');
   expect(result.current.stream.error).toBeNull();
+});
+
+it('releases waiting with an error when the completion read exceeds fifteen seconds', async () => {
+  vi.useFakeTimers();
+  // Drive the platform deadline with the test clock while keeping real signals
+  // and the API's abort/rejection behavior across the whole completion flow.
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException('Result read timed out', 'TimeoutError')), milliseconds);
+    return controller.signal;
+  });
+  apiGet.mockImplementation((_path, { signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  const { result } = renderHook(useChatStream);
+  await act(async () => {
+    await result.current.openSessionStream('s1', 0, []);
+    await vi.advanceTimersByTimeAsync(14999);
+  });
+  expect(AbortSignal.timeout).toHaveBeenCalledWith(15000);
+  expect(result.current.busy).toBe(true);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(result.current.stream.status).toBe('error');
+  expect(result.current.stream.error).toContain('读取执行结果失败');
+  expect(result.current.busy).toBe(false);
+  expect(result.current.connecting).toBe(false);
 });

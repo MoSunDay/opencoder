@@ -14,14 +14,27 @@ async fn created_definition_fires_then_patch_disables() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
+    let created_at = h
+        .state
+        .store
+        .get_schedule("api_pinger")
+        .await
+        .unwrap()
+        .unwrap()
+        .created_at;
 
     let body = poll_runs(&h, "api_pinger", |b| {
-        b["runs"].as_array().is_some_and(|runs| runs.len() >= 2)
+        b["runs"]
+            .as_array()
+            .is_some_and(|runs| runs.iter().any(|r| r["status"] == "fired"))
     })
     .await;
     let runs = body["runs"].as_array().unwrap();
-    // The first scan also records the pre-history as one collapsed `missed`
-    // catch-up row next to the fresh fire.
+    assert!(
+        runs.iter()
+            .all(|run| run["scheduled_for_ms"].as_i64().unwrap() > created_at),
+        "a new schedule must not fire or record missed ticks from before creation: {body}"
+    );
     let fired = runs
         .iter()
         .find(|r| r["status"] == "fired")
@@ -243,17 +256,19 @@ async fn overlap_skip_waits_for_terminal_last_run() {
 async fn catch_up_records_older_ticks_as_missed() {
     let h = Harness::new().await;
     write_fast_scan(&h);
-    let (status, body) = create_schedule(
-        &h,
-        json!({"id": "catchup", "cron": "* * * * *", "kind": "agent", "target": "act",
-               "params": {"prompt": "ping"}}),
-    )
-    .await;
-    assert_eq!(status, 200, "{body}");
     // Last fire two hours ago (execution long finished): every minute tick
-    // since then is due, inside the 24h catch-up window.
+    // since then is due, inside the 24h catch-up window. The definition
+    // already existed before that fire, as it would after a server restart.
     let now = opencoder_core::message::now_ms();
     let last = now - 2 * 60 * 60 * 1000;
+    let job = serde_json::from_value(json!({"id": "catchup", "cron": "* * * * *",
+        "kind": "agent", "target": "act", "params": {"prompt": "ping"}}))
+    .unwrap();
+    h.state
+        .store
+        .upsert_schedule(&job, last - 60_000)
+        .await
+        .unwrap();
     let execution_id = "agent-catchup-old";
     h.state
         .store

@@ -81,11 +81,14 @@ async fn bash_registers_while_running_unregisters_after() {
     let tool = BashTool;
     let mut c = ctx();
     c.working_dir = dir.path().to_path_buf();
-    // sleep 0.5 finishes well within the 1 s test timeout
-    // (BASH_TIMEOUT_SECS == 1 under cfg(test)) so the command completes
-    // in the foreground — no handoff, no timeout marker.
+    // Keep the child alive until its registry entry is checked, then release
+    // it immediately. A fixed sleep consumes the foreground timeout on busy hosts.
+    let release = dir.path().join("release");
     let input = json!({
-        "command": format!("echo $$ > {pf}; sleep 0.5; echo done", pf = pidfile.display())
+        "command": format!(
+            "echo $$ > {}; while [ ! -f {} ]; do sleep 0.01; done; echo done",
+            pidfile.display(), release.display()
+        )
     });
     // Run the tool concurrently so we can inspect the registry mid-flight.
     let handle = tokio::spawn(async move { tool.execute(input, &c).await.unwrap() });
@@ -109,6 +112,7 @@ async fn bash_registers_while_running_unregisters_after() {
         "running bash pid {pid} should be registered"
     );
 
+    std::fs::write(release, "continue").unwrap();
     let out = handle.await.unwrap();
     assert!(out.content.contains("done"), "{}", out.content);
 

@@ -6,6 +6,7 @@ use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 mod cleanup;
+mod init_exit;
 mod recovery;
 pub(super) use cleanup::delete_force;
 pub use recovery::cleanup_owned_containers;

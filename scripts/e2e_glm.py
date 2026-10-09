@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""opencoder e2e entry point: deep business-contract verification vs real glm5.2.
+"""opencoder e2e entry point: deep platform-contract verification vs real glm5.2.
 
 Replaces the former bash-only scripts/e2e-glm.sh (kept as a thin wrapper).
 Run:  scripts/e2e-glm.sh [binary]        # or: python3 scripts/e2e_glm.py [binary]
 
-Each scenario asserts an actual business contract (fork copy integrity, bundle
+Each scenario asserts an actual platform contract (fork copy integrity, bundle
 roundtrip, resume context-load, compaction content-awareness, subagent DB
 tracking, plan read-only, web steer+queue delivery) rather than a surface
 marker. See scripts/e2e/{lib,cli_scenarios,web_scenarios,config_scenarios,todos_scenarios}.py

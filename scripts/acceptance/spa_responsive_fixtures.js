@@ -34,7 +34,7 @@ const WORKFLOW = (i) => ({ id: `wf-${i}`, todo_id: `todo-${i}`, status: ['runnin
   attempt: i % 2, active_session_id: 'ses-1', node_id: 'node-0', updated_at: NOW + i,
   created_at: NOW, events: 4 });
 
-const TEMPLATE = (i) => ({ name: `模板-${i}`, description: '日常巡检模板', tools: ['/agent/tools/v3/git'],
+const TEMPLATE = (i) => ({ name: `模板-${i}`, description: '测试任务模板', tools: ['/agent/tools/v3/git'],
   env_vars: { PATH: '/usr/bin' }, prompt: 'p' });
 
 // brainPanel.jsx reads row.capability.* (rowKey = row.capability.id).
@@ -75,6 +75,8 @@ const FIXTURES = {
   '/api/health': { ok: true, version: '0.0.0-fixture' },
   // main.jsx re-probes /api/me per token; `name` unlocks IdentityBadge and
   // role=admin unlocks the admin entries (store.js setIdentity).
+  '/api/users': { users: [{ name: 'admin', role: 'admin', created_at: NOW }, { name: 'readonly-user', role: 'viewer', created_at: NOW }] },
+  '/api/tokens': { tokens: [{ id: 'token-display-example', name: '自动化访问', user_name: 'readonly-user', created_at: NOW, expires_at: null, revoked_at: null }] },
   '/api/me': { name: 'root', role: 'admin', username: 'root' },
   '/api/agents/nfs': { status: { running: true, host: '127.0.0.1', port: 2049, read_only: true, export_root: '/fixture/agents' } },
   '/api/dag/binaries/nfs': { root: '/fixture/binaries', status: { running: true, host: '127.0.0.1', port: 2050, read_only: true, export_root: '/fixture/binaries' } },
@@ -82,7 +84,6 @@ const FIXTURES = {
   '/api/dag/binaries': { pools: [{ name: 'tool', description: 'Linux executable', current: 2, current_version: { version: 2, size_bytes: 1024, sha256: 'a'.repeat(64) } }] },
   '/api/dag/binaries/tool': { name: 'tool', current: 2, history: [{ version: 1, size_bytes: 1024, sha256: 'b'.repeat(64) }, { version: 2, size_bytes: 1024, sha256: 'a'.repeat(64) }] },
   '/api/admin/release': { enabled: false },
-  '/api/users': { users: [{ name: 'root', role: 'admin', created_at: NOW, last_seen: NOW }] },
   '/api/nodes': { nodes: L(3, NODE) },
   '/api/nodes/node-0': NODE(0),
   '/api/nodes/node-0/dialogs': { dialogs: [] },
@@ -122,10 +123,10 @@ const FIXTURES = {
   '/api/dag/runs': L(3, DAG_RUN),
   '/api/dag/runs/drun-0': DAG_RUN(0),
   '/api/project/overview': { goals: [GOAL('g1', '发布 1.0'), GOAL('g2', '站点改版')],
-    backlog: [TODO('b1', '整理巡检脚本', 'planned', null)], standalone_milestones: [] },
+    backlog: [TODO('b1', '整理测试脚本', 'planned', null)], standalone_milestones: [] },
 };
 
 // Endpoints that require the bearer token (src/admin/*).
-const GUARDED = ['/api/users'];
+const GUARDED = ['/api/users', '/api/tokens'];
 
 module.exports = { FIXTURES, ABSENT, GUARDED };

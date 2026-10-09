@@ -8,7 +8,7 @@ description: Periodic memory-consolidation pass over repository local memory (re
 ## 角色
 周期性「做梦」整理仓库本地记忆：根据**现状**（代码基线）与**时间线**（changelog/git log）回顾全部记忆文档，整合冗余、修剪过期、保留当下状态快照。与迭代内记忆维护的分工：迭代内维护是**每次迭代的 repair-on-touch 最小更新**；本 skill 是**低频全量整理/固化**，二者不互替。**绝不改动 changelog**（`features/changelog/*` 是唯一时间线，永不合并、重写或删除既有条目；做梦产物是否记新 changelog 条目由用户决定，本 skill 不自动写）。
 
-> **只读代码、只写记忆**：不修改业务代码、不跑构建（验证记忆主张时可只读检查代码）。
+> **只读代码、只写记忆**：不修改功能代码、不跑构建（验证记忆主张时可只读检查代码）。
 
 ## 输入
 - 当前代码基线：`git rev-parse HEAD`。

@@ -102,7 +102,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     setCredentials('smoke-token', '');
     await mountApp();
     expect(await screen.findByText('smoke · 管理员')).toBeTruthy();
-    expect(await screen.findByRole('button', { name: '后台管理' })).toBeTruthy();
+    expect(await screen.findAllByRole('tab', { name: '后台管理' })).toHaveLength(2);
     expect(getState().identity).toEqual({ name: 'smoke', role: 'admin' });
     // No login modal: the stored credential was accepted.
     expect(screen.queryByText('Opencoder Fleet · 登录')).toBeNull();
@@ -185,9 +185,9 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     render(<App />);
     expect(screen.getByText('正在确认登录身份…')).toBeTruthy();
     expect(screen.queryByRole('menuitem')).toBeNull();
-    expect(screen.queryByRole('button', { name: '后台管理' })).toBeNull();
-    await act(async () => { reply({ ok: true, status: 200, json: async () => ({ name: 'reader', role: 'user' }) }); });
-    expect(await screen.findByRole('menuitem', { name: /全部执行$/ })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: '后台管理' })).toBeNull();
+    await act(async () => { reply({ ok: true, status: 200, json: async () => ({ name: 'reader', role: 'viewer' }) }); });
+    expect(await screen.findByRole('menuitem', { name: /项目$/ })).toBeTruthy();
     expect(screen.queryByRole('menuitem', { name: /节点列表$/ })).toBeNull();
   });
 

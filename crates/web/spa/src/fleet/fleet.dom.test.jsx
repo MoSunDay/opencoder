@@ -6,7 +6,7 @@ import { err } from '../notice.js';
 import { ExecutionsPanel } from './executions.jsx';
 import { ExecutionTranscript, appendEvent, messageRefreshMode } from './detail.jsx';
 import { FleetNodesPanel } from './nodes.jsx';
-import { FleetTeamsPanel } from './teams.jsx';
+import { FleetTeamsPanel, rosterRowsOf } from './teams.jsx';
 import { PayloadWindows, detailMarkers } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
 import { CREATABLE_KINDS, KINDS, LARGE_MESSAGE_BYTES, appendMessagePage, executionActions, executionPagePath, newId, nodeOptions, textOf } from './model.js';
@@ -183,19 +183,23 @@ describe('fleet execution boundaries', () => {
     expect(await screen.findByText('会话片段', { exact: true })).toBeTruthy();
     expect(apiGet).toHaveBeenCalledWith('/api/executions/todos-owner/detail-field?field=todo.item.child.session_history&offset=0');
   });
-  it('offers bounded team plan, participant result and summary windows', async () => {
-    const bytes = new TextEncoder().encode('成员结论');
-    apiGet.mockResolvedValue({ encoding: 'utf8-base64', offset: 0, next_offset: bytes.length, total_bytes: bytes.length, eof: true, bytes_b64: btoa(String.fromCharCode(...bytes)) });
+  it('renders readable team statements and captain summaries through bounded record requests', async () => {
+    apiGet.mockImplementation(async (path) => {
+      const field = new URL(path, 'http://test').searchParams.get('field');
+      const record = field.endsWith('.summary') ? { summary: '队长确认可以发布', aligned: true, ambiguities: [] }
+        : { answer: '成员结论', ok: true };
+      const bytes = new TextEncoder().encode(JSON.stringify(record));
+      return { encoding: 'json-base64', offset: 0, next_offset: bytes.length, total_bytes: bytes.length, eof: true, bytes_b64: btoa(String.fromCharCode(...bytes)) };
+    });
     render(<WorkloadDetail id="team-owner" kind="team" detail={{ definition: { name: 'release', captain: 'lead', members: [{ agent: 'lead', capabilities: ['发布编排'] }] }, topic: {
       turns: [{ turn: 3, meta: { question: '发布检查', participants: ['lead'], aligned: true, sub_turns: 1 }, detail_fields: { plan: 'team.turn.3.plan' } }],
     } }} />);
-    expect(screen.getByText('发布检查')).toBeTruthy(); expect(screen.getByText('已对齐')).toBeTruthy();
-    /// 成员身份即 agent：固化下来的能力快照随 Tag 一并展示。
-    expect(screen.getByText('lead · 发布编排')).toBeTruthy();
-    expect(screen.getByText('查看本轮计划')).toBeTruthy(); expect(screen.getByText('第 1 次小结')).toBeTruthy();
-    fireEvent.click(screen.getByText('lead · 第 1 次结果'));
+    expect(screen.getByText('发布检查')).toBeTruthy();
+    expect(screen.getByTitle('lead · 发布编排')).toBeTruthy();
+    expect(screen.getByText('本轮讨论安排')).toBeTruthy();
     expect(await screen.findByText('成员结论', { exact: true })).toBeTruthy();
-    expect(apiGet).toHaveBeenCalledWith('/api/executions/team-owner/detail-field?field=team.turn.3.sub.0.result.lead&offset=0');
+    expect(await screen.findByText('队长确认可以发布')).toBeTruthy();
+    expect(apiGet).toHaveBeenCalledWith('/api/executions/team-owner/detail-field?field=team.turn.3.sub.0.result.lead&offset=0', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
   it('reloads the first message window once when an execution becomes idle', () => {
     expect(messageRefreshMode('running', 0)).toBe('poll');
@@ -238,12 +242,13 @@ describe('fleet execution boundaries', () => {
     expect(onNotice).toHaveBeenLastCalledWith(err(''));
   });
   it('builds a captain-first roster from agent identity and posts deduped members', async () => {
+    const longPlanDescription = `规划拆解：${'这是一段用于验证表格省略和自适应滚动的超长描述。'.repeat(12)}`;
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/teams') return { teams: [] };
       if (path === '/api/nodes') return { nodes: [] };
       return { agents: [
         { agent: 'act', capabilities: [{ id: 'c1', summary: '执行任务' }] },
-        { agent: 'plan', capabilities: [{ id: 'c2', summary: '规划拆解' }] },
+        { agent: 'plan', capabilities: [{ id: 'c2', summary: longPlanDescription }] },
         { agent: 'explore', capabilities: [] },
       ] };
     });
@@ -266,6 +271,15 @@ describe('fleet execution boundaries', () => {
     fireEvent.click(exploreOptions[exploreOptions.length - 1]);
     const rosterRow = (agent) => document.querySelector(`[data-agent="${agent}"]`);
     await waitFor(() => expect(rosterRow('act')).toBeTruthy());
+    expect(screen.getByRole('columnheader', { name: '名称' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: '角色' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: '描述' })).toBeTruthy();
+    expect(document.querySelector('.team-roster-table .ant-table-content')).toBeTruthy();
+    expect(within(rosterRow('plan')).getByText('队长')).toBeTruthy();
+    expect(within(rosterRow('act')).getByText('成员')).toBeTruthy();
+    const planCells = rosterRow('plan').querySelectorAll('.team-roster-cell');
+    expect(planCells[1].getAttribute('title')).toBe(longPlanDescription);
+    expect(planCells[1].classList.contains('team-roster-cell')).toBe(true);
     expect(rosterRow('plan').textContent).toContain('规划拆解');
     expect(rosterRow('act').textContent).toContain('执行任务');
     /// 无绑定能力的 agent 走「暂无能力画像」兜底文案。
@@ -277,5 +291,14 @@ describe('fleet execution boundaries', () => {
     fireEvent.click(screen.getByText('保存 Team'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/teams', { name: 'release', captain: 'plan', members: [{ agent: 'plan' }, { agent: 'act' }, { agent: 'explore' }] }));
     expect(onNotice).toHaveBeenLastCalledWith(err(''));
+  });
+  it('keeps roster mapping pure and captain-first when selections contain duplicates', () => {
+    expect(rosterRowsOf('plan', ['act', 'plan', 'act'], [
+      { agent: 'plan', capabilities: [{ summary: '规划' }] },
+      { agent: 'act', capabilities: [{ summary: '执行' }] },
+    ])).toEqual([
+      { key: 'plan', name: 'plan', role: '队长', description: '规划' },
+      { key: 'act', name: 'act', role: '成员', description: '执行' },
+    ]);
   });
 });

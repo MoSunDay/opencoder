@@ -11,7 +11,7 @@ Commit: (working-tree, pre-initial-commit)
 - debug：`5k_blocks` 稳定失败（build ~1.3–1.7s vs 1s 阈值），`1k/10k` 在并行负载下偶发失败；
 - release：全部稳定通过（4/4，~0.3s）。
 
-已取证：在干净工作树（无任何业务改动）上复现相同失败 → 与功能改动无关，自 `c55bb02`
+已取证：在干净工作树（无任何功能改动）上复现相同失败 → 与功能改动无关，自 `c55bb02`
 引入以来即为既有 flaky。前序 changelog `tui-resize-log-tty-guard-robustness.md` 已将其
 标记为“建议在独立任务中硬化（放宽阈值或限定 Release）”，本提交即落实该建议。
 
@@ -42,4 +42,4 @@ Commit: (working-tree, pre-initial-commit)
 
 ## Related Docs
 - 落实 [tui-resize-log-tty-guard-robustness.md](./tui-resize-log-tty-guard-robustness.md) 中的 perf 硬化建议
-- [agents/tui](../../agents/tui/index.md)
+- [agents/tui](../../../agents/tui/index.md)

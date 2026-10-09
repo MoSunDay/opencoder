@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Alert, Button, Descriptions, Drawer, Input, Modal, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { apiDel, apiPost, authFetch } from '../../api.js';
@@ -27,14 +28,14 @@ export function BinaryResources() {
     <Alert type="info" showIcon title="一次 DAG 运行共享一个容器和工作区" description="二进制和 Agent 步骤在同一个容器内执行。资源在受理时固定，更新或切换当前版本只影响后续任务。" />
     {(error || readError) && <Alert type="error" showIcon title={error || readError} action={<Button onClick={() => { setError(''); reload(); }}>重试资源列表</Button>} />}
     <Space wrap><Input.Search aria-label="搜索二进制资源" placeholder="搜索二进制资源" value={search} onChange={(event) => setSearch(event.target.value)} allowClear />
-      <Button type="primary" onClick={() => setEditor({})}>上传二进制</Button><Button onClick={reload}>刷新资源</Button></Space>
+      <EditButton type="primary" onClick={() => setEditor({})}>上传二进制</EditButton><Button onClick={reload}>刷新资源</Button></Space>
     <Table rowKey="name" loading={loading} dataSource={pools.filter((pool) => `${pool.name} ${pool.description}`.toLowerCase().includes(query))} scroll={{ x: 'max-content' }} locale={{ emptyText: error || readError ? '资源读取失败，请重试' : '暂无二进制资源' }} columns={[
       { title: '名称', dataIndex: 'name', render: (name) => <Button type="link" onClick={() => setSelected(name)}>{name}</Button> },
       { title: '说明', dataIndex: 'description' },
       { title: '当前版本', dataIndex: 'current', render: (version) => `v${version}` },
       { title: '字节数', render: (_, pool) => pool.current_version?.size_bytes ?? '版本不可用' },
       { title: 'SHA-256', render: (_, pool) => <Typography.Text copyable={!!pool.current_version?.sha256}>{pool.current_version?.sha256 || '版本不可用'}</Typography.Text> },
-      { title: '操作', render: (_, pool) => <Space><Button onClick={() => setEditor(pool)}>追加版本</Button><Button danger onClick={() => setRemoving(pool)}>删除资源</Button></Space> },
+      { title: '操作', render: (_, pool) => <Space><EditButton onClick={() => setEditor(pool)}>追加版本</EditButton><EditButton danger onClick={() => setRemoving(pool)}>删除资源</EditButton></Space> },
     ]} />
     {editor && <BinaryEditor pool={editor.name ? editor : null} onClose={() => setEditor(null)} onSaved={async () => { await reload(); setRevision((value) => value + 1); }} />}
     {selected && <BinaryHistory key={`${selected}:${revision}`} name={selected} onClose={() => setSelected(null)} onChanged={reload} />}
@@ -73,7 +74,7 @@ function BinaryHistory({ name, onClose, onChanged }) {
         { title: '版本', dataIndex: 'version', render: (version) => <Space>v{version}{pool.current === version && <Tag color="success">当前</Tag>}</Space> },
         { title: '说明', dataIndex: 'description' }, { title: '字节数', dataIndex: 'size_bytes' },
         { title: 'SHA-256', dataIndex: 'sha256', render: (digest) => <Typography.Text copyable>{digest}</Typography.Text> },
-        { title: '操作', render: (_, version) => <Space><Button disabled={loading || !!readError} onClick={() => download(version.version)}>下载 v{version.version}</Button><Button disabled={busy || loading || !!readError || pool.current === version.version} onClick={() => setTarget(version.version)}>使用 v{version.version}</Button></Space> },
+        { title: '操作', render: (_, version) => <Space><Button disabled={loading || !!readError} onClick={() => download(version.version)}>下载 v{version.version}</Button><EditButton disabled={busy || loading || !!readError || pool.current === version.version} onClick={() => setTarget(version.version)}>使用 v{version.version}</EditButton></Space> },
       ]} /></>}
     <Modal open={target !== null} title={`切换当前版本为 v${target}`} okText="确认切换版本" cancelText="取消" confirmLoading={busy} onOk={switchVersion} onCancel={() => { if (!busy) setTarget(null); }}>
       只切换后续任务使用的当前版本，不修改已有版本或已受理任务。

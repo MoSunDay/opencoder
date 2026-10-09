@@ -13,6 +13,17 @@ pub struct PlatformUser {
     pub created_at: i64,
 }
 
+/// Public token metadata. The credential digest is only used inside the store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessToken {
+    pub id: String,
+    pub user_name: String,
+    pub name: String,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+}
+
 /// Outcome of `Store::delete_user_guarding_last_admin`. The guard runs in
 /// the same statement as the delete, so two concurrent admin deletions can
 /// never both pass a count-then-act check and empty the table of admins.

@@ -64,7 +64,8 @@ async fn migrate_and_restore(version: i64) {
                VALUES ('one','initiative','todo','draft','draft','act',1,1),
                       ('two','old-marker','todo','draft','draft','act',1,1);
              CREATE INDEX idx_project_todos_milestone ON project_todos(milestone_id);
-             INSERT INTO platform_users VALUES ('fixture','fixture-hash','operator',1);
+             INSERT INTO platform_users VALUES ('fixture','viewer',1);
+             INSERT INTO platform_tokens (id,user_name,name,token_hash,created_at) VALUES ('fixture','fixture','test','fixture-hash',1);
              UPDATE schema_version SET version=31;",
         ).await.unwrap();
         conn.execute("UPDATE schema_version SET version=?", [version])
@@ -77,7 +78,7 @@ async fn migrate_and_restore(version: i64) {
         let conn = store.conn().await.unwrap();
         assert_eq!(
             scalar(&conn, "SELECT CAST(version AS TEXT) FROM schema_version").await,
-            "33"
+            "34"
         );
         assert_eq!(
             scalar(
@@ -99,7 +100,7 @@ async fn migrate_and_restore(version: i64) {
         assert_eq!(
             scalar(
                 &conn,
-                "SELECT token_hash FROM platform_users WHERE name='fixture'"
+                "SELECT token_hash FROM platform_tokens WHERE user_name='fixture'"
             )
             .await,
             "fixture-hash"
@@ -145,7 +146,7 @@ async fn migrate_and_restore(version: i64) {
     assert_eq!(
         scalar(
             &conn,
-            "SELECT token_hash FROM platform_users WHERE name='fixture'"
+            "SELECT token_hash FROM platform_tokens WHERE user_name='fixture'"
         )
         .await,
         "fixture-hash"

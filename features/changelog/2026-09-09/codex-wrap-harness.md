@@ -43,7 +43,7 @@ Project 通过惰性客户端支持无原生凭据的 Plan/Execute；资源身�
 - 后续提交仅包含规范格式、测试和 CI 修正；`source-equivalence.json` 验证运行逻辑与已部署包一致。Mac 路径断言按规范路径比较，取消/steer 测试分离启动等待与五秒取消上限，使用三秒启动延迟和跨平台进程退出检查完成 8 项回归，旧 Bash 用例改用 getsid 验证独立会话并完成 18 项工具契约回归；MySQL 测试先验证旧运行阻止新领取，再结束旧运行后验证原子领取。真实 MySQL 8.4.11 契约及 SQL 可选后端 clippy 通过。最终 [macOS CI](https://github.com/MoSunDay/opencoder/actions/runs/34272427213) 与 [MySQL / fmt / clippy CI](https://github.com/MoSunDay/opencoder/actions/runs/34270311636) 均通过。
 - 已安装 CLI 真实 Codex 读取文件与环境后返回正确结果；现网浏览器验证三层折叠、刷新、续聊、环境值隐藏、非法环境零派发与 390px 布局。原生 Agent、DAG、Team、Project、大脑稳定 request_id 与 interrupt 全部通过。
 - 自定义 Codex Agent 经只读 NFS 引用版本化 prompt，使用默认 Harness 完成 Project Execute；原生 Plan 与 Codex Execute 混合链路通过。22 字节交付文件 SHA-256 为 `b0c0a4f20e9d48e4558ffe43625317a3622be95eb7db7bb2c5d9f640caa0232b`，修改工作副本后归档不变。纯 Codex Plan/Execute、resume/fork/取消及混合编排另有进程矩阵和真实 Codex 候选验收记录。
-- 发布前冻结、interrupt 空闲会话、停写备份，并在新目录完成恢复。实际 definitions/runtime 数据库从 schema 21 迁至 22，迁移进程分别约 12 ms / 20 ms；所有旧行与索引哈希保持，再次打开收敛，旧二进制可读取恢复副本。保留 34 条旧原生会话、38 条原执行索引、36,302 个历史归档文件与 48 个原资源文件，没有删除业务数据或变更鉴权数据。
+- 发布前冻结、interrupt 空闲会话、停写备份，并在新目录完成恢复。实际 definitions/runtime 数据库从 schema 21 迁至 22，迁移进程分别约 12 ms / 20 ms；所有旧行与索引哈希保持，再次打开收敛，旧二进制可读取恢复副本。保留 34 条旧原生会话、38 条原执行索引、36,302 个历史归档文件与 48 个原资源文件，没有删除数据或变更鉴权数据。
 - 稳定观察：北京时间 **2026-09-09 02:45:43 至 2026-09-09 04:46:13**，**7229.72 秒 / 227 次采样**；Server/Agent 无重启，Node 持续 Ready，固定二进制/入口配置保持，无新增服务错误、超时 Pending 或未收敛 interrupt。
 
 完整发布包、日志、截图、数据库与资源备份、恢复演练、逐字节历史重放及最终记录：`/var/tmp/opencoder-wrap-rollout-20260909-4mztpbel`。主要证据为 `gates-result.json`、`post-ci-gates.json`、`ci-final.json`、`online-verification.json`、`production-observation.json`、`done.json`。

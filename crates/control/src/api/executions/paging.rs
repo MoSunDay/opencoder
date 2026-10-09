@@ -3,6 +3,7 @@ use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     response::Response,
+    Extension,
 };
 use opencoder_core::fleet::*;
 use opencoder_store::fleet::handoff::ExecutionNames;
@@ -18,7 +19,11 @@ pub struct ListQuery {
     pub cursor_created_at: Option<i64>,
     pub cursor_id: Option<String>,
 }
-pub async fn list(State(state): State<Arc<AppState>>, Query(query): Query<ListQuery>) -> Response {
+pub async fn list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ListQuery>,
+    identity: Option<Extension<opencoder_core::Identity>>,
+) -> Response {
     let kind = match query
         .kind
         .map(|kind| serde_json::from_value::<ExecutionKind>(json!(kind)))
@@ -45,10 +50,17 @@ pub async fn list(State(state): State<Arc<AppState>>, Query(query): Query<ListQu
         .indexes_page(query.node_id.as_deref(), kind, cursor.as_ref(), limit)
         .await
     {
-        Ok(page) => match named_page(&state, page).await {
-            Ok(body) => response(RpcReply::ok(body)),
-            Err(error) => error_500(error),
-        },
+        Ok(mut page) => {
+            if identity.as_ref().is_some_and(|i| !i.is_admin()) {
+                page.executions.retain(|e| {
+                    !matches!(e.kind, ExecutionKind::Maintenance | ExecutionKind::System)
+                });
+            }
+            match named_page(&state, page).await {
+                Ok(body) => response(RpcReply::ok(body)),
+                Err(error) => error_500(error),
+            }
+        }
         Err(error) => error_500(format!("index: {error:#}")),
     }
 }

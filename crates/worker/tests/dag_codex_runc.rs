@@ -195,7 +195,8 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
             "PUT",
             "/api/harnesses/codex/profiles/selected",
             json!({
-                "model":"profile-model","auth_slot":2,"reasoning_effort":"high",
+                "model":"profile-model","reasoning_effort":"high",
+                "startup_script":["/bin/sh","/usr/bin/codex-start.sh"],
                 "envs":{"CODEX_HOME":profile_home,"NOTE":"private-profile-fixture"}
             }),
         )
@@ -223,11 +224,17 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
         let dir = support::dag_run(&fleet.root().join("n0/node"), "dag-codex-runc-batch")
             .join(format!("upper/batch/instances/{index}"));
         let args = std::fs::read_to_string(dir.join("argv.txt")).unwrap();
-        for expected in [
-            "--auth-slot\n2",
-            "--model\nstep-model",
-            "model_reasoning_effort=\"high\"",
-        ] {
+        assert_eq!(
+            std::fs::read_to_string(dir.join("startup-state")).unwrap(),
+            "before\nafter\n"
+        );
+        let context = read(&dir.join("startup-context.json"));
+        assert_eq!(context["agent"], "codex-runc");
+        assert_eq!(context["schema_version"], 1);
+        assert!(context["session_id"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()));
+        for expected in ["--model\nstep-model", "model_reasoning_effort=\"high\""] {
             assert!(args.contains(expected), "{args}");
         }
         let reply = fleet

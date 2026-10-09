@@ -150,7 +150,7 @@ async fn dag_step_events_first_page_errors_pass_through() {
 /// The compat DAG surface stays admin-only under the role gate; the step event
 /// stream inherits that (see `role_gate::allowed`).
 #[tokio::test]
-async fn dag_step_events_are_admin_only() {
+async fn viewer_can_read_dag_step_events() {
     let h = Harness::new().await;
     seeded(&h, "dag-se-5").await;
     h.node
@@ -159,7 +159,15 @@ async fn dag_step_events_are_admin_only() {
         .req(
             Method::POST,
             "/api/users",
-            Some(json!({"name": "dag-se-user", "role": "user"})),
+            Some(json!({"name": "dag-se-user", "role": "viewer"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = h
+        .req(
+            reqwest::Method::POST,
+            "/api/tokens",
+            Some(json!({"user_name":"dag-se-user","name":"test"})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
@@ -172,7 +180,7 @@ async fn dag_step_events_are_admin_only() {
             Some(token),
         )
         .await;
-    assert_eq!(denied.status(), 403);
+    assert_eq!(denied.status(), 200);
     let allowed = h
         .req_raw(
             Method::GET,

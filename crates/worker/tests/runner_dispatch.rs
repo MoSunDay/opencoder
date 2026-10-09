@@ -20,7 +20,7 @@ async fn registered_runner_is_rejected_by_dag_definition_and_inline_dispatch() {
     std::fs::create_dir_all(agents.join("act")).unwrap();
     std::fs::write(
         agents.join("act/meta.json"),
-        r#"{"name":"act","harness":"codex","harness_profile":"business"}"#,
+        r#"{"name":"act","harness":"codex","harness_profile":"platform"}"#,
     )
     .unwrap();
     opencoder_core::agent::set_agents_dir_override(Some(agents.clone()));
@@ -38,8 +38,8 @@ async fn registered_runner_is_rejected_by_dag_definition_and_inline_dispatch() {
         fleet
             .call(
                 "PUT",
-                "/api/harnesses/codex/profiles/business",
-                json!({"executable":exe,"model":"model-v1","auth_slot":1})
+                "/api/harnesses/codex/profiles/platform",
+                json!({"executable":exe,"model":"model-v1"})
             )
             .await
             .body["revision"],
@@ -48,12 +48,12 @@ async fn registered_runner_is_rejected_by_dag_definition_and_inline_dispatch() {
     assert!(fleet.call("GET", "/api/runners", Value::Null).await.status >= 400);
     assert!(
         fleet
-            .call("PUT", "/api/runners/business", json!({}))
+            .call("PUT", "/api/runners/platform", json!({}))
             .await
             .status
             >= 400
     );
-    let spec = json!({"name":"business","steps":[{"name":"diagnose","timeout_secs":20,"kind":{"type":"runner","runner":"business","agent":"act"}}]});
+    let spec = json!({"name":"platform","steps":[{"name":"diagnose","timeout_secs":20,"kind":{"type":"runner","runner":"platform","agent":"act"}}]});
     let reply = fleet
         .call("POST", "/api/dag/defs", json!({"spec":spec}))
         .await;

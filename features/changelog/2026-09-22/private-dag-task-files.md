@@ -24,7 +24,7 @@ DAG rootfs 准备补齐 Python 标准库与动态依赖，并用 chroot 核验�
 全量 Clippy 同时修正原有 fleet report 测试的无必要 clone，断言语义不变。
 
 额外隔离运行验证：以准备好的 Python rootfs 启动真实 runc，挂载执行专属凭证目录；
-容器内读回 fixture 成功，写入返回 EROFS，进程退出 0。未使用生产凭证或业务目录。
+容器内读回 fixture 成功，写入返回 EROFS，进程退出 0。未使用生产凭证或任务目录。
 
 验收：在独立冻结检出 `d9b366a66dc7defa4281f484dd00b2a3e208c092` 加本轮工作区改动上，
 workspace Clippy（all-targets，warnings denied）、build、全量 test 均通过；5525 passed、0 failed、7 ignored。

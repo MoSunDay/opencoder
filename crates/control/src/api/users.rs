@@ -1,7 +1,5 @@
-//! Platform-user administration (`/api/users`) and identity probe
-//! (`/api/me`). Admin-only; the role gate plus explicit handler checks
-//! enforce it. Tokens are returned exactly once in the creation response.
-
+//! Administrator-managed identities. Startup admin is protected; token issuance
+//! is a separate operation so each user can own several credentials.
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -9,35 +7,33 @@ use axum::{
     response::{IntoResponse, Response},
     Extension, Json,
 };
-use opencoder_core::identity::{parse_role, token_hash, Identity};
-use opencoder_store::PlatformUser;
+use opencoder_core::identity::{parse_role, Identity, Role};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
-/// `GET /api/me` — the authenticated caller. Without bearer middleware
-/// (auth-disabled deployments) defaults to the bootstrap admin view.
+pub mod tokens;
+
 pub async fn me(identity: Option<Extension<Identity>>) -> Response {
     let identity = identity
         .map(|Extension(i)| i)
         .unwrap_or_else(|| Identity::admin("admin"));
-    Json(json!({"name": identity.name, "role": identity.role.as_str()})).into_response()
+    Json(json!({"name":identity.name,"role":identity.role.as_str()})).into_response()
 }
 
-/// The caller when the bearer middleware ran; `None` means auth is disabled
-/// and the request is treated as the implicit admin.
-fn caller(identity: &Option<Extension<Identity>>) -> Option<&Identity> {
-    identity.as_ref().map(|Extension(i)| i)
+pub(super) fn require_admin(identity: &Option<Extension<Identity>>) -> Option<Response> {
+    identity
+        .as_ref()
+        .is_some_and(|Extension(i)| !i.is_admin())
+        .then(|| failure(403, "admin role required"))
 }
 
-fn require_admin(identity: &Option<Extension<Identity>>) -> Option<Response> {
-    caller(identity).is_some_and(|i| !i.is_admin()).then(|| {
-        (
-            StatusCode::FORBIDDEN,
-            Json(json!({"ok": false, "error": "admin role required"})),
-        )
-            .into_response()
-    })
+pub(super) fn failure(status: u16, message: impl ToString) -> Response {
+    (
+        StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        Json(json!({"ok":false,"error":message.to_string()})),
+    )
+        .into_response()
 }
 
 pub async fn list(
@@ -48,16 +44,13 @@ pub async fn list(
         return denied;
     }
     match state.store.list_users().await {
-        Ok(users) => Json(json!({ "users": users })).into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"ok": false, "error": format!("list users: {error:#}")})),
-        )
-            .into_response(),
+        Ok(users) => Json(json!({"users":users})).into_response(),
+        Err(error) => failure(500, error),
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateUser {
     pub name: String,
     pub role: String,
@@ -69,53 +62,81 @@ fn valid_name(name: &str) -> bool {
         && !name.chars().any(|c| c.is_control() || c.is_whitespace())
 }
 
-/// Wire token = `oc_` + two ULIDs (80 random bits each, 160 total); only
-/// the sha256 digest is stored.
-fn new_token() -> String {
-    format!("oc_{}{}", ulid::Ulid::new(), ulid::Ulid::new())
+fn managed_role(value: &str) -> Option<Role> {
+    parse_role(value).filter(|role| *role != Role::Admin)
 }
 
 pub async fn create(
     State(state): State<Arc<AppState>>,
     identity: Option<Extension<Identity>>,
-    Json(request): Json<CreateUser>,
+    Json(body): Json<CreateUser>,
 ) -> Response {
     if let Some(denied) = require_admin(&identity) {
         return denied;
     }
-    let name = request.name.trim();
-    if !valid_name(name) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "error": "name must be 1-64 chars without spaces or control characters"})),
-        )
-            .into_response();
+    let name = body.name.trim();
+    if !valid_name(name) || name == "admin" {
+        return failure(
+            400,
+            "name must be 1-64 bytes without whitespace; admin is reserved",
+        );
     }
-    let Some(role) = parse_role(request.role.trim()) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "error": "role must be one of admin, root, user"})),
-        )
-            .into_response();
+    let Some(role) = managed_role(&body.role) else {
+        return failure(
+            400,
+            "role must be editor or viewer; admin uses the startup token",
+        );
     };
-    let token = new_token();
-    let user = state
+    match state
         .store
-        .create_user(name, &token_hash(&token), role, now_ms())
-        .await;
-    match user {
-        Ok(user) => Json(json!({"user": user_view(&user), "token": token})).into_response(),
+        .create_user(name, "", role, chrono::Utc::now().timestamp_millis())
+        .await
+    {
+        Ok(user) => Json(json!({"user":user})).into_response(),
         Err(error) => {
-            let status = match state.store.find_user_by_name(name).await {
-                Ok(Some(_)) => StatusCode::CONFLICT,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            let status = if matches!(state.store.find_user_by_name(name).await, Ok(Some(_))) {
+                409
+            } else {
+                500
             };
-            (
-                status,
-                Json(json!({"ok": false, "error": format!("create user: {error:#}")})),
-            )
-                .into_response()
+            failure(status, error)
         }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateUser {
+    pub role: String,
+}
+
+pub async fn update(
+    State(state): State<Arc<AppState>>,
+    identity: Option<Extension<Identity>>,
+    Path(name): Path<String>,
+    Json(body): Json<UpdateUser>,
+) -> Response {
+    if let Some(denied) = require_admin(&identity) {
+        return denied;
+    }
+    let Some(role) = managed_role(&body.role) else {
+        return failure(400, "role must be editor or viewer");
+    };
+    if name == "admin" {
+        return failure(400, "startup admin is read-only");
+    }
+    match state.store.find_user_by_name(&name).await {
+        Ok(Some(user)) if user.role == Role::Admin || name == "admin" => {
+            return failure(400, "startup admin is read-only")
+        }
+        Ok(None) => return failure(404, "user not found"),
+        Err(error) => return failure(500, error),
+        _ => {}
+    }
+    match state.store.update_user_role(&name, role).await {
+        Ok(true) => Json(json!({"ok":true})).into_response(),
+        Ok(false) => failure(409, "user changed; refresh and retry"),
+        Err(error) => failure(500, error),
     }
 }
 
@@ -127,67 +148,37 @@ pub async fn delete(
     if let Some(denied) = require_admin(&identity) {
         return denied;
     }
-    if caller(&identity).is_some_and(|i| i.name == name) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "error": "cannot delete the caller's own account"})),
-        )
-            .into_response();
+    if name == "admin" {
+        return failure(400, "startup admin is read-only");
     }
-    // The last-admin guard runs inside the store's delete statement, so two
-    // admins racing to delete each other can never both pass and empty the
-    // table of admins.
-    match state.store.delete_user_guarding_last_admin(&name).await {
-        Ok(opencoder_store::GuardedDelete::Deleted) => Json(json!({"ok": true})).into_response(),
-        Ok(opencoder_store::GuardedDelete::Missing) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"ok": false, "error": "user not found"})),
-        )
-            .into_response(),
-        Ok(opencoder_store::GuardedDelete::LastAdmin) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "error": "cannot delete the last admin"})),
-        )
-            .into_response(),
-        Err(error) => store_error("delete user", error),
+    match state.store.find_user_by_name(&name).await {
+        Ok(Some(user)) if user.role == Role::Admin => {
+            return failure(400, "startup admin is read-only")
+        }
+        Err(error) => return failure(500, error),
+        _ => {}
     }
-}
-
-fn store_error(what: &str, error: anyhow::Error) -> Response {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"ok": false, "error": format!("{what}: {error:#}")})),
-    )
-        .into_response()
-}
-
-fn user_view(user: &PlatformUser) -> serde_json::Value {
-    json!({"name": user.name, "role": user.role.as_str(), "created_at": user.created_at})
-}
-
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    match state.store.delete_user(&name).await {
+        Ok(true) => Json(json!({"ok":true})).into_response(),
+        Ok(false) => failure(404, "user not found"),
+        Err(error) => failure(500, error),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn names_reject_spaces_and_controls() {
+    fn names_and_roles_are_explicit() {
         assert!(valid_name("alice"));
-        assert!(valid_name("ops-01"));
-        assert!(!valid_name(""));
-        assert!(!valid_name("a b"));
-        assert!(!valid_name("a\nb"));
+        for value in ["", "a b", "a\nb"] {
+            assert!(!valid_name(value));
+        }
         assert!(!valid_name(&"x".repeat(65)));
-    }
-
-    #[test]
-    fn tokens_carry_two_ulids_and_oc_prefix() {
-        let token = new_token();
-        assert!(token.starts_with("oc_"));
-        assert_eq!(token.len(), "oc_".len() + 26 * 2);
-        assert_ne!(token, new_token());
+        assert_eq!(managed_role("editor"), Some(Role::Editor));
+        assert_eq!(managed_role("viewer"), Some(Role::Viewer));
+        for value in ["admin", "root", "user"] {
+            assert_eq!(managed_role(value), None);
+        }
     }
 }

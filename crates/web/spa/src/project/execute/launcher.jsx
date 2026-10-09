@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Alert, Button, Input, Space, Typography } from 'antd';
 import { useRef, useState } from 'react';
 import { apiPost } from '../../api.js';
@@ -47,6 +48,6 @@ export function CapabilityLauncher({ capability, todoId, onCreated, prompt: init
     <Input.TextArea aria-label="执行任务" rows={6} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={busy || !!attempt.current} />
     {!!capability.required_inputs?.length && <Typography.Text>必填参数：{capability.required_inputs.join('、')}</Typography.Text>}
     <Input.TextArea aria-label="能力输入参数" rows={5} value={raw} onChange={(event) => setRaw(event.target.value)} disabled={busy || !!attempt.current} placeholder="能力需要的命名参数（JSON）" />
-    <Button type="primary" loading={busy} disabled={!!capability.unavailable_reason || !prompt.trim()} onClick={send}>开始执行</Button>
+    <EditButton type="primary" loading={busy} disabled={!!capability.unavailable_reason || !prompt.trim()} onClick={send}>开始执行</EditButton>
   </Space>;
 }

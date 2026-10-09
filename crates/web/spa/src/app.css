@@ -278,6 +278,23 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Team editor roster: keep the description readable without letting a long
+   capability summary widen the modal or the mobile page.  The Table's
+   `scroll.x` supplies the horizontal viewport; cells only clip their own
+   content and expose the full value through the native title tooltip. */
+.team-roster-table {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+.team-roster-table .team-roster-cell {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ===== DAG 工作流面板 ===== */
 /* Live graph node boxes (fixed size mirrors dagLayout.js NODE_W/NODE_H). */
 .dag-node {

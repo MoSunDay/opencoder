@@ -7,7 +7,7 @@ const measure = (text: string) => Array.from(text).reduce((width, character) => 
 
 describe("complete relationship labels", () => {
   it.each([
-    "主要归属外部协议边界，并通过已确认接口建立跨业务域的依赖关系",
+    "主要归属外部协议边界，并通过已确认接口建立跨模块的依赖关系",
     "dependency_without_spaces_0123456789_abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "归属 🚀 API / source → target：a longer name with spaces",
     "第一行\n第二行原有内容\n\n最后一行",

@@ -10,7 +10,7 @@ fn write(path: &Path, value: &Value) {
 fn base() -> Value {
     json!({"agent": {
         "codex": {
-            "executable": "C:\\Tools\\codex.exe", "auth_slot": 2,
+            "executable": "C:\\Tools\\codex.exe", "startup_script": ["launcher.exe", "literal argument"],
             "model": "global", "approval_policy": "never",
             "envs": {"HTTPS_PROXY": "http://localhost:8080", "KEEP": "global"}
         },
@@ -38,11 +38,13 @@ fn project_codex_overlay_preserves_global_launch_settings_and_frozen_operator() 
     let settings = loaded.agent.codex.as_ref().unwrap();
     assert_eq!(settings.model.as_deref(), Some("project"));
     assert_eq!(settings.executable.as_deref(), Some(r"C:\Tools\codex.exe"));
-    assert_eq!(settings.auth_slot, Some(2));
+    assert_eq!(
+        settings.startup_script,
+        ["launcher.exe", "literal argument"]
+    );
     assert_eq!(settings.approval_policy.as_deref(), Some("never"));
     assert_eq!(settings.envs["HTTPS_PROXY"], "http://localhost:8080");
     assert_eq!(settings.envs["KEEP"], "project");
-    assert_eq!(&settings.config_args()[..2], ["--auth-slot", "2"]);
     let operator = temp.path().join("operator");
     write(
         &operator.join("config.json"),
@@ -90,7 +92,10 @@ fn codex_patch_changes_only_explicit_fields_and_null_clears_settings() {
     let settings = partial.agent.codex.as_ref().unwrap();
     assert_eq!(settings.model.as_deref(), Some("project"));
     assert!(settings.executable.is_none());
-    assert_eq!(settings.auth_slot, Some(2));
+    assert_eq!(
+        settings.startup_script,
+        ["launcher.exe", "literal argument"]
+    );
     assert_eq!(settings.envs, original.agent.codex.as_ref().unwrap().envs);
     assert!(original.agent.codex.as_ref().unwrap().executable.is_some());
     assert!(partial

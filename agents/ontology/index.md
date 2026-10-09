@@ -2,7 +2,7 @@ Commit: 9d82393d5ad376511b387d089199a4d845f22b08
 
 # ontology 模块
 
-`opencoder-ontology` 提供通用类型、实体、关系、图谱切面、属性正文和向量的独立存储及 HTTP 接口。业务 Server 持有数据库；只读资源服务持有正文导出。
+`opencoder-ontology` 提供通用类型、实体、关系、图谱切面、属性正文和向量的独立存储及 HTTP 接口。版本 Server 持有数据库；只读资源服务持有正文导出。
 
 ## 索引
 

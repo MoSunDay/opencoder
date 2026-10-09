@@ -243,6 +243,22 @@ macro_rules! store_implementation_1 {
         let _guard = self.db_lock.lock().await;
         users::update_token_hash(&self.conn, name, token_hash).await
     }
+    async fn update_user_role(&self, name: &str, role: opencoder_core::identity::Role) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        users::update_role(&self.conn,name,role).await
+    }
+    async fn list_access_tokens(&self) -> Result<Vec<crate::AccessToken>> {
+        let _guard = self.db_lock.lock().await;
+        users::tokens::list(&self.conn).await
+    }
+    async fn create_access_token(&self, token: &crate::AccessToken, hash: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        users::tokens::create(&self.conn,token,hash).await
+    }
+    async fn revoke_access_token(&self, id: &str, now: i64) -> Result<bool> {
+        let _guard = self.db_lock.lock().await;
+        users::tokens::revoke(&self.conn,id,now).await
+    }
     async fn count_admin_users(&self) -> Result<i64> {
         let _guard = self.db_lock.lock().await;
         users::count_admins(&self.conn).await

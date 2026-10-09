@@ -2,7 +2,8 @@ import { Alert, Button, Descriptions, Space, Spin, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react';
 import { apiGet } from '../../api.js';
 import { Markdown } from '../../project/markdown.jsx';
-import { InlineFields, PayloadWindows } from './fields.jsx';
+import { InlineFields } from './fields.jsx';
+import { TeamDetail } from './team/index.jsx';
 
 function PageButtons({ page, busy, more, previous, next }) {
   return <Space style={{ marginTop: 8 }}>
@@ -49,47 +50,6 @@ function WindowedRows({ initialRows, initialNext, path, render }) {
     {error && <Alert type="error" showIcon title={error} />}
     {render(rows)}
     <PageButtons page={page} busy={busy} more={nextCursor !== null && nextCursor !== undefined} previous={previous} next={next} />
-  </div>;
-}
-
-function TeamDetail({ id, detail }) {
-  const team = detail?.definition || {};
-  const topic = detail?.topic || {};
-  const turns = Array.isArray(topic.turns) ? topic.turns : [];
-  return <div><Typography.Title level={5}>Team 执行</Typography.Title><Descriptions size="small" items={[
-    { key: 'name', label: 'Team', children: team.name || '—' },
-    { key: 'captain', label: '队长', children: team.captain || '—' },
-    { key: 'members', label: '成员', children: (team.members || []).map((member) => <Tag key={member.agent} color={member.agent === team.captain ? 'gold' : undefined}>{[member.agent, ...(member.capabilities || [])].join(' · ')}</Tag>) },
-  ]} />
-  {turns.length || topic.turns_page?.more ? <WindowedRows
-    initialRows={turns}
-    initialNext={topic.turns_page?.next_turn}
-    path={asyncPath(`/api/executions/${encodeURIComponent(id)}/team-turns?after_turn=`, 'turns', 'next_turn')}
-    render={(rows) => <Space orientation="vertical" style={{ width: '100%' }}>{rows.map((turn, index) => <TeamTurn key={turn.turn ?? index} id={id} turn={turn} />)}</Space>}
-  /> : null}</div>;
-}
-
-function TeamTurn({ id, turn }) {
-  const meta = turn.meta?.omitted ? {} : (turn.meta || turn);
-  const number = turn.turn ?? meta.turn;
-  const participants = Array.isArray(meta.participants) ? meta.participants : [];
-  const subTurns = Number.isInteger(meta.sub_turns) ? meta.sub_turns : 0;
-  const field = (value) => ({ omitted: true, field: value, read_via: 'detail_field' });
-  const plan = turn.detail_fields?.plan || `team.turn.${number}.plan`;
-  return <div className="execution-team-turn">
-    <Space wrap><Typography.Text strong>第 {number ?? '?'} 轮</Typography.Text>
-      <Typography.Text>{meta.question || '协作记录'}</Typography.Text>
-      {participants.map((member) => <Tag key={member}>{member}</Tag>)}
-      {typeof meta.aligned === 'boolean' ? <Tag color={meta.aligned ? 'green' : 'orange'}>{meta.aligned ? '已对齐' : '待对齐'}</Tag> : null}
-    </Space>
-    <Space wrap style={{ marginTop: 6 }}>
-      <PayloadWindows id={id} marker={field(plan)} label="查看本轮计划" />
-      {Array.from({ length: subTurns }, (_, sub) => <Space key={sub} wrap>
-        <PayloadWindows id={id} marker={field(`team.turn.${number}.sub.${sub}.summary`)} label={`第 ${sub + 1} 次小结`} />
-        {participants.map((member) => <PayloadWindows key={member} id={id} marker={field(`team.turn.${number}.sub.${sub}.result.${member}`)} label={`${member} · 第 ${sub + 1} 次结果`} />)}
-      </Space>)}
-      <InlineFields id={id} value={turn.meta} />
-    </Space>
   </div>;
 }
 
@@ -156,7 +116,7 @@ function ProjectDetail({ id, detail, onOpen }) {
 
 export function WorkloadDetail({ id, detail, kind, onOpen }) {
   if (!detail) return null;
-  if (kind === 'team') return <TeamDetail id={id} detail={detail} />;
+  if (kind === 'team') return <TeamDetail key={id} id={id} detail={detail} />;
   if (kind === 'todos') return <TodoDetail id={id} detail={detail} />;
   if (kind === 'project') return detail.run ? null : <ProjectDetail id={id} detail={detail} onOpen={onOpen} />;
   if (kind === 'dag') {

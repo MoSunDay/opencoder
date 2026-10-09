@@ -63,7 +63,7 @@ async fn tui_catalog_reads_library_agent_operator_with_user_role_without_exposin
         .await
         .unwrap();
     let app = opencoder_control::build_app(state, None, false);
-    for role in [Role::User, Role::Root, Role::Admin] {
+    for role in [Role::Viewer, Role::Editor, Role::Admin] {
         let (status, body) = call(&app, "GET", "/api/tui/agent-capabilities", role).await;
         assert_eq!(status, 200, "{body}");
         let cards = body["capabilities"].as_array().unwrap();
@@ -79,13 +79,15 @@ async fn tui_catalog_reads_library_agent_operator_with_user_role_without_exposin
         assert!(!body.to_string().contains("do not expose"));
     }
     assert_eq!(
-        call(&app, "POST", "/api/tui/agent-capabilities", Role::User)
+        call(&app, "POST", "/api/tui/agent-capabilities", Role::Viewer)
             .await
             .0,
         403
     );
     assert_eq!(
-        call(&app, "GET", "/api/brain/library", Role::User).await.0,
-        403
+        call(&app, "GET", "/api/brain/library", Role::Viewer)
+            .await
+            .0,
+        200
     );
 }

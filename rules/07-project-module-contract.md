@@ -4,7 +4,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 修改项目、专项、TODO 的数据关系、看板、标签、执行关联、结果读取或进度计算之前，先读本规则。核心职责是：**项目承载整体目标，专项组织某一方向的工作，TODO 记录具体要完成的事情，执行记录保存实际执行过程和结果。**
 
-业务入口见 [项目工作台](../features/project/index.md)，实现索引见 [project 模块](../agents/project/index.md)。涉及大脑调度时同时遵守 [规则 06](06-brain-scheduling-contract.md)，涉及 DAG 执行时同时遵守 [规则 04](04-dag-execution-contract.md)。
+功能入口见 [项目工作台](../features/project/index.md)，实现索引见 [project 模块](../agents/project/index.md)。涉及大脑调度时同时遵守 [规则 06](06-brain-scheduling-contract.md)，涉及 DAG 执行时同时遵守 [规则 04](04-dag-execution-contract.md)。
 
 ## 对象、归属与职责
 
@@ -35,7 +35,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 ## 看板状态与执行状态
 
 - TODO 看板列固定为 `backlog` 待整理、`todo` 待办、`in_progress` 进行中、`done` 已完成，由用户编辑或拖动维护。
-- 执行状态来自原生执行索引。执行结束或取得结果均不能自动将 TODO 标为已完成，也不能作为业务验收通过的依据。
+- 执行状态来自原生执行索引。执行结束或取得结果均不能自动将 TODO 标为已完成，也不能作为任务验收通过的依据。
 - 项目执行关联只保存 TODO ID、执行 ID、能力 ID、类型、名称和创建时间。不保存结论副本或同步状态，不启动后台结论收集，不提供重新收集接口。
 - 查询失败显示实际错误；节点离线返回不可用。界面清除旧的实时结果并提供重试，不能将旧内容当作当前执行结果，也不能因节点离线修改看板状态。
 - 原生执行明细由执行 ID 和所属节点定位；项目页面不另建执行状态机。运行中的 Team 可通过原生详情提交引导。
@@ -81,7 +81,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 - TODO 交给 Brain 时选择已保存的计划版本并传入任务输入，关联整次 Brain 运行；Brain 的里程碑、节点和返工轮次留在该次运行内。其执行完成不改变项目 TODO 的看板状态。
 - 执行关联与原生详情由 Server 控制台提供。独立 Web 的旧项目 API 不提供控制台执行索引，不能据此假定执行不存在。
 - 旧 `ProjectService` 的 plan/execute 路径与历史记录仍有独立实现，当前项目页面不提供旧的专属计划、执行或回放入口；维护时不能把旧路径的状态规则套到看板指派链路。
-- 项目业务数据通过 `ProjectStore` 持久化；关系投影、进度、标签选择与重匹配使用纯函数，API 和 UI 复用相同规则。
+- 项目数据通过 `ProjectStore` 持久化；关系投影、进度、标签选择与重匹配使用纯函数，API 和 UI 复用相同规则。
 
 代码入口：[数据定义](../crates/store/src/project_types.rs)、[存储接缝](../crates/store/src/project.rs)、[概览与进度](../crates/store/src/project/overview.rs)、[标签规则](../crates/store/src/project/tags.rs)、[原生执行入口](../crates/web/spa/src/project/execute/launcher.jsx)、[执行关联](../crates/control/src/api/project_links.rs)、[实时结果](../crates/control/src/api/executions/results/mod.rs)。
 
@@ -99,4 +99,4 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 | 归属编辑、看板移动与筛选保留 | [relations.dom.test.jsx](../crates/web/spa/src/project/views/relations.dom.test.jsx)、[board.test.js](../crates/web/spa/src/project/model/board.test.js)、[project.dom.test.jsx](../crates/web/spa/src/project/project.dom.test.jsx) |
 | 执行发起、关联及详情切换 | [launcher.dom.test.jsx](../crates/web/spa/src/project/execute/launcher.dom.test.jsx)、[todoDrawer.dom.test.jsx](../crates/web/spa/src/project/tests/todoDrawer.dom.test.jsx) |
 
-改变上述业务规则须明确记录用户决定，并同步修改本规则、实现、测试和相关仓库记忆。实现验收遵守 [规则 01](01-mandatory-tests.md)、[规则 02](02-regression-gate.md)；界面变更同时遵守 [规则 05](05-ui-acceptance.md)。
+改变上述功能规则须明确记录用户决定，并同步修改本规则、实现、测试和相关仓库记忆。实现验收遵守 [规则 01](01-mandatory-tests.md)、[规则 02](02-regression-gate.md)；界面变更同时遵守 [规则 05](05-ui-acceptance.md)。

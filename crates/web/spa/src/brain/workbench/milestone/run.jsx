@@ -1,3 +1,4 @@
+import { EditButton } from '../../../ui/permissions.jsx';
 import { Alert, Button, Drawer, Input, InputNumber, Space, Tag } from 'antd';
 import { useState } from 'react';
 import { apiPost } from '../../../api.js';
@@ -52,7 +53,7 @@ export function MilestoneRunBody({ view, id, refresh, onNotice }) {
       <Space wrap><Tag>第 {run.round} / {run.max_rounds} 轮</Tag><Tag>当前第 {run.layer || 1} 层</Tag><Tag>{LAYERED_PHASES[run.phase] || run.phase}</Tag></Space>
       <Space wrap>
         <Button disabled={busy || terminal} onClick={() => command(['paused', 'blocked'].includes(run.phase) ? 'resume' : 'pause')}>{['paused', 'blocked'].includes(run.phase) ? '继续调度' : '暂停调度'}</Button>
-        <Button danger disabled={busy || terminal} onClick={() => command('cancel')}>取消运行</Button>
+        <EditButton danger disabled={busy || terminal} onClick={() => command('cancel')}>取消运行</EditButton>
         <Button onClick={() => { setExecutionId(null); setDetailsOpen(true); }}>查看详情</Button>
       </Space>
     </div>
@@ -70,13 +71,13 @@ export function MilestoneRunBody({ view, id, refresh, onNotice }) {
           <Input.TextArea aria-label="大脑人工输入" disabled={terminal} value={humanInput} onChange={(e) => setHumanInput(e.target.value)} rows={3}
             placeholder="补充信息或调整调度要求；信息将作为最新事件交给大脑" />
           <span className={inputBytes > 4096 ? 'brain-input-count over-limit' : 'brain-input-count'}>{inputBytes} / 4096 字节</span>
-          <Button aria-label="发送大脑输入" type="primary" loading={busy} disabled={terminal || !humanInput.trim() || inputBytes > 4096} onClick={submitInput}>发送给大脑</Button>
+          <EditButton aria-label="发送大脑输入" type="primary" loading={busy} disabled={terminal || !humanInput.trim() || inputBytes > 4096} onClick={submitInput}>发送给大脑</EditButton>
         </Space></div>
         {(view.events || []).filter((event) => ['human_input', 'guidance_processed'].includes(event.event_type)).slice(-20).map((event) =>
           <div key={event.seq} className="brain-human-message"><strong>{event.event_type === 'human_input' ? '你' : '大脑'}：</strong>{event.user_input || event.reason_summary}</div>)}
         {['paused', 'blocked'].includes(run.phase) && <Space style={{ marginBottom: 16 }}>
           <InputNumber aria-label="新的轮次预算" min={run.round + 1} max={32} precision={0} value={budget} onChange={setBudget} />
-          <Button disabled={busy || !budget} onClick={() => command('set_round_budget', { max_rounds: budget })}>调整预算</Button>
+          <EditButton disabled={busy || !budget} onClick={() => command('set_round_budget', { max_rounds: budget })}>调整预算</EditButton>
         </Space>}
         <RunDetails view={view} plan={displayPlan} history={history} onExecution={openExecution} />
       </>}

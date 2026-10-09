@@ -24,7 +24,8 @@ fn bind(
     std::fs::create_dir_all(&target)?;
     mounts.push(
         json!({"type":"bind","source":source,"destination":destination,
-        "options":["rbind",if writable {"rw"} else {"ro"},"nosuid","nodev"]}),
+        // Bind only the declared directory; unrelated host submounts must stay outside the run.
+        "options":["bind",if writable {"rw"} else {"ro"},"nosuid","nodev"]}),
     );
     Ok(())
 }

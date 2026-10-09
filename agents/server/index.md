@@ -6,7 +6,8 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 ## 索引
 - `crates/server/src/` — 二进制装配；复用 control/web 能力
-- [control/release/resources.rs](../../crates/control/src/release/resources.rs) — 独立资源服务持有 Agent、Linux 二进制、源工作区与 Ontology 正文的只读 NFS 导出；经认证的资源管理接口与版本 Server 使用同一配置。资源进程不打开 Ontology 数据库，业务 Server 持有域状态并在退休前排空写入。
+- [main.rs](../../crates/server/src/main.rs) 的 `--data-dir` 指定 Server 持久化目录；执行过程由所属 Node 的同名参数指定。[rolling/config.py](../../scripts/platform/rolling/config.py) 的 `deployment.server_data` 与 `deployment.state_dir` 分别管理 Server 数据和版本运行、备份目录；参数及目录归属见 [部署说明](../../docs/agent-platform.md)、[发布配置](../../docs/smooth-release.md)。
+- [control/release/resources.rs](../../crates/control/src/release/resources.rs) — 独立资源服务持有 Agent、Linux 二进制、源工作区与 Ontology 正文的只读 NFS 导出；经认证的资源管理接口与版本 Server 使用同一配置。资源进程不打开 Ontology 数据库，版本 Server 持有域状态并在退休前排空写入。
 - 资源服务的 `GET /api/health` 返回 `role=resources` 与完整构建信息；兼容发布在预热前核对生产资源的版本。旧服务缺少元数据时要求维护升级。
 - [rolling/maintenance](../../scripts/platform/rolling/maintenance/__init__.py) — 不兼容升级的持久阶段：冻结接入、排空、停服、备份、升级资源与挂载、启动迁移、私有验证、复开。迁移启动意图先落盘；复开写入意图持久化前可恢复旧库，此后禁止旧备份恢复，只允许同候选续跑或新格式版本修复。
 - [maintenance/flow.py](../../scripts/platform/rolling/maintenance/flow.py) — 资源 HTTP 就绪后，按发布等待时限轮询导出状态和节点挂载的实际目录读取；成功后才准备候选进程。临时 NFS 读取错误可重试，超时保留 `installing` 阶段、关闭的写入口和原备份，同候选续跑继续核验这份备份。

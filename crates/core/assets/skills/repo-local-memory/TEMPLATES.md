@@ -82,7 +82,7 @@ Commit: <documentation baseline git commit sha>
 - <页面 / API / 命令 / 事件 / 工作流>
 
 ## 行为与规则
-- <核心业务规则>
+- <核心功能规则>
 
 ## 关键状态与异常
 - 状态：<关键状态>

@@ -33,4 +33,4 @@ TODO 管理页的新建模板是页面内联表单、编辑模板会整页替换
 ## 回归基线
 
 - `npm test`（spa）681 tests：本次改动范围全绿；仅存 2 个失败位于他人未提交的 brain/workbench WIP（`plans.dom.test.jsx` 存储失败用例隔离复现、`editor.dom.test.jsx` 全量并发下偶发超时），与本改动无关。
-- `scripts/build-spa.sh` 通过（输出契约校验 + dist 更新）；`check-spa-drift.sh` 当时因工作台 WIP 的跨目录相对导入在临时树构建失败，补齐临时测试目录后确认 dist ↔ src 无漂移。当前 SPA 的构建不依赖仓库外的示例目录。
+- `scripts/build-spa.sh` 通过（输出契约校验 + dist 更新）；`check-spa-drift.sh` 当时因工作台 WIP 的跨目录相对导入在临时树构建失败，补齐临时测试目录后确认 dist ↔ src 无漂移。

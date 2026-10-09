@@ -13,12 +13,14 @@ describe("GraphPage saved observation", () => {
     expect(await screen.findByRole("combobox", { name: "切面观测实体多选" })).toBeEnabled();
     expect(screen.getByRole("combobox", { name: "切面观测实体多选" })).toBeEnabled();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], relationshipTypeIds: ["depends"], upstreamDepth: 3, downstreamDepth: 3,
     }));
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "切面下游跳数" }));
     const downstreamOption = document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="1 跳"]');
     fireEvent.click(downstreamOption!);
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], relationshipTypeIds: ["depends"], upstreamDepth: 3, downstreamDepth: 1,
     }));
     await screen.findByTestId("node-a");
@@ -31,6 +33,7 @@ describe("GraphPage saved observation", () => {
     fireEvent.click(aspectCenterOption);
     finishSelection();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], relationshipTypeIds: ["depends"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 1,
     }));
   });
@@ -43,6 +46,7 @@ describe("GraphPage saved observation", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "切面观测" }));
     await expandFilters();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], relationshipTypeIds: ["depends"], centerIds: ["a"],
       upstreamDepth: 0, downstreamDepth: 2,
     }));
@@ -54,6 +58,7 @@ describe("GraphPage saved observation", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "切面观测" }));
     await expandFilters();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], relationshipTypeIds: ["depends"], upstreamDepth: 3, downstreamDepth: 3,
     }));
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "切面关系类型多选" }));
@@ -65,6 +70,7 @@ describe("GraphPage saved observation", () => {
     fireEvent.click(option);
       finishSelection();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], relationshipTypeIds: ["depends", "unused"], upstreamDepth: 3, downstreamDepth: 3,
     }));
     expect(apiMock.updateGraphAspect).not.toHaveBeenCalled();
@@ -78,6 +84,7 @@ describe("GraphPage saved observation", () => {
     fireEvent.click(option!);
     finishSelection();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], centerIds: ["a", "b"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["depends"],
     }));
     await screen.findByTestId("node-b");
@@ -89,7 +96,7 @@ describe("GraphPage saved observation", () => {
     await renderPage();
     expect(await screen.findByText("实体查询失败")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /重\s*试/ }));
-    await screen.findByText("请先选择实体类型，再选择关系类型");
+    await screen.findByText("请先选择实体类型");
     expect(screen.queryByText("实体查询失败")).not.toBeInTheDocument();
     expect(apiMock.entities).toHaveBeenCalledTimes(2);
   });
@@ -103,12 +110,13 @@ describe("GraphPage saved observation", () => {
     fireEvent.click(await screen.findByText("2 跳"));
     finishSelection();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 2, downstreamDepth: 3, relationshipTypeIds: ["depends"],
     }));
     apiMock.entities.mockResolvedValue({ items: [{ ...entities[0], id: "new", name: "新环境实体" }] });
     page.rerender(pageElement(true, "new-env"));
     await expandFilters();
-    await screen.findByText("请先选择实体类型，再选择关系类型");
+    await screen.findByText("请先选择实体类型");
     await act(async () => { resolveOld({ nodes: graphNodes, edges: [edge], available_relationship_type_ids: ["depends"] }); });
     expect(screen.queryByTestId("node-a")).not.toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "实体类型多选" }));

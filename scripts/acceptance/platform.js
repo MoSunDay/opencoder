@@ -15,6 +15,7 @@ const { schedules } = require('./ui/scenarios/schedules');
 const { teamAnswer, teams } = require('./ui/scenarios/teams');
 const { exportsStatus } = require('./ui/scenarios/exports');
 const { chat } = require('./ui/scenarios/chat');
+const { access } = require('./ui/scenarios/access');
 require('./harness/namespace').isolateFixture();
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-platform-browser-'));
@@ -189,7 +190,7 @@ async function main() {
   await page.screenshot({ path: path.join(root, 'project-latest-plan.png'), animations: 'disabled' });
   await page.locator('.ant-drawer-close').click();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator('.fleet-mobile-nav').getByText('节点', { exact: true }).click();
+  await page.locator('.fleet-mobile-nav').getByText('后台管理', { exact: true }).click();
   await page.getByRole('combobox', { name: '页面导航' }).click();
   await page.locator('.ant-select-item-option-content').getByText('节点列表', { exact: true }).click();
   await page.getByText('node-a', { exact: true }).waitFor();
@@ -206,6 +207,8 @@ async function main() {
   await page.screenshot({ path: path.join(root, 'brain.png') });
   console.log('CASE chat continuation');
   await chat({ page, api, root, until });
+  console.log('CASE roles and token administration');
+  await access({ page, browser, base, api, root });
   // An offline owner must expose an error without creating a replacement run.
 
   const owner = (await api('GET', '/api/nodes')).nodes.find((node) => node.id === project.node_id);

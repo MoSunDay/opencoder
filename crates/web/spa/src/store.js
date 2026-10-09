@@ -66,7 +66,7 @@ export function setCredentials(token, base) {
 /// Publish the authenticated identity ({name, role}) resolved by the login
 /// probe (GET /api/me). Merges into state; panels/nav read it via useStore.
 export function setIdentity(identity) {
-  setState({ identity: identity && identity.name ? { name: identity.name, role: identity.role || 'user' } : null });
+  setState({ identity: identity && identity.name ? { name: identity.name, role: identity.role || 'viewer' } : null });
 }
 
 export function clearCredentials() {

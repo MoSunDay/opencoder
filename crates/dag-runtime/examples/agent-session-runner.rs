@@ -1,46 +1,7 @@
-//! Container-side multi-turn agent session runner (`run_mode: agent`
-//! custom agents under `sandbox: runc`).
-//!
-//! The host executes an agent session by launching THIS binary inside a
-//! read-only OCI container (`ArgvStyle::Direct`, argv
-//! `["/usr/bin/agent-session-runner"]`) once PER TURN; the whole session
-//! turn -- LLM loop, tools, artifacts -- runs confined to the container with
-//! the per-session rw dir, the pinned read-only agents pool
-//! (`/workspace/agent`) and optionally the knowledge root exposed.
-//! Continuation is file-based: the host stages `<step_dir>/messages.json`
-//! from its durable store before each turn, and persists the delta from
-//! the `messages.json` this runner writes after the turn.
-//!
-//! Contract (env, injected by the host executor):
-//! - `OPENCODER_STEP_PROMPT`  -- container path of THIS turn's prompt file
-//!   (REQUIRED; missing = contract violation, exit code 2);
-//! - `OPENCODER_STEP_DIR`     -- the per-session rw dir (default
-//!   `/workspace/context/step`);
-//! - `OPENCODER_STEP_SESSION_ID` -- host session id (a fresh ULID when
-//!   absent);
-//! - `OPENCODER_STEP_AGENT`   -- executing agent name (default `act`);
-//! - `OPENCODER_AGENTS_DIR`   -- container path of the pinned agents pool
-//!   (default `/workspace/agent`); re-pinned process-wide BEFORE any agent
-//!   resolution so `resolve_agent`, skill roots, tools paths and memory
-//!   all read the read-only pool;
-//! - `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENCODER_MODEL` -- the host's
-//!   resolved LLM endpoint, applied through `Config`'s env overlay;
-//! - `OPENCODER_HOW_APPEND`   -- optional how.md payload.
-//!
-//! Artifacts written into the step dir (host-visible through the bind):
-//! - `events.ndjson` -- every `SessionEvent` of this turn, one
-//!   `{"kind": ..., "payload": ...}` line per event in the SSE wire shape
-//!   (`SessionEvent::sse_kind`/`sse_data`; the host reconstructs events
-//!   with `SessionEvent::from_sse` and tails the file while the turn
-//!   runs). Lines are written + flushed eagerly.
-//! - `messages.json` -- the full `session.messages` after the turn (the
-//!   host persists the delta; the next turn seeds from this file);
-//! - `session.json` (`running` -> `done`/`error`), `transcript.txt`
-//!   (bounded tail), and the optional `output.json` recovered from the
-//!   final assistant text with the same extraction contract as the host
-//!   path.
-//!
-//! Exit codes: 0 success, 1 run failure, 2 contract violation.
+//! Container-side Agent runner. The host admits inputs into runtime.db under
+//! OPENCODER_STEP_DIR; the native session loop drains them with durable input
+//! receipts. Continuations resume that same store and pinned agent pool. Events
+//! are also emitted to events.ndjson for the host's public SSE relay.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -57,6 +18,13 @@ fn env_or(name: &str, default: &str) -> String {
 }
 
 fn main() {
+    if std::env::args().skip(1).collect::<Vec<_>>() == ["--build-info"] {
+        println!(
+            "{}",
+            serde_json::to_string(&opencoder_core::version::build_info()).unwrap()
+        );
+        return;
+    }
     match run() {
         Ok(()) => {}
         Err(code) => std::process::exit(code),
@@ -74,24 +42,6 @@ fn run() -> Result<(), i32> {
     let agents_dir = env_or("OPENCODER_AGENTS_DIR", "/workspace/agent");
     std::env::set_var("OPENCODER_AGENTS_DIR", &agents_dir);
 
-    // 2. Turn contract: the prompt file must exist before anything else.
-    let prompt_path = match std::env::var("OPENCODER_STEP_PROMPT") {
-        Ok(path) if !path.is_empty() => PathBuf::from(path),
-        _ => {
-            eprintln!("agent-session-runner: OPENCODER_STEP_PROMPT is required (prompt file path)");
-            return Err(2);
-        }
-    };
-    let prompt = match std::fs::read_to_string(&prompt_path) {
-        Ok(text) => text,
-        Err(error) => {
-            eprintln!(
-                "agent-session-runner: cannot read prompt file {}: {error}",
-                prompt_path.display()
-            );
-            return Err(2);
-        }
-    };
     let step_dir = PathBuf::from(env_or("OPENCODER_STEP_DIR", "/workspace/context/step"));
     if let Err(error) = std::fs::create_dir_all(&step_dir) {
         eprintln!(
@@ -136,10 +86,7 @@ fn run() -> Result<(), i32> {
         }
     };
 
-    // 4. Session pinned to the step dir (writable mount). Multi-turn
-    //    continuation: when the host staged `<step_dir>/messages.json`
-    //    from its durable store, seed the session history from it so this
-    //    turn continues the conversation instead of starting fresh.
+    // Resume uses the writable native session store below.
     let mut session = SessionState::new(
         session_id.clone(),
         agent,
@@ -147,24 +94,6 @@ fn run() -> Result<(), i32> {
         client,
         step_dir.clone(),
     );
-    if let Ok(bytes) = std::fs::read(step_dir.join("harness.json")) {
-        match serde_json::from_slice::<opencoder_core::harness::HarnessRuntime>(&bytes) {
-            Ok(runtime) => session.harness.literal_mentions = runtime.literal_mentions,
-            Err(error) => {
-                eprintln!("agent-session-runner: cannot parse harness.json: {error}");
-                return Err(2);
-            }
-        }
-    }
-    if let Ok(bytes) = std::fs::read(step_dir.join("messages.json")) {
-        match serde_json::from_slice::<Vec<opencoder_core::Message>>(&bytes) {
-            Ok(history) => session.messages = history,
-            Err(error) => {
-                eprintln!("agent-session-runner: cannot parse messages.json: {error}");
-                return Err(2);
-            }
-        }
-    }
     if let Ok(how_append) = std::env::var("OPENCODER_HOW_APPEND") {
         if !how_append.is_empty() {
             session
@@ -232,7 +161,26 @@ fn run() -> Result<(), i32> {
                 return Err(1);
             }
         };
-        runtime.block_on(run_session(&mut session, prompt, on_event))
+        runtime.block_on(async {
+            let store =
+                Arc::new(opencoder_store::LibsqlStore::open(step_dir.join("runtime.db")).await?);
+            use opencoder_store::Store;
+            anyhow::ensure!(
+                store.get_session(&session_id).await?.is_some(),
+                "host must initialize the native session store"
+            );
+            let passthrough = std::mem::take(&mut session.env_passthrough);
+            session = opencoder_session::resume(
+                store,
+                &session_id,
+                config.clone(),
+                session.client.clone(),
+                step_dir.clone(),
+            )
+            .await?;
+            session.env_passthrough = passthrough;
+            run_session(&mut session, String::new(), on_event).await
+        })
     };
 
     // 8. Artifacts: the full message history (the host persists the

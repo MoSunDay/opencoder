@@ -19,7 +19,7 @@ use clap::Parser;
     about = "opencoder fleet control plane: web console, brain and node scheduling"
 )]
 struct Args {
-    /// Run the independent resource service instead of a business server.
+    /// Run the independent resource service instead of a platform server.
     #[arg(long)]
     resources: bool,
     /// Per-instance release metadata; keeps the existing resource workdir.

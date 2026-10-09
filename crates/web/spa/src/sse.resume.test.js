@@ -27,3 +27,27 @@ it('retries a node transport error while preserving persisted execution errors',
   await vi.advanceTimersByTimeAsync(1100);
   expect(frames).toEqual([{ seq: 3, event: 'error', data: { error: 'step failed' } }]);
 });
+
+it('notifies the owner of an empty completed stream without inventing a session event', async () => {
+  vi.useFakeTimers();
+  authFetch.mockResolvedValue(response('event: stream_end\ndata: {"finished":true}\n\n'));
+  const onEnd = vi.fn(), onFrame = vi.fn();
+  const stream = openStream({ path: '/api/sessions/a/events', after: 9, onFrame, onEnd });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd).toHaveBeenCalledWith(9);
+  expect(onFrame).not.toHaveBeenCalled();
+  stream.abort();
+  await vi.advanceTimersByTimeAsync(16000);
+  expect(authFetch).toHaveBeenCalledTimes(1);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+});
+
+it('does not report completion when the caller aborts a stream', async () => {
+  authFetch.mockResolvedValue({ ok: true, body: new ReadableStream({ start() {} }) });
+  const onEnd = vi.fn();
+  const stream = openStream({ path: '/api/sessions/a/events', onEnd });
+  stream.abort();
+  await Promise.resolve();
+  expect(onEnd).not.toHaveBeenCalled();
+});

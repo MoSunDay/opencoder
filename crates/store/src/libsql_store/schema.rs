@@ -7,6 +7,7 @@ use super::chat_tables::{
 use super::schedule::{CREATE_INDEX_SCHEDULE_RUNS_FIRED, CREATE_SCHEDULES, CREATE_SCHEDULE_RUNS};
 use super::team_runs::{CREATE_INDEX_TEAM_TOPIC_RUNS_TOPIC, CREATE_TEAM_TOPIC_RUNS};
 
+mod access;
 mod catalog;
 mod migrations;
 mod project_links;
@@ -16,7 +17,7 @@ use project_relations::CREATE_PROJECT_MILESTONES;
 
 // Scheduler tables bootstrap additively. Project v33 removes result caches;
 // the release data-format gate excludes older Servers before this migration.
-pub(crate) const SCHEMA_VERSION: i64 = 33;
+pub(crate) const SCHEMA_VERSION: i64 = 34;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -236,13 +237,7 @@ CREATE TABLE IF NOT EXISTS brain_vectors (
 /// Platform users (v24): bearer identities beyond the seed admin token.
 /// Only sha256 hex digests are stored; the plaintext token is shown exactly
 /// once in the creation response and never persisted or logged.
-const CREATE_PLATFORM_USERS: &str = "\
-CREATE TABLE IF NOT EXISTS platform_users (
-  name        TEXT PRIMARY KEY,
-  token_hash  TEXT NOT NULL UNIQUE,
-  role        TEXT NOT NULL,
-  created_at  INTEGER NOT NULL
-)";
+const CREATE_PLATFORM_USERS: &str = access::USERS;
 
 /// Exemplar-input lookups are per-capability ordered scans; the index keeps
 /// the brain catalog's `get`/`list` reads off full table scans.
@@ -407,6 +402,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_SCHEDULE_RUNS, ()).await?;
     conn.execute(CREATE_SCHEDULES, ()).await?;
     conn.execute(CREATE_PLATFORM_USERS, ()).await?;
+    access::initialize(conn).await?;
     conn.execute(CREATE_INDEX_MSG, ()).await?;
     conn.execute(CREATE_INDEX_IN, ()).await?;
     conn.execute(CREATE_INDEX_EV, ()).await?;

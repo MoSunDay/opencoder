@@ -201,6 +201,7 @@ async fn viewer_reads_platform_editor_writes_and_both_cannot_administer() {
             "/api/tokens",
             "/api/executions/maintenance-private",
             "/api/sessions/maintenance-private",
+            "/api/resource-admission-provider",
         ] {
             assert_eq!(
                 auth(&h, Method::GET, path, token, None).await.0,
@@ -212,6 +213,7 @@ async fn viewer_reads_platform_editor_writes_and_both_cannot_administer() {
             "/api/users",
             "/api/tokens",
             "/api/nodes/node-e2e/maintenance",
+            "/api/executions/team-public/resources",
         ] {
             assert_eq!(
                 auth(&h, Method::POST, path, token, Some(json!({}))).await.0,

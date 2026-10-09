@@ -59,6 +59,8 @@ pub fn build_app_with_metrics(
             "/api/nodes/:id/scheduling",
             get(api::settings::get_scheduling).put(api::settings::save_scheduling),
         )
+        .route("/api/resource-admission-provider", get(api::resource_admission::get).put(api::resource_admission::save))
+        .route("/api/executions/:id/resources", get(api::resource_admission::inspect).post(api::resource_admission::command))
         .route("/api/harnesses", get(api::settings::get_harnesses))
         .route("/api/harnesses/:name", put(api::settings::save_harness))
         .route("/api/harnesses/codex/profiles", get(api::settings::registered::profiles))

@@ -44,3 +44,5 @@ pub fn error_500(msg: String) -> Response {
 pub mod compat;
 
 mod template;
+
+pub mod resource_admission;

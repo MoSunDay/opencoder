@@ -74,7 +74,8 @@ async fn resource_queue_waits_then_dispatches_in_order_without_duplicate_node_cr
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/resources", listener.local_addr().unwrap());
     let provider = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let token = h.data_dir().join("resource-provider.token");
+    let credentials = tempfile::tempdir().unwrap();
+    let token = credentials.path().join("resource-provider.token");
     std::fs::write(&token, "isolated-resource-fixture").unwrap();
     let (status, _) = h
         .req(

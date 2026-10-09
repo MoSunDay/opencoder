@@ -228,6 +228,8 @@ async function main() {
   await until(async () => !(await api('GET', '/api/nodes')).nodes.find((node) => node.id === owner.id).online, 'owner disconnected');
   await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
+  await page.getByRole('combobox', { name: '执行类型筛选' }).click();
+  await page.locator('.ant-select-item-option-content').getByText('项目任务', { exact: true }).click();
   await page.getByRole('button', { name: projectId, exact: true }).click();
   await page.locator('.ant-drawer .ant-alert-error').waitFor();
   assert.equal((await api('GET', '/api/executions')).executions.length, count);

@@ -189,6 +189,17 @@ opencoder session <list|show|delete>    # 会话管理（show --json 为深度�
   -v, --verbose                详细日志
 ```
 
+Fleet 管理 CLI 默认读取 `~/.config/opencoder/ctl.json`（设置 `XDG_CONFIG_HOME` 时使用其中的 `opencoder/ctl.json`），也可通过 `--client-config <PATH>` 指定文件。例如：
+
+```json
+{
+  "server": "http://127.0.0.1:8080",
+  "token_file": "credentials/admin.text"
+}
+```
+
+`token_file` 的相对路径以配置文件目录为准。配置后可直接运行 `opencoder-cli health`，无需重复传地址和 Token。优先级为命令行参数、环境变量、配置文件；已有 admin Token 继续拥有管理员权限。凭据文件和本机连接配置不要提交到 Git。
+
 ## ⚡ 性能
 
 | 指标 | 实测 | 目标 |

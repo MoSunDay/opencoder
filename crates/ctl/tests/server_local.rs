@@ -24,6 +24,54 @@ use opencoder_control::admission::AdmissionMode;
 use server_local_defs::{api_get, assert_ok, cli, Server, TOKEN};
 use server_local_defs::{CAP, CAP_UPDATED, CARD, DAG_SPEC, TEAM, TEAM_RAW, WF_SPEC};
 
+#[tokio::test]
+async fn default_file_connects_with_existing_admin_token_without_auth_arguments() {
+    let s = Server::new(None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let config_dir = dir.path().join("opencoder");
+    std::fs::create_dir(&config_dir).unwrap();
+    std::fs::write(config_dir.join("admin.text"), TOKEN).unwrap();
+    std::fs::write(
+        config_dir.join("ctl.json"),
+        serde_json::json!({
+            "server":s.base,"token_file":"admin.text"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_opencoder-cli"))
+        .args(["raw", "call", "GET", "/api/users"])
+        .env("XDG_CONFIG_HOME", dir.path())
+        .env_remove("OPENCODER_SERVER_URL")
+        .env_remove("OPENCODER_SERVER_TOKEN")
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(body["users"].is_array(), "{body}");
+    let denied = tokio::process::Command::new(env!("CARGO_BIN_EXE_opencoder-cli"))
+        .args([
+            "--token",
+            "incorrect-test-token",
+            "raw",
+            "call",
+            "GET",
+            "/api/users",
+        ])
+        .env("XDG_CONFIG_HOME", dir.path())
+        .env_remove("OPENCODER_SERVER_URL")
+        .env_remove("OPENCODER_SERVER_TOKEN")
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(denied.status.code(), Some(2));
+}
+
 // ── checklist 1 + 10: probes and the bearer contract ──────────────────
 
 #[tokio::test]

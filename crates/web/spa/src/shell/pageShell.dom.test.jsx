@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '../test/setup-dom.js';
 import { Button } from 'antd';
-import { HEADERLESS_PAGES, PAGE_META } from '../nav.js';
+import { HEADERLESS_PAGES, PAGE_META, pagesOf } from '../nav.js';
 import { PageShell } from './pageShell.jsx';
 
 afterEach(() => cleanup());
@@ -66,6 +66,14 @@ describe('PageShell', () => {
     render(<PageShell page="brain">brain-body</PageShell>);
     expect(screen.queryByRole('heading')).toBeNull();
     expect(screen.getByText('brain-body')).toBeTruthy();
+  });
+
+  it.each(pagesOf('ontology'))('%s omits the title and description while keeping environment controls', (page) => {
+    const { container } = render(<PageShell page={page} extra={<Button>切换环境</Button>}>ontology-body</PageShell>);
+    expect(container.querySelector('.oc-page-title')).toBeNull();
+    expect(container.querySelector('.oc-page-desc')).toBeNull();
+    expect(screen.getByRole('button', { name: '切换环境' })).toBeTruthy();
+    expect(screen.getByText('ontology-body')).toBeTruthy();
   });
 
   it('renders every headerless page body without a page header', () => {

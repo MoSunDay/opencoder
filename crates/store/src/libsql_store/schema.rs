@@ -17,7 +17,7 @@ use project_relations::CREATE_PROJECT_MILESTONES;
 
 // Scheduler tables bootstrap additively. Project v33 removes result caches;
 // the release data-format gate excludes older Servers before this migration.
-pub(crate) const SCHEMA_VERSION: i64 = 34;
+pub(crate) const SCHEMA_VERSION: i64 = 35;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a

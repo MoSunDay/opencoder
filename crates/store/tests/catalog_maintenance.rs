@@ -78,7 +78,7 @@ async fn migrate_and_restore(version: i64) {
         let conn = store.conn().await.unwrap();
         assert_eq!(
             scalar(&conn, "SELECT CAST(version AS TEXT) FROM schema_version").await,
-            "34"
+            "35"
         );
         assert_eq!(
             scalar(

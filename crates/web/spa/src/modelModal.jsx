@@ -70,9 +70,9 @@ export function ModelModal({ open, sessionId, nodeId, onClose, onNotice }) {
     >
       {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
       {!error && models.length === 0 ? <Text type="secondary">暂无可用模型</Text> : (
-        <Radio.Group value={sel} onChange={(e) => setSel(e.target.value)}>
+        <Radio.Group orientation="vertical" value={sel} onChange={(e) => setSel(e.target.value)}>
           {models.map((m) => (
-            <Radio key={m} value={m} style={{ display: 'block', padding: '2px 0' }}>{m}</Radio>
+            <Radio key={m} value={m} style={{ padding: '2px 0' }} styles={{ label: { minWidth: 0, overflowWrap: 'anywhere' } }}>{m}</Radio>
           ))}
         </Radio.Group>
       )}

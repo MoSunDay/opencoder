@@ -14,7 +14,7 @@ Brain 第一层并行计算，第二层把实际完整输出绑定到 DAG 验证
 | 功能 | 测试名或入口 | 文件 |
 |---|---|---|
 | 四类派发、结果绑定、历史、进度与故障恢复 | `project-capabilities` | [main.js](../../../scripts/acceptance/project/capabilities/main.js) |
-| 计算值和原生文本结果的严格校验 | `task conclusions require structured computed values, including Markdown and nested output`、`Brain child outputs accept native text or objects while checking the business result` | [scenario.test.js](../../../scripts/acceptance/project/capabilities/scenario.test.js) |
+| 计算值和原生文本结果的严格校验 | `task conclusions require structured computed values, including Markdown and nested output`、`Brain child outputs accept native text or objects while checking the task result` | [scenario.test.js](../../../scripts/acceptance/project/capabilities/scenario.test.js) |
 | DAG 入口独立加载节点及错误提示 | `loads dispatch nodes without first visiting the fleet page`、`shows node fetch failures in the dispatch drawer` | [dag.dom.test.jsx](../../../crates/web/spa/src/dag/dag.dom.test.jsx) |
 | 全站功能、四种屏宽、TUI | `scripts/acceptance/ui/main.js` | [全站入口](../../../scripts/acceptance/ui/main.js) |
 

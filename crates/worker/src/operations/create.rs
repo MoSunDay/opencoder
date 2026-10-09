@@ -589,11 +589,19 @@ fn prepare_with_config(
                     // credentials; a host CLI is not used by this sandbox.
                     continue;
                 }
-                opencoder_session::harness::codex::configured_binary(
+                if opencoder_session::harness::codex::startup_program(
                     settings,
                     &effective_envs,
                     &crate::brain::workdir::node_workdir(worker),
-                )?;
+                )?
+                .is_none()
+                {
+                    opencoder_session::harness::codex::configured_binary(
+                        settings,
+                        &effective_envs,
+                        &crate::brain::workdir::node_workdir(worker),
+                    )?;
+                }
             }
             if needs_llm && native && worker.inner.client.is_none() {
                 config.resolve_endpoint()?;

@@ -243,5 +243,5 @@ async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
 fn brain_v4_tables_do_not_increment_current_schema_version() {
     // v4 tables bootstrap unconditionally, so they must not move the
     // database watermark: 33 removes project execution caches.
-    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 33);
+    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 34);
 }

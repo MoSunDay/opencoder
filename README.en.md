@@ -257,11 +257,7 @@ opencoder run "Implement terminal Snake..."
 
 ## 🧪 Development & Testing
 
-This repository contains OpenCoder platform capabilities, reusable tools, tests, and documentation. External business implementations, workflows, data, and operational records are maintained outside the repository and connect through platform registration APIs and task inputs. Core code, builds, and tests do not depend on those external files.
-
-
-
-This project strictly follows the development rules under [`rules/`](rules/): every business feature must have corresponding tests, and a full regression run with a changelog + test manifest is required before each iteration ends.
+This project strictly follows the development rules under [`rules/`](rules/): every platform feature must have corresponding tests, and a full regression run with a changelog + test manifest is required before each iteration ends.
 
 ```bash
 # Unit + integration tests (deterministic, zero network)

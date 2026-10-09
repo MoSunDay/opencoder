@@ -9,7 +9,7 @@ Commit: c2bd85c234ea2394536308dd63c1122aa670ebc2
 ## 变更
 
 - `agents/team/index.md` 新增「话题推进合约」段：主持人唯一规划者、成员 act 作答、话题内 1..N 轮 / 轮内 0..N 对齐子轮（sub ≥1 仅拉回未对齐成员，`RESULT_ALIGNMENT`）、对齐才记轮并进入 closing。
-- 新增 `crates/team/tests/topic_contract_flow.rs`：真实注册节点（arch-captain + pay-backend/sre/risk-ctl，带能力快照）+ `MockDispatcher` per-node FIFO 全脚本 19 次 prompt（主持人 10 决策 + 成员 9 次 act 作答），驱动两个话题：
+- 新增 `crates/team/tests/topic_contract_flow.rs`：真实注册节点（arch-captain + runtime-backend/sre/resource-ctl，带能力快照）+ `MockDispatcher` per-node FIFO 全脚本 19 次 prompt（主持人 10 决策 + 成员 9 次 act 作答），驱动两个话题：
   - 话题1《回调超时与降级》：turn1 三人作答未对齐 → 仅点名 backend/risk 追答（sub1，sre 不被拉入）→ 对齐 → turn2 参与者收缩为 backend/risk → closing 完成；
   - 话题2《重试与幂等》：1 轮对齐 → closing 完成。
 - 新增 `crates/web/tests/team_topic_sequence.rs`：HTTP e2e 复现同一两话题场景（复用 `api_teams.rs` harness 形态），经 `POST /api/teams` 建队 → 依次 `POST .../topics` → 轮询 detail 至 finished。

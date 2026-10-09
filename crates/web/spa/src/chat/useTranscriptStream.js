@@ -4,6 +4,7 @@ import { apiGet } from '../api.js';
 import { openStream } from '../sse.js';
 import { emptyStream, ensurePendingEcho, reduceFrame, resyncState, turnsFromMessages, usageFromMessages } from '../reduce.js';
 import { err } from '../notice.js';
+import { completionState } from './stream/completion.js';
 
 export function useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, setConnecting, setQueueVersion, onNotice, selectionRef }) {
   /// Normalize the transcript from the store once a run reaches `done` —
@@ -35,7 +36,9 @@ export function useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, s
 
   const startStream = useCallback(({ path, sessionId, after, initialTurns, initialUsage }) => {
     const owner = selectionRef.current.node;
-    const current = () => aliveRef.current && selectionRef.current.node === owner && selectionRef.current.dialog === sessionId;
+    const controller = new AbortController();
+    const current = () => !controller.signal.aborted && aliveRef.current
+      && selectionRef.current.node === owner && selectionRef.current.dialog === sessionId;
     if (streamRef.current) {
       streamRef.current.abort();
     }
@@ -59,10 +62,32 @@ export function useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, s
       pendingEcho: initialPendingEcho,
       status: 'streaming',
     });
-    streamRef.current = openStream({
+    openStream({
       path,
       sessionId,
+      signal: controller.signal,
       after: after || 0,
+      onEnd: async () => {
+        if (!current()) return;
+        setConnecting(false);
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]);
+        try {
+          const detail = await apiGet('/api/executions/' + encodeURIComponent(sessionId), { signal });
+          if (!current()) return;
+          let snapshot;
+          try {
+            snapshot = await apiGet('/api/sessions/' + encodeURIComponent(sessionId), { signal });
+          } catch (error) {
+            // Startup failures can have an execution receipt but no session.
+            if (!detail.error && detail.execution?.status !== 'error') throw error;
+          }
+          if (current()) setStream((s) => completionState(s, detail, snapshot));
+        } catch (error) {
+          if (current()) setStream((s) => ({ ...s, status: 'error', error: '读取执行结果失败: ' + error.message }));
+        } finally {
+          if (current()) setBusy(false);
+        }
+      },
       onFrame: (f) => {
         if (!current()) return;
         setConnecting(false);
@@ -122,6 +147,9 @@ export function useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, s
         }
       },
     });
+    // Cancelling a subscription also invalidates its pending snapshot reads,
+    // including when a newer stream belongs to the same session and node.
+    streamRef.current = controller;
   }, [onNotice, reloadAfterDone, selectionRef, aliveRef, setStream, setBusy, setConnecting, setQueueVersion, streamRef]);
 
   /// seq head → authenticated /events stream (prompt + 压缩 share the open path).

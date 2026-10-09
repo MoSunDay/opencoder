@@ -4,7 +4,7 @@ Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 
 ## 范围与根因
 
-Server 和 Node 的实际数据链路使用 libsql。旧独立 Web 保留了可选 MySQL/StarRocks 项目后端和 SQL 专用 CI，这不能解释为线上改用了 MySQL。按用户决定删除这套可选实现，项目与会话复用同一个 libsql 实例；不新增表或产品环境变量，不迁移现有业务数据。
+Server 和 Node 的实际数据链路使用 libsql。旧独立 Web 保留了可选 MySQL/StarRocks 项目后端和 SQL 专用 CI，这不能解释为线上改用了 MySQL。按用户决定删除这套可选实现，项目与会话复用同一个 libsql 实例；不新增表或产品环境变量，不迁移现有数据。
 
 Brain CI 原先没有准备原生 DAG 镜像和完整 NFS、容器运行条件。补齐后，远端浏览器日志进一步定位到共享内存 `Permission denied`：普通 runner 创建临时目录，原生测试却以 root 运行；Chromium 子进程丢弃特权后，既不能写入 runner 所有的目录，也不能穿过 runner 私有父目录。失败后的截图又报 `Target crashed`，遮住了首次导航的原始异常。
 
@@ -12,7 +12,7 @@ Brain CI 原先没有准备原生 DAG 镜像和完整 NFS、容器运行条件�
 
 ## 实现与边界
 
-- 删除可选 SQL 后端、配置项、工厂及 sqlx；锁文件减少 41 个包，没有新增或升级依赖。保留 libsql 业务、事务和迁移测试。
+- 删除可选 SQL 后端、配置项、工厂及 sqlx；锁文件减少 41 个包，没有新增或升级依赖。保留 libsql 应用、事务和迁移测试。
 - [存储 CI](../../../.github/workflows/project-store-tests.yml) 执行真实 libsql 测试，保留全工作区格式检查与 Clippy。
 - [Brain CI](../../../.github/workflows/brain-e2e.yml) 分开准备镜像、项目恢复、里程碑、调度、重启与浏览器步骤。普通用户编译，原生测试进入独立挂载和 PID 空间；退出时清理残留子进程。
 - 原生临时目录位于 `/tmp`，归实际执行用户所有；结束后递归归还调用用户并移入证据目录。失败日志、截图、HTML 与原始浏览器异常保留并上传，零测试或忽略测试不能算通过。
@@ -41,7 +41,7 @@ Brain CI 原先没有准备原生 DAG 镜像和完整 NFS、容器运行条件�
 - 产品 Rust、SPA、依赖和发布代码从全量回归版本 `4586e9a0` 到 `4bb3a745` 未变化；中间提交仅完善 CI、浏览器证据和文档。对照记录为 `final-source-equivalence.json`。
 - GitHub [libsql CI](https://github.com/MoSunDay/opencoder/actions/runs/37574884981)、[发布脚本 CI](https://github.com/MoSunDay/opencoder/actions/runs/37574885268) 与最终 [Brain CI](https://github.com/MoSunDay/opencoder/actions/runs/37579067002) 均通过。
 
-删除的测试仅属于用户决定移除的可选 SQL 后端及配置、工厂；libsql 现有业务与迁移回归保持覆盖。
+删除的测试仅属于用户决定移除的可选 SQL 后端及配置、工厂；libsql 现有应用与迁移回归保持覆盖。
 
 ## 发布与验收
 

@@ -116,7 +116,8 @@ async function resources({ page, api, root, until }) {
   const after = fs.statSync(seed);
   assert.deepEqual({ bytes: fs.readFileSync(seed, 'utf8'), inode: after.ino, mode: after.mode, uid: after.uid, gid: after.gid }, hostBefore);
   assert(!fs.existsSync(path.join(workspace, 'shared.txt')));
-  await page.getByText('全部步骤共享本次 DAG 容器', { exact: true }).waitFor();
+  await page.getByText(detail.dag_context.container_id, { exact: true }).waitFor();
+  assert.equal(await page.getByText('全部步骤共享本次 DAG 容器', { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(root, 'native-workspace-context.png'), animations: 'disabled' });
   await page.getByRole('button', { name: '← 返回运行列表', exact: true }).click();
   await page.getByRole('tab', { name: '二进制资源', exact: true }).click();

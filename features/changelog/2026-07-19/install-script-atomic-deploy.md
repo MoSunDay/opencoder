@@ -54,7 +54,7 @@
 | 无暂存文件残留 | C5 no atomic-staging leftovers | `scripts/e2e/test_install.sh` |
 | --source 覆盖生效 | C6 --source override installs the given binary verbatim | `scripts/e2e/test_install.sh` |
 
-> 说明：本次变更为部署/安装脚本，不动 Rust 业务代码，故 `cargo test --workspace`
+> 说明：本次变更为部署/安装脚本，不动 Rust 功能代码，故 `cargo test --workspace`
 > 用例数与基线持平（625）。新增覆盖落在 shell 契约测试层（`scripts/e2e/test_install.sh`，
 > 6 passed / 0 failed），属 Rule 03 的 L3 旁路测试（无需 API key、确定性）。
 
@@ -62,7 +62,7 @@
 
 | 项 | 结果 |
 |----|------|
-| `cargo test --workspace` | 625 passed / 0 failed / 0 ignored（业务码未改动，与基线一致）|
+| `cargo test --workspace` | 625 passed / 0 failed / 0 ignored（源码未改动，与基线一致）|
 | `cargo clippy --workspace --all-targets -- -D warnings` | 零警告 |
 | `cargo build --release` | 零错误（11.6 MB，`opencoder 0.1.0`）|
 | `scripts/e2e/test_install.sh` | 6 passed / 0 failed |
@@ -72,7 +72,7 @@
 
 - 新增：部署脚本 `scripts/install.sh`、契约测试 `scripts/e2e/test_install.sh`。
 - 现场修复：`/usr/local/bin/opencoder` 刷新为最新；移除 `/data/caches/opencoder` 孤儿副本。
-- 不影响：任何 Rust crate 源码、`Store` / `ChatStream` 抽象、session/web/cli/tui 业务行为。
+- 不影响：任何 Rust crate 源码、`Store` / `ChatStream` 抽象、session/web/cli/tui 功能行为。
 - 不影响：`opencode`（旧 167MB 二进制）及依赖它的 `opencode-vps-bootstrap.sh` / systemd tunnel——
   本次按既定决策**不替换** `opencode`。
 

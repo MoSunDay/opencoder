@@ -1,5 +1,5 @@
 //! Tool contract tests — each tool exercised with real tempdir + ToolContext.
-//! Per rules/01-mandatory-tests.md: every business function gets a real behavior test.
+//! Per rules/01-mandatory-tests.md: every platform function gets a real behavior test.
 
 #[cfg(unix)]
 use opencoder_session::tools::bash::BashTool;

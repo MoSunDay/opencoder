@@ -1,49 +1,18 @@
-//! `run_mode: agent` sessions: every turn runs inside a runc sandbox.
-//!
-//! A custom agent card can pin [`opencoder_core::agent::RunMode::Agent`];
-//! `kind=agent` executions targeting such a card never run the agent loop
-//! in the host process. Each turn is one OCI container round — the same
-//! mechanism as a DAG `sandbox: runc` agent step — with the host reduced
-//! to staging state and relaying events:
-//!
-//! * before the round the host seeds a per-session rw dir under the
-//!   workflow root (the DAG kind root, or the legacy one) with the durable
-//!   transcript, a fresh `events.ndjson`, the turn prompt and the runner
-//!   env (LLM endpoint, context/agents mount points);
-//! * `/usr/bin/agent-session-runner` executes the turn in a read-only
-//!   rootfs with the pinned agents pool bound ro at `/workspace/agent` and
-//!   appends Say frames as ndjson lines;
-//! * the host tails that file, reconstructs each frame with
-//!   `SessionEvent::from_sse` and persists it exactly like a host session
-//!   (the same `SessionEventRecord` shape as the web event sink), so
-//!   operators watch the turn through the normal SSE relay; afterwards the
-//!   turn's message delta is folded back into the store.
-//!
-//! Host posture is fail-closed like the DAG step: admission
-//! ([`preflight`], wired into `create::prepare`) rejects the execution
-//! when runc, the provisioned `<workflow root>/rootfs` or the LLM API key
-//! is missing, and [`run_round`] re-checks before every round — a sandbox
-//! request must never silently fall back to the host session runtime. The
-//! prompt path is intercepted in `operations::command` (and the queued
-//! command replay) before the native web app: a native POST prompt would
-//! start a HOST turn.
-//!
-//! Turn semantics are at-least-once: the turn prompt lives in the
-//! execution input, so a crash between container exit and journal
-//! finalization re-runs the round on resume. Prior turns' events are
-//! already durable, and each round truncates `events.ndjson`, so the
-//! re-run turn's frames append after the pre-crash prefix without
-//! duplicating it.
+//! Sandbox Agent rounds drain the native session store in the existing writable
+//! session directory. The host admits durable inputs, relays events/messages,
+//! and keeps the same execution, capacity slot and pinned resources. All model
+//! calls and tools stay inside runc. Missing runtime prerequisites fail closed.
 
 use crate::{journal::Record, Worker};
 use anyhow::{bail, Result};
 use opencoder_agents::resources::how_append;
 use opencoder_core::agent::{builtin_agents, read_agent_meta, scope, RunMode};
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
-use opencoder_core::{Config, Message};
+use opencoder_core::Config;
 use opencoder_dag_runtime::sandbox::oci::{write_bundle, BundleSpec};
 use opencoder_dag_runtime::sandbox::runc::{run_step_streamed, runc_available};
 use opencoder_session::handoff;
+use opencoder_store::Store;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
@@ -130,7 +99,6 @@ pub(super) async fn run_round(
         .clone()
         .unwrap_or_else(|| "act".into());
     let input = &assignment.request.input;
-    let prompt = input["prompt"].as_str().unwrap_or("").trim().to_string();
     // Admission already ran the fail-closed checks; repeat them so a
     // degraded node (runc removed, rootfs gone, key rotated out) errors
     // the round instead of silently falling back to a host turn.
@@ -151,7 +119,9 @@ pub(super) async fn run_round(
         },
     )
     .await?;
-    if prompt.is_empty() {
+    let runtime_store = inputs::open(worker, record, legacy).await?;
+    runtime_store.recover_orphan_inputs(&id).await?;
+    if !inputs::pending(runtime_store.as_ref(), &id).await? {
         // Monitor-only relaunch (no new turn).
         return Ok((ExecutionStatus::Idle, json!({"session_id": id})));
     }
@@ -165,21 +135,17 @@ pub(super) async fn run_round(
     }
     let session_dir = run_root.join("session");
     std::fs::create_dir_all(&session_dir)?;
-    // Seed the continuation state: the durable transcript in full, a fresh
-    // event file scoped to THIS turn (prior turns' frames are already
-    // stored) and the turn prompt.
-    let prior = worker.inner.state.store.load_messages(&id).await?;
-    std::fs::write(
-        session_dir.join("messages.json"),
-        serde_json::to_vec(&prior)?,
-    )?;
-    let mut runtime = worker
-        .inner
-        .state
-        .store
-        .harness_runtime(&id)
-        .await?
-        .unwrap_or_default();
+    // Continuations keep container-owned harness state and resource snapshots.
+    let mut runtime = match runtime_store.harness_runtime(&id).await? {
+        Some(runtime) => runtime,
+        None => worker
+            .inner
+            .state
+            .store
+            .harness_runtime(&id)
+            .await?
+            .unwrap_or_default(),
+    };
     runtime.literal_mentions = input["literal_mentions"]
         .as_bool()
         .unwrap_or(runtime.literal_mentions);
@@ -189,19 +155,11 @@ pub(super) async fn run_round(
         .store
         .set_harness_runtime(&id, &runtime)
         .await?;
-    std::fs::write(
-        session_dir.join("harness.json"),
-        serde_json::to_vec(&runtime)?,
-    )?;
+    runtime_store.set_harness_runtime(&id, &runtime).await?;
     std::fs::write(session_dir.join("events.ndjson"), b"")?;
-    std::fs::write(run_root.join("prompt.txt"), &prompt)?;
     // The runner resolves its LLM endpoint from the injected env (the
     // container carries no config); `api_key` fails closed.
     let mut env = vec![
-        (
-            "OPENCODER_STEP_PROMPT".into(),
-            "/workspace/context/prompt.txt".into(),
-        ),
         (
             "OPENCODER_STEP_DIR".into(),
             "/workspace/context/session".into(),
@@ -256,6 +214,7 @@ pub(super) async fn run_round(
     let outcome = loop {
         tokio::select! {
             result = &mut container => {
+                inputs::sync_messages(worker, runtime_store.as_ref(), &id).await?;
                 // Final drain passes until no new complete line appears.
                 loop {
                     let next =
@@ -269,6 +228,7 @@ pub(super) async fn run_round(
                 break result;
             }
             _ = tokio::time::sleep(TAIL_POLL) => {
+                inputs::sync_messages(worker, runtime_store.as_ref(), &id).await?;
                 offset =
                     drain_events(&events_path, offset, store.as_ref(), &id, &mut error_event)
                         .await?;
@@ -290,25 +250,7 @@ pub(super) async fn run_round(
         }
         Err(error) => bail!("runc agent session failed: {error:#}"),
     }
-    // Fold the turn's message delta back into the durable store. An
-    // unreadable file only skips persistence — the events and the bounded
-    // output contract below still flow from the store projection.
-    let persisted = std::fs::read(session_dir.join("messages.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Vec<Message>>(&bytes).ok());
-    match persisted {
-        Some(messages) if messages.len() > prior.len() => {
-            worker
-                .inner
-                .state
-                .store
-                .append_messages(&id, &messages[prior.len()..])
-                .await?;
-        }
-        Some(_) => {}
-        None => tracing::warn!(session = %id,
-            "sandbox messages.json unreadable; skipping message persistence (events already streamed)"),
-    }
+    inputs::sync_messages(worker, runtime_store.as_ref(), &id).await?;
     let status = if cancel.is_cancelled() {
         ExecutionStatus::Cancelled
     } else {
@@ -339,6 +281,7 @@ pub(super) async fn run_round(
 }
 
 mod events;
+pub(crate) mod inputs;
 
 #[cfg(test)]
 mod tests;

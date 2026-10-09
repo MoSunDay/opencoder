@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Button, Drawer, Form, Input, Select, Space } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { initiativeOptions, projectOptions, searchSelect } from '../model/relations.js';
@@ -34,7 +35,7 @@ export function TagEditor({ open, initial, overview, onCancel, onOk }) {
 
   return <Drawer open={open} title={initial ? '编辑 Tag' : '新建 Tag'} size="min(640px, 100vw)" destroyOnHidden
     onClose={() => { if (!submitting.current) onCancel(); }}
-    extra={<Space><Button disabled={saving} onClick={onCancel}>取消</Button><Button type="primary" loading={saving} onClick={submit}>保存 Tag</Button></Space>}>
+    extra={<Space><Button disabled={saving} onClick={onCancel}>取消</Button><EditButton type="primary" loading={saving} onClick={submit}>保存 Tag</EditButton></Space>}>
     <Form form={form} layout="vertical" disabled={saving} onValuesChange={(changed) => {
       if (Object.hasOwn(changed, 'scope_type')) form.setFields([{ name: 'scope_id', value: undefined, errors: [] }]);
     }}>

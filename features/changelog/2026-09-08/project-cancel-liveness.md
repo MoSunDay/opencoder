@@ -8,4 +8,4 @@ Commit: ff43bfa9410769695481374ea3bd2c5d7e08867c
 
 回归测试 `repeated_cancel_does_not_converge_a_driver_still_flushing_output` 覆盖重复取消、stale 扫描及最终输出保留；项目模块 28 项单元测试、14 项集成测试通过，真实二进制验收覆盖工具输出后的取消。
 
-逻辑见 [project 模块](../../../agents/project/index.md)，业务规则见 [Agent 调度平台](../../agent-platform/index.md)。
+逻辑见 [project 模块](../../../agents/project/index.md)，功能规则见 [Agent 调度平台](../../agent-platform/index.md)。

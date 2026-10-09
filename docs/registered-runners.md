@@ -1,6 +1,6 @@
 # DAG 步骤执行类型
 
-DAG 步骤支持 `agent` 和 `binary`。注册业务 Runner 的配置、执行、查询和管理接口已移除，旧 Runner 步骤定义会在校验时被拒绝。
+DAG 步骤支持 `agent` 和 `binary`。注册 Runner 的配置、执行、查询和管理接口已移除，旧 Runner 步骤定义会在校验时被拒绝。
 
 Codex 使用 `agent` 步骤接入：将目标 Agent 的 `meta.json` 设置为 `"harness": "codex"`，在 DAG 中引用该 Agent，例如：
 

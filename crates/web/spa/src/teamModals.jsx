@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 // teamModals.jsx — the four team management modals behind the 组队 tab.
 // Same shape as modelModal.jsx / questionModal.jsx: footer-button Modal,
 // local form state reset on (re)open, busy flag while the request runs,
@@ -61,7 +62,7 @@ export function CreateTeamModal({ open, nodes, onClose, onDone, onNotice }) {
       onCancel={onClose}
       footer={[
         <Button key="cancel" onClick={onClose}>取消</Button>,
-        <Button key="ok" type="primary" disabled={busy || !name.trim() || !captain} onClick={submit}>创建</Button>,
+        <EditButton key="ok" type="primary" disabled={busy || !name.trim() || !captain} onClick={submit}>创建</EditButton>,
       ]}
     >
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
@@ -260,7 +261,7 @@ export function TopicModal({ team, onClose, onCreated, onNotice }) {
       onCancel={onClose}
       footer={[
         <Button key="cancel" onClick={onClose}>取消</Button>,
-        <Button key="ok" type="primary" disabled={busy || !title.trim()} onClick={submit}>创建</Button>,
+        <EditButton key="ok" type="primary" disabled={busy || !title.trim()} onClick={submit}>创建</EditButton>,
       ]}
     >
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>

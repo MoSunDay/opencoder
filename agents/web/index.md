@@ -1,10 +1,13 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 
 # web 模块
 
 axum HTTP + SSE 会话管理 + 内嵌 SPA。
 
 ## 索引
+- [admin/users.jsx](../../crates/web/spa/src/admin/users.jsx)、[admin/tokens.jsx](../../crates/web/spa/src/admin/tokens.jsx) — 用户角色编辑与独立 Token 的签发、到期和撤销；新 Token 只展示一次。
+- [chat/conversationInput.jsx](../../crates/web/spa/src/chat/conversationInput.jsx) — 会话页和 Agent/Operator 执行详情共用输入组件；按当前角色控制提交，保留引导、排队与问题交互。
+- [chat/stream/completion.js](../../crates/web/spa/src/chat/stream/completion.js) — 流结束后对齐持久化消息及执行状态，恢复发送状态；迟到的旧请求不能覆盖新会话。
 - `src/lib.rs` — `AppState` 装配（`config_home`：Operator 执行 home，prompt/config 载入走 `Config::load_with_home`，drain 栈经 `DrainContext` 穿参）
 - `src/api.rs`、`src/api_*.rs` — 各域 HTTP API（prompt/events/agents/dag/todo/team/…）
 - [api_transcript.rs](../../crates/web/src/api_transcript.rs) — `GET /api/sessions/:id/transcript` 按消息序号和字节偏移读取完整展示消息块；TUI 经 Server 执行命令的 `http` 转发调用，复用已有渲染。
@@ -17,11 +20,12 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [SPA 产物检查](../../scripts/check-spa-drift.sh) — 在临时目录用 SPA 源码与包内资源重建，逐文件比较 `dist`；不复制仓库示例目录，不重试掩盖差异。
 - `spa/src/chat.jsx`、`spa/src/chatSidebar.jsx`、`spa/src/chat/` — 会话页（Operator/Agent 双模式 lane）；Operator 创建前可选 Codex Harness 与逐行 env，随 `/api/sessions` 创建请求发送，启动后固定。`app.css` 在窄屏将会话侧栏与输入区纵向排列，保持输入区可操作
 - `spa/src/main.jsx` — 身份确认完成后才挂载导航与页面；身份格式错误和读取失败提供重试，401 返回登录入口。
-- [nav.js](../../crates/web/spa/src/nav.js)、[shell/categoryTabs.jsx](../../crates/web/spa/src/shell/categoryTabs.jsx) — 项目、Agent、Ontology、节点四类导航；标签保持完整宽度，容器支持滚轮、触摸和键盘滚动，并保持当前标签可见。非管理员可打开全部执行和全部 Ontology 页面。
+- [nav.js](../../crates/web/spa/src/nav.js)、[shell/categoryTabs.jsx](../../crates/web/spa/src/shell/categoryTabs.jsx) — 项目、Agent、Ontology、后台管理四类导航；标签保持完整宽度，容器支持滚轮、触摸和键盘滚动，并保持当前标签可见。editor 与 viewer 可打开平台页面，后台管理仅管理员可见；viewer 的写入控件禁用。
 - [Ontology 前端](ontology.md) — 五个页面、图谱与结果列表、实体详情草稿及环境观测记忆；复用平台身份、请求与 antd。接口与存储见 [ontology](../ontology/index.md)。
 - `spa/src/ui/requests/query.js` — 读取请求的取消、迟到响应丢弃、响应校验与错误状态；失败不替换为空数据。
 - `spa/src/fleet/`、`spa/src/schedule/` — 执行表与定时任务页；`schedule/history.jsx` 按历史记录的执行 ID 打开原执行，不重新派发。节点调度设置读取失败时禁止保存默认值。
 - [fleet/detail.jsx](../../crates/web/spa/src/fleet/detail.jsx)、[fleet/detail/workloads.jsx](../../crates/web/spa/src/fleet/detail/workloads.jsx) — TODO 执行明细在工作流建立后加载工作台；初始化、停止和初始化失败只展示对应状态，初始化错误只显示一次。工作流建立后的读取错误仍显示实际原因。
+- [fleet/detail/team/](../../crates/web/spa/src/fleet/detail/team/) — Team 讨论的轮次、发言与小结展示；按展开的轮次和讨论阶段读取有界记录，澄清对象来自上次小结。切换记录取消旧请求，大记录保留分段读取。
 - `src/api_project*.rs` — 项目、专项、TODO 与 Tag 的共享 HTTP 处理器；Tag 范围和选择经存储验证，顺序写入携带 `initiative_id` 范围，负数位置保留给迁移且 API 拒绝；Control 复用同一组处理器
 - `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 项目、专项、TODO、Tag 四个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和专项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`；专项详情与 `todoDrawer.jsx` 的外层 Drawer 均使用 `size="100vw"`，不设置固定最大宽度。
 - [tags/tab.jsx](../../crates/web/spa/src/project/tags/tab.jsx)、[tags/editor.jsx](../../crates/web/spa/src/project/tags/editor.jsx)、[tags/model.js](../../crates/web/spa/src/project/tags/model.js) — 独立 Tag 管理表格、名称与归属编辑、定义行纯投影；保存失败保留草稿，切换归属类型清空旧归属。共享 [api_project_tags.rs](../../crates/web/src/api_project_tags.rs) 的创建和修改均校验 `name`、`scope_type`、`scope_id`，修改保留原 ID。
@@ -37,6 +41,8 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [dag/step/binaryLogs.jsx](../../crates/web/spa/src/dag/step/binaryLogs.jsx) — 原生二进制步骤输出；编辑器只提供 Binary、Agent 与 Dynamic，运行页面按节点所属执行读取实例、日志与声明产物。
 - [dag/run/context.jsx](../../crates/web/spa/src/dag/run/context.jsx) — DAG 与执行明细共用的只读运行环境；容器、工作目录、版本和摘要来自节点保存的运行资料，不从当前资源池推测历史。
 - `spa/src/brain/workbench/` — schema 7 工作台。`scheduler/editor.jsx` 在 `milestone/` 画布上配置必填里程碑信息和绑定泛化能力的并行节点，随后用表单提交计划信息；节点名称和任务由能力库生成。画布按顺序展示相邻层，大脑在运行时决定是否回到已执行层。`milestone/run.jsx` 保持状态与画布为主视图，`runDetails.jsx` 将历史激活按轮次汇入右侧抽屉表格，执行记录复用 `ExecutionView`；右侧抽屉中的人工输入，以及受计划管理的 Agent/Operator/Team 明细引导，统一提交到 Brain 输入事件；托管明细不暴露单独中断/取消执行的控件。`useRun.js` 读取 `/layered`，由事件流及轮询刷新。
+- [brain/workbench/plans.jsx](../../crates/web/spa/src/brain/workbench/plans.jsx) — 新建计划、点击当前计划名称与修改操作共用 `PlanEditor`；历史版本预览独立打开，旧格式必须显式转换后编辑。读取请求用序号隔离，迟到响应不能覆盖新建表单。
+- [brainPanel.jsx](../../crates/web/spa/src/brainPanel.jsx)、[brain/library.css](../../crates/web/spa/src/brain/library.css) — 能力表格固定布局，一句话描述限制宽度并省略；输入、输出与工程示例由 `CapabilityEditor` 读取完整详情后展示，列表和搜索结果共用入口。
 - `tests/` — 集成测试
 
 ## 接缝

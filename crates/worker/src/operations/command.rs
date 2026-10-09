@@ -350,28 +350,53 @@ async fn http(
         if tail.is_empty() { "" } else { "/" },
         tail
     );
-    let needs_monitor = method == "POST"
+    let mut needs_monitor = method == "POST"
         && matches!(tail_path(tail), "prompt" | "compact" | "handoff")
         && !worker.inner.active.lock().await.contains_key(id);
-    // Sandbox session operations: a host turn cannot be steered, queued or
-    // compacted from outside the container, so v1 rejects these POSTs
-    // instead of pretending success against absent host state. Subagent
-    // steer paths (`subagents/<task>/steer`) are not intercepted: the
-    // container runner owns its subagents and the native call 404s.
+    let mut sandbox_receipt = None;
+    #[cfg(not(windows))]
+    if sandbox {
+        use crate::workloads::agent_runc::inputs;
+        let sandbox_record = record.as_ref().expect("sandbox record");
+        if tail_path(tail).starts_with("inputs") {
+            let store = inputs::open(worker, sandbox_record, legacy).await?;
+            return inputs::handle(store.as_ref(), id, method, tail, &body).await;
+        }
+        if method == "POST" && tail_path(tail) == "prompt" {
+            let lifecycle = worker.lifecycle_gate(id).await;
+            let _guard = lifecycle.lock().await;
+            let status = worker.inner.journal.lock().await.records[id]
+                .assignment
+                .index
+                .status;
+            let active = worker.inner.active.lock().await.get(id).cloned();
+            if active.as_ref().is_some_and(|cancel| cancel.is_cancelled())
+                || active.is_none()
+                    && status != ExecutionStatus::Pending
+                    && !crate::lifecycle::can_start(status)
+            {
+                return Ok(RpcReply::error(409, "execution is not continuable"));
+            }
+            let store = inputs::open(worker, sandbox_record, legacy).await?;
+            let reply = inputs::admit(store.as_ref(), id, &body).await?;
+            if reply.status >= 300
+                || status == ExecutionStatus::Pending
+                || active.is_some()
+                || !inputs::pending(store.as_ref(), id).await?
+            {
+                return Ok(reply);
+            }
+            sandbox_receipt = Some(reply);
+            needs_monitor = true;
+        }
+    }
     if sandbox
         && method == "POST"
         && matches!(tail_path(tail), "steer" | "queue" | "compact" | "handoff")
     {
         return Ok(RpcReply::error(
             409,
-            "runc sandbox sessions do not support this session operation (v1)",
-        ));
-    }
-    // A sandbox prompt while a round is active must not start a host turn.
-    if sandbox && method == "POST" && tail_path(tail) == "prompt" && !needs_monitor {
-        return Ok(RpcReply::error(
-            409,
-            "sandbox session is already running a turn",
+            "use prompt with delivery steer or queue for sandbox conversations",
         ));
     }
     let mut sandbox_turn = false;
@@ -398,24 +423,8 @@ async fn http(
             _gate = super::queue::dispatch_owned(worker, _gate).await?;
         }
         if sandbox {
-            // Sandbox prompt: stage the turn text into the durable input so
-            // the launch below (immediate or queued replay) runs it as one
-            // runc round; v1 carries text only — images and input ids stay
-            // host-side. There is no host session to POST to.
-            let prompt = body["prompt"]
-                .as_str()
-                .map(str::trim)
-                .filter(|p| !p.is_empty());
-            let Some(prompt) = prompt else {
-                return Ok(RpcReply::error(
-                    400,
-                    "prompt is required for sandbox sessions",
-                ));
-            };
-            if let Some(record) = record.as_mut() {
-                record.assignment.request.input["prompt"] = json!(prompt);
-                worker.inner.journal.lock().await.save(record.clone())?;
-            }
+            // Native input admission already persisted the continuation. Keep
+            // the original request unchanged when a capacity slot is queued.
             sandbox_turn = true;
         }
         match worker
@@ -508,7 +517,10 @@ async fn http(
     let result = if sandbox_turn {
         // The turn is the launch below (`run_round`); the reply mirrors the
         // web layer's async-acceptance surface.
-        Ok(RpcReply::ok(json!({"id": id, "status": "accepted"})))
+        Ok(
+            sandbox_receipt
+                .unwrap_or_else(|| RpcReply::ok(json!({"id": id, "status": "accepted"}))),
+        )
     } else {
         opencoder_core::agent::scope::with_root(scope, native(worker, method, &path, body)).await
     };

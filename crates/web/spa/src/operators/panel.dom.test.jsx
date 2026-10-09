@@ -74,7 +74,7 @@ describe('节点总览 tab visibility', () => {
   });
 
   it('hides the 节点总览 tab for a non-admin identity', async () => {
-    setState({ identity: { name: 'guest', role: 'user' } });
+    setState({ identity: { name: 'guest', role: 'viewer' } });
     render(<AgentsPanel onNotice={() => {}} />);
     await screen.findByText('Agent 列表');
     expect(screen.queryByText('节点总览')).toBeNull();

@@ -1,7 +1,7 @@
 //! 纯提示词构造：计划/执行两种运行的 LLM 输入完全由这些纯函数从
 //! `ProjectContext` 生成——无 IO、无状态，便于单测锁定措辞契约。
 
-/// 一次 plan/execute 运行所需的全部业务上下文（目标→专项→待办链路上
+/// 一次 plan/execute 运行所需的全部任务上下文（目标→专项→待办链路上
 /// 各级标题与正文；项目与专项均可缺失，缺失的段落直接省略）。
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectContext {

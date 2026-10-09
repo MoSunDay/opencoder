@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 // queuePanel.jsx — TUI queue-panel parity over HTTP: what is still pending
 // for the active LOCAL session, one row per admitted input, deletable and
 // (queue-only) reorderable before the drain consumes it. Endpoints
@@ -51,11 +52,11 @@ function Row({ row, index, rows, delivery, onDelete, onReorder }) {
       </Text>
       {delivery === 'queue' ? (
         <>
-          <Button size="small" type="text" aria-label="上移" disabled={loneQueue || index === 0} onClick={() => move(-1)}>↑</Button>
-          <Button size="small" type="text" aria-label="下移" disabled={loneQueue || index === rows.length - 1} onClick={() => move(1)}>↓</Button>
+          <EditButton size="small" type="text" aria-label="上移" disabled={loneQueue || index === 0} onClick={() => move(-1)}>↑</EditButton>
+          <EditButton size="small" type="text" aria-label="下移" disabled={loneQueue || index === rows.length - 1} onClick={() => move(1)}>↓</EditButton>
         </>
       ) : null}
-      <Button size="small" type="text" danger aria-label="移除" onClick={() => onDelete(row.seq)}>删除</Button>
+      <EditButton size="small" type="text" danger aria-label="移除" onClick={() => onDelete(row.seq)}>删除</EditButton>
     </div>
   );
 }

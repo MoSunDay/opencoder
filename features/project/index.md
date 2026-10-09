@@ -20,4 +20,4 @@ Tag 在独立页签中统一管理，表格显示名称、归属类型、所属�
 
 CLI 提供 `project todos links/attach/detach/dispatch` 和 `exec result`，与 Web 共用 Server API；独立 Web 的旧项目 API 不提供控制台执行索引。项目页不提供旧的专属计划、执行或回放操作。
 
-业务规则见 [项目模块约定](../../rules/07-project-module-contract.md)。相关逻辑：[project](../../agents/project/index.md)、[web](../../agents/web/index.md)、[control](../../agents/control/index.md)。
+功能规则见 [项目模块约定](../../rules/07-project-module-contract.md)。相关逻辑：[project](../../agents/project/index.md)、[web](../../agents/web/index.md)、[control](../../agents/control/index.md)。

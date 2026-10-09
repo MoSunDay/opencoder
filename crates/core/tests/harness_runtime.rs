@@ -10,11 +10,13 @@ async fn named_profiles_survive_config_reload_and_spawned_driver_scope() {
     let _home = opencoder_core::scoped_config_home(root.path().into());
     let mut runtime = RuntimeSettings::default();
     runtime.profiles.insert(
-        "business".into(),
+        "platform".into(),
         Versioned {
             revision: 7,
-            settings: serde_json::from_value(json!({"model":"model-pinned","auth_slot":2}))
-                .unwrap(),
+            settings: serde_json::from_value(
+                json!({"model":"model-pinned","startup_script":["/bin/sh","/external/start.sh"]}),
+            )
+            .unwrap(),
         },
     );
     let expected = runtime.clone();
@@ -33,11 +35,20 @@ async fn named_profiles_survive_config_reload_and_spawned_driver_scope() {
 #[test]
 fn profile_validation_rejects_invalid_execution_settings() {
     assert!(
-        serde_json::from_value::<CodexSettings>(json!({"auth_slot":0}))
+        serde_json::from_value::<CodexSettings>(json!({"startup_script":[""]}))
             .unwrap()
             .validate()
             .is_err()
     );
+    for value in [
+        json!({"startup_script":["/bin/sh", "bad\u{0}arg"]}),
+        json!({"startup_script":"/bin/sh"}),
+        json!({"auth_slot":2}),
+    ] {
+        assert!(serde_json::from_value::<CodexSettings>(value)
+            .and_then(|s| s.validate().map_err(serde::de::Error::custom))
+            .is_err());
+    }
     let config = Config::default();
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("act")).unwrap();

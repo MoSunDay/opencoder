@@ -108,56 +108,64 @@ async fn graph_aspects_relationship_scopes_and_directory_cycles_use_live_metadat
 }
 
 #[tokio::test]
-async fn ordinary_roles_read_all_domains_but_cannot_modify_them() {
+async fn viewer_reads_all_domains_but_cannot_modify_them() {
     let f = Fixture::new().await;
     let kind = f.kind().await;
     let entity = f.entity(&kind, "只读").await;
     let id = entity["id"].as_str().unwrap();
-    for role in [Role::User, Role::Root] {
-        for path in [
-            "/session".to_string(),
-            "/environments".into(),
-            "/envs/debug/entity-types".into(),
-            "/envs/debug/entities".into(),
-            "/envs/debug/relationship-types".into(),
-            "/envs/debug/relationships".into(),
-            "/envs/debug/directories/tree".into(),
-            "/envs/debug/graph-aspects".into(),
-            format!("/envs/debug/entities/{id}"),
-        ] {
-            assert_eq!(
-                common::call(&f.router, role, "GET", &path, Value::Null)
-                    .await
-                    .0,
-                StatusCode::OK,
-                "{path}"
-            );
-        }
+    let role = Role::Viewer;
+    for (role, capabilities) in [
+        (Role::Viewer, json!(["view_ontology"])),
+        (Role::Editor, json!(["view_ontology", "manage_ontology"])),
+        (Role::Admin, json!(["view_ontology", "manage_ontology"])),
+    ] {
+        let (status, session) = common::call(&f.router, role, "GET", "/session", Value::Null).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(session["capabilities"], capabilities);
+    }
+    for path in [
+        "/session".to_string(),
+        "/environments".into(),
+        "/envs/debug/entity-types".into(),
+        "/envs/debug/entities".into(),
+        "/envs/debug/relationship-types".into(),
+        "/envs/debug/relationships".into(),
+        "/envs/debug/directories/tree".into(),
+        "/envs/debug/graph-aspects".into(),
+        format!("/envs/debug/entities/{id}"),
+    ] {
         assert_eq!(
-            common::call(
-                &f.router,
-                role,
-                "POST",
-                "/environments",
-                json!({"key":"no","name":"禁止"})
-            )
-            .await
-            .0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            common::call(
-                &f.router,
-                role,
-                "PATCH",
-                &format!("/envs/debug/entities/{id}"),
-                json!({"name":"禁止","is_deleted":false,"expected_revision":1})
-            )
-            .await
-            .0,
-            StatusCode::FORBIDDEN
+            common::call(&f.router, role, "GET", &path, Value::Null)
+                .await
+                .0,
+            StatusCode::OK,
+            "{path}"
         );
     }
+    assert_eq!(
+        common::call(
+            &f.router,
+            role,
+            "POST",
+            "/environments",
+            json!({"key":"no","name":"禁止"})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        common::call(
+            &f.router,
+            role,
+            "PATCH",
+            &format!("/envs/debug/entities/{id}"),
+            json!({"name":"禁止","is_deleted":false,"expected_revision":1})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
 }
 
 #[tokio::test]
@@ -213,4 +221,30 @@ async fn vectors_search_real_cosine_values_and_keep_environment_partitions() {
         .await["items"],
         json!([])
     );
+}
+
+#[tokio::test]
+async fn editor_manages_ontology_environments_and_entities() {
+    let f = Fixture::new().await;
+    let kind = f.kind().await;
+    let entity = f.entity(&kind, "before").await;
+    let (status, _) = common::call(
+        &f.router,
+        Role::Editor,
+        "POST",
+        "/environments",
+        json!({"key":"editor_env","name":"Editor environment"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = common::call(
+        &f.router,
+        Role::Editor,
+        "PATCH",
+        &format!("/envs/debug/entities/{}", entity["id"].as_str().unwrap()),
+        json!({"name":"after","is_deleted":false,"expected_revision":1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["item"]["name"], "after");
 }

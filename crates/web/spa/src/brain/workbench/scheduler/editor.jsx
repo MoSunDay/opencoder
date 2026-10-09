@@ -1,3 +1,4 @@
+import { EditButton } from '../../../ui/permissions.jsx';
 import { Alert, Button, Drawer, Form, Input, InputNumber, Space, Typography } from 'antd';
 import { forwardRef, useImperativeHandle, useMemo, useState } from 'react';
 import { apiPost } from '../../../api.js';
@@ -60,7 +61,7 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
         <Form.Item label="整体目标与交付物" name="objective" rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={4} maxLength={4096} /></Form.Item>
         <EngineeringFields />
         <Form.Item label="最多反思轮数（含首轮）" name="max_rounds" rules={[{ required: true }]} extra="正常逐层推进不增加轮数；回退才开启下一轮。耗尽后阻塞，可调整预算后恢复。"><InputNumber min={1} max={32} precision={0} /></Form.Item>
-        <Space><Button disabled={busy} onClick={() => setSubmitOpen(false)}>返回画布</Button><Button type="primary" htmlType="submit" loading={busy} disabled={!!cacheError}>保存计划版本</Button></Space>
+        <Space><Button disabled={busy} onClick={() => setSubmitOpen(false)}>返回画布</Button><EditButton type="primary" htmlType="submit" loading={busy} disabled={!!cacheError}>保存计划版本</EditButton></Space>
       </Form>
     </Drawer>
   </div>;

@@ -47,6 +47,11 @@ describe('capability library table and editor', () => {
     expect(screen.queryByText('能力类型', { selector: 'th' })).toBeNull();
     expect(screen.getByText('Agent')).toBeTruthy();
     expect(screen.getByText('goal')).toBeTruthy();
+    for (const label of ['输入描述', '输出描述', '工程输入']) {
+      expect(screen.queryByText(label, { selector: 'th' })).toBeNull();
+    }
+    expect(screen.queryByText('crate 列表')).toBeNull();
+    expect(screen.queryByText('依赖 DAG')).toBeNull();
   });
 
   it('creates through a 75 percent right drawer and resets fields for the next creation', async () => {
@@ -73,6 +78,8 @@ describe('capability library table and editor', () => {
     fireEvent.click(await screen.findByText('解析依赖图'));
     expect(await screen.findByText('编辑能力', { selector: '.ant-drawer-title' })).toBeTruthy();
     await waitFor(() => expect(screen.getByDisplayValue('opencoder').disabled).toBe(false));
+    expect(screen.getByLabelText('输入描述').value).toBe('crate 列表');
+    expect(screen.getByLabelText('输出描述').value).toBe('依赖 DAG');
     fireEvent.change(screen.getByLabelText('一句话描述'), { target: { value: '更新后的能力' } });
     fireEvent.click(button('保存修改'));
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/brain/capabilities/c1', expect.objectContaining({ summary: '更新后的能力', eng_inputs: ['opencoder'], capability_type: 'agent' })));

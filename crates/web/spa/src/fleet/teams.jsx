@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import { Alert, Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
@@ -9,6 +10,17 @@ import { err } from '../notice.js';
 
 /// 实时成员名单：captain 永远置顶，其余按已选顺序排列，整体按 agent 去重。
 const rosterOf = (captain, members) => [...new Set([captain, ...(members || [])].filter(Boolean))];
+
+/// 选择结果的只读展示模型：队长和成员共用一套描述，队长只通过角色列区分。
+/// 这层保持纯函数，避免表格渲染和表单状态互相耦合。
+export const rosterRowsOf = (captain, members, agents) => rosterOf(captain, members).map((agent) => {
+  const profile = (agents || []).find((item) => item.agent === agent);
+  const description = (profile?.capabilities || [])
+    .map((capability) => capability.summary)
+    .filter(Boolean)
+    .join('；') || '暂无能力画像';
+  return { key: agent, name: agent, role: agent === captain ? '队长' : '成员', description };
+});
 
 export function FleetTeamsPanel({ onNotice, onCreated, initialPrompt = '' }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]); const [agents, setAgents] = useState([]);
@@ -50,8 +62,7 @@ export function FleetTeamsPanel({ onNotice, onCreated, initialPrompt = '' }) {
   };
   /// 编辑表单实时名单：跟随 captain/队员选择联动，能力画像取自 /api/brain/agents。
   const captain = Form.useWatch('captain', form); const members = Form.useWatch('members', form);
-  const roster = rosterOf(captain, members);
-  const summaryOf = (agent) => (agents.find((a) => a.agent === agent)?.capabilities || []).map((c) => c.summary).join('；');
+  const rosterRows = rosterRowsOf(captain, members, agents);
   const options = agents.map((a) => ({ value: a.agent, label: a.agent }));
   // 搜索框为受控组件：按 Team 名称（忽略大小写）过滤本地列表，不入服务端。
   const query = search.trim().toLowerCase();
@@ -68,14 +79,14 @@ export function FleetTeamsPanel({ onNotice, onCreated, initialPrompt = '' }) {
         onChange={(e) => setSearch(e.target.value)}
         aria-label="team-search"
       />
-      <Button type="primary" onClick={() => edit(null)}>创建 Team</Button>
+      <EditButton type="primary" onClick={() => edit(null)}>创建 Team</EditButton>
       <Button onClick={() => load()}>刷新</Button>
     </Space>
     <Table scroll={{ x: 'max-content' }} rowKey="name" dataSource={tableRows(loading, visible)} loading={tableLoading(loading)} columns={[
       { title: 'Team', dataIndex: 'name' },
       { title: '成员', render: (_, row) => row.members.map((m) => <Tag key={m.agent}>{m.agent}</Tag>) },
       { title: '队长', dataIndex: 'captain' },
-      { title: '操作', render: (_, row) => <Space><Button onClick={() => edit(row)}>编辑</Button><Button onClick={() => { runForm.resetFields(); runForm.setFieldsValue({ prompt: initialPrompt }); setLaunch(row); }}>启动 Team</Button></Space> },
+      { title: '操作', render: (_, row) => <Space><EditButton onClick={() => edit(row)}>编辑</EditButton><EditButton onClick={() => { runForm.resetFields(); runForm.setFieldsValue({ prompt: initialPrompt }); setLaunch(row); }}>启动 Team</EditButton></Space> },
     ]} />
     <Modal open={editing} onCancel={() => { if (!busy) setEditing(false); }} title="Team 成员" footer={null} width={720}>
       <Form form={form} disabled={busy} onFinish={save} layout="vertical">
@@ -84,13 +95,27 @@ export function FleetTeamsPanel({ onNotice, onCreated, initialPrompt = '' }) {
           <Form.Item name="captain" label="队长" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={options} style={{ width: 200 }} placeholder="选择队长" /></Form.Item>
         </Space>
         <Form.Item name="members" label="队员"><Select mode="multiple" showSearch optionFilterProp="label" options={options} placeholder="选择 Team 成员" /></Form.Item>
-        {roster.length > 0 && <div style={{ marginBottom: 16 }}>
-          {roster.map((agent) => <div key={agent} data-agent={agent} style={{ marginBottom: 4 }}>
-            <Tag>{agent}</Tag>{agent === captain && <Tag color="gold">队长</Tag>}
-            <span>{summaryOf(agent) || '暂无能力画像'}</span>
-          </div>)}
-        </div>}
-        <Button type="primary" htmlType="submit" loading={busy} style={{ marginTop: 16 }}>保存 Team</Button>
+        {rosterRows.length > 0 && <Table
+          className="team-roster-table"
+          rowKey="key"
+          size="small"
+          pagination={false}
+          scroll={{ x: 640 }}
+          dataSource={rosterRows}
+          onRow={(row) => ({ 'data-agent': row.name })}
+          columns={[
+            {
+              title: '名称', dataIndex: 'name', key: 'name', width: 170, ellipsis: true,
+              render: (value) => <span className="team-roster-cell" title={value}>{value}</span>,
+            },
+            { title: '角色', dataIndex: 'role', key: 'role', width: 96, render: (value) => value === '队长' ? <Tag color="gold">{value}</Tag> : <Tag>{value}</Tag> },
+            {
+              title: '描述', dataIndex: 'description', key: 'description', width: 374, ellipsis: true,
+              render: (value) => <span className="team-roster-cell" title={value}>{value}</span>,
+            },
+          ]}
+        />}
+        <EditButton type="primary" htmlType="submit" loading={busy} style={{ marginTop: 16 }}>保存 Team</EditButton>
       </Form>
     </Modal>
     <Drawer open={!!launch} title={`启动 ${launch?.name || ''}`} onClose={() => setLaunch(null)} size={560} destroyOnHidden>
@@ -98,7 +123,7 @@ export function FleetTeamsPanel({ onNotice, onCreated, initialPrompt = '' }) {
         <Alert type="info" showIcon title="整个 Team 会在同一个执行节点内完成，成员不会跨节点运行" style={{ marginBottom: 12 }} />
         <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'team')} /></Form.Item>
         <Form.Item name="prompt" label="任务要求" rules={[{ required: true }]}><Input.TextArea rows={5} /></Form.Item>
-        <Button type="primary" htmlType="submit" loading={busy}>启动</Button>
+        <EditButton type="primary" htmlType="submit" loading={busy}>启动</EditButton>
       </Form>
     </Drawer>
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => setDetail(null)} onNotice={onNotice} />}

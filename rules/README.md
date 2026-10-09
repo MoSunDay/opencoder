@@ -6,7 +6,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 | 编号 | 文件 | 摘要 |
 |------|------|------|
-| 01 | [mandatory-tests.md](01-mandatory-tests.md) | 每个业务功能必须有对应测试用例；禁止"只构造对象"的表面测试 |
+| 01 | [mandatory-tests.md](01-mandatory-tests.md) | 每个功能必须有对应测试用例；禁止"只构造对象"的表面测试 |
 | 02 | [regression-gate.md](02-regression-gate.md) | 每轮迭代结束前必须全量回归 `cargo test --workspace` |
 | 03 | [test-pyramid.md](03-test-pyramid.md) | 测试分层规范：纯函数内联 / 集成放 tests/ / e2e 放 scripts/ |
 | 04 | [dag-execution-contract.md](04-dag-execution-contract.md) | DAG 单节点单容器、只读 NFS 源工作区、节点本地写层与原生步骤约定 |
@@ -21,5 +21,4 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 - [ ] 新增 / 修改的公共函数有对应测试（规则 01）
 - [ ] 新增功能在 changelog 中附「功能 → 测试名」映射（规则 02）
 - [ ] 无硬编码密钥 / 凭证
-- [ ] 代码、测试和说明只包含 OpenCoder 通用能力；外部业务实现、数据和现场记录存放在仓库外
 - [ ] 新增文件 ≤ 400 行；迭代中文件 ≤ 800 行

@@ -48,7 +48,7 @@ class Operations:
         self.calls.append(tuple(args))
         if args[:2] in (("systemctl", "stop"), ("systemctl", "restart")):
             if any("runtime" in arg or "server" in arg or arg == "opencoder-agent.service" for arg in args[2:]):
-                raise AssertionError("deployment interrupted a business process")
+                raise AssertionError("deployment interrupted a platform process")
 
     def wait(self, check, seconds=90):
         return check()

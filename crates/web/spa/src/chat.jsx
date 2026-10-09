@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 // Node-owned conversations. Two creation lanes share this console:
 //   - Operator 模式（缺省）: operator-kind executions — newId('operator'), body
 //       without `kind`, first prompt admitted with creation;
@@ -8,7 +9,8 @@
 // compact / fork / interrupt) is lane-agnostic and reused verbatim. Selection
 // is required before creating or sending.
 // This panel is the console's chat entry (nav label「Agent」, page key `chat`).
-import { Sender } from '@ant-design/x';
+import { ConversationInput } from './chat/conversationInput.jsx';
+import { useCanEdit } from './ui/permissions.jsx';
 import { Alert, Button, Input, Modal, Segmented, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
@@ -51,6 +53,7 @@ const MODE_OPTIONS = [
 ];
 
 export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind }) {
+  const canEdit = useCanEdit();
   const { preselectNode } = useStore();
   const { nodes, error: nodesError } = useNodes();
   const [nodeSel, setNodeSel] = useState(null);
@@ -617,8 +620,8 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
         dialogs={dialogs}
         activeKey={dialogSel}
         onActiveChange={openDialog}
-        onDelete={deleteDialog}
-        onDeleteAll={deleteAllDialogs}
+        onDelete={canEdit ? deleteDialog : undefined}
+        onDeleteAll={canEdit ? deleteAllDialogs : undefined}
         loading={dialogsLoading}
       />
 
@@ -654,7 +657,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
                   {data.title && <Text type="secondary" style={{ fontSize: 12 }}>{data.title}</Text>}
                 </div>
               )}
-              onChange={switchAgent}
+              disabled={!canEdit} onChange={switchAgent}
               style={{ minWidth: 150 }}
             />
           ) : null}
@@ -665,7 +668,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
                   size="small"
                   value={sessionAgent}
                   options={[{ label: 'act', value: 'act' }, { label: 'plan', value: 'plan' }]}
-                  onChange={switchAgent}
+                  disabled={!canEdit} onChange={switchAgent}
                 /> : null}
               {modeKind === 'agent' && selectedAgent ? (
                 <Tooltip title={RUN_MODE_HINT}>
@@ -679,8 +682,8 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
                   {selectedAgent.description}
                 </Text>
               ) : null}
-              <Button size="small" disabled={!dialogSel} onClick={() => setModelOpen(true)}>模型</Button>
-              {modeKind === 'operator' && <Button size="small" disabled={!!dialogSel || busy} onClick={() => setLaunchOpen(true)}>启动配置</Button>}
+              <Button size="small" disabled={!canEdit || !dialogSel} onClick={() => setModelOpen(true)}>模型</Button>
+              {modeKind === 'operator' && <EditButton size="small" disabled={!!dialogSel || busy} onClick={() => setLaunchOpen(true)}>启动配置</EditButton>}
             </>
           ) : null}
         </div>
@@ -725,7 +728,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
           ) : null}
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <Sender
+              <ConversationInput
                 value={input}
                 onChange={setInput}
                 onSubmit={send}
@@ -775,12 +778,12 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
           onPressEnter={() => setAnnotation(annoText.trim())}
         />
         <Space style={{ marginTop: 12 }}>
-          <Button type="primary" onClick={() => setAnnotation(annoText.trim())}>保存</Button>
+          <EditButton type="primary" onClick={() => setAnnotation(annoText.trim())}>保存</EditButton>
           <Button onClick={() => setAnnotation('')}>清除</Button>
         </Space>
       </Modal>
 
-      <QuestionModal sessionId={hasNode ? dialogSel : null} active={busy} />
+      <QuestionModal sessionId={canEdit && hasNode ? dialogSel : null} active={busy} />
     </div>
   );
 }

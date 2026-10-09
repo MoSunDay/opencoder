@@ -1,4 +1,4 @@
-//! Pure milestone scheduling: layer barriers, business assessments, and reflection.
+//! Pure milestone scheduling: layer barriers, task assessments, and reflection.
 mod activation;
 pub mod budget;
 mod context;

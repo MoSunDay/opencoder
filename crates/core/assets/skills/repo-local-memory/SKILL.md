@@ -69,10 +69,10 @@ Change layer:
 
 Stable docs describe what the system is now, not how the task was executed.
 
-### 2. Logic And Business Stay Separate
+### 2. Logic And Platform Stay Separate
 
 - `agents/*` describes logic structure: responsibilities, boundaries, abstractions, dependencies, and main flows
-- `features/*` describes business behavior: user-visible capability, rules, states, and external behavior
+- `features/*` describes platform behavior: user-visible capability, rules, states, and external behavior
 
 They are related but not required to mirror each other one-to-one.
 
@@ -130,7 +130,7 @@ Module-level logic doc. Describe:
 - related modules
 - representative code anchors when useful
 
-Do not put business value, task diary, or changelog-style history here.
+Do not put platform value, task diary, or changelog-style history here.
 
 If the document approaches 400 lines, split by semantic boundary. The parent stays as overview and index; child docs hold details.
 
@@ -149,7 +149,7 @@ Update only when the feature map changes.
 
 ### `features/{feature}/index.md`
 
-Feature-level business doc. Describe:
+Feature-level platform doc. Describe:
 
 - user- or caller-visible capability
 - triggers or actors
@@ -188,7 +188,7 @@ Update `agents/*` only when one of these changed:
 Update `features/*` only when one of these changed:
 
 - user-visible capability
-- business rule
+- platform rule
 - key state
 - error semantics
 - external contract
@@ -244,7 +244,7 @@ Before editing local memory:
 
 1. Inspect the touched code, config, tests, and relevant existing memory docs within the current scope.
 2. Identify the touched logic modules.
-3. Identify the touched business capabilities.
+3. Identify the touched platform capabilities.
 4. Decide whether the change affects stable semantics, timeline, or whether scope must expand.
 5. Reuse and repair existing docs before creating new ones.
 6. Update only the minimum required files.
@@ -272,7 +272,7 @@ All local memory docs must not:
 - become a diary
 - say "this time we changed ..." inside stable docs
 - paste large file trees or long symbol inventories
-- put business value in `agents/*`
+- put platform value in `agents/*`
 - put implementation detail in `features/*`
 - create changelog by reflex
 - update indexes by reflex

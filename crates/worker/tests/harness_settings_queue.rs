@@ -41,8 +41,15 @@ fn request(id: &str, label: &str) -> Value {
 async fn managed(fleet: &Fleet) -> (Value, std::path::PathBuf) {
     let binary = controlled_binary(fleet.root());
     let log = fleet.root().join("managed-capture.jsonl");
+    let script = fleet.root().join("codex-start.sh");
+    std::fs::write(
+        &script,
+        "set -eu\nexport EXAMPLE=\"$1\"\nshift\nexec \"$@\"\n",
+    )
+    .unwrap();
     let config = json!({"executable":binary,"model":"codex-managed-model","reasoning_effort":"high", "sandbox_mode":"read-only", "approval_policy":"never",
-        "envs":{"CAPTURE":log,"GATES":fleet.root(),"EXAMPLE":"private-managed-value"}});
+        "startup_script":["/bin/sh",script,"private-managed-value"],
+        "envs":{"CAPTURE":log,"GATES":fleet.root()}});
     let saved = fleet
         .call("PUT", "/api/harnesses/codex", config.clone())
         .await;
@@ -154,7 +161,7 @@ async fn managed_codex_is_pinned_and_node_obeys_fifo_lifo() {
         }
         let denied = fleet.call("POST", "/api/executions", json!({"id":"agent-override","kind":"agent","target":"act","input":{"harness":"codex","prompt":"TASK:autoInvalid","envs":{"EXAMPLE":"override"}}})).await;
         assert_eq!(denied.status, 400, "{denied:?}");
-        config["envs"]["EXAMPLE"] = json!("new-managed-value");
+        config["startup_script"][2] = json!("new-managed-value");
         assert_eq!(
             fleet
                 .call("PUT", "/api/harnesses/codex", config)
@@ -369,7 +376,7 @@ async fn idle_codex_followup_waits_for_capacity_and_keeps_its_settings() {
         202
     );
     wait_count(&log, 2).await;
-    config["envs"]["EXAMPLE"] = json!("updated-value");
+    config["startup_script"][2] = json!("updated-value");
     fleet.call("PUT", "/api/harnesses/codex", config).await;
     let command = json!({"action":"prompt", "input":{"input_id":"followup-stable", "prompt":"TASK:autoFollowup"}});
     for _ in 0..2 {

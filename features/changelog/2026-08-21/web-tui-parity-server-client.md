@@ -67,7 +67,7 @@ Web 侧三层（HTTP API / 内嵌前端 / `opencode client`）与 TUI 的会话�
   `post_prompt` 增 skill 参数；`interrupt` 返回结构化 `{ok,error}` Value；
   SSE 合成失败 kind 改 `stream_error`（与 LLM 流式错误区分）。
 - `crates/cli/src/client_stream.rs`（新）：纯函数重连策略（3 次重连，
-  500ms/1s/2s 退避）；`stream_with_reconnect`（业务错误即终止；传输层断开 →
+  500ms/1s/2s 退避）；`stream_with_reconnect`（执行错误即终止；传输层断开 →
   从 `/seq` 快照游标重新订阅；放弃重连 → transcript 快照兜底 + 报错）；
   question 工具 stderr 提示（含 call_id，引导用子命令作答）。
 - `crates/cli/src/client_ops.rs`（新）：`client session list|show|delete|fork`、

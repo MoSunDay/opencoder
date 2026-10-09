@@ -21,8 +21,8 @@ use opencoder_store::{NodeRecord, Store, TEAM_RUN_FINISHED};
 use opencoder_team::{layout, ok, CancelToken, MockDispatcher, RESULT_ALIGNMENT};
 use serde_json::json;
 
-const TEAM: &str = "pay-alignment";
-const REQ_1: &str = "确定支付回调的超时阈值与降级策略";
+const TEAM: &str = "runtime-alignment";
+const REQ_1: &str = "确定执行回调的超时阈值与降级策略";
 const REQ_2: &str = "确定回调失败后的重试与幂等方案";
 
 // ── decision-JSON builders (same shapes as runtime_flow.rs) ───────────────
@@ -57,18 +57,18 @@ fn ids<'a>(members: impl IntoIterator<Item = &'a NodeRecord>) -> Vec<String> {
 
 // ── fixtures ──────────────────────────────────────────────────────────────
 
-/// The pay-alignment team: real registered nodes carrying a capability
+/// The runtime-alignment team: real registered nodes carrying a capability
 /// snapshot (what the captain's plan prompt sees).
-async fn pay_team(fx: &Fixture) -> (NodeRecord, NodeRecord, NodeRecord, NodeRecord) {
+async fn runtime_team(fx: &Fixture) -> (NodeRecord, NodeRecord, NodeRecord, NodeRecord) {
     let captain = register(&fx.store, "arch-captain").await;
-    let backend = register(&fx.store, "pay-backend").await;
+    let backend = register(&fx.store, "runtime-backend").await;
     let sre = register(&fx.store, "sre").await;
-    let risk = register(&fx.store, "risk-ctl").await;
+    let risk = register(&fx.store, "resource-ctl").await;
     let caps = |name: &str| match name {
         "arch-captain" => vec!["架构决策".to_string()],
-        "pay-backend" => vec!["支付网关".to_string(), "回调链路".to_string()],
+        "runtime-backend" => vec!["执行节点".to_string(), "回调链路".to_string()],
         "sre" => vec!["容量与稳定性".to_string()],
-        _ => vec!["风控规则".to_string(), "降级开关".to_string()],
+        _ => vec!["资源规则".to_string(), "降级开关".to_string()],
     };
     let team = opencoder_team::types::TeamMeta {
         name: TEAM.to_string(),
@@ -179,8 +179,8 @@ fn script(
             &risk.id,
             vec![
                 ok("超时必须降级放行，不能阻塞主链路"),
-                ok("对齐：降级开关由风控平台持有，回调侧只执行"),
-                ok("放行必须携带风控降级标记"),
+                ok("对齐：降级开关由资源服务持有，回调侧只执行"),
+                ok("放行必须携带资源降级标记"),
             ],
         )
 }
@@ -190,7 +190,7 @@ fn script(
 #[tokio::test]
 async fn captain_progresses_two_topics_and_members_stay_in_act_mode() {
     let fx = fixture(4, 3).await;
-    let (captain, backend, sre, risk) = pay_team(&fx).await;
+    let (captain, backend, sre, risk) = runtime_team(&fx).await;
 
     // Topic 1 opens with all three members; topic 2 is a NEW topic the
     // captain opens after topic 1 completes.

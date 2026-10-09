@@ -3,7 +3,6 @@ import { Alert, Descriptions, Table, Typography } from 'antd';
 export function DagRunContext({ context }) {
   if (!context) return null;
   return <div aria-label="DAG 运行环境">
-    <Alert type="info" showIcon title="全部步骤共享本次 DAG 容器" description="源目录只读，容器写入保存在节点本地写层；步骤目录不是隔离边界。" />
     {context.state === 'preparing' && <Alert type="info" title="资源准备中，尚未固定版本" />}
     {context.state === 'unavailable' && <Alert type="error" title="资源快照缺失，无法确认本次固定版本" />}
     <Descriptions column={1} size="small" items={[

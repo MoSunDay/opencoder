@@ -21,7 +21,7 @@ const overview = { goals: [], standalone_initiatives: [], backlog: [{ id: 'todo-
 beforeEach(() => {
   Object.values(api).forEach((method) => method.mockReset());
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
-    ? { assignments: [{ execution_id: 'agent-1', kind: 'agent', name: '构建 Agent' }] }
+    ? { current_execution_id: 'agent-1', assignments: [{ execution_id: 'agent-1', kind: 'agent', name: '构建 Agent' }] }
     : path.endsWith('/result') ? { summary: '已完成' } : { id: 'agent-1', kind: 'agent', name: '构建 Agent', status: 'done' }));
   api.apiPost.mockResolvedValue({ execution_id: 'agent-2' });
   api.apiPatch.mockResolvedValue({ ok: true });
@@ -30,6 +30,8 @@ beforeEach(() => {
 
 it('displays execution type, name and ID resolved from the index', async () => {
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
+  await screen.findByText('execution:agent-1');
+  fireEvent.click(screen.getByRole('button', { name: '返回 TODO' }));
   expect(await screen.findByText('构建 Agent')).toBeTruthy();
   expect(screen.getAllByText('已完成').length).toBeGreaterThan(0);
   expect(screen.getByText('执行结论')).toBeTruthy();
@@ -47,22 +49,17 @@ it('links an existing execution ID', async () => {
 
 it('opens an operator through its execution reference', async () => {
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
-    ? { assignments: [{ execution_id: 'operator-1', kind: 'operator' }] }
+    ? { current_execution_id: 'operator-1', assignments: [{ execution_id: 'operator-1', kind: 'operator' }] }
     : { id: 'operator-1', kind: 'operator', status: 'running' }));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
-  expect((await screen.findAllByText('operator-1')).length).toBeGreaterThan(0);
-  fireEvent.click(screen.getByText('查看', { selector: 'button span' }).closest('button'));
   expect(await screen.findByText('execution:operator-1')).toBeTruthy();
 }, 20000);
 
 it('submits Team guidance with a stable input ID from the execution detail', async () => {
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/executions')
-    ? { assignments: [{ execution_id: 'team-1', kind: 'team', name: '审核' }] }
+    ? { current_execution_id: 'team-1', assignments: [{ execution_id: 'team-1', kind: 'team', name: '审核' }] }
     : { id: 'team-1', kind: 'team', name: '审核', status: 'running' }));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
-  const view = (await screen.findByText('查看', { selector: 'button span' })).closest('button');
-  await waitFor(() => expect(view.disabled).toBe(false));
-  fireEvent.click(view);
   fireEvent.click(await screen.findByText('提交引导', { selector: 'button' }));
   await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/executions/team-1/commands', {
     action: 'steer', input: { prompt: '补充说明', input_id: expect.stringMatching(/^input-/) },
@@ -71,7 +68,7 @@ it('submits Team guidance with a stable input ID from the execution detail', asy
 
 it('preserves a missing execution ID but does not open an unknown detail type', async () => {
   api.apiGet.mockImplementation((path) => path.endsWith('/executions')
-    ? Promise.resolve({ assignments: [{ execution_id: 'lost-1', kind: '', name: 'lost-1' }] })
+    ? Promise.resolve({ current_execution_id: 'lost-1', assignments: [{ execution_id: 'lost-1', kind: '', name: 'lost-1' }] })
     : Promise.reject(new Error('index unavailable')));
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   await waitFor(() => expect(screen.getAllByText('lost-1').length).toBeGreaterThan(0));
@@ -95,6 +92,7 @@ it('keeps the TODO open when saving before a native launch fails', async () => {
 });
 
 it('saves a selected Operator before allowing assignment', async () => {
+  api.apiGet.mockResolvedValue({ assignments: [], current_execution_id: null });
   const unbound = { ...overview, backlog: [{ ...overview.backlog[0], capability_id: null }] };
   render(<TodoDrawer todoId="todo-1" overview={unbound} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   expect(screen.getByRole('button', { name: '指派所选能力' }).disabled).toBe(true);

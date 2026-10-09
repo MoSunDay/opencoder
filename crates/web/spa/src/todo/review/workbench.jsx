@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import {Alert,Button,Dropdown,Empty,Space,Spin,Tabs,Tag,Typography} from 'antd';
 import {useState} from 'react';
 import {apiPost} from '../../api.js';
@@ -39,8 +40,8 @@ export function TodoWorkbench({id,onMutated,showControls=true}) {
   return <section className="todo-workbench" aria-label="TODO 运行工作台">
     <div className="todo-workbench-toolbar"><Space wrap>
       <Button onClick={refresh} loading={loading}>刷新状态</Button>
-      <Space wrap className="todo-workbench-controls">{actions.map(action=><Button key={action.key} type={action.key==='rerun'?'primary':'default'} danger={action.danger} disabled={action.disabled} onClick={()=>runAction(action.key)}>{action.label}</Button>)}</Space>
-      <Dropdown menu={{items:actions,onClick:({key})=>runAction(key)}} trigger={['click']}><Button className="todo-workbench-mobile-actions">运行操作</Button></Dropdown>
+      <Space wrap className="todo-workbench-controls">{actions.map(action=><EditButton key={action.key} type={action.key==='rerun'?'primary':'default'} danger={action.danger} disabled={action.disabled} onClick={()=>runAction(action.key)}>{action.label}</EditButton>)}</Space>
+      <Dropdown menu={{items:actions,onClick:({key})=>runAction(key)}} trigger={['click']}><EditButton className="todo-workbench-mobile-actions">运行操作</EditButton></Dropdown>
     </Space><Typography.Text type={stale?'danger':'secondary'}>{lastSuccess?`${stale?'数据已陈旧 · ':''}更新于 ${new Date(lastSuccess).toLocaleTimeString()}`:'等待状态同步'}</Typography.Text></div>
     {(error||actionError)&&<Alert type="error" showIcon title={actionError?'执行操作失败':'状态同步失败'} description={actionError||error}/>}
     {loading&&!snapshot?<Spin/>:snapshot?.initializing?<Alert type="info" title="工作流正在初始化" description="受理记录已保存，等待父 Agent 和 TODO 状态就绪。"/>:!wf?<Empty description="无法读取工作流"/>:<>

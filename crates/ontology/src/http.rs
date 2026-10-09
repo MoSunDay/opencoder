@@ -44,7 +44,7 @@ pub(crate) async fn session(Extension(actor): Extension<Actor>) -> Json<serde_js
     Json(serde_json::json!({
         "principal":{"external_id":actor.external_id,"display_name":actor.display_name,
             "kind":if actor.is_service {"service"} else {"user"}},
-        "capabilities":if actor.is_admin {vec!["view_business_understanding","manage_business_understanding"]}
-            else {vec!["view_business_understanding"]}
+        "capabilities":if actor.can_manage {vec!["view_ontology","manage_ontology"]}
+            else {vec!["view_ontology"]}
     }))
 }

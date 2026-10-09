@@ -40,10 +40,10 @@ prompt 契约变化，无行为变更。
 
 ## 测试覆盖
 
-本轮为文档/死代码清理，无新增业务功能，故无新增测试（N/A）。改动均属非行为性移除，
+本轮为文档/死代码清理，无新增功能，故无新增测试（N/A）。改动均属非行为性移除，
 其正确性由 `clippy --all-targets -D warnings` 零警告（含被改测试文件 output_streamline.rs
 在内的全部 target 编译干净）+ 既有测试不回归共同保证。
 
 ## Related Docs
 
-- [agents/session](../../agents/session/index.md)
+- [agents/session](../../../agents/session/index.md)

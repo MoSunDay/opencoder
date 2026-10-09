@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Button, Drawer, Form, Input, InputNumber, Segmented, Space } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { Markdown } from '../markdown.jsx';
@@ -39,7 +40,7 @@ export function MdEditDrawer({ open, title, initial, extraTop, onCancel, onOk })
   };
 
   return <Drawer open={open} title={title} onClose={() => { if (!saving) onCancel(); }} size="min(640px, 100vw)" destroyOnHidden
-    extra={<Space><Button disabled={saving} onClick={onCancel}>取消</Button><Button type="primary" loading={saving} onClick={submit}>保存</Button></Space>}>
+    extra={<Space><Button disabled={saving} onClick={onCancel}>取消</Button><EditButton type="primary" loading={saving} onClick={submit}>保存</EditButton></Space>}>
     <Form form={form} layout="vertical" disabled={saving}>
       {extraTop}
       <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}><Input placeholder="一句话标题" /></Form.Item>

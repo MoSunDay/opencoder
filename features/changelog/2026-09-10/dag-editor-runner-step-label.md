@@ -21,4 +21,4 @@ DAG 编辑器两处显示文案 `Runner 工作流` → `Runner 步骤`：
 | dist 与源码零漂移 | `scripts/check-spa-drift.sh` → no drift (build 1/3) |
 | 嵌入产物编译 | `cargo check -p opencoder-web` → 零错误 |
 
-相关语义：[Web](../../../agents/web/index.md)、[注册业务 Runner](../../../docs/registered-runners.md)。
+相关语义：[Web](../../../agents/web/index.md)、[注册 Runner](../../../docs/registered-runners.md)。

@@ -4,7 +4,7 @@ Commit: (working-tree, 基于 f9b5581)
 
 ## 需求本质
 
-- 顶层业务单位是一次 assistant Turn，而不是 reducer/消息存储产生的相邻片段。
+- 顶层交互单位是一次 assistant Turn，而不是 reducer/消息存储产生的相邻片段。
 - 默认态展示一个 `N steps` 摘要与 Say；流式更新不得擅自展开。
 - 展开/收起是用户状态：reasoning、tool result、轮次结束、Compaction 最终摘要和本地 `!cmd` 结果等新输出只能更新内容，不能关闭或重开已有展开态；仅表头点击与 Ctrl+L/全局收起可改变它。
 - 展开严格为 Turn → Step 内容 → Function call：Step 内显示 Thinking 与 `N function calls` 聚合行，打开聚合行后才列出 call，点击单个 call 只显示它自己的结果。

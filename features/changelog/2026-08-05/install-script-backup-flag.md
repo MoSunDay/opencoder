@@ -43,13 +43,13 @@ ETXTBSY），但替换 `/usr/local/bin/opencoder` 前不留旧版本，回滚只
 | `bash -n scripts/install.sh` | 语法 OK |
 | `bash -n scripts/e2e/test_install.sh` | 语法 OK |
 | `scripts/e2e/test_install.sh` | **8 passed / 0 failed**（含新增 C7/C8） |
-| 说明 | 本变更仅触及 shell 部署脚本，不动 Rust 业务码，`cargo test` 基线不变 |
+| 说明 | 本变更仅触及 shell 部署脚本，不动 Rust 源码，`cargo test` 基线不变 |
 
 ## Impact Surface
 
 - 变更：[scripts/install.sh](../../../scripts/install.sh)（+~21 行，纯增量）、
   [scripts/e2e/test_install.sh](../../../scripts/e2e/test_install.sh)（+2 契约用例 + 头注释 2 行）。
-- 不影响：任何 Rust crate、`Store`/`ChatStream` 抽象、session/web/cli/tui 业务行为；
+- 不影响：任何 Rust crate、`Store`/`ChatStream` 抽象、session/web/cli/tui 功能行为；
   install.sh 默认行为向后兼容（`backup` 默认关闭）。
 - 复用既有原子部署链路，备份仅是其前置步骤。
 

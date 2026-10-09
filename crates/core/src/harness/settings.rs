@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CodexSettings {
-    pub auth_slot: Option<u32>,
+    /// External launcher argv. The Codex command is appended verbatim.
+    pub startup_script: Vec<String>,
     pub executable: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
@@ -18,6 +19,7 @@ impl std::fmt::Debug for CodexSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CodexSettings")
             .field("model", &self.model)
+            .field("has_startup_script", &!self.startup_script.is_empty())
             .field("environment_keys", &self.envs.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
@@ -25,8 +27,13 @@ impl std::fmt::Debug for CodexSettings {
 
 impl CodexSettings {
     pub fn validate(&self) -> Result<(), String> {
-        if self.auth_slot == Some(0) {
-            return Err("Codex auth_slot must be positive".into());
+        if self
+            .startup_script
+            .first()
+            .is_some_and(|s| s.trim().is_empty())
+            || self.startup_script.iter().any(|s| s.contains('\0'))
+        {
+            return Err("invalid Codex startup script command".into());
         }
         for (name, value) in [("executable", &self.executable), ("model", &self.model)] {
             if value
@@ -69,9 +76,6 @@ impl CodexSettings {
     /// Values are separate argv entries, never interpreted by a shell.
     pub fn config_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        if let Some(slot) = self.auth_slot {
-            args.extend(["--auth-slot".into(), slot.to_string()]);
-        }
         for (key, value) in [
             ("model_reasoning_effort", &self.reasoning_effort),
             ("sandbox_mode", &self.sandbox_mode),

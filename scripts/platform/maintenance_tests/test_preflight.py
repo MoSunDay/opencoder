@@ -28,17 +28,17 @@ class PreflightTests(unittest.TestCase):
             with sqlite3.connect(database) as connection:
                 connection.executescript('''
                     CREATE TABLE schema_version(version INTEGER);
-                    INSERT INTO schema_version VALUES(33);
+                    INSERT INTO schema_version VALUES(34);
                     CREATE TABLE project_assignments(todo_id TEXT,execution_id TEXT);
                     INSERT INTO project_assignments VALUES('todo','agent-work');
                 ''')
             original = database.read_bytes()
             inventory = preflight.database_inventory(database)
-            self.assertEqual(inventory['schema_version'], 33)
+            self.assertEqual(inventory['schema_version'], 34)
             self.assertEqual(inventory['tables'], {'project_assignments': 1})
             self.assertEqual(database.read_bytes(), original)
             with sqlite3.connect(database) as connection:
-                connection.execute('UPDATE schema_version SET version=34')
+                connection.execute('UPDATE schema_version SET version=35')
             with self.assertRaisesRegex(ValueError, 'unsupported definitions database schema'):
                 preflight.database_inventory(database)
 

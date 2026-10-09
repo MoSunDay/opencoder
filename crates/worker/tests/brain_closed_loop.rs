@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 #[tokio::test]
-async fn native_coding_test_loop_recovers_binding_errors_and_business_failures() {
+async fn native_coding_test_loop_recovers_binding_errors_and_task_failures() {
     let model = Arc::new(model::Model::default());
     let fleet = support::Fleet::new(1, model.clone()).await;
     fixture::prepare(&fleet).await;

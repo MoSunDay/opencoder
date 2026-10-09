@@ -75,7 +75,7 @@ python3 scripts/acceptance/smooth_release/live.py \
 - 确认公共入口的实例版本、真实探针完成和任务持久归属；核对旧 Runtime、工具进程和 NFS 身份未改变。
 - 持续提交失败为 0；接收及调度间隔均不超过 1 秒；SSE 5 秒内自动恢复且逐游标补齐。
 - 检查最终 `result.json` 为 PASS、观察至少 900 秒；检查 Server/Host/Runtime 状态及退役回收失败。
-- CLI 超时不会取消独立发布作业。先查 `--status` 的 `signals.receipts`、发布阶段和对应 unit journal，判断作业仍运行、失败还是已完成。不要以超时为理由重启业务进程；不并发发布。
+- CLI 超时不会取消独立发布作业。先查 `--status` 的 `signals.receipts`、发布阶段和对应 unit journal，判断作业仍运行、失败还是已完成。不要以超时为理由重启服务进程；不并发发布。
 - 失败必须直接报告，并依据原发布 ID 续跑或兼容回滚。保留失败证据，不将重试成功改写为从未失败。
 
 ## 5. 交付

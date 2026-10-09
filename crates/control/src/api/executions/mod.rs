@@ -32,13 +32,15 @@ pub async fn create(
         .as_ref()
         .map(|axum::Extension(i)| i)
         .is_some_and(|i| {
-            !i.is_admin() && !matches!(request.kind, ExecutionKind::Operator | ExecutionKind::Agent)
+            !i.can_edit()
+                || !i.is_admin()
+                    && matches!(
+                        request.kind,
+                        ExecutionKind::Maintenance | ExecutionKind::System
+                    )
         })
     {
-        return response(RpcReply::error(
-            403,
-            "non-admin roles may only submit operator or agent executions",
-        ));
+        return response(RpcReply::error(403, "role may not submit this execution"));
     }
     response(submit::submit_private(&state, request, submission.private_context).await)
 }
@@ -68,9 +70,8 @@ pub async fn dispatch_command(
     dispatch_command_as(state, id, command, None).await
 }
 
-/// [`dispatch_command`] with the caller's identity: non-admins may command
-/// only operator and agent executions (the role gate already limited them
-/// to this endpoint family).
+/// Dispatch with live role checks: editors may command platform executions;
+/// maintenance and historical system executions remain administrator-only.
 pub async fn dispatch_command_as(
     state: &Arc<AppState>,
     id: &str,
@@ -80,14 +81,15 @@ pub async fn dispatch_command_as(
     match state.fleet.index(id).await {
         Ok(Some(index))
             if identity.is_some_and(|i| {
-                !i.is_admin()
-                    && !matches!(index.kind, ExecutionKind::Operator | ExecutionKind::Agent)
+                !i.can_edit()
+                    || !i.is_admin()
+                        && matches!(
+                            index.kind,
+                            ExecutionKind::Maintenance | ExecutionKind::System
+                        )
             }) =>
         {
-            return RpcReply::error(
-                403,
-                "non-admin roles may only command operator or agent executions",
-            );
+            return RpcReply::error(403, "role may not command this execution");
         }
         Ok(Some(index))
             if index.kind == ExecutionKind::System

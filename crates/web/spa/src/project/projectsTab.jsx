@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import { Button, Dropdown, Modal, Space, Tag } from 'antd';
 import { useState } from 'react';
 import { apiDel, apiPatch, apiPost } from '../api.js';
@@ -38,11 +39,11 @@ export function ProjectsTab({ overview, refresh, onNotice, openProject }) {
       { key: 'edit', label: '编辑', onClick: () => { setEditing(row); setOpen(true); } },
       { key: 'archive', label: row.status === 'archived' ? '激活' : '归档', onClick: () => toggle(row) },
       { key: 'delete', label: '删除', danger: true, onClick: () => modal.confirm({ title: '删除该项目？', content: '专项变为独立专项，TODO 和执行记录保留；项目 Tag 会重新匹配。', onOk: () => remove(row) }) },
-    ] }} trigger={['click']}><Button size="small">操作</Button></Dropdown></div> },
+    ] }} trigger={['click']}><EditButton size="small">操作</EditButton></Dropdown></div> },
   ];
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
     {contextHolder}
-    <Button type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建项目</Button>
+    <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建项目</EditButton>
     <ProjectTable label="项目表格" rows={rows} columns={columns} onRowClick={(row) => openProject(row.id)} locale={{ emptyText: '还没有项目' }} />
     <MdEditDrawer open={open} title={editing ? '编辑项目' : '新建项目'} initial={editing} onCancel={() => setOpen(false)} onOk={save} />
   </Space>;

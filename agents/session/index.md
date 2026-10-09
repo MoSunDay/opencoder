@@ -1,4 +1,4 @@
-Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
+Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 
 # session 模块
 
@@ -6,6 +6,7 @@ Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 接缝：只依赖 `Arc<dyn Store>` 与 `Arc<dyn ChatStream>`，不做 HTTP/终端 IO；steer 打断进行中 turn、queue 等 idle。
 
 ## 索引
+- [harness/codex/launch.rs](../../crates/session/src/harness/codex/launch.rs) — 解析启动入口并逐项追加 Codex 参数；每轮通过 `OPENCODER_HARNESS_CONTEXT` 传递会话、线程、输入和工作目录。脚本与 Codex 共用取消和超时管理，启动失败不回退；接口见 [启动脚本](../../docs/codex-startup-script.md)。
 - `src/runner/` — drain/执行/sidecar/steer，subagent 在 `runner/subagent.rs`；`runner/local_memory/` 在成功任务结束后复制消息到无 Store 的独立会话，注入内置技能并运行记忆维护，主会话结束事件在维护完成后发出
 - `src/lib.rs` 导出 `run_with_registry`；Brain 的生产激活创建无工具的 Act 会话，复用同一 agent loop 完成一次事件驱动决策。
 - `src/harness/` — 前端共用的执行器准备与续会话校验；`codex/` 独立处理进程、JSONL 解码、工具事件映射和回合状态，TUI/headless/Web/Operator 均经 `SessionState` 进入该模块；重连 `error` 只显示状态，`turn.failed`、非零退出或缺少完成事件使回合失败

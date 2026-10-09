@@ -135,7 +135,7 @@ async fn node_registration_delete_requires_admin_identity() {
     assert_eq!(response.status().as_u16(), 401);
     // No auth middleware: inject the already-authenticated non-admin identity
     // to exercise the role gate without minting credentials.
-    for role in [Role::User, Role::Root] {
+    for role in [Role::Viewer, Role::Editor] {
         let app = opencoder_control::build_app(state.clone(), None, false);
         let mut request = Request::builder()
             .method("DELETE")

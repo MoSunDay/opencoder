@@ -1,9 +1,9 @@
 Commit: (working-tree)
 
-# e2e 深度化（业务契约断言）+ `session show --json` 观测面 + agents/cli 记忆补齐
+# e2e 深度化（功能契约断言）+ `session show --json` 观测面 + agents/cli 记忆补齐
 
 ## 背景
-原 `scripts/e2e-glm.sh` 只验证**表面标记**：grep 关键字、文件存在、id 不等。核心业务契约从未被 e2e 真正断言——
+原 `scripts/e2e-glm.sh` 只验证**表面标记**：grep 关键字、文件存在、id 不等。核心功能契约从未被 e2e 真正断言——
 - `--fork` 只查新 id ≠ 原 id，**不验证是否真复制了消息、原 session 是否真未变**。
 - bundle 导入导出只查文件存在 + "imported" 文本，**不验证导入会话与原会话内容一致**。
 - `--continue` 只查 scoreboard 关键字，**不验证恢复的会话真加载了首轮上下文**。
@@ -23,7 +23,7 @@ Commit: (working-tree)
 
 ### B — e2e 重写为 Python 深度契约套件（`scripts/e2e/`）
 - `scripts/e2e/{lib,cli_scenarios,web_scenarios}.py` + `scripts/e2e_glm.py`（入口）+ `e2e-glm.sh`（薄 wrapper）。stdlib only，无第三方依赖。每文件 ≤400 行（规则 03）。
-- 每场景断言**业务契约**，区分 hard（确定性存储契约）/ soft（模型协作依赖，记 skip 不 fail）：
+- 每场景断言**功能契约**，区分 hard（确定性存储契约）/ soft（模型协作依赖，记 skip 不 fail）：
 
 | 场景 | 深度断言（相对原 bash 的「表面」断言） | hard/soft |
 |------|----------------------------------------|-----------|
@@ -69,7 +69,7 @@ Commit: (working-tree)
 | 项 | 变更前 | 变更后 |
 |----|--------|--------|
 | e2e 介质 | bash (e2e-glm.sh) | Python 包 (scripts/e2e/) + 薄 wrapper |
-| e2e 断言深度 | 表面标记（grep/存在性） | 业务契约（hard/soft 分层） |
+| e2e 断言深度 | 表面标记（grep/存在性） | 功能契约（hard/soft 分层） |
 | e2e 场景数 | 10（9 + E9） | 12（+E10 plan 只读、+E11 web delivery） |
 | CLI 观测面 | `session show` 仅 text | `session show --json` 全状态 |
 | agents/cli 记忆 | 无（dangling bullet） | `agents/cli/index.md` |

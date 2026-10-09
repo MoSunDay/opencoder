@@ -1,3 +1,5 @@
+import { UsersPanel } from '../admin/users.jsx';
+import { TokensPanel } from '../admin/tokens.jsx';
 // panels.jsx — store `page` → panel component map. Extracted from main.jsx so
 // the shell contract tests can render any single page without importing the
 // app shell (main.jsx auto-mounts <App/> at import time).
@@ -18,6 +20,8 @@ import { OntologyGraphPanel, OntologyEntitiesPanel, OntologyTypesPanel, Ontology
 /// so adding a page stays one line. Keys must equal nav.js ALL_PAGES exactly
 /// (asserted by shell/headerContract.dom.test.jsx).
 export const PANELS = {
+  users: UsersPanel,
+  tokens: TokensPanel,
   chat: ChatPanel,
   team: TeamPanel,
   topics: TopicsPanel,

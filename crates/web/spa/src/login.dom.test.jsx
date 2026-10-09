@@ -37,7 +37,7 @@ describe('LoginModal (token-only)', () => {
 
   it('probes /api/me, publishes the identity and keeps the current base', async () => {
     setCredentials('stale-token', 'https://fleet.example.com');
-    apiGetMock.mockResolvedValueOnce({ name: 'ops', role: 'user' });
+    apiGetMock.mockResolvedValueOnce({ name: 'ops', role: 'viewer' });
     const onConnected = vi.fn();
     render(<LoginModal open onConnected={onConnected} />);
     fireEvent.change(screen.getByLabelText('访问令牌 (Token)'), { target: { value: 'good-token' } });
@@ -47,7 +47,7 @@ describe('LoginModal (token-only)', () => {
     expect(getState().token).toBe('good-token');
     // base 仍是登录前的存储值（VITE_OC_BASE / URL 机制不动）。
     expect(getState().base).toBe('https://fleet.example.com');
-    expect(getState().identity).toEqual({ name: 'ops', role: 'user' });
+    expect(getState().identity).toEqual({ name: 'ops', role: 'viewer' });
     expect(localStorage.getItem('oc_token')).toBe('good-token');
   });
 

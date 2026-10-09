@@ -14,6 +14,6 @@ Commit: 07d29e11815cdbbbfc82a73a5a208bd0eb313e62
 | 节点准入与人工输入无副作用拒绝 | `probe_and_create_reject_a_plan_before_execution_admission`、`rejected_human_input_does_not_append_events_or_advance_generation` | [brain_context_budget.rs](../../../crates/worker/tests/brain_context_budget.rs) |
 | 服务端保留 413 且不创建索引 | `node_capacity_rejection_is_reported_before_creating_a_brain_index` | [layered_api/mod.rs](../../../crates/control/tests/e2e/layered_api/mod.rs) |
 
-本次合并的完整验证见 2026-10-09 仓库清理记录。项目结果采用用户确认的实时读取方案。
+本次合并的完整验证见 [项目执行结果实时读取](../2026-10-09/project-execution-results.md)。项目结果采用用户确认的实时读取方案。
 
 相关：[大脑调度规则](../../../rules/06-brain-scheduling-contract.md)、[大脑工作台](../../brain/index.md)。

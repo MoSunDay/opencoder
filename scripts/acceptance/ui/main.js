@@ -72,7 +72,7 @@ async function main() {
   };
   try {
     let build;
-    for (const name of ['opencoder', 'opencoder-cli', 'opencoder-server', 'opencoder-agent', 'dag-runner', 'agent-step-runner']) {
+    for (const name of ['opencoder', 'opencoder-cli', 'opencoder-server', 'opencoder-agent', 'dag-runner', 'agent-step-runner', 'agent-session-runner']) {
       const binary = path.join(binaries, name);
       const info = JSON.parse(execFileSync(binary, ['--build-info'], { encoding: 'utf8' }));
       if (!build) build = info;
@@ -87,7 +87,7 @@ async function main() {
       if (previous?.extra_artifacts?.brain_test) verifyArtifact(previous.extra_artifacts.brain_test, fingerprint, 'brain-test');
       report.extra_artifacts = { ...report.extra_artifacts, brain_test: fingerprint };
     }
-    for (const name of ['dag-runner', 'agent-step-runner']) assert.equal(sha256(path.join(rootfs, 'usr/bin', name)), report.artifacts[name], `rootfs runner differs: ${name}`);
+    for (const name of ['dag-runner', 'agent-step-runner', 'agent-session-runner']) assert.equal(sha256(path.join(rootfs, 'usr/bin', name)), report.artifacts[name], `rootfs runner differs: ${name}`);
     const spa = path.join(repo, 'crates/web/spa/dist');
     const digest = crypto.createHash('sha256');
     const visit = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? visit(path.join(directory, entry.name)) : entry.isFile() ? [path.join(directory, entry.name)] : []);

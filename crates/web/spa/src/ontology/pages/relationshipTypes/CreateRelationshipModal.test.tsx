@@ -21,7 +21,7 @@ vi.mock("../../api", () => ({
 }));
 
 const entityTypes = [
-  { id: "t1", env_num: 1, type_key: "source_business", name: "类型一", description: "", is_system: false, revision: 1, is_deleted: false },
+  { id: "t1", env_num: 1, type_key: "source_platform", name: "类型一", description: "", is_system: false, revision: 1, is_deleted: false },
   { id: "t2", env_num: 1, type_key: "target_service", name: "类型二", description: "", is_system: false, revision: 1, is_deleted: false },
   { id: "t3", env_num: 1, type_key: "t3", name: "类型三", description: "", is_system: false, revision: 1, is_deleted: false },
 ];
@@ -156,7 +156,7 @@ describe("RelationshipTypesPage", () => {
     fireEvent.change(fields[1]!, { target: { value: "部署依赖" } });
     const combos = within(dialog).getAllByRole("combobox");
     await openOptions(combos[0]!);
-    fireEvent.change(combos[0]!, { target: { value: "source_business" } });
+    fireEvent.change(combos[0]!, { target: { value: "source_platform" } });
     const source = await waitFor(() => {
       const dropdown = document.body.querySelector<HTMLElement>(".ant-select-dropdown:not(.ant-select-dropdown-hidden)")!;
       expect(within(dropdown).queryByText("类型二")).not.toBeInTheDocument();

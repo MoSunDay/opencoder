@@ -1,3 +1,8 @@
+import { EditButton } from '../ui/permissions.jsx';
+import { ConversationInput } from '../chat/conversationInput.jsx';
+import { QueuePanel } from '../queuePanel.jsx';
+import { QuestionModal } from '../questionModal.jsx';
+import { useCanEdit } from '../ui/permissions.jsx';
 import { DagRunResult } from '../dag/run/result.jsx';
 import { DagRunContext } from '../dag/run/context.jsx';
 import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Input, Progress, Select, Space, Spin, Typography } from 'antd';
@@ -55,13 +60,14 @@ export function ExecutionDetail({ id, summary, onClose, onNotice, managed = fals
 }
 
 export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', managed = false, allowGuidance = false, onGuidance }) {
+  const canEdit = useCanEdit();
   const id = executionRef.id;
   const [childId, setChildId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [events, setEvents] = useState([]);
   const [prompt, setPrompt] = useState('');
-  const [delivery, setDelivery] = useState('prompt');
+  const [delivery, setDelivery] = useState('steer');
   const [busy, setBusy] = useState(false);
   const inputAttempt = useRef(null);
   const submitting = useRef(false);
@@ -147,7 +153,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     loadMessages({ reset: true, windowIndex: 0 });
   };
   const command = async (action, input = {}) => {
-    if (submitting.current) return;
+    if (!canEdit || submitting.current) return;
     submitting.current = true; setBusy(true);
     try {
       if (['prompt', 'steer', 'queue'].includes(action)) {
@@ -179,9 +185,9 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     ]} />}
     {!managed && <Space wrap style={{ margin: '12px 0' }}>
       <Button onClick={() => { setRevision((v) => v + 1); load(); }}>刷新明细</Button>
-      <Button disabled={busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
-      <Button disabled={busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
-      <Button danger disabled={busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
+      <Button disabled={!canEdit || busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
+      <Button disabled={!canEdit || busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
+      <Button danger disabled={!canEdit || busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
     </Space>}
     {detail?.error && !todoInitialization && <Alert type="error" title={detail.error} />}
     {hasMessages && <div className="execution-messages">
@@ -201,16 +207,23 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       {!messages.large?.length && (messages.more || messages.partial) && <Button block loading={messagesBusy} onClick={nextMessages}>继续加载消息</Button>}
       {messagesBusy && !messages.messages.length && !messages.partial ? <Spin size="small" /> : null}
     </div>}
-    {((!managed && ['agent', 'maintenance', 'operator'].includes(kind)) || (allowGuidance && !!onGuidance && ['agent', 'operator', 'team'].includes(kind))) && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
-      <Input.TextArea disabled={!managed && unavailable} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={managed ? '补充信息，由大脑决定后续调度' : '继续会话'} rows={3} />
-      <Space>{!managed && kind !== 'team' && <Select value={delivery} onChange={setDelivery} options={[{ value: 'prompt', label: '发送' }, { value: 'steer', label: '指导当前执行' }, { value: 'queue', label: '加入队列' }]} />}<Button type="primary" disabled={!prompt.trim() || busy} loading={busy} onClick={managed || kind === 'team' ? submitGuidance : () => command(delivery, { prompt })}>{managed ? '提交给大脑' : '提交'}</Button></Space>
+    {hasMessages && !managed && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
+      {canEdit && <Select aria-label="发送方式" value={delivery} onChange={setDelivery} options={[{ value: 'steer', label: '指导当前执行 / 继续对话' }, { value: 'queue', label: '加入队列' }]} />}
+      <ConversationInput value={prompt} onChange={setPrompt} disabled={busy || unavailable} loading={busy}
+        placeholder="继续会话" onSubmit={() => { if (prompt.trim()) command(delivery, { prompt }); }} />
+      <QueuePanel sessionId={id} refreshSignal={`${revision}-${events.at(-1)?.seq || 0}`} />
+      {canEdit && <QuestionModal sessionId={id} active={index?.status === 'running'} />}
     </Space>}
-    {kind === 'dag' && <DagRunContext context={detail?.dag_context} />}
+    {canEdit && allowGuidance && onGuidance && (managed || kind === 'team') && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
+      <Input.TextArea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={managed ? '补充信息，由大脑决定后续调度' : '继续会话'} rows={3} />
+      <EditButton type="primary" disabled={!prompt.trim() || busy} loading={busy} onClick={submitGuidance}>提交给大脑</EditButton>
+    </Space>}
     {kind === 'dag' && (detail?.definition?.spec || detail?.definition)?.steps && <DagRunResult key={id} id={id}
       spec={detail.definition.spec || detail.definition} status={execution?.status}
       onStatus={(status) => { if (status !== execution?.status) load(); }} />}
+    {kind === 'dag' && <DagRunContext context={detail?.dag_context} />}
     {kind === 'dag' && <Artifacts id={id} spec={detail?.definition?.spec || detail?.definition} onNotice={onNotice} />}
-    {detail?.topic?.final_summary && <Markdown text={detail.topic.final_summary} />}
+    {kind !== 'team' && typeof detail?.topic?.final_summary === 'string' && <Markdown text={detail.topic.final_summary} />}
     {/* 过程视图只在完整明细挂载：inline 模式（brain 工作台 Inspector 的「执行过程」页，
         ~380px 窄列）不嵌 PlanCanvas/TODO 画布与第二条 SSE，内联仍由下方 Transcript/
         WorkloadDetail 等轻量块承载过程信息。 */}

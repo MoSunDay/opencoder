@@ -2,7 +2,7 @@
 //! replays the two output-contract forms for two chained agent steps: the
 //! v3 primary ```json fence and the bare-JSON-after-narration fallback the
 //! whole-text parse could never recover. Both must land a non-null
-//! `output.json` with reachable business fields.
+//! `output.json` with reachable platform fields.
 
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::{LlmStub, Script, EXTRA_REPLY};

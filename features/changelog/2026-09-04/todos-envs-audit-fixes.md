@@ -55,4 +55,4 @@ Commit: (working-tree, 待提交)
 | E-3：连续 marker 重写原子性 | `crates/core/tests/config_envs_contract.rs`（rapid marker rewrites） |
 | Web PATCH：空白 active 400 / 损坏 env 500+回滚 / 重复激活短路 / 并发激活 marker 完整 | `crates/web/tests/web_envs.rs`（4 新增） |
 
-回归：`cargo test --workspace` 39 个测试二进制全部通过、0 失败；key-free e2e `scripts/e2e/config_scenarios.py` 18/18 通过（深度 e2e cli/web/todos 场景硬绑定智谱 GLM 端点，本环境无 `ZHIPU_API_KEY` 未跑；业务契约由上表 workspace 集成测试覆盖）。
+回归：`cargo test --workspace` 39 个测试二进制全部通过、0 失败；key-free e2e `scripts/e2e/config_scenarios.py` 18/18 通过（深度 e2e cli/web/todos 场景硬绑定智谱 GLM 端点，本环境无 `ZHIPU_API_KEY` 未跑；功能契约由上表 workspace 集成测试覆盖）。

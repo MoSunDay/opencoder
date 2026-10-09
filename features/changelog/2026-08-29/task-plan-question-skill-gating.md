@@ -14,4 +14,4 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 | 规划技能携带完整澄清用法与准确资源清单 | `seeded_task_plan_skill_requires_question_tool_guidance`、`seeded_task_plan_skill_requires_launch_closure_contract` | `crates/core/tests/skill_contract/planning.rs` |
 | 更新内置文件前备份，用户资源保持原样 | `seed_builtin_skills_backs_up_then_overwrites_user_edits` | `crates/core/tests/skill_contract/seeding.rs` |
 
-原迭代全量回归为 3345 passed / 0 failed，clippy 零警告。当前回归结果见 [核心仓库范围](../2026-10-01/core-platform-scope.md)。
+原迭代全量回归为 3345 passed / 0 failed，clippy 零警告。

@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 
 # worker 模块
 
@@ -7,6 +7,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类在准入时拒绝，不装配 DAG/runc/NFS。依赖与实现通过平台模块隔开；原生验收入口见 [windows_operator.rs](../../crates/worker/tests/windows_operator.rs)，用户边界见 [Windows](../../features/windows/index.md)。
 
 ## 索引
+- [operations/sandbox_session/mod.rs](../../crates/worker/src/operations/sandbox_session/mod.rs)、[workloads/agent_runc/inputs.rs](../../crates/worker/src/workloads/agent_runc/inputs.rs) — 容器会话的 steer 与 queue 使用原生输入存储，按 `input_id` 去重；运行中引导进入当前循环，排队输入在后续轮次消费，续会话沿用同一执行和上下文。
 - `crates/worker/src/service.rs` — 根执行与会话清单
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器
 - `crates/worker/src/workloads/agent_how.rs`、`agent_runc.rs`（+ `agent_runc/`）— how 契约与 `run_mode: agent` runc 运行时（准入 fail-closed）

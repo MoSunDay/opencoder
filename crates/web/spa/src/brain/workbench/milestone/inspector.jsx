@@ -1,3 +1,4 @@
+import { EditButton } from '../../../ui/permissions.jsx';
 import { Button, Input, Select, Typography } from 'antd';
 import { capabilityId } from '../scheduler/model.js';
 import { capabilityLabel, capabilityTask } from './model.js';
@@ -13,7 +14,7 @@ export function MilestoneInspector({ plan, selection, capabilities, onLayerChang
     <label>目标<Input.TextArea aria-label="里程碑目标" rows={3} maxLength={4096} value={layer.objective} onChange={(event) => onLayerChange({ objective: event.target.value })} /></label>
     <label>达成标准<Input.TextArea aria-label="里程碑达成标准" rows={3} maxLength={4096} value={layer.success_criteria} onChange={(event) => onLayerChange({ success_criteria: event.target.value })} /></label>
     <p>本层 {plan.nodes.filter((item) => item.layer_id === layer.layer_id).length} 个执行节点并行运行。</p>
-    <Button danger onClick={onDelete}>删除里程碑及其节点</Button>
+    <EditButton danger onClick={onDelete}>删除里程碑及其节点</EditButton>
   </aside>;
   if (node) {
     const capability = capabilities.find((item) => capabilityId(item) === node.capability_id);
@@ -22,7 +23,7 @@ export function MilestoneInspector({ plan, selection, capabilities, onLayerChang
       <label>所属里程碑<Select aria-label="所属里程碑" value={node.layer_id} options={plan.layers.map((item) => ({ value: item.layer_id, label: item.title || item.layer_id }))} onChange={onMoveNode} /></label>
       <label>泛化能力<Select aria-label="绑定能力" showSearch optionFilterProp="label" value={node.capability_id || undefined} onChange={(capability_id) => onNodeChange(capabilities.find((item) => capabilityId(item) === capability_id))} options={capabilities.map((item) => ({ value: capabilityId(item), label: capabilityLabel(item) }))} /></label>
       {capability && <section><Typography.Text strong>{capabilityLabel(capability)}</Typography.Text><p>{capabilityTask(capability)}</p><p>输入：{capability.input_desc}</p><p>输出：{capability.output_desc}</p>{!!capability.required_inputs?.length && <p>必填输入：{capability.required_inputs.join('、')}</p>}{!!capability.required_outputs?.length && <p>必填输出：{capability.required_outputs.join('、')}</p>}</section>}
-      <Button danger onClick={onDelete}>删除执行节点</Button>
+      <EditButton danger onClick={onDelete}>删除执行节点</EditButton>
     </aside>;
   }
   return null;

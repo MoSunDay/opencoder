@@ -130,7 +130,8 @@ export function InlineFields({ id, value }) {
 
 export function DetailFields({ id, detail }) {
   const markers = detailMarkers(detail).filter((marker) =>
-    !marker.field.startsWith('todo.item.') && !marker.field.startsWith('project.run.'));
+    !marker.field.startsWith('todo.item.') && !marker.field.startsWith('project.run.')
+    && !(detail?.execution?.kind === 'team' && marker.field === 'team.topic'));
   if (!markers.length) return null;
   return <Space orientation="vertical" style={{ width: '100%', marginTop: 12 }}>
     <Typography.Title level={5}>较大内容</Typography.Title>

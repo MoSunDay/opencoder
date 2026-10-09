@@ -77,49 +77,94 @@ pub(super) async fn launch_locked(
     let tasks = worker.inner.tasks.clone();
     tasks.spawn(async move {
         let ticket = record.queue.as_ref().and_then(|q| q.ticket.clone());
-        let outcome = std::panic::AssertUnwindSafe(async {
-            opencoder_core::harness::scope::with_execution(
-                config.agent.codex.clone(),
-                config.agent.runtime.clone(),
-                opencoder_core::agent::scope::with_root(
-                    config.agent.agents_dir.clone(),
-                    Box::pin(opencoder_core::skill::with_execution(
-                        skills_root,
-                        crate::workloads::run(&worker, &record, config, cancel.clone(), resume),
-                    )),
-                ),
-            )
+        let mut record = record;
+        let (status, result, error, _guard) = loop {
+            let outcome = std::panic::AssertUnwindSafe(async {
+                opencoder_core::harness::scope::with_execution(
+                    config.agent.codex.clone(),
+                    config.agent.runtime.clone(),
+                    opencoder_core::agent::scope::with_root(
+                        config.agent.agents_dir.clone(),
+                        Box::pin(opencoder_core::skill::with_execution(
+                            skills_root.clone(),
+                            crate::workloads::run(
+                                &worker,
+                                &record,
+                                config.clone(),
+                                cancel.clone(),
+                                resume,
+                            ),
+                        )),
+                    ),
+                )
+                .await
+            })
+            .catch_unwind()
             .await
-        })
-        .catch_unwind()
-        .await
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("execution panicked")));
-        let (status, result, error) = match outcome {
-            Ok((status, result)) => {
-                // DAG failures retain their result/artifact receipt as well as
-                // the scheduler's terminal diagnostic in the execution index.
-                let error = (status == ExecutionStatus::Error
-                    && record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Dag)
-                    .then(|| result["error"].as_str().map(str::to_owned))
-                    .flatten();
-                (status, result, error)
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("execution panicked")));
+            let (status, result, error) = match outcome {
+                Ok((status, result)) => {
+                    // DAG failures retain their result/artifact receipt as well as
+                    // the scheduler's terminal diagnostic in the execution index.
+                    let error = (status == ExecutionStatus::Error
+                        && record.assignment.index.kind
+                            == opencoder_core::fleet::ExecutionKind::Dag)
+                        .then(|| result["error"].as_str().map(str::to_owned))
+                        .flatten();
+                    (status, result, error)
+                }
+                Err(error) => (
+                    if cancel.is_cancelled()
+                        && record.assignment.index.kind
+                            == opencoder_core::fleet::ExecutionKind::Brain
+                    {
+                        ExecutionStatus::Interrupted
+                    } else if cancel.is_cancelled() {
+                        ExecutionStatus::Cancelled
+                    } else {
+                        ExecutionStatus::Error
+                    },
+                    Value::Null,
+                    Some(format!("{error:#}")),
+                ),
+            };
+            let gate = worker.lifecycle_gate(&id).await;
+            let guard = gate.lock_owned().await;
+            #[cfg(not(windows))]
+            if status == ExecutionStatus::Idle
+                && !cancel.is_cancelled()
+                && crate::workloads::agent_runc::sandbox_session(
+                    &record,
+                    config.agent.agents_dir.as_deref(),
+                )
+            {
+                let legacy = worker.inner.journal.lock().await.uses_legacy(&id);
+                let pending = async {
+                    let store =
+                        crate::workloads::agent_runc::inputs::open(&worker, &record, legacy)
+                            .await?;
+                    crate::workloads::agent_runc::inputs::pending(store.as_ref(), &id).await
+                }
+                .await;
+                match pending {
+                    Ok(true) => {
+                        drop(guard);
+                        record.assignment.request.input["how_append"] = Value::Null;
+                        continue;
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        break (
+                            ExecutionStatus::Error,
+                            Value::Null,
+                            Some(error.to_string()),
+                            guard,
+                        )
+                    }
+                }
             }
-            Err(error) => (
-                if cancel.is_cancelled()
-                    && record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Brain
-                {
-                    ExecutionStatus::Interrupted
-                } else if cancel.is_cancelled() {
-                    ExecutionStatus::Cancelled
-                } else {
-                    ExecutionStatus::Error
-                },
-                Value::Null,
-                Some(format!("{error:#}")),
-            ),
+            break (status, result, error, guard);
         };
-        let gate = worker.lifecycle_gate(&id).await;
-        let _guard = gate.lock().await;
         let persisted = worker
             .inner
             .journal

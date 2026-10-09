@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 import {Alert,Button,Form,Input,Spin} from 'antd';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {apiGet,apiPost} from './api.js';
@@ -97,7 +98,7 @@ function TodoEditorSession({templateName,version,creating=false,onNotice,onClose
   return <section className="todo-directory-editor" aria-label="TODO 目录编辑器">
     <div className="todo-directory-toolbar">
       <Button onClick={onClose} disabled={saving}>返回</Button>
-      <Button type="primary" loading={saving} disabled={loading||!!loadError} onClick={save}>保存</Button>
+      <EditButton type="primary" loading={saving} disabled={loading||!!loadError} onClick={save}>保存</EditButton>
     </div>
     {loading ? <Spin/> : <>
     {loadError&&<Alert type="error" title="加载模板失败" description={loadError}/>}

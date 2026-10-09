@@ -14,7 +14,7 @@ mod private_context;
 pub(crate) mod results;
 mod submit;
 pub use submit::submit;
-pub(crate) use submit::submit_private;
+pub(crate) use submit::{dispatch_queued, submit_private};
 
 pub async fn create(
     State(state): State<Arc<AppState>>,
@@ -107,6 +107,18 @@ pub async fn dispatch_command_as(
         }
         Ok(_) => {}
         Err(error) => return RpcReply::error(500, format!("index: {error:#}")),
+    }
+    if command.action == "cancel" {
+        match super::resource_admission::cancel_waiting(state, id).await {
+            Ok(Some(reply)) => return reply,
+            Ok(None) => {}
+            Err(_) => {
+                return RpcReply::error(
+                    503,
+                    "resource cancellation unavailable; retry the same task",
+                )
+            }
+        }
     }
     if matches!(command.action.as_str(), "plan" | "execute") {
         let Some(todo) = id.strip_prefix("project-").filter(|_| valid_id(id)) else {

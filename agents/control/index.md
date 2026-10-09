@@ -11,6 +11,7 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 - `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）
 - `src/api/session.rs` — 会话执行面（`?kind=operator|agent` 泳道）
 - `src/api/executions/`、`src/role_gate.rs` — 派发去重、选点冻结、回执与角色门禁；执行索引五字段协议
+- [resource_admission](../../crates/control/src/api/resource_admission/mod.rs) — 通过既有 Fleet 定义保存外部资源提供方；核验冻结的 `_resource_request`，提供按执行 ID 查询、状态确认和释放接口。批次释放先检查 Server 终态；等待取消与派发共用执行锁。
 - `src/api/settings/` — Harness 配置与节点调度配置（Maintenance RPC 转发）
 - `src/api/catalog.rs`、`src/api/compat/`、`src/api/project.rs` — 节点/定义目录、兼容路由与 Project 中继；项目、专项、TODO、Tag 处理器复用 Web 实现并经 `src/routes.rs` 装配
 - [api/project_links.rs](../../crates/control/src/api/project_links.rs)、[api/project_links/](../../crates/control/src/api/project_links/) — TODO 保存执行与能力引用；`dispatch` 以稳定执行 ID 和既有 Fleet 回执复用 Agent、Operator、Team、DAG、TODO 工作流及保存的 Brain 计划入口，重试不能改变输入或能力。`reference` 按真实准入记录核验能力，不信任任意请求标签。
@@ -46,5 +47,6 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 ## 派发与报告
 
 - [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。
+- [outbox/resources.rs](../../crates/control/src/release/outbox/resources.rs)：资源任务受理后先持久化等待，按创建时间及 ID 扫描，获得外部授权后才创建节点执行；不可运行项不阻挡其他项。普通任务保持持久化前预留节点容量的路径，不依赖资源提供方。
 - [socket.rs](../../crates/control/src/transport/socket.rs)：Host 库存持久化并通过代次栅栏后直接发送交接确认，避免 socket 循环等待自己消费的满队列。
 - [v4/view.rs](../../crates/control/src/api/brain_runs/v4/view.rs)：层调度理由只取本层 `layer_started` 事件，不被执行终态覆盖。

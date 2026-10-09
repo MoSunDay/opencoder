@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const HANDOFF_PROTOCOL: u32 = 1;
-// Identity schema v34 separates users and tokens. Older Servers cannot
+// Identity schema v35 separates users and tokens. Older Servers cannot
 // read or reopen the upgraded store, so the upgrade requires maintenance.
-pub const HANDOFF_DATA_FORMAT: u32 = 5;
+pub const HANDOFF_DATA_FORMAT: u32 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -60,11 +60,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn project_reference_schema_requires_maintenance_from_previous_formats() {
+    fn identity_schema_requires_maintenance_from_previous_formats() {
         let current = ReleaseCompatibility::current();
-        assert_eq!(current.data_format, CompatibleRange { min: 5, max: 5 });
+        assert_eq!(current.data_format, CompatibleRange { min: 6, max: 6 });
         assert!(current.compatible(&current));
-        for version in 1..=3 {
+        for version in 1..=5 {
             let mut previous = current.clone();
             previous.data_format = CompatibleRange {
                 min: version,

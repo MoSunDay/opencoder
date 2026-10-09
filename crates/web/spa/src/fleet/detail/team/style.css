@@ -61,6 +61,7 @@
 .team-ambiguities { overflow-wrap: anywhere; }
 .team-ambiguities ul { padding-left: 20px; margin-bottom: 0; }
 .team-round-pagination { margin-top: 12px; }
+.team-live-round { margin: 12px 0; min-width: 0; }
 @media (max-width: 600px) {
   .team-discussion-conclusion,
   .team-discussion-goal,

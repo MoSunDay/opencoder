@@ -14,6 +14,7 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 - [config/runtime/dag.rs](../../crates/core/src/config/runtime/dag.rs) — 原生 DAG 的镜像、二进制池、源工作区、节点数据根与独立只读 NFS 配置；严格拒绝未知字段，不提供执行模式切换。约定见 [规则 04](../../rules/04-dag-execution-contract.md)。
 - [config/runtime/ontology.rs](../../crates/core/src/config/runtime/ontology.rs) — 可选正文根 `ontology.files_dir` 与独立 NFS 的启用、监听地址、端口；默认关闭、`127.0.0.1:2052`，导出始终只读。正文根默认由 Server workdir 对应的数据根计算，与 `--data-dir` 中的数据库分别管理。
 - `src/harness/` — `Harness::{Opencoder,Codex}` 与私有运行态；`fresh_runtime` 统一前端新会话的执行器、env、model 选择，`matches_requested_env` 校验续会话显式 env，托管配置可补充其他变量
+- [harness/settings.rs](../../crates/core/src/harness/settings.rs) — Codex `startup_script` 保存外部启动命令数组，随私有 Harness 设置固定；校验入口和参数，不解释账号策略。接入约定见 [启动脚本](../../docs/codex-startup-script.md)。
 - [harness/remote.rs](../../crates/core/src/harness/remote.rs) — `ServerConnection` 仅含默认关闭的 `enabled` 与 `url`；`ServerCapability` 表示能力 ID、种类、目标和摘要，`RemoteSession` 保存执行绑定与可重试首轮输入。已有 Harness JSON 保存 `remote` 与 `literal_mentions`，不新增表结构。
 - `src/agent/`、`src/skill.rs` — agent 引用卡（`meta.json` `run_mode`）、memory 池聚合（`agent/memory.rs`）与技能发现。技能根优先级：执行任务本地根（`skill::with_execution`/`execution_root`）→ 节点 pinned 根 → 真实 `~/.opencoder/skills`
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed

@@ -13,13 +13,13 @@ _spec.loader.exec_module(_installer)
 def verify(bundle):
     manifest = _installer.verify_bundle(bundle)
     if set(_installer.bundle_names(manifest)) != set(_installer.NAMES):
-        raise ValueError("smooth deployment requires platform binaries and both native DAG runners")
+        raise ValueError("smooth deployment requires platform binaries and all native runners")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", manifest.get("release_id", "")):
         raise ValueError("bundle lacks a valid release_id; first build a handoff-capable release")
     compatibility = manifest.get("compatibility", {})
     for key in ("protocol", "data_format"):
         limits = compatibility.get(key, {})
-        supported = (1,) if key == "protocol" else (1, 2, 3, 4)
+        supported = (1,) if key == "protocol" else (1, 2, 3, 4, 5, 6)
         if limits.get("min") not in supported or limits.get("max") != limits.get("min"):
             raise ValueError(f"unsupported handoff {key}")
     info = _installer.build_info(bundle / "bin/opencoder-agent")

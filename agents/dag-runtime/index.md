@@ -26,7 +26,7 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 ## 执行器与镜像
 
 - 原生 Agent 使用节点固定的模型配置；纯二进制和纯 Codex DAG 不额外要求原生模型凭证。
-- [sandbox/codex](../../crates/dag-runtime/src/sandbox/codex/mod.rs) 校验容器内 Codex CLI、固定 Harness/profile，并挂载实际执行节点的登录目录以支持认证刷新。Server 不分发自身登录文件，配置或认证失败不会退回宿主执行。
+- [sandbox/codex](../../crates/dag-runtime/src/sandbox/codex/mod.rs) 校验容器内 Codex CLI 与启动脚本入口、固定 Harness/profile，并挂载实际执行节点的登录目录以支持认证刷新。脚本在同一容器执行；Server 不分发自身登录文件，配置或认证失败不会退回宿主执行。
 - 镜像的 `dag-runner` 和 `agent-step-runner` 必须与节点完整构建信息一致，不能是软链接。[制备脚本](../../scripts/prepare-dag-rootfs.sh) 安装运行器、Shell、Git、TLS、NSS 与 Python 依赖。
 - [tests/preflight.rs](../../crates/dag-runtime/tests/preflight.rs)、[tests/run_loop](../../crates/dag-runtime/tests/run_loop/main.rs) 和 [两节点验收](../../scripts/acceptance/runc_scheduling/main.py) 覆盖版本拒绝、共享容器与实际恢复。
 

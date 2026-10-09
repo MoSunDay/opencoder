@@ -7,6 +7,7 @@
 //! plain Bearer, same token the server and agent binaries use.
 
 pub mod cmd;
+pub mod connection;
 pub mod ctx;
 pub mod http;
 pub mod out;
@@ -32,6 +33,9 @@ pub struct Cli {
     /// Server base URL (e.g. http://127.0.0.1:8080); env OPENCODER_SERVER_URL.
     #[arg(long, global = true)]
     server: Option<String>,
+    /// Connection defaults file; otherwise ~/.config/opencoder/ctl.json.
+    #[arg(long, global = true, value_name = "PATH")]
+    client_config: Option<PathBuf>,
     /// Bearer token; defaults to OPENCODER_SERVER_TOKEN when no token flag is supplied.
     /// Mutually exclusive with --token-file.
     #[arg(long, global = true, conflicts_with = "token_file")]
@@ -120,6 +124,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         return cmd::brain::ontology::activate(context, config, output).await;
     }
     let ctx: Ctx = ctx::resolve(
+        cli.client_config.as_deref(),
         cli.server.as_deref(),
         cli.token.as_deref(),
         cli.token_file.clone(),

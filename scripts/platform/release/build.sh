@@ -11,7 +11,7 @@ Usage: scripts/platform/release/build.sh [--output DIR]
 
 Builds the release binaries for the current platform from a clean commit
 (Linux: opencoder, opencoder-cli, opencoder-server, opencoder-agent,
-dag-runner and agent-step-runner; macOS:
+dag-runner, agent-step-runner and agent-session-runner; macOS:
 opencoder, opencoder-cli and opencoder-server, the agent binary is Linux-only), verifies their compiled
 build metadata, and writes checksums plus manifest.json to an atomic bundle.
 USAGE
@@ -85,8 +85,8 @@ done
 OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked "${packages[@]}"
 if [[ "$(uname -s)" = Linux ]]; then
   OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked -p opencoder-dag-runtime \
-    --example dag-runner --example agent-step-runner
-  binaries+=(dag-runner agent-step-runner)
+    --example dag-runner --example agent-step-runner --example agent-session-runner
+  binaries+=(dag-runner agent-step-runner agent-session-runner)
 fi
 target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 
@@ -97,7 +97,7 @@ mkdir -p "$stage/bin"
 
 for binary in "${binaries[@]}"; do
   source_path="$target_dir/release/$binary"
-  if [[ "$binary" = dag-runner || "$binary" = agent-step-runner ]]; then
+  if [[ "$binary" = dag-runner || "$binary" = agent-step-runner || "$binary" = agent-session-runner ]]; then
     source_path="$target_dir/release/examples/$binary"
   fi
   [[ -x "$source_path" ]] || { echo "missing release binary: $source_path" >&2; exit 5; }

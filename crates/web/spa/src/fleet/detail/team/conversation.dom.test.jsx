@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import '../../../test/setup-dom.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { apiGet } from '../../../api.js';
-import { TeamDetail } from './index.jsx';
+import { TeamExecutionProcess } from './index.jsx';
 import { TeamRecord } from './record.jsx';
+import { useRoundProgress } from './progress.js';
 
 vi.mock('../../../api.js', () => ({ apiGet: vi.fn() }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.resetAllMocks(); vi.useRealTimers(); });
 
 const chunk = (record) => {
   const bytes = new TextEncoder().encode(JSON.stringify(record));
@@ -36,7 +37,7 @@ const respond = async (path) => {
   if (!records[field]) throw new Error(`unexpected field: ${field}`);
   return chunk(records[field]);
 };
-const show = (changes = {}) => render(<TeamDetail id="team-a" detail={{ definition, execution: { status: 'done' }, topic: { ...topic, ...changes } }} />);
+const show = (changes = {}) => render(<TeamExecutionProcess id="team-a" detail={{ definition, execution: { status: 'done' }, topic: { ...topic, ...changes } }} />);
 
 describe('Team 讨论阅读', () => {
   it('shows the conclusion first and opens the latest clarification with only the requested member', async () => {
@@ -70,12 +71,13 @@ describe('Team 讨论阅读', () => {
     expect(screen.queryByRole('heading', { name: '最终结论' })).toBeNull();
   });
 
-  it('shows an honest waiting state without inventing a round or finished result', () => {
+  it('shows captain planning while waiting for the first persisted plan', async () => {
+    apiGet.mockRejectedValue(Object.assign(new Error('not found'), { status: 404 }));
     show({ status: 'executing', finish_reason: null, final_summary: null, turns: [] });
     expect(screen.getByText('讨论进行中')).toBeTruthy();
-    expect(screen.getByText('等待本轮讨论记录')).toBeTruthy();
+    expect(await screen.findByText('队长正在安排首轮讨论')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '最终结论' })).toBeNull();
-    expect(apiGet).not.toHaveBeenCalled();
+    expect(apiGet).toHaveBeenCalledWith('/api/executions/team-a/detail-field?field=team.turn.1.plan&offset=0', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('paginates round history and retries failures without showing an empty history as success', async () => {
@@ -139,5 +141,81 @@ describe('Team 讨论记录读取', () => {
     fireEvent.click(screen.getByRole('button', { name: '分段查看计划' }));
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('当前 0–65536 / 100000 字节')).toBeTruthy();
+  });
+});
+
+const notFound = () => Object.assign(new Error('记录尚未产生'), { status: 404 });
+const inProgress = (turns = []) => ({ definition, execution: { status: 'running' }, topic: { status: 'executing', turns } });
+
+describe('Team 实时讨论过程', () => {
+  it('shows a persisted member answer before the round is complete, then follows clarification and the next round', async () => {
+    vi.useFakeTimers();
+    const liveRecords = {
+      'team.turn.1.plan': { question: '当前讨论问题', participants: ['review'] },
+      'team.turn.1.sub.0.result.review': { answer: '已产生的首轮发言', ok: true },
+    };
+    apiGet.mockImplementation(async (path) => {
+      const field = new URL(path, 'http://test').searchParams.get('field');
+      if (!liveRecords[field]) throw notFound();
+      return chunk(liveRecords[field]);
+    });
+    let view;
+    await act(async () => { view = render(<TeamExecutionProcess id="live" detail={inProgress()} />); });
+    expect(screen.getByText('已产生的首轮发言')).toBeTruthy();
+    expect(screen.getByText('等待本轮成员发言结束，由队长整理小结')).toBeTruthy();
+    expect(screen.getByText('成员讨论中')).toBeTruthy();
+    liveRecords['team.turn.1.sub.0.summary'] = { summary: '需要执行成员澄清', aligned: false, ambiguities: [{ node_id: 'act', question: '如何回滚？' }] };
+    liveRecords['team.turn.1.sub.1.result.act'] = { answer: '已补充回滚步骤', ok: true };
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+    expect(screen.getByRole('tab', { name: '补充澄清 1' })).toBeTruthy();
+    expect(screen.getByText('已补充回滚步骤')).toBeTruthy();
+    expect(apiGet.mock.calls.some(([path]) => path.includes('sub.1.result.review'))).toBe(false);
+    // Reading an earlier stage must not stop observing the newest stage.
+    fireEvent.click(screen.getByRole('tab', { name: '首次讨论' }));
+    liveRecords['team.turn.1.sub.1.summary'] = { summary: '本轮完成', aligned: true };
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+    expect(screen.getByText('队长正在收尾')).toBeTruthy();
+    liveRecords['team.turn.2.plan'] = { question: '第二轮问题', participants: ['review'] };
+    liveRecords['team.turn.2.sub.0.result.review'] = { answer: '第二轮发言', ok: true };
+    await act(async () => { view.rerender(<TeamExecutionProcess id="live" detail={inProgress([{ turn: 1, question: '当前讨论问题', participants: ['review'], sub_turns: 2, aligned: true }])} />); });
+    expect(screen.getByText('第二轮发言')).toBeTruthy();
+    expect(screen.getByText('本轮完成')).toBeTruthy();
+    const ended = inProgress([{ turn: 1, question: '当前讨论问题', participants: ['review'], sub_turns: 2, aligned: true }]);
+    ended.execution.status = 'done'; ended.topic = { ...ended.topic, status: 'finished', finish_reason: 'complete', final_summary: '完整讨论结论' };
+    await act(async () => { view.rerender(<TeamExecutionProcess id="live" detail={ended} />); });
+    expect(screen.getByText('完整讨论结论')).toBeTruthy();
+    expect(screen.queryByLabelText('当前讨论进展')).toBeNull();
+  });
+  it('retains unfinished member output after a failed run', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path.includes('team.turn.1.plan')) return chunk({ question: '失败前的问题', participants: ['review'] });
+      if (path.includes('result.review')) return chunk({ answer: '失败前已保存的发言', ok: true });
+      throw notFound();
+    });
+    render(<TeamExecutionProcess id="failed" detail={{ ...inProgress(), execution: { status: 'error' }, topic: { status: 'finished', finish_reason: 'error', turns: [] } }} />);
+    expect(await screen.findByText('失败前已保存的发言')).toBeTruthy();
+    expect(screen.getByText('本轮尚未产生队长小结')).toBeTruthy();
+  });
+  it('distinguishes a missing plan from a failed read and retries the error', async () => {
+    apiGet.mockRejectedValueOnce(Object.assign(new Error('节点暂时离线'), { status: 503 })).mockRejectedValue(notFound());
+    render(<TeamExecutionProcess id="offline" detail={inProgress()} />);
+    expect(await screen.findByText('节点暂时离线')).toBeTruthy();
+    expect(screen.queryByText('队长正在安排首轮讨论')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
+    expect(await screen.findByText('队长正在安排首轮讨论')).toBeTruthy();
+  });
+  it('bounds progress discovery and aborts old reads when the execution changes', async () => {
+    apiGet.mockImplementation(async (path) => chunk(path.includes('.plan') ? { participants: ['review'] } : { aligned: false }));
+    const view = renderHook((props) => useRoundProgress(props), { initialProps: { id: 'many', number: 1, running: true } });
+    await waitFor(() => expect(view.result.current.step).toBe(8));
+    expect(apiGet).toHaveBeenCalledTimes(9);
+    const signal = apiGet.mock.calls[0][1].signal;
+    let complete;
+    apiGet.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+    view.rerender({ id: 'new', number: 1, running: true });
+    expect(signal.aborted).toBe(true);
+    view.unmount();
+    expect(apiGet.mock.calls.at(-1)[1].signal.aborted).toBe(true);
+    await act(async () => { complete(chunk({ participants: ['review'] })); });
   });
 });

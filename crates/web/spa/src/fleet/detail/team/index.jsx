@@ -5,7 +5,8 @@ import { topicNotice } from './model.js';
 import { TeamRounds } from './rounds.jsx';
 import './style.css';
 
-export function TeamDetail({ id, detail }) {
+// Reused by Team history, the execution drawer and embedded execution views.
+export function TeamExecutionProcess({ id, detail }) {
   const team = detail.definition || {};
   const topic = detail.topic || {};
   const captain = team.captain || topic.captain?.name || topic.captain?.node_id;
@@ -33,6 +34,7 @@ export function TeamDetail({ id, detail }) {
       <div className="team-discussion-text"><Markdown text={requirement} /></div>
     </section>}
     <InlineFields id={id} value={{ requirement, final }} />
-    <TeamRounds id={id} topic={topic} captain={captain} running={running} />
+    <TeamRounds key={id} id={id} topic={topic} captain={captain} running={running}
+      unfinished={['error', 'cancelled', 'interrupted'].includes(detail.execution?.status)} />
   </section>;
 }

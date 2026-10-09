@@ -1,4 +1,4 @@
-Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
+Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
 
 # dag-runtime 模块
 
@@ -13,6 +13,8 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 5. [sandbox/supervisor.rs](../../crates/dag-runtime/src/sandbox/supervisor.rs) 管理步骤进程树。单步取消只终止该步骤；结束运行才关闭容器。恢复核验进程身份并清理遗留容器与挂载，不从新配置重新选择路径或版本。
 
 [sandbox/run](../../crates/dag-runtime/src/sandbox/run/mod.rs) 等待内核卸载完成后才标记清理结束，随后才能提交终态并释放容量；卸载错误保留清理归属供重试，不按固定超时提前释放。
+
+[runc/cleanup.rs](../../crates/dag-runtime/src/sandbox/runc/cleanup.rs) 回收删除进程并核验状态目录消失；若 runc 自身的退出期限先到，[init_exit.rs](../../crates/dag-runtime/src/sandbox/runc/init_exit.rs) 核对容器 ID、PID 与启动时间，仅等待正在退出或已收到 SIGKILL 的原初始化进程，再重试删除。普通运行中的进程、复用的 PID 和真实删除错误不会被当作清理成功。
 
 ## 输入、输出与资源
 

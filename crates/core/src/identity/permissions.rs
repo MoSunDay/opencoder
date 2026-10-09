@@ -54,6 +54,11 @@ pub fn allowed(role: Role, method: &str, path: &str) -> bool {
     ) {
         return matches!(method, "GET" | "HEAD");
     }
+    // Resource transitions are issued by the execution runtime after cleanup.
+    // Editors may cancel an execution, but cannot assert that its processes stopped.
+    if path.starts_with("/api/executions/") && path.ends_with("/resources") {
+        return matches!(method, "GET" | "HEAD");
+    }
     let platform = [
         "/api/project",
         "/api/executions",
@@ -115,5 +120,17 @@ mod tests {
         ));
         assert!(!allowed(Role::Viewer, "POST", "/api/me"));
         assert!(!allowed(Role::Editor, "GET", "/api/unregistered"));
+    }
+
+    #[test]
+    fn resource_ownership_writes_require_administration() {
+        for role in [Role::Viewer, Role::Editor] {
+            assert!(allowed(role, "GET", "/api/executions/run/resources"));
+            assert!(!allowed(role, "POST", "/api/executions/run/resources"));
+            assert!(!allowed(role, "GET", "/api/resource-admission-provider"));
+            assert!(!allowed(role, "PUT", "/api/resource-admission-provider"));
+        }
+        assert!(allowed(Role::Admin, "POST", "/api/executions/run/resources"));
+        assert!(allowed(Role::Admin, "PUT", "/api/resource-admission-provider"));
     }
 }

@@ -21,9 +21,8 @@ const STATUS_OPTIONS = [
 ];
 const linkPath = (todoId) => `/api/project/todos/${encodeURIComponent(todoId)}/executions`;
 
-function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
+function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice }) {
   const canEdit = useCanEdit();
-  const todo = flattenTodos(overview).find((item) => item.id === todoId);
   const [draft, setDraft] = useState(todo?.draft || '');
   const [title, setTitle] = useState(todo?.title || '');
   const [groupId, setGroupId] = useState(todo?.initiative_id || null);
@@ -195,5 +194,8 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
 }
 
 export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
-  return todoId ? <TodoDrawerSession key={todoId} {...{ todoId, overview, refresh, onClose, onNotice }} /> : null;
+  if (!todoId) return null;
+  const todo = flattenTodos(overview).find((item) => item.id === todoId);
+  if (!todo) return <Drawer open title="TODO" onClose={onClose} placement="right" size="100vw"><Spin description="正在读取 TODO"><div style={{ minHeight: 80 }} /></Spin></Drawer>;
+  return <TodoDrawerSession key={todoId} {...{ todoId, todo, overview, refresh, onClose, onNotice }} />;
 }

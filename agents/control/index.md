@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # control 模块
 
@@ -24,6 +24,7 @@ Commit: c854143bd187656f4d74be6cca0f153176e44a21
 - `tests/e2e/` — 集成测试（含 `layered_api` 家族：锁定读面、命令门禁、嵌套准入）
 
 ## 接缝
+- Brain 根运行另要求 `brain_context_budget_v1`：`api/executions/capabilities.rs` 用实际请求探测模型容量，`submit.rs` 保留容量拒绝的 413；创建和唤醒均检查帧大小。超限唤醒明确阻塞，避免不断重试无法传输的上下文。先升级节点再启用 Server，预算实现见 [brain](../brain/index.md)。
 - Brain 里程碑计划：根运行及托管子执行的节点须同时广告 `brain_scheduler_v7`、`brain_contracts_v1`；保存版本和直接运行准入均规范化内部层间路径，旧版本显式路径保持原样。普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation，且沿用父运行的节点。节点持有运行与操作投影；视图按轮次和激活提供执行索引，详情由执行 ID 查询。Control 为每次激活解析冻结能力与完整有界结果；受理拒绝从根事件读取具体原因，不等待不存在的子执行。Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。目录解析失败只标记对应能力不可用，计划引用它时返回原因，不阻断其他计划。字段约定与回执入口见 [brain](../brain/index.md)。
 - [api/executions/submit.rs](../../crates/control/src/api/executions/submit.rs) 接收用户注册的工作流定义，受理时原样固定定义与输入；找不到目标时拒绝提交，不按业务名称改写工作流。
 - [api/brain_runs/attachments](../../crates/control/src/api/brain_runs/attachments/mod.rs) 提供通用图片附件上传与读取，核验名称、实际图片内容和 MIME；附件引用包含摘要，不依赖特定任务表单。

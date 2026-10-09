@@ -1,15 +1,15 @@
 // defsTab.jsx — DAG「定义」tab: definitions table (name /
 // updated_at / actions) + dispatch modal (optional target node from the
-// shared fleet snapshot) + create/edit drawer (defEditor.jsx).
+// current fleet) + create/edit drawer (defEditor.jsx).
 // Endpoints: GET /api/dag/defs, POST /api/dag/defs, DELETE /api/dag/defs/:id,
 // POST /api/dag/defs/:id/dispatch {node_id?} → {run_id}.
 
-import { Button, Drawer, Input, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Drawer, Input, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { useMessage } from '../ui/appMessage.js';
-import { useStore } from '../store.js';
+import { useNodes } from '../fleet/useNodes.js';
 import { newId, nodeOptions as buildNodeOptions } from '../fleet/model.js';
 import { DefEditor } from './defEditor.jsx';
 import { err } from '../notice.js';
@@ -20,7 +20,7 @@ const { Text } = Typography;
 
 export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
   const msg = useMessage();
-  const { nodes } = useStore();
+  const { nodes, error: nodesError } = useNodes();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -249,6 +249,7 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
       >
         <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Text type="secondary">整个工作流会在同一个节点完成。留空时由服务端选择当前可用节点。</Text>
+          {nodesError && <Alert type="error" showIcon title={nodesError} />}
           <Select
             style={{ width: '100%' }}
             allowClear

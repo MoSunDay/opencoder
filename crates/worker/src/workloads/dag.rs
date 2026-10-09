@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 struct LocalEvents {
     store: Arc<dyn Store>,
     failure: Arc<Mutex<Option<String>>>,
+    terminal_error: Arc<Mutex<Option<String>>>,
 }
 #[async_trait::async_trait]
 impl LocalDagPersistence for LocalEvents {
@@ -36,9 +37,18 @@ impl LocalDagPersistence for LocalEvents {
             }
         }
     }
-    async fn status(&self, _report: &DagStatusReport) -> Result<()> {
-        if let Some(error) = self.failure.lock().unwrap().as_ref() {
+    async fn status(&self, report: &DagStatusReport) -> Result<()> {
+        let failure = self.failure.lock().unwrap();
+        if let Some(error) = failure.as_ref() {
             anyhow::bail!("{error}");
+        }
+        if report.status == "error" {
+            *self.terminal_error.lock().unwrap() = Some(
+                report
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "DAG execution failed".into()),
+            );
         }
         Ok(())
     }
@@ -101,9 +111,11 @@ pub(super) async fn run(
     )
     .await?;
     let failure = Arc::new(Mutex::new(None));
+    let terminal_error = Arc::new(Mutex::new(None));
     let uplink = Arc::new(Uplink::for_local_dag(Arc::new(LocalEvents {
         store: worker.inner.state.store.clone(),
         failure: failure.clone(),
+        terminal_error: terminal_error.clone(),
     })));
     let deps = opencoder_dag_runtime::RunDeps {
         uplink,
@@ -144,10 +156,12 @@ pub(super) async fn run(
         opencoder_dag::DagRunStatus::Cancelled => ExecutionStatus::Cancelled,
         _ => ExecutionStatus::Error,
     };
-    Ok((
-        mapped,
-        json!({"run_id":id,"status":status.as_str(),"artifact_root":workflow_root.join(id)}),
-    ))
+    let mut result =
+        json!({"run_id":id,"status":status.as_str(),"artifact_root":workflow_root.join(id)});
+    if let Some(error) = terminal_error.lock().unwrap().as_ref() {
+        result["error"] = json!(error);
+    }
+    Ok((mapped, result))
 }
 
 /// A registered DAG sees the same named input shape when dispatched directly

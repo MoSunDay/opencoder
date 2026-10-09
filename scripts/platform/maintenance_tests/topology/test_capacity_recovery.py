@@ -133,6 +133,33 @@ class RecoveryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'admission backup checksum'):
                     capacity.recover(f.settings, f, 'old', 'agent-task', 'ticket')
 
+    def test_boot_recovery_releases_multiple_runtime_reservations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            f, old = self.fixture(Path(directory))
+            root = f.settings.state_dir / 'runtimes/new'
+            root.mkdir(parents=True)
+            (root / 'node-id').write_text('node')
+            (root / 'node.lock').touch()
+            (root / 'admission.json').write_text('{"version":1,"mode":"open"}')
+            host = f.settings.state_dir / 'host'
+            (root / 'host-binding.json').write_text(json.dumps(
+                {'database': str(host / 'host.db'), 'runtime_id': 'new'}))
+            with sqlite3.connect(host / 'host.db') as conn:
+                conn.execute('INSERT INTO host_runtimes VALUES (?,?,?,?)',
+                             ('new', 'new', json.dumps({'data_dir': str(root),
+                              'unit': 'opencoder-runtime-new.service'}), 'active'))
+                conn.execute("INSERT INTO capacity_queue VALUES ('new-ticket','new','new-task','running')")
+            rows = [('ticket', 'old', 'agent-task', 'running'),
+                    ('new-ticket', 'new', 'new-task', 'running')]
+            with patch.object(capacity, '_live_rows', return_value=rows), \
+                    patch.object(capacity, 'kernel_owners', return_value=[]):
+                receipt = capacity.recover_running(f.settings, f, wait_seconds=1)
+            self.assertEqual(len(receipt['reservations']), 2)
+            with sqlite3.connect(host / 'host.db') as conn:
+                self.assertEqual(conn.execute(
+                    'SELECT phase FROM capacity_queue ORDER BY ticket').fetchall(),
+                    [('done',), ('done',)])
+
 
 if __name__ == '__main__':
     unittest.main()

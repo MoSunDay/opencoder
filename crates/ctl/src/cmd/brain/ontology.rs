@@ -124,12 +124,14 @@ pub async fn activate(
     config.local_memory = false;
     config.autopilot.mode = opencoder_core::ApMode::Off;
     config.compaction.auto = false;
+    config.max_tokens = Some(opencoder_brain::layered::budget::OUTPUT_TOKENS);
     let client = LocalClient(config.clone());
     anyhow::ensure!(
         context["schema_version"] == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION,
         "unsupported brain schema; expected 7"
     );
     let context: opencoder_core::brain::layered::LayeredContext = serde_json::from_value(context)?;
+    opencoder_brain::layered::budget::validate_context(&context, config.context_limit())?;
     let agent = opencoder_core::Agent {
         name: "act".into(),
         kind: opencoder_core::AgentKind::Act,

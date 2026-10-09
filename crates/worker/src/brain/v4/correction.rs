@@ -44,6 +44,8 @@ pub(super) async fn decide(
     snapshot: &LayeredSnapshot,
     cancel: CancellationToken,
 ) -> Result<LayeredDecision> {
+    super::budget::context(worker, record, context)?;
+    layered::budget::validate_context(context, config.context_limit())?;
     let marker = &record.annotations["layered_decision_attempt"];
     let same = marker["generation"].as_u64() == Some(context.generation);
     let mut attempt = if same {
@@ -77,8 +79,10 @@ pub(super) async fn decide(
                 .run
                 .as_mut()
                 .context("decision context has no run state")?;
+            let feedback: String = feedback.chars().take(1024).collect();
             run.error = Some(format!("Previous decision rejected: {feedback}. Correct only the decision; no capability was dispatched."));
         }
+        layered::budget::validate_context(&corrected, config.context_limit())?;
         let remaining = remaining_budget(deadline_ms, opencoder_core::message::now_ms())?;
         // Let the container's cancellation path reap runc and remove its bundle.
         // Dropping that future via timeout would bypass its cleanup.

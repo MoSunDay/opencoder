@@ -1,4 +1,4 @@
-Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # core 模块
 
@@ -19,7 +19,8 @@ Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 - [技能契约测试](../../crates/core/tests/skill_contract/main.rs) — 按发现、种子写入、规划与工作流分模块；首次安装核对准确的技能和资源集合，升级备份内置文件的用户修改，清单之外的用户资源保持原样。
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput
 - [platform/](../../crates/core/src/platform/mod.rs) — 执行种类、宿主命令语言、私有文件与原子发布的跨平台入口；Windows ACL 在创建文件时生效，路径校验拒绝设备名与重解析点，目录身份用于去重。
-- `src/net.rs`、`src/data_dir.rs` — HTTP 客户端与 per-workdir 数据目录
+- [net.rs](../../crates/core/src/net.rs) — HTTP 客户端统一解析显式代理及大小写环境变量；读取 `NO_PROXY`（未设置时读取 `no_proxy`），并保留固定的回环地址例外。容器沿用配置中的代理，额外传入这两项排除变量；纯规则构造入口供测试与调用方避免读进程环境。
+- `src/data_dir.rs` — 按工作目录隔离的数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
 - [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 4；项目 schema v33 移除执行结论缓存，旧 Server 无法打开新库，格式 1–3 升级必须走维护发布。
 - `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。

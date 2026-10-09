@@ -266,7 +266,7 @@ async fn v31_migration_removes_legacy_containers_but_preserves_todo_payloads() {
 }
 
 #[tokio::test]
-async fn tag_scope_rejects_missing_owner_and_cannot_move_existing_definition() {
+async fn tag_scope_rejects_missing_owner_and_allows_moving_existing_definition() {
     let s = setup().await;
     assert!(s
         .write_tag(&tag("missing", "project", "gone", "模块"))
@@ -280,12 +280,14 @@ async fn tag_scope_rejects_missing_owner_and_cannot_move_existing_definition() {
     s.write_tag(&tag("t", "project", "p", "模块"))
         .await
         .unwrap();
-    assert!(s
-        .write_tag(&tag("t", "project", "q", "模块"))
+    s.write_tag(&tag("t", "project", "q", "模块"))
         .await
-        .is_err());
+        .unwrap();
     assert_eq!(
         s.list_tags().await.unwrap(),
-        [tag("t", "project", "p", "模块")]
+        [tag("t", "project", "q", "模块")]
     );
 }
+
+#[path = "project_tags/moves.rs"]
+mod moves;

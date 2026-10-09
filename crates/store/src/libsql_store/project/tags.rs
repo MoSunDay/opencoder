@@ -103,13 +103,6 @@ pub(super) async fn write(conn: &Connection, tag: &ProjectTag) -> Result<()> {
         anyhow::ensure!(owner.next().await?.is_some(), TagError::InvalidScope);
         drop(owner);
         anyhow::ensure!(
-            previous
-                .iter()
-                .filter(|t| t.id == tag.id)
-                .all(|t| t.scope_type == tag.scope_type && t.scope_id == tag.scope_id),
-            TagError::InvalidScope
-        );
-        anyhow::ensure!(
             !previous.iter().any(|t| t.id != tag.id
                 && t.scope_type == tag.scope_type
                 && t.scope_id == tag.scope_id
@@ -118,8 +111,13 @@ pub(super) async fn write(conn: &Connection, tag: &ProjectTag) -> Result<()> {
         );
         if previous.iter().any(|t| t.id == tag.id) {
             conn.execute(
-                "UPDATE project_tags SET name=? WHERE id=?",
-                params![tag.name.as_str(), tag.id.as_str()],
+                "UPDATE project_tags SET name=?,scope_type=?,scope_id=? WHERE id=?",
+                params![
+                    tag.name.as_str(),
+                    tag.scope_type.as_str(),
+                    tag.scope_id.as_str(),
+                    tag.id.as_str()
+                ],
             )
             .await?;
         } else {

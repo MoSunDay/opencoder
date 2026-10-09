@@ -48,6 +48,11 @@ impl Fleet {
         // pools and credentials outside the fixture for its entire lifetime,
         // including requests served by spawned node-channel tasks.
         let config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
+        // The deterministic provider accepts the complete-evidence window used
+        // by multi-layer integration fixtures; production defaults are unchanged.
+        let config_path = opencoder_core::Config::global_config_path().unwrap();
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(config_path, r#"{"context_limit":1000000}"#).unwrap();
         setup(&opencoder_core::agent::agents_dir().unwrap());
         let state = opencoder_control::new_state(
             dir.path().join("server-work"),

@@ -34,10 +34,8 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告；共享测试目录锁修复后重新验证通过。
 - 构建：`cargo build --workspace --bins --examples` → 通过；测试前后夹具二进制摘要一致。
 - SPA：127 个测试文件、949 项通过；构建与产物一致性检查通过。技能契约 28 项原有用例完整保留，准确技能集合的断言也已包含在最终全量回归中。
-- 仓库外业务版本：42 处接入保留，2 处补丁上下文冲突已适配新增通用模块；全目标编译检查、32 项 Rust 测试、7 项前端测试及 3 项组装校验通过。
 - 此前发布和维护脚本：59 项、29 项通过；工作区与预检校验各 6 项通过。旧平台版本的隔离发布演练覆盖 16 类场景和 58 次提交，保留当时源码、二进制与回执；未发布生产。
 - 全量回归使用独立临时目录及 tmpfs；超时、断言和容器/NFS 约束保持原值。共享资源目录测试改为共用既有锁，保持原有并发测试参数。
 - 原始输出位于 `/data00/opencoder-safety/20261001-103221/`：`confirmation-frozen-workspace-tests.log`、`confirmation-frozen-clippy-after-lock-fix.log`、`confirmation-frozen-build-after-lock-fix.log`、`confirmation-latest-spa-tests.log`。固定的 1745 份 Rust 源码及清单文件摘要见 `confirmation-frozen-source.json`；源码汇总 SHA256 为 `385c32d592c38bba6212221f7d3f88ac8f854d59365a9dbc305a45b1f81865c0`。
-- 全局扫描及迁移摘要、外部业务验证、已解决的失败和并行开发差异见 `/data00/opencoder-tools/confirmation-report.json`。共享工作区仍在同时迭代其他通用平台功能；上述 Rust 全量结果仅对应固定源码清单，后续改动的验证范围单独记录。
 
-[逻辑地图](../../../agents.md) · [Control](../../../agents/control/index.md) · [Worker](../../../agents/worker/index.md) · [大脑工作台](../../brain/index.md)
+[逻辑地图](../../../repo-memory.md) · [Control](../../../agents/control/index.md) · [Worker](../../../agents/worker/index.md) · [大脑工作台](../../brain/index.md)

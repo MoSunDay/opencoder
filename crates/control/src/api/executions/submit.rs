@@ -59,6 +59,12 @@ pub(crate) async fn submit_private(
     if let Err(error) = request.validate() {
         return RpcReply::error(400, error);
     }
+    if request.kind == ExecutionKind::Brain
+        && serde_json::to_vec(&request.input)
+            .is_ok_and(|bytes| bytes.len() + 4096 > MAX_FRAME_BYTES)
+    {
+        return RpcReply::error(413, "Brain frozen request exceeds transport capacity; reduce plan inputs or capability definitions before starting");
+    }
     match submit_inner(state, request, private_context).await {
         Ok(reply) => reply,
         Err(error) => RpcReply::error(500, format!("submit execution: {error:#}")),
@@ -167,13 +173,14 @@ async fn submit_inner(
                 }
             }
             let mut incompatibilities = Vec::new();
+            let mut capacity_rejected = false;
             let node = loop {
                 let Some(node) =
                     select_queue_node(&nodes, request.kind, request.node_id.as_deref(), now_ms())
                         .cloned()
                 else {
                     return Ok(RpcReply::error(
-                        503,
+                        if capacity_rejected { 413 } else { 503 },
                         if incompatibilities.is_empty() {
                             "no ready online node can accept this execution".to_string()
                         } else {
@@ -197,11 +204,16 @@ async fn submit_inner(
                             id: request.id.clone(),
                             kind: request.kind,
                         },
-                        action.cloned().unwrap_or_else(|| serde_json::json!({})),
+                        if request.kind == ExecutionKind::Brain {
+                            request.input.clone()
+                        } else {
+                            action.cloned().unwrap_or_else(|| serde_json::json!({}))
+                        },
                         &required,
                     )
                     .await
                     {
+                        capacity_rejected |= reply.status == 413;
                         incompatibilities.push(format!("{}: {}", node.registration.id, reply.body));
                         nodes.retain(|n| n.registration.id != node.registration.id);
                         continue;
@@ -232,6 +244,11 @@ async fn submit_inner(
         assignment.definition.as_ref(),
     ) {
         return Ok(RpcReply::error(409, message));
+    }
+    if assignment.request.kind == ExecutionKind::Brain
+        && serde_json::to_vec(&assignment)?.len() + 4096 > MAX_FRAME_BYTES
+    {
+        return Ok(RpcReply::error(413, "Brain assignment exceeds transport capacity; reduce frozen inputs or configuration before starting"));
     }
     state.hub.reserve(&assignment.index).await;
     state

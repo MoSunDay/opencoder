@@ -7,7 +7,7 @@ use opencoder_node::fleet::NodeService;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-async fn run_output(text: String, required: &[&str]) -> (Value, Value, RpcReply) {
+async fn run_output(text: String, required: &[&str]) -> (Value, Value, RpcReply, Vec<RpcReply>) {
     let (_scope, _home) = support::isolated_config();
     let directory = tempfile::tempdir().unwrap();
     let model = MockChatClient::new().with_default(vec![LlmEvent::Completed {
@@ -39,6 +39,17 @@ async fn run_output(text: String, required: &[&str]) -> (Value, Value, RpcReply)
         })
         .await;
     assert_eq!(summary.status, 200, "{summary:?}");
+    let mut pointers = Vec::new();
+    for path in ["", "/", "/a~1b~0"] {
+        pointers.push(
+            node.handle(NodeOperation::Brain {
+                execution: reference.clone(),
+                action: "layered_output".into(),
+                input: json!({"path":path}),
+            })
+            .await,
+        );
+    }
     let missing = node
         .handle(NodeOperation::Brain {
             execution: reference,
@@ -47,14 +58,15 @@ async fn run_output(text: String, required: &[&str]) -> (Value, Value, RpcReply)
         })
         .await;
     node.shutdown().await.unwrap();
-    (detail, summary.body, missing)
+    (detail, summary.body, missing, pointers)
 }
 
 #[tokio::test]
 async fn structured_business_failure_survives_summary_and_missing_pointer_is_actionable() {
     let output = json!({"summary":"Tests executed","passed":false,
         "failures":["expected 2, got 1"],"revision":"patch-1"});
-    let (detail, summary, missing) = run_output(output.to_string(), &["passed", "revision"]).await;
+    let (detail, summary, missing, _) =
+        run_output(output.to_string(), &["passed", "revision"]).await;
     assert_eq!(detail["execution"]["status"], "done");
     assert_eq!(detail["result"]["scheduler_output"], output);
     assert_eq!(
@@ -69,7 +81,7 @@ async fn structured_business_failure_survives_summary_and_missing_pointer_is_act
 #[tokio::test]
 async fn missing_required_output_is_an_execution_failure_with_the_original_output_retained() {
     let output = json!({"summary":"finished"});
-    let (detail, summary, _) = run_output(output.to_string(), &["passed"]).await;
+    let (detail, summary, _, _) = run_output(output.to_string(), &["passed"]).await;
     assert_eq!(detail["execution"]["status"], "error");
     assert_eq!(detail["result"]["scheduler_output"], output);
     assert!(summary["summary"]
@@ -81,7 +93,7 @@ async fn missing_required_output_is_an_execution_failure_with_the_original_outpu
 #[tokio::test]
 async fn oversized_evidence_reports_a_contract_failure_instead_of_hiding_a_late_verdict() {
     let output = json!({"summary":"x".repeat(17000),"passed":false});
-    let (detail, summary, _) = run_output(output.to_string(), &["passed"]).await;
+    let (detail, summary, _, _) = run_output(output.to_string(), &["passed"]).await;
     assert_eq!(detail["execution"]["status"], "error");
     assert_eq!(detail["result"]["scheduler_output"]["passed"], false);
     let evidence: Value = serde_json::from_str(summary["summary"].as_str().unwrap()).unwrap();
@@ -91,4 +103,31 @@ async fn oversized_evidence_reports_a_contract_failure_instead_of_hiding_a_late_
         .contains("evidence exceeds"));
     assert_eq!(evidence["result_truncated"], true);
     assert!(summary["summary"].as_str().unwrap().len() < 16384);
+}
+
+#[tokio::test]
+async fn complete_output_binding_uses_empty_pointer_and_slash_keeps_its_exact_meaning() {
+    for output in [json!("completed task text"), json!({"passed":true})] {
+        let (_, _, _, pointers) = run_output(
+            output
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| output.to_string()),
+            &[],
+        )
+        .await;
+        assert_eq!(pointers[0].status, 200);
+        assert_eq!(pointers[0].body["value"], output);
+        assert_eq!(
+            pointers[1].status, 422,
+            "slash must not stand in for the root"
+        );
+    }
+    let output = json!({"":"empty property", "a/b~":"escaped property", "passed":true});
+    let (_, _, _, pointers) = run_output(output.to_string(), &[]).await;
+    assert_eq!(pointers[0].body["value"], output);
+    assert_eq!(pointers[1].status, 200);
+    assert_eq!(pointers[1].body["value"], "empty property");
+    assert_eq!(pointers[2].status, 200);
+    assert_eq!(pointers[2].body["value"], "escaped property");
 }

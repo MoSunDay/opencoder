@@ -12,9 +12,12 @@ import EntitiesPage from "./pages/EntitiesPage";
 import EntityTypesPage from "./pages/EntityTypesPage";
 import RelationshipTypesPage from "./pages/RelationshipTypesPage";
 import EnvironmentsPage from "./pages/EnvironmentsPage";
+import { useDraftGuard } from "./navigation/DraftGuard";
+import "./styles.css";
 
 function OntologyPanel({ page, Component }: { page: string; Component: ComponentType }) {
   const { identity } = useStore();
+  const guard = useDraftGuard();
   const [storedEnv, setEnv] = useLocalStorage("oc_ontology_env", "debug");
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,9 +35,10 @@ function OntologyPanel({ page, Component }: { page: string; Component: Component
   }, []);
   useEffect(() => { void refreshEnvironments(); return () => { request.current += 1; }; }, [refreshEnvironments]);
   const env = environments.some((item) => item.env_key === storedEnv) ? storedEnv : environments[0]?.env_key;
-  const context = { env: env ?? "debug", environments, setEnv, refreshEnvironments, canManage: identity?.role === "admin" };
+  const changeEnv = (next: string) => { if (next !== env) guard.run(() => setEnv(next)); };
+  const context = { env: env ?? "debug", environments, setEnv: changeEnv, refreshEnvironments, canManage: identity?.role === "admin" };
   return <PageShell page={page} extra={<Space><span>环境</span><Select aria-label="Ontology 环境" value={env} loading={loading}
-    style={{ minWidth: 140 }} onChange={setEnv} options={environments.map((item) => ({ value: item.env_key, label: item.name }))} /></Space>}>
+    style={{ minWidth: 140 }} onChange={changeEnv} options={environments.map((item) => ({ value: item.env_key, label: item.name }))} /></Space>}>
     {error ? <Alert title={error} type="error" showIcon action={<Button onClick={() => void refreshEnvironments()}>重试</Button>} />
       : loading ? <Spin /> : !env ? <Empty description="暂无可用环境" />
         : <EnvContext.Provider value={context}><Component key={env} /></EnvContext.Provider>}

@@ -168,7 +168,7 @@ class MaintenanceTests(unittest.TestCase):
             self.assertEqual(archive.inventory(root), original_hashes)
             self.assertEqual(fixture.settings.nginx_include.read_text(), 'old ingress\n')
             for workdir in (fixture.settings.agent_workdir, fixture.settings.server_workdir):
-                self.assertEqual(json.loads((workdir / 'opencoder.json').read_text())['dag'], {'wasm_dir': '/old/wasm'})
+                self.assertEqual(json.loads((workdir / 'opencoder.json').read_text())['dag'], {'binary_dir': '/old/binaries'})
             self.assertEqual((fixture.settings.state_dir / 'services/opencoder-resources').read_bytes(), b'old resources')
             with sqlite3.connect(fixture.db) as conn:
                 self.assertEqual(conn.execute('SELECT version FROM schema_version').fetchone(), (31,))

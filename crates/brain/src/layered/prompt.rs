@@ -22,12 +22,14 @@ Do not re-assess earlier layers; their evidence may appear in the summary only.
 If run.error records a rejected decision, correct that validation error; do not treat it as a capability failure.
 Explain the reflection, problems to fix and evidence. The context's previous results are historical evidence,
 not automatically valid current outputs. Do not invent output values or execution IDs.
+Decision layer numbers are 1-based integers: use layer_numbers to map plan layer_id values to their numeric targets. run.layer=0 is the initial state, never a dispatch target; the first target is 1. Do not use a zero-based plan array index or a layer_id string as the decision layer.
 First dispatch layer 1. Complete only after the final layer passes; never complete early.
 If the current milestone is unmet and no executed layer can address the problem, or required inputs are missing, block with an actionable reason.
 Decisions:
 {"decision":"dispatch_layer","layer":1,"assignments":[{"node_id":"coding","capability_id":"attached-id","inputs":{"task":{"kind":"value","value":"specific task"}},"reason":"why this capability"}],"reason":"assessment and next-layer rationale","reflection":null,"evidence_execution_ids":[],"assessments":{}}
 For a return use the same dispatch decision with a nonempty reflection and previously executed target layer.
 Input bindings: {"kind":"root","name":"key"}, {"kind":"execution","execution_id":"id","path":"/json/pointer"}, {"kind":"artifact","reference":"key"}, or {"kind":"value","value":<generated task input>}.
+Execution binding path is a JSON Pointer: use path="" for the complete output, including a text result. path="/" selects an empty property name, not the complete output. A subfield such as passed uses path="/passed"; escape property names with ~0 for ~ and ~1 for /.
 {"decision":"complete","reason":"final layer milestone met","evidence_execution_ids":["id"],"summary":"final deliverables","assessments":{"<current-layer-id>":{"met":true,"reason":"criteria evidence"}}}
 {"decision":"block","reason":"specific missing prerequisite"}
 {"decision":"fail","reason":"irrecoverable reason","error_type":"type"}
@@ -49,15 +51,23 @@ pub fn instruction(context: &LayeredContext) -> Result<String> {
         .map(|layer| &layer.layer_id);
     let mut plan = serde_json::to_value(&context.request.plan)?;
     plan.as_object_mut().unwrap().remove("transitions");
+    let layer_numbers: Vec<_> = context
+        .request
+        .plan
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(index, layer)| json!({"layer": index + 1, "layer_id": layer.layer_id}))
+        .collect();
     let instruction = serde_json::to_string(
-        &json!({"schema_version":LAYERED_SCHEMA_VERSION,"run":context.run,"plan":plan,"assessment_layer_id":assessment_layer_id,
+        &json!({"schema_version":LAYERED_SCHEMA_VERSION,"run":context.run,"plan":plan,"layer_numbers":layer_numbers,"assessment_layer_id":assessment_layer_id,
         "capabilities":capabilities,"root_inputs":context.request.inputs,"artifacts":context.request.artifacts,"todo":context.todo,
         "operations":context.operations,"summaries":context.summaries,"human_inputs":context.human_inputs,
         "guidance_only":context.guidance_only,"guidance_notes":context.guidance_notes}),
     )?;
     ensure!(
-        instruction.len() <= 1024 * 1024,
-        "milestone decision context exceeds 1 MiB; reduce plan inputs, capability contracts or human guidance before resuming"
+        instruction.len() <= super::budget::INSTRUCTION_BYTES,
+        "milestone decision context exceeds 1 MiB; evidence retained, start a smaller plan; resuming cannot increase transport capacity"
     );
     Ok(instruction)
 }

@@ -112,6 +112,17 @@ pub(in crate::operations) async fn detail_field(
     if let Some(reply) = crate::operations::validate_reference(worker, &request.execution).await? {
         return Ok(reply);
     }
+    if crate::result_reader::ResultReader::supports(&request) {
+        return worker
+            .inner
+            .result_reader
+            .read(
+                worker.inner.data_dir.clone(),
+                worker.inner.registration.id.clone(),
+                request,
+            )
+            .await;
+    }
     let id = request.execution.id.as_str();
     if let Some(name) = request.field.strip_prefix("archive.") {
         if request.execution.kind != ExecutionKind::Project || !id.starts_with("prun-") {
@@ -190,16 +201,6 @@ pub(in crate::operations) async fn detail_field(
         "definition" => record
             .as_ref()
             .and_then(|row| row.assignment.definition.clone()),
-        "result" => record.as_ref().map(|row| row.result.clone()),
-        "team.topic" => {
-            let legacy = worker.inner.journal.lock().await.uses_legacy(id);
-            let Some(path) = team_topic_path(worker, &request.execution, record.as_ref(), legacy)?
-            else {
-                return Ok(RpcReply::error(404, "detail field not found"));
-            };
-            let chunk = read_file_chunk(&path, request.offset, EVENT_CHUNK_BYTES)?;
-            return detail_chunk_reply(request.field, request.offset, chunk, "json-base64");
-        }
         _ => return Ok(RpcReply::error(400, "unsupported detail field")),
     };
     let Some(value) = value else {
@@ -207,7 +208,8 @@ pub(in crate::operations) async fn detail_field(
     };
     let chunk = value_chunk(&value, request.offset, EVENT_CHUNK_BYTES)?;
     let next_offset = request.offset + chunk.bytes.len() as u64;
-    bounded_reply(serde_json::to_value(DetailFieldChunk {
+    let version = opencoder_core::token_hash(&serde_json::to_string(&value)?);
+    let mut body = serde_json::to_value(DetailFieldChunk {
         field: request.field,
         offset: request.offset,
         next_offset,
@@ -215,7 +217,9 @@ pub(in crate::operations) async fn detail_field(
         eof: next_offset >= chunk.total_bytes,
         encoding: "json-base64".into(),
         bytes_b64: base64::engine::general_purpose::STANDARD.encode(chunk.bytes),
-    })?)
+    })?;
+    body["version"] = serde_json::json!(version);
+    bounded_reply(body)
 }
 
 async fn team_artifact_chunk(
@@ -335,43 +339,6 @@ fn detail_chunk_reply(
         encoding: encoding.into(),
         bytes_b64: base64::engine::general_purpose::STANDARD.encode(chunk.bytes),
     })?)
-}
-
-fn team_topic_path(
-    worker: &Worker,
-    execution: &ExecutionRef,
-    record: Option<&crate::journal::Record>,
-    legacy: bool,
-) -> Result<Option<std::path::PathBuf>> {
-    let Some(record) = record else {
-        return Ok(None);
-    };
-    if !matches!(execution.kind, ExecutionKind::Team | ExecutionKind::System) {
-        return Ok(None);
-    }
-    let name = if execution.kind == ExecutionKind::System {
-        "system"
-    } else {
-        record
-            .assignment
-            .definition
-            .as_ref()
-            .and_then(|value| value["name"].as_str())
-            .ok_or_else(|| anyhow::anyhow!("team execution has no team name"))?
-    };
-    let root = if legacy {
-        worker.inner.layout.legacy_team_dir(&execution.id)?
-    } else {
-        worker
-            .inner
-            .layout
-            .team_state_dir(execution.kind, &execution.id)?
-    };
-    Ok(Some(opencoder_team::layout::topic_file(
-        &root,
-        name,
-        &execution.id,
-    )?))
 }
 
 fn value_chunk(

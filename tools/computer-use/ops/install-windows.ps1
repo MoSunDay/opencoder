@@ -1,8 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$ArtifactBase,
     [string]$Root = "$env:LOCALAPPDATA\OpenCoder\computer",
-    [string]$HostAddress = '192.168.127.10',
-    [string]$Gateway = '192.168.127.1'
+    [Parameter(Mandatory=$true)][string]$HostAddress,
+    [Parameter(Mandatory=$true)][string]$Gateway
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8

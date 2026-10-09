@@ -123,7 +123,7 @@ pub fn build_app_with_metrics(
         .route("/api/project/initiatives", get(api_project_initiatives::list).post(api_project_initiatives::create))
         .route("/api/project/initiatives/:id", patch(api_project_initiatives::patch).delete(api_project_initiatives::delete))
         .route("/api/project/tags", get(api_project_tags::list).post(api_project_tags::create))
-        .route("/api/project/tags/:id", patch(api_project_tags::rename).delete(api_project_tags::delete))
+        .route("/api/project/tags/:id", patch(api_project_tags::update).delete(api_project_tags::delete))
         .route("/api/project/todos", get(api_project_todos::list_todos).post(api_project_todos::create_todo))
         .route("/api/project/todos/order", put(api_project_todos::reorder_todos))
         .route("/api/project/todos/:id", patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo))

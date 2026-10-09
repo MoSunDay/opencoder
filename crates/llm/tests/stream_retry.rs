@@ -18,6 +18,7 @@ use tokio::net::TcpListener;
 /// short enough for the retry scenarios to finish promptly.
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
 const STALL_HOLD: Duration = Duration::from_secs(2);
+const SSE_HEADER: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
 
 /// What one accepted connection does before it is abandoned/finished.
 enum Conn {
@@ -100,10 +101,10 @@ fn spawn_server(listener: TcpListener, behaviors: Vec<Conn>) {
                         }
                     }
                     Conn::Full { text } => {
-                        let _ = write_sse_header(&mut stream).await;
-                        let _ = stream.write_all(sse_text(&text).as_bytes()).await;
-                        let _ = stream.flush().await;
-                        let _ = stream.write_all(sse_done().as_bytes()).await;
+                        // A healthy response has no intentional scheduling gap
+                        // between its headers, content, and completion frame.
+                        let response = format!("{SSE_HEADER}{}{}", sse_text(&text), sse_done());
+                        let _ = stream.write_all(response.as_bytes()).await;
                         let _ = stream.flush().await;
                     }
                 }
@@ -148,9 +149,29 @@ async fn drain(rx: &mut tokio::sync::mpsc::Receiver<LlmEvent>) -> Vec<LlmEvent> 
 
 async fn consume_http_request(stream: &mut tokio::net::TcpStream) {
     let mut buf = [0u8; 4096];
+    let mut request = Vec::new();
+    let mut request_len = None;
     loop {
         let n = stream.read(&mut buf).await.unwrap_or(0);
-        if n == 0 || buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+        if n == 0 {
+            return;
+        }
+        request.extend_from_slice(&buf[..n]);
+        if request_len.is_none() {
+            if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..end]);
+                let body_len = headers
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                    .unwrap_or(0);
+                request_len = Some(end + 4 + body_len);
+            }
+        }
+        // Closing a socket with an unread request body can reset the response.
+        // Headers and body may arrive in separate reads under concurrent load.
+        if request_len.is_some_and(|len| request.len() >= len) {
             return;
         }
     }
@@ -168,11 +189,7 @@ async fn write_sse_header_chunked(stream: &mut tokio::net::TcpStream) -> std::io
 }
 
 async fn write_sse_header(stream: &mut tokio::net::TcpStream) -> std::io::Result<()> {
-    stream
-        .write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
-        )
-        .await?;
+    stream.write_all(SSE_HEADER.as_bytes()).await?;
     stream.flush().await
 }
 

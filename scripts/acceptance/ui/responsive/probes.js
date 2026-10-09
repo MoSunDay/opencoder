@@ -155,8 +155,10 @@ async function checkPage(page, name, results) {
     await pause(500);
     await page.waitForFunction(() => [...document.querySelectorAll('.ant-drawer-open, .ant-modal-wrap')].every((overlay) => overlay.getAnimations({ subtree: true }).every((animation) => animation.playState !== 'running' || animation.effect.getTiming().iterations === Infinity)),
       null, { timeout: 20000 });
+    // A loaded browser can defer the first animation frame. An empty Web
+    // Animations list alone does not mean the drawer has finished entering.
     await page.waitForFunction(() => !document.querySelector('[class*="-motion-"]'),
-      null, { timeout: 3000 }).catch(() => {});
+      null, { timeout: 20000 });
     const kind = (await overlayCount(page)) > 0 ? 'overlay' : 'after';
     await measure(page, `${name} ${kind}:${opened}`, results);
     const left = await closeOverlay(page);

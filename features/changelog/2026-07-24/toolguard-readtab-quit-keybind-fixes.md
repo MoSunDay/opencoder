@@ -1,7 +1,7 @@
-# Fix: tool-guard threshold, read/grep tool hardening, graceful Ctrl+D quit, keybind cleanup, stats provider
+# Fix: tool-guard threshold, read/grep tool hardening, graceful Ctrl+D quit, keybind cleanup
 
 **Date:** 2026-07-24
-**Scope:** `opencoder-core`, `opencoder-session`, `opencoder-tui`, scripts
+**Scope:** `opencoder-core`, `opencoder-session`, `opencoder-tui`
 
 ## Background
 
@@ -22,10 +22,7 @@ A set of small, independent polish/fix changes accumulated in the working tree:
    mode, `Ctrl+N`/`Ctrl+P` were wired to history navigation but were
    unused/removed earlier; the orphaned handlers and help-text lines were cleaned
    up.
-5. **Stats script provider mapping (P3):** `parse_model` mapped `glm-5.2` to a
-   `glm-5.2` provider, but the correct provider id is `zhipuai-coding-plan`.
-   Fixed the mapping and its test.
-6. **Grep tool hung on symlink cycles (P1):** The `GrepTool` directory walk
+5. **Grep tool hung on symlink cycles (P1):** The `GrepTool` directory walk
    followed symlinks but had no cycle guard, so a self-referencing symlink
    (`loop -> .`) recursed until the 50 000-file / 1000-result cap. The walk now
    tracks the canonical (real) path of each visited directory in a `HashSet` and
@@ -45,8 +42,6 @@ A set of small, independent polish/fix changes accumulated in the working tree:
 | Ctrl+D graceful quit | `crates/tui/src/app.rs` | `KeyAction::Quit` sets `quitting=true` + "shutting down…" status + dirty/render flags; loop renders one frame then `break`s at top-of-loop `if quitting { break; }` |
 | History keybind cleanup | `crates/tui/src/key_handler.rs` | removed dead `Ctrl+N`/`Ctrl+P` history handlers in multiline mode |
 | Keybind help text | `crates/tui/src/keybind.rs` | removed `Ctrl+N`/`Ctrl+P` and duplicate `Home/End` lines |
-| Stats provider mapping | `scripts/opencoder-to-opencode-stats.py` | `parse_model`: `glm-5.2` model id → `zhipuai-coding-plan` provider |
-| Stats test | `scripts/test-stats-sync.py` | `test_parse_model` expects `zhipuai-coding-plan`; added bare-provider check |
 
 ## Tests
 
@@ -65,20 +60,18 @@ A set of small, independent polish/fix changes accumulated in the working tree:
 | `threshold_stops_after_five_consecutive_failures` | `crates/session/tests/tool_failure_guard.rs` | loop aborts after 5 consecutive failures; 6th script unconsumed |
 | `emits_error_event_on_threshold` | `crates/session/tests/tool_failure_guard.rs` | error event emitted at threshold (now 5) |
 | `success_between_failures_resets_counter` | `crates/session/tests/tool_failure_guard.rs` | success resets counter; needs 5 consecutive to trip |
-| `test_parse_model` | `scripts/test-stats-sync.py` | `glm-5.2` → provider `zhipuai-coding-plan` |
 
 - 全量回归：`cargo test --workspace` → 全绿 (0 failures)
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 编译干净
-- 行数：`crates/tui/src/app.rs` 800 ≤ 800；`crates/core/src/config.rs` 779 ≤ 800；`scripts/opencoder-to-opencode-stats.py` 399 ≤ 400；其余改动文件均 ≤ 400/800
+- 行数：`crates/tui/src/app.rs` 800 ≤ 800；`crates/core/src/config.rs` 779 ≤ 800；其余改动文件均 ≤ 400/800
 
 ## Impact Surface
 
 - 用户可感知：agent 在连续工具失败时更宽容（5 次而非 3 次才中止）；带 Tab 的文件在 TUI 中行号沟槽对齐；grep 遇自引用 symlink 不再卡死且仍跟随合法软链；Ctrl+D 退出时显示 "shutting down…" 反馈；移除未用的 Ctrl+N/P 历史键绑定。
 - 不影响：CLI/Web/Store/session drain 边界（仅默认常量、read/grep 工具实现与 TUI 渲染循环）。
-- 仅 stats 脚本（非运行时）受 provider 映射影响。
 
 ## Related Docs
 
-- [agents/session](../../agents/session/index.md)
+- [agents/session](../../../agents/session/index.md)
 - [既有 changelog: tool-failure-surface-fixes](./tool-failure-surface-fixes.md)

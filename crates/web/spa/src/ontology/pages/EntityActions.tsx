@@ -1,5 +1,6 @@
 import { EditOutlined } from "@ant-design/icons";
-import { ModalForm, TextField, TextAreaField } from "../ui";
+import { TextField, TextAreaField } from "../ui";
+import { ModalForm } from "../ui/ModalForm";
 import { App, Button } from "antd";
 import { api } from "../api";
 import type { Entity } from "../types";

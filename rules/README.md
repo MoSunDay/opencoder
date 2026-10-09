@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # OpenCoder 仓库规则索引
 
@@ -12,7 +12,7 @@ Commit: c854143bd187656f4d74be6cca0f153176e44a21
 | 04 | [dag-execution-contract.md](04-dag-execution-contract.md) | DAG 单节点单容器、只读 NFS 源工作区、节点本地写层与原生步骤约定 |
 | 05 | [ui-acceptance.md](05-ui-acceptance.md) | 全站功能、四种屏宽、Server TUI 与成套构建的 UI 验收约定 |
 | 06 | [brain-scheduling-contract.md](06-brain-scheduling-contract.md) | 大脑分层并行、整层评估、返工预算、节点选择、人工引导及恢复约定 |
-| 07 | [project-module-contract.md](07-project-module-contract.md) | 项目、专项、TODO 的归属、看板、执行关联、结论回写、进度与标签约定 |
+| 07 | [project-module-contract.md](07-project-module-contract.md) | 项目、专项、TODO 的归属、看板、执行关联、实时结果读取、进度与标签约定 |
 
 ## 快速检查清单（每次 PR / commit 前）
 
@@ -21,4 +21,5 @@ Commit: c854143bd187656f4d74be6cca0f153176e44a21
 - [ ] 新增 / 修改的公共函数有对应测试（规则 01）
 - [ ] 新增功能在 changelog 中附「功能 → 测试名」映射（规则 02）
 - [ ] 无硬编码密钥 / 凭证
+- [ ] 代码、测试和说明只包含 OpenCoder 通用能力；外部业务实现、数据和现场记录存放在仓库外
 - [ ] 新增文件 ≤ 400 行；迭代中文件 ≤ 800 行

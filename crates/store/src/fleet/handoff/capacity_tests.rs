@@ -114,3 +114,42 @@ async fn live_capacity_preserves_cross_runtime_fifo_after_large_completed_histor
     assert_eq!((empty.running, empty.queued), (0, 0));
     assert!(store.runtime_tickets("old").await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn recovery_releases_only_the_exact_running_ticket_and_is_idempotent() {
+    let store = FleetStore::open_memory().await.unwrap();
+    store.initialize_capacity(2).await.unwrap();
+    store
+        .enqueue_capacity("ticket", "execution", "runtime")
+        .await
+        .unwrap();
+    assert!(store.claim_capacity("ticket", "runtime").await.unwrap());
+
+    assert!(store
+        .recover_capacity("ticket", "execution", "runtime")
+        .await
+        .unwrap());
+    assert!(!store
+        .recover_capacity("ticket", "execution", "runtime")
+        .await
+        .unwrap());
+    assert_eq!(store.capacity().await.unwrap().running, 0);
+}
+
+#[tokio::test]
+async fn recovery_rejects_a_ticket_with_changed_identity() {
+    let store = FleetStore::open_memory().await.unwrap();
+    store.initialize_capacity(1).await.unwrap();
+    store
+        .enqueue_capacity("ticket", "execution", "runtime")
+        .await
+        .unwrap();
+    assert!(store.claim_capacity("ticket", "runtime").await.unwrap());
+
+    let error = store
+        .recover_capacity("ticket", "other-execution", "runtime")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("identity differs"));
+    assert_eq!(store.capacity().await.unwrap().running, 1);
+}

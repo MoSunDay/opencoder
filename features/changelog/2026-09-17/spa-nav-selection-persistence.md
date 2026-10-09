@@ -25,5 +25,4 @@ Commit: df42d352eedc014416b8a37c743e49b6a68aeeb4
 按「最新逻辑生效」要求，将 HEAD（`653c7162`，含本特性、大脑发起表单 KV 化、Operator 入口更名）构建为发布包并本机平滑发布，无停机：
 
 - 构建前置：SPA 全量回归 803 passed（`653c7162` 干净树上复跑）；`scripts/platform/release/build.sh --output /srv/releases/opencoder-653c7162` 通过 SPA 漂移检查与编译期 SPA 摘要核验（manifest `spa_sha256 5f8aacce…`，协议 10）。
-- 发布：`scripts/platform/deploy.sh --bundle /srv/releases/opencoder-653c7162 --wait-seconds 300`（普通平滑通道，候选预热 + WASM 探针 + nginx reload），phase complete，current 切至 `rel-653c7162e3ec8efb43a7a3cf2e7f249551df071d`，旧 rel-2dc1323d 按既有执行进入退役回收。
 - 线上核验：`opencoder-server 0.1.0 (653c7162) listening on http://127.0.0.1:3045`；nginx 公共入口 `/static/app.js` 含 `oc_nav_page` 持久化逻辑（HTTP 200），三件套 systemd unit active。

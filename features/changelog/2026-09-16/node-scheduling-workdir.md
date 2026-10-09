@@ -27,6 +27,5 @@
 - `cargo test -p opencoder-control --lib` — 57 passed（GET/PUT scheduling 序列化与 API 行为）。
 - `cargo test -p opencoder-agent` — 9 passed（多 runtime Host 拒绝 workdir）。
 - `cargo test -p opencoder-worker --lib` — 56 passed（生效工作空间配置、启动建目录）。
-- `cargo test -p opencoder-worker` 23 个集成测试文件全部通过（合计 61 passed、1 ignored 为既有 NFS 条件跳过）：新增 `scheduling_workdir` 2 例（相对路径 400、保存即建目录、GET 回读、会话 cwd=workspace、清空恢复、重启后 scheduling.json 生效）；`harness_settings_queue` 4 例（调度弹窗字段与提交）；`workloads` 5、`project_replay` 10、`dag_wasm_pin` 10、`resource_snapshot` 6、`layout_migration` 4、`brain_ontology` 3、`brain_recovery` 2、`todo_review` 2、`initial_input_recovery` 2 及其余单例文件。
 - SPA：`management.dom.test.jsx` 6 例通过（GET 回填 workdir、绝对路径校验、清空提交 null）；`npm run build` 产物刷新；`scripts/acceptance/harness/settings.js` 浏览器验收通过（验收后清空恢复）。
 - 环境说明：共享 cargo 环境（/data00/rust-build）被并行会话长期持有文件锁，本次改用隔离 CARGO_HOME/TARGET_DIR 分片执行；`cargo test --workspace` 单次扫描受机器负载（峰值 load>300）限制未能在单窗口完成，以全 workspace 编译检查 + 全部受影响 crate 完整测试套件替代，未涉及 NodeScheduling 的其余 crate 已 grep 确认零引用。

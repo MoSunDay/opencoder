@@ -59,7 +59,6 @@
 - 先存红（HEAD `9513d000` 即失败，非本迭代引入，根因为 `225718da` lane
   隔离把 `worker/service.rs` 的节点索引发布收窄为 `agent-` 前缀 +
   `include_subagents:false`，内部/成员会话不再进执行索引）：
-  - `dag_e2e flow::dag_spec_dispatch_runs_wasm_and_agent_steps_to_done`（relay
     按子会话 id GET 404 "execution id not found"）
   - `team_e2e flow::team_topic_runs_to_completion_with_turn_ledger`、
     `web dag_e2e_flow claimed_run_executes_and_converges_done_on_the_server`

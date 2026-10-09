@@ -38,7 +38,7 @@ pub(super) fn advertise_v4(h: &Harness) {
     h.node
         .set_capability_reply(opencoder_core::fleet::RpcReply::ok(json!({
             "compatible": true,
-            "features": ["dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7", "brain_contracts_v1"]
+            "features": ["dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7", "brain_contracts_v1", "brain_context_budget_v1"]
         })));
 }
 
@@ -150,6 +150,23 @@ async fn layered_admission_requires_the_v4_advertisement_and_freezes_the_scope()
     let replayed = create(&h).await;
     assert_eq!(replayed, receipt);
     assert_eq!(h.node.journal_ids(), vec![RUN.to_string()]);
+}
+
+#[tokio::test]
+async fn node_capacity_rejection_is_reported_before_creating_a_brain_index() {
+    let h = Harness::with_brain_kind().await;
+    h.node
+        .set_capability_reply(opencoder_core::fleet::RpcReply::error(
+            413,
+            "complete-evidence model capacity exceeded",
+        ));
+    let (status, body) = h
+        .req(Method::POST, "/api/brain/runs", Some(request()))
+        .await;
+    assert_eq!(status, 413, "{body}");
+    assert!(body.to_string().contains("complete-evidence"));
+    assert!(h.state.fleet.index(RUN).await.unwrap().is_none());
+    assert!(h.node.journal_ids().is_empty());
 }
 
 #[tokio::test]

@@ -33,5 +33,4 @@ Agent 配置抽屉的两处 UI 收敛：
 按「新逻辑生效」要求，将 HEAD（`9e66930a`，含本特性与 review 两处一行修复）构建为发布包并本机平滑发布，无停机：
 
 - 构建前置：`crates/web/spa` vitest 全量 811 passed；干净 worktree 上 `scripts/platform/release/build.sh --output /srv/releases/opencoder-9e66930a` 通过 SPA 漂移检查与编译期 SPA 摘要核验（manifest `spa_sha256 5ce3978fef8a557c03707b7e28d3f80e1119a1ac9d21c0c524750e2e4e75de24`，协议 10）；同树 `cargo test --workspace` 全绿。
-- 发布：`scripts/platform/deploy.sh --bundle /srv/releases/opencoder-9e66930a --wait-seconds 300`（普通平滑通道，候选预热 + WASM 探针 + nginx reload），phase complete，current 切至 `rel-9e66930a59e7154bd6fa2548265071ba46a7c9d6`，旧 rel-653c7162 / rel-2dc1323d / rel-a51016ca 按既有执行进入退役回收。
 - 线上核验：`opencoder-server 0.1.0 (9e66930a) listening on http://127.0.0.1:3048`；公共入口（18081）`/static/app.js` 含「上传压缩包」逻辑且与提交 dist 字节一致（2,565,079 字节，HTTP 200），server / runtime / host 三件套 systemd unit active。

@@ -1,0 +1,12 @@
+.oc-page .admin-content { min-width: 0; max-width: 100%; }
+.oc-page .admin-content .ant-table-cell { overflow-wrap: anywhere; }
+.admin-filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.admin-filters .ant-input-affix-wrapper { width: 260px; max-width: 100%; }
+.admin-filters .ant-select { min-width: 140px; }
+.admin-content { min-width: 0; }
+@media (max-width: 575px) {
+  .oc-page .admin-content .ant-card-body { padding: 12px; }
+  .admin-filters { gap: 8px; }
+  .admin-filters .ant-input-affix-wrapper { width: 100%; }
+  .admin-filters .ant-select { min-width: 0; flex: 1; }
+}

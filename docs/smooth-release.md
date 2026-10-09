@@ -13,9 +13,9 @@ Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
 ```json
 {
   "deployment": {
-    "state_dir": "/var/lib/opencoder-platform",
+    "state_dir": "/data00/opencoder/platform",
     "server_workdir": "/etc/opencoder/server",
-    "server_data": "/var/lib/opencoder-server",
+    "server_data": "/data00/opencoder/server",
     "server_user": "opencoder-server",
     "agent_workdir": "/srv/opencoder",
     "legacy_agent_data": "/var/lib/opencoder-node",
@@ -29,6 +29,8 @@ Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
 ```
 
 默认 Host 本地入口为 `127.0.0.1:18082`，资源管理服务为 `127.0.0.1:18084`，版本实例端口从 `3000` 分配。版本端口应位于主机临时客户端端口范围之外，避免预热或休眠期间被客户端连接占用。SQLite 和锁文件必须放在本机本地磁盘。保留现有服务环境配置及原凭证文件，配置和发布清单不包含凭证明文。
+
+`server_data` 传给 Server 的 `--data-dir`；`state_dir` 包含 `host/`、`resources/`、`runtimes/<版本>/`、`releases/` 和 `backups/`。发布工具把每个 Runtime 目录传给 Agent 的 `--data-dir`，DAG 过程文件位于该目录的 `dag/runs/`。两个配置项都应指向已挂载的数据磁盘，并提前设置服务账号权限。已有部署不能仅修改路径后启动空目录：应迁移完整数据、保留节点身份及锁文件，并保持已接受执行记录中的旧路径可访问。
 
 ```bash
 # 没有 Nginx 时执行一次；不会启动业务监听。

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import "../../../../test/setup-dom.js";
+import "../../../testSetup";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGraphObservation } from "../useGraphObservation";
@@ -60,11 +60,11 @@ describe("observation loading and selection", () => {
     act(() => result.current.changeSelection({ centerIds: ["a"] }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 1, downstreamDepth: 1,
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3,
     });
   });
 
-  it("expands cross-type neighbors when expansion is enabled without requiring a relationship filter", async () => {
+  it("expands cross-type neighbors in jy-hub without requiring a relationship filter", async () => {
     apiMock.relationships.mockResolvedValue({ items: [{
       id: "edge", env_num: 1, relationship_type_id: "cross", source_entity_id: "a", target_entity_id: "c",
       description: "已确认的跨类型调用", revision: 1, is_deleted: false, is_pinned: false,
@@ -77,14 +77,14 @@ describe("observation loading and selection", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     act(() => result.current.changeSelection({ entityTypeIds: ["other"], centerIds: ["c"] }));
     await waitFor(() => expect(apiMock.graph).toHaveBeenCalledWith("debug", {
-      entityTypeIds: ["other"], centerIds: ["c"], upstreamDepth: 1, downstreamDepth: 1,
+      entityTypeIds: ["other"], centerIds: ["c"], upstreamDepth: 3, downstreamDepth: 3,
       expandNeighbors: true,
     }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.relationshipTypes.some((item) => item.id === "cross")).toBe(true);
     act(() => result.current.changeSelection({ relationshipTypeIds: ["cross"] }));
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["other"], centerIds: ["c"], upstreamDepth: 1, downstreamDepth: 1,
+      entityTypeIds: ["other"], centerIds: ["c"], upstreamDepth: 3, downstreamDepth: 3,
       relationshipTypeIds: ["cross"], expandNeighbors: true,
     }));
   });
@@ -94,12 +94,12 @@ describe("observation loading and selection", () => {
     act(() => result.current.changeSelection({ entityTypeIds: ["service"], centerIds: ["a"], relationshipTypeIds: ["calls"] }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 1, downstreamDepth: 1, relationshipTypeIds: ["calls"],
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["calls"],
     });
     act(() => result.current.changeSelection({ relationshipTypeIds: [] }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 1, downstreamDepth: 1,
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3,
     });
   });
 
@@ -114,7 +114,7 @@ describe("observation loading and selection", () => {
     act(() => result.current.changeSelection({ centerIds: ["a"] }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 1, downstreamDepth: 1, relationshipTypeIds: ["calls"],
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["calls"],
     });
   });
 
@@ -125,7 +125,7 @@ describe("observation loading and selection", () => {
     act(() => result.current.changeSelection({ centerIds: ["a", "c"], relationshipTypeIds: ["calls", "depends"] }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service", "other"], centerIds: ["a", "c"], upstreamDepth: 1, downstreamDepth: 1,
+      entityTypeIds: ["service", "other"], centerIds: ["a", "c"], upstreamDepth: 3, downstreamDepth: 3,
       relationshipTypeIds: ["calls", "depends"],
     });
     act(() => result.current.changeSelection({ entityTypeIds: ["other"] }));
@@ -133,7 +133,7 @@ describe("observation loading and selection", () => {
     expect(result.current.selection.centerIds).toEqual(["c"]);
     expect(result.current.selection.relationshipTypeIds).toEqual(["depends"]);
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["other"], centerIds: ["c"], upstreamDepth: 1, downstreamDepth: 1, relationshipTypeIds: ["depends"],
+      entityTypeIds: ["other"], centerIds: ["c"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["depends"],
     });
   });
 
@@ -146,7 +146,7 @@ describe("observation loading and selection", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.selection.centerIds).toEqual(["b"]);
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["b"], upstreamDepth: 1, downstreamDepth: 1,
+      entityTypeIds: ["service"], centerIds: ["b"], upstreamDepth: 3, downstreamDepth: 3,
     });
   });
 
@@ -161,7 +161,7 @@ describe("observation loading and selection", () => {
     expect(result.current.selection.centerIds).toEqual(["a"]);
     expect(result.current.selection.relationshipTypeIds).toEqual(["calls"]);
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 1, downstreamDepth: 1, relationshipTypeIds: ["calls"],
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["calls"],
     });
   });
 
@@ -172,7 +172,7 @@ describe("observation loading and selection", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.selection.relationshipTypeIds).toEqual(["calls"]);
     expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 1, downstreamDepth: 1, relationshipTypeIds: ["calls"],
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["calls"],
     });
   });
 
@@ -204,7 +204,7 @@ describe("observation loading and selection", () => {
     act(() => second.result.current.changeSelection({ entityTypeIds: ["service"], centerIds: ["a"] }));
     await waitFor(() => expect(second.result.current.loading).toBe(false));
     expect(apiMock.graph).toHaveBeenLastCalledWith("new", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 1, downstreamDepth: 1,
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3,
     });
     expect(second.result.current.entities).toEqual(entities);
   });
@@ -220,4 +220,17 @@ describe("observation loading and selection", () => {
     expect(result.current.data).toEqual(graph);
     expect(apiMock.entities).toHaveBeenCalledTimes(2);
   });
+});
+
+it("keeps the last graph visible while updating and after a failed update", async () => {
+  apiMock.entities.mockResolvedValue({ items: entities }); apiMock.entityTypes.mockResolvedValue({ items: entityTypes });
+  apiMock.relationships.mockResolvedValue({ items: [] }); apiMock.relationshipTypes.mockResolvedValue({ items: relationshipTypes }); apiMock.graph.mockResolvedValue(graph);
+  const { result } = await ready();
+  act(() => result.current.changeSelection({ entityTypeIds: ["service"], centerIds: ["a"] }));
+  await waitFor(() => expect(result.current.data).toEqual(graph));
+  const next = deferred<GraphResponse>(); apiMock.graph.mockReturnValueOnce(next.promise);
+  act(() => result.current.changeSelection({ downstreamDepth: 3 }));
+  expect(result.current.loading).toBe(true); expect(result.current.data).toEqual(graph);
+  await act(async () => next.reject(new Error("新查询失败")));
+  expect(result.current.error).toBe("新查询失败"); expect(result.current.data).toEqual(graph);
 });

@@ -9,17 +9,19 @@ cargo build --workspace
 
 # 凭据由管理员单独创建并以 0600 文件提供；进程不会生成或打印 token
 opencoder-server --host 127.0.0.1 --port 8080 \
-  --workdir /etc/opencoder/server --data-dir /var/lib/opencoder-server \
+  --workdir /etc/opencoder/server --data-dir /data00/opencoder/server \
   --token-file /run/credentials/opencoder-server.service/token
 
 # 每个执行节点使用独立工作目录和持久化目录；示例布局为
-# /data00/<kind>/<id>/execution.json
+# /data00/opencoder/nodes/worker-a/<kind>/<id>/execution.json
 opencoder-agent --remote https://opencoder.internal.example --name worker-a \
-  --workdir /etc/opencoder/agent --data-dir /data00 \
+  --workdir /etc/opencoder/agent --data-dir /data00/opencoder/nodes/worker-a \
   --token-file /run/credentials/opencoder-agent.service/token
 ```
 
 Server 与 Node 都要求 `--token`、`--token-file` 或既有 `OPENCODER_SERVER_TOKEN` 三者之一；生产服务使用 `--token-file`，token 不进入 URL、进程参数或日志。节点主动建立携带 Bearer 凭据的 WebSocket，无需开放节点 HTTP 入站端口。节点工作目录中的 `opencoder.json` 配置执行用的模型与凭据；Server 配置中的模型用于大脑。大脑未配置模型时仍可管理节点及派发普通任务，调用大脑时返回具体配置错误。
+
+`--data-dir` 是已有的持久化目录参数。Server 的参数指定控制面数据，执行过程、资源快照和产物由所属 Node 的同名参数指定；两端都应显式设置。按版本部署时，还需设置 [发布配置](smooth-release.md) 的 `deployment.state_dir` 和 `deployment.server_data`，运行目录与维护备份才会一起写入指定磁盘。配置前创建目录并赋予对应服务账号读写权限；确认 `/data00` 已挂载到数据磁盘。
 
 仓库提供 [Server unit](../deploy/systemd/opencoder-server.service)、[Agent unit](../deploy/systemd/opencoder-agent.service) 和 [Nginx HTTPS/WSS/SSE 样例](../deploy/nginx/opencoder.conf)。部署前分别创建 `/etc/opencoder/server.token` 和 `/etc/opencoder/agent.token`，写入同一 Bearer token 并设为 `0600`，owner 必须是对应服务用户；unit 只把文件路径传给 `--token-file`，不会把 token 内容放入参数、环境变量或日志。样例 Agent 以 root 运行以支持当前真实 runc 路径，并使用 `KillMode=mixed`，保证停止时只有 Agent 先收到 TERM，已有任务可自然 drain；若禁用 runc，可在验证目录、进程树和 NFS 权限后改用专用用户。内网 CA 的完整证书链必须安装到每个 Node 和管理员浏览器的系统信任库；Agent 的 HTTP 与 WebSocket 客户端都使用系统 CA，不提供跳过证书校验的降级开关。
 

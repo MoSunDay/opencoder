@@ -6,7 +6,7 @@
 
 快照实现拆为 `resources.rs` 的准入/挂载检查、`resources/snapshot.rs` 的发布和 `resources/copy.rs` 的有界复制。新增 `resource_snapshot` example，可对显式源和全新私有目录测量，不创建平台任务、不修改源资源。
 
-实测只读 NFS 资源池：原串行 106.71 秒，最终并行加目录类型复用 31.07 秒；两份 1,448 文件的路径和 SHA256 全部一致。基准及原始记录位于工作区 `artifacts/test-agent/2026-09-20/e2e-closure/`。该测量不是线上已发布证明。隔离候选已完成真实并发及正负业务交付，生产连续性仍需发布后验收。
+实测只读 NFS 资源池：原串行 106.71 秒，最终并行加目录类型复用 31.07 秒；两份 1,448 文件的路径和 SHA256 全部一致。该测量不是线上已发布证明。隔离候选已完成真实并发及正负业务交付，生产连续性仍需发布后验收。
 
 后续隔离 Server/Node 并发实测中，冻结在负载下达到 64/84 秒。清单采集等待受理锁，重连时的 admission 又在 WebSocket 读取循环内等待同一把锁，导致心跳停止并被 Server 判为离线。节点现在独立发送 WebSocket Ping，Server 仅更新已认证连接的存活时间；不伪造新的负载或清单。admission 由连接拥有的有界 FIFO worker 执行，断连时取消未完成的控制请求，退役前等待在途 admission。其他 Create 生命周期及持久受理合同保持原语义。
 
@@ -27,4 +27,4 @@
 
 - 模块测试：5 passed / 0 failed。
 - 节点传输模块7项、真实Server/Node存活及慢预检测试通过；最终候选并发持续在线，未伪造负载清单。
-- Clippy、完整workspace test（1243秒，4线程）及build均通过，包含17项根DAG E2E。测试期间共享仓库发生合并，保留源码前后清单；当前合并源码重新Clippy通过；补验曾因WASI资源绕过顺序测试附加1秒落盘上限而超时，同一原二进制单测通过。该测试改用10秒死锁保护，资源槽仍持续占满，状态/顺序断言及单独的1秒executor响应测试未变。修正后Worker 97通过/1既有忽略，慢预检通过；最终worker/TUI差异补验记录于工作区 `merged-corrected-source-gates.json`。这不是当前生产已包含修复或已完成发布连续性验收的声明。
+- Clippy、完整 workspace test 和 build 均通过，包含 17 项根 DAG E2E；生产连续性仍需发布后验收。

@@ -6,7 +6,7 @@
     "native_tool_calls": true
   },
   "targets": {
-    "win-11": {
+    "windows": {
       "os": "windows",
       "url": "http://127.0.0.1:18000"
     }

@@ -55,6 +55,11 @@ async fn harness_on(
     native.configure(&mut config);
     bridge.configure(&mut config);
     config.dag.data_dir = Some(dir.path().join("dag/runs"));
+    // Config::load merges the developer's global settings into this fixture.
+    // Keep the optional knowledge mount local as well as the execution data.
+    let knowledge = dir.path().join("knowledge");
+    std::fs::create_dir_all(&knowledge).unwrap();
+    config.dag.knowledge_root = Some(knowledge);
     config.team_root = dir.path().join("team");
     config.agent.agents_dir = native.config.agent.agents_dir.clone();
     // Keep team data in this fixture as well: with no explicit team_root the

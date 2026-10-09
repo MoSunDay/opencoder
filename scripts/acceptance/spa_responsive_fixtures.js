@@ -102,7 +102,7 @@ const FIXTURES = {
   // harness/management.jsx reads data.harnesses.find(name === 'codex').settings.
   '/api/harnesses': { harnesses: [{ name: 'codex', revision: 3, settings: { executable: '/usr/bin/codex',
     model: 'gpt-4o-mini', reasoning_effort: 'medium', sandbox_mode: 'read-only',
-    approval_policy: 'never', envs: {}, auth_slot: null } }],
+    approval_policy: 'never', envs: {}, startup_script: [] } }],
     profiles: [{ name: 'default', model: 'gpt-4o-mini' }] },
   '/api/skills': { skills: [{ name: 'git', description: 'git 操作', disabled: false }] },
   '/api/todo/envs': { envs: [{ name: 'demo', description: '视频工具链',

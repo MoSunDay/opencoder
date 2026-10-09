@@ -74,6 +74,8 @@ pub struct MockNode {
     pub id: String,
     pub open: AtomicBool,
     pub freezes: AtomicUsize,
+    pub create_gate: Mutex<Option<(String, Arc<tokio::sync::Notify>)>>,
+    pub gated_creates: AtomicUsize,
     /// Monotonic snapshot sequence: the hub drops snapshots whose sequence
     /// does not advance, so scripted snapshot overrides must keep growing.
     snapshot_seq: AtomicU64,
@@ -104,6 +106,8 @@ impl MockNode {
             id: id.into(),
             open: AtomicBool::new(true),
             freezes: AtomicUsize::new(0),
+            create_gate: Mutex::new(None),
+            gated_creates: AtomicUsize::new(0),
             snapshot_seq: AtomicU64::new(1),
             tables: Mutex::new(Tables::default()),
             seen: Mutex::new(Vec::new()),

@@ -57,6 +57,9 @@ pub fn pin_selected(
         let path = entry?.path();
         let name = path.file_name().unwrap().to_string_lossy();
         if AGENT_CATEGORIES.contains(&name.as_ref()) {
+            // Entry workers have already flushed their descendants. Shared
+            // category directories are flushed only after every worker joins.
+            opencoder_core::platform::fs::sync_directory(&path)?;
             continue;
         }
         let meta: AgentMeta = serde_json::from_slice(&files::read(&path.join("meta.json"))?)?;

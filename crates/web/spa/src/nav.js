@@ -110,6 +110,8 @@ export const HEADERLESS_REASONS = {
   chat: 'menu-only',
   agents: 'body-title',
   nodes: 'menu-only',
+  users: 'menu-only',
+  tokens: 'menu-only',
   ontologyGraph: 'menu-only',
   ontologyEntities: 'menu-only',
   ontologyTypes: 'menu-only',
@@ -126,8 +128,6 @@ export const HEADERLESS_PAGES = Object.keys(HEADERLESS_REASONS);
 /// header contract test mounts every panel and fails on it, so this map
 /// stays truthful.
 export const PAGE_META = {
-  users: { title: '用户权限', desc: '管理用户及其资源权限' },
-  tokens: { title: 'Token 管理', desc: '为用户签发和撤销访问 Token' },
   project: { title: '项目', desc: '项目、专项与 TODO 工作台' },
 };
 

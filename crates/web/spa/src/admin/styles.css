@@ -1,0 +1,28 @@
+.oc-admin-toolbar, .oc-admin-filters, .oc-admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.oc-admin-toolbar { justify-content: space-between; margin-bottom: 16px; }
+.oc-admin-filters { flex: 1; }
+.oc-admin-filters .oc-admin-search { width: 280px; max-width: 100%; }
+.oc-admin-filters .ant-select { width: 160px; }
+.oc-admin-actions { gap: 8px; }
+.oc-admin-table { min-width: 0; }
+.oc-admin-table .ant-table { border: 1px solid var(--oc-border); border-radius: 10px; }
+.oc-admin-table .ant-table-cell { vertical-align: middle; }
+.oc-admin-table .ant-table-cell .ant-tag { margin-inline-end: 0; }
+.oc-admin-table .ant-btn-link { padding-inline: 4px; }
+.oc-admin-table .ant-table-pagination { margin-bottom: 0; }
+.oc-admin-hint.ant-typography { margin: 16px 0 0; font-size: 13px; }
+.oc-admin-cell-secondary { display: block; color: var(--oc-text-secondary); font-size: 12px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-admin-feedback { margin-bottom: 16px; }
+.oc-admin-form .ant-picker { width: 100%; }
+@media (max-width: 767px) {
+  .oc-admin-filters, .oc-admin-actions { width: 100%; }
+  .oc-admin-filters .oc-admin-search { width: 100%; }
+  .oc-admin-filters .ant-select { flex: 1; min-width: 120px; }
+  .oc-admin-actions { justify-content: flex-end; }
+}

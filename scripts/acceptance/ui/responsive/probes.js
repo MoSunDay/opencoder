@@ -176,9 +176,7 @@ async function checkPage(page, name, results) {
 
 // Page options of the selected category; leaves the dropdown closed.
 async function pagesOf(page) {
-  await page.locator(`${SELECT} input`).focus();
-  await page.keyboard.press('ArrowDown');
-  await page.waitForSelector(OPTIONS, { timeout: 4000 });
+  if (!(await openSelect(page))) throw new Error('page navigation dropdown did not open');
   const pages = await labels(page, OPTIONS);
   await page.keyboard.press('Escape');
   await pause(150);
@@ -188,10 +186,15 @@ async function pagesOf(page) {
 // Open the page Select, retrying once behind a stray overlay that eats keys.
 async function openSelect(page) {
   for (let i = 0; i < 2; i += 1) {
-    await page.locator(`${SELECT} input`).focus();
-    await page.keyboard.press('ArrowDown');
-    await pause(300);
-    if (await page.$(OPTIONS)) return true;
+    const firstOption = page.locator(OPTIONS).first();
+    if (await firstOption.isVisible()) return true;
+    await page.locator(`${SELECT} input`).click();
+    try {
+      await firstOption.waitFor({ state: 'visible', timeout: 4000 });
+      return true;
+    } catch (failure) {
+      if (failure.name !== 'TimeoutError') throw failure;
+    }
     await closeOverlay(page);
   }
   return false;

@@ -60,6 +60,10 @@ impl Dispatcher {
             self.workdir.clone(),
         )
         .await?;
+        // A discussion answer is an intermediate step, not a completed repo
+        // task. Post-task memory maintenance would add a second agent run to
+        // every captain decision and member answer before it becomes visible.
+        session.config.local_memory = false;
         session.cancel = Some(self.cancel.child_token());
         let (sink, flush) = opencoder_session::spawn_event_flusher(
             Some(self.worker.inner.state.store.clone()),

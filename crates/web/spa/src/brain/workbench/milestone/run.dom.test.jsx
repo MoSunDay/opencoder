@@ -121,3 +121,48 @@ it('耗尽预算后可以显式增加预算并继续调度', async () => {
   fireEvent.click(screen.getByText('继续调度'));
   await waitFor(() => expect(apiPost).toHaveBeenLastCalledWith('/api/brain/runs/brain-run/commands', { action: 'resume', input: {} }));
 });
+it('运行推进到下一层后，点击前一层和节点仍打开该层最新执行', async () => {
+  const data = view('dag');
+  data.run = { ...data.run, activation: 3, layer: 2, phase: 'completed', valid_layers: 2 };
+  data.plan.layers.push({ layer_id: 'report', title: '报告', task: '出报告' });
+  data.plan.nodes.push({ node_id: 'report', layer_id: 'report', title: '报告任务', capability_id: 'cap' });
+  data.operations.push({ ...data.operations[1], activation: 3, layer: 2, node_id: 'report', execution_id: 'report-3', operation_id: 'op-report', status: 'done' });
+  data.events.push({ activation: 3, round: 2, layer: 2, event_type: 'layer_started' });
+  const { container } = render(<MilestoneRunBody view={data} id="brain-run" refresh={vi.fn()} />);
+  expect(container.querySelector('[data-id="layer:coding"]').style.visibility).toBe('visible');
+  fireEvent.click(container.querySelector('[data-id="layer:coding"]'));
+  expect((await screen.findByTestId('execution-identity')).textContent).toBe('dag:dag-visit-2:false');
+  expect(screen.getByRole('dialog', { name: '第 1 层 · Coding' })).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: '选择层执行记录' })).toBeTruthy();
+  expect(container.querySelector('[data-id="layer:report"]').style.visibility).toBe('visible');
+});
+it('并行层展示全部任务，未派发层显示明确说明', async () => {
+  const data = view('agent');
+  data.plan.nodes.push({ node_id: 'review', layer_id: 'coding', title: '审查任务', capability_id: 'cap' });
+  data.operations.push({ ...data.operations[1], node_id: 'review', execution_id: 'review-2', operation_id: 'op-review' });
+  const { container } = render(<MilestoneRunBody view={data} id="brain-run" refresh={vi.fn()} />);
+  fireEvent.click(container.querySelector('[data-id="layer:coding"]'));
+  expect(screen.queryByTestId('execution-identity')).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: /审查任务.*查看执行详情/ }));
+  expect((await screen.findByTestId('execution-identity')).textContent).toBe('agent:review-2:true');
+});
+it('未派发层支持键盘打开且不伪造执行记录', async () => {
+  const data = view('dag'); data.operations = []; data.events = [];
+  const { container } = render(<MilestoneRunBody view={data} id="brain-run" refresh={vi.fn()} />);
+  fireEvent.keyDown(container.querySelector('[data-id="layer:coding"]'), { key: 'Enter' });
+  expect(await screen.findByText('本层尚未派发，执行开始后可在这里查看详情')).toBeTruthy();
+  expect(screen.queryByTestId('execution-identity')).toBeNull();
+});
+it('全屏画布支持退出按钮和 Escape，完成后不展示无效的调度操作', () => {
+  const data = view('dag'); data.run.phase = 'completed';
+  const { container } = render(<MilestoneRunBody view={data} id="brain-run" refresh={vi.fn()} />);
+  expect(screen.queryByText('暂停调度')).toBeNull();
+  expect(screen.queryByText('取消运行')).toBeNull();
+  fireEvent.click(screen.getByText('全屏画布'));
+  expect(container.querySelector('.brain-run-workspace.is-fullscreen')).toBeTruthy();
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(container.querySelector('.brain-run-workspace.is-fullscreen')).toBeNull();
+  fireEvent.click(screen.getByText('全屏画布'));
+  fireEvent.click(screen.getByText('退出全屏'));
+  expect(container.querySelector('.brain-run-workspace.is-fullscreen')).toBeNull();
+});

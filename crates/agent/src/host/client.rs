@@ -220,6 +220,15 @@ impl Host {
             }
             Err(error) => return Err(error.into()),
         };
+        // Axum rejects an incompatible JSON operation before Runtime admission.
+        // Preserve that definitive rejection so Control can settle its outbox;
+        // wrapping it as a routing 503 would retry the same schema forever.
+        if response.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+            return Ok(RpcReply::error(
+                422,
+                "runtime rejected the execution protocol; request was not accepted",
+            ));
+        }
         let reply = response.error_for_status()?.json().await?;
         let was_asleep = self
             .store

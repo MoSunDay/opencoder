@@ -65,6 +65,20 @@ impl NodeService for MockNode {
     }
 
     async fn handle(&self, operation: NodeOperation) -> RpcReply {
+        let gate = match &operation {
+            NodeOperation::Create { assignment } => self
+                .create_gate
+                .lock()
+                .unwrap()
+                .as_ref()
+                .filter(|(prefix, _)| assignment.index.id.starts_with(prefix))
+                .map(|(_, gate)| gate.clone()),
+            _ => None,
+        };
+        if let Some(gate) = gate {
+            self.gated_creates.fetch_add(1, Ordering::SeqCst);
+            gate.notified().await;
+        }
         let mut t = self.tables.lock().unwrap();
         match operation {
             NodeOperation::Brain { action, .. } if action == "capability_probe" => {

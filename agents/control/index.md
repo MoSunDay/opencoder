@@ -1,4 +1,4 @@
-Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
+Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
 
 # control 模块
 
@@ -21,6 +21,7 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 - [api/brain_runs/tui.rs](../../crates/control/src/api/brain_runs/tui.rs) — `GET /api/tui/agent-capabilities` 复用能力库目录，仅投影可用 Agent/Operator 的 ID、种类、目标和摘要；editor 与 viewer 可读，不返回定义与 Harness 私有设置。
 - `src/transport/layered_tests.rs` — 分层 wake 的 generation 栅栏（只确认本次激活准入的那一轮）
 - `src/scheduler.rs`、`src/scheduler/telemetry.rs`、`src/api/schedules/`、`src/api/scheduler_metrics.rs`、`src/seed_schedules.rs` — cron 调度、进程内计数、定义 CRUD、调度总览与遗留导入；[scheduler/timing.rs](../../crates/control/src/scheduler/timing.rs) 以定义生效时间和最近触发记录计算补跑、跳过与重试，纯函数不执行 I/O。定义 CRUD 的相同内容写入保留原生效时间。
+- [scheduler.rs](../../crates/control/src/scheduler.rs) 按定义 ID 保留一个进行中的触发任务，跨扫描去重；各定义独立等待准入，慢请求不阻塞其他日程。重启后的去重仍依赖持久化派发记录与确定性执行 ID；回归见 [schedule_api/isolation.rs](../../crates/control/tests/e2e/schedule_api/isolation.rs)。
 - `src/bootstrap.rs`、`src/routes.rs` — 管理凭据与独立指标凭据分开装配；指标凭据只允许读取 `GET /metrics`，相同凭据拒绝启动
 - [resource_scope.rs](../../crates/control/src/resource_scope.rs)、[release/resources.rs](../../crates/control/src/release/resources.rs) — 固定资源服务配置并装配共享二进制管理接口及四个只读 NFS 导出；版本 Server 转发管理请求，保留查询参数、原始文件字节与响应元数据。
 - [ontology.rs](../../crates/control/src/ontology.rs)、[routes.rs](../../crates/control/src/routes.rs) — 挂载 `/api/ontology` 和正文 NFS 管理接口；正文根与 Agent、二进制、源工作区互不包含，不能导出 Server 数据库。域实现见 [ontology](../ontology/index.md)。

@@ -23,7 +23,7 @@ pub(super) fn all(source: &Path, staging: &Path) -> Result<usize> {
         if AGENT_CATEGORIES.contains(&name.to_string_lossy().as_ref()) {
             // Create shared category parents before workers own disjoint children.
             let target = staging.join(&name);
-            opencoder_core::share_fs::durable_create_dir_all(&target)?;
+            std::fs::create_dir_all(&target)?;
             for resource in std::fs::read_dir(item.path())? {
                 let resource = resource?;
                 if resource
@@ -162,10 +162,12 @@ fn copy_entry(root: &Path, entry: &Entry) -> Result<()> {
         let _: AgentMeta = serde_json::from_slice(&raw)?;
         None
     };
-    opencoder_core::share_fs::durable_create_dir_all(&entry.target)?;
+    // This tree is private staging. Flush each populated directory once,
+    // bottom-up, before publication instead of flushing empty directories
+    // and their shared parents for every resource.
+    std::fs::create_dir_all(&entry.target)?;
     std::fs::write(entry.target.join("meta.json"), raw)?;
     opencoder_core::platform::fs::sync_file(&entry.target.join("meta.json"))?;
-    opencoder_core::platform::fs::sync_directory(&entry.target)?;
     if let Some(version) = version {
         let path = entry.source.join(&version);
         if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&path)?) {
@@ -180,11 +182,12 @@ fn copy_entry(root: &Path, entry: &Entry) -> Result<()> {
         }
         version_files(&original, &entry.target.join(version))?;
     }
+    opencoder_core::platform::fs::sync_directory(&entry.target)?;
     Ok(())
 }
 
 pub(super) fn version_files(source: &Path, destination: &Path) -> Result<()> {
-    opencoder_core::share_fs::durable_create_dir_all(destination)?;
+    std::fs::create_dir_all(destination)?;
     for entry in std::fs::read_dir(source)
         .with_context(|| format!("read resource version dir {}", source.display()))?
     {

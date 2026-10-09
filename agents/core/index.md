@@ -1,4 +1,4 @@
-Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
+Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
 
 # core 模块
 
@@ -25,7 +25,7 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 - [net.rs](../../crates/core/src/net.rs) — HTTP 客户端统一解析显式代理及大小写环境变量；读取 `NO_PROXY`（未设置时读取 `no_proxy`），并保留固定的回环地址例外。容器沿用配置中的代理，额外传入这两项排除变量；纯规则构造入口供测试与调用方避免读进程环境。
 - `src/data_dir.rs` — 按工作目录隔离的数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
-- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 5；schema v34 将用户与 Token 分开保存，旧格式 1–4 升级须走维护发布。
+- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 6；schema v35 将用户与 Token 分开保存，旧格式 1–5 升级须走维护发布。
 - `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
 
 ## 私有任务文件

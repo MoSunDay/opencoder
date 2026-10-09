@@ -30,7 +30,7 @@ use opencoder_store::{
     SCHEDULE_RUN_MISSED,
 };
 use serde_json::Value;
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 pub mod telemetry;
 mod timing;
@@ -49,6 +49,7 @@ pub fn start(state: &Arc<AppState>) {
     let weak = Arc::downgrade(state);
     tokio::spawn(async move {
         let mut interval = DEFAULT_SCAN_SECS;
+        let mut pending = HashMap::new();
         loop {
             let Some(state) = weak.upgrade() else {
                 return;
@@ -61,7 +62,7 @@ pub fn start(state: &Arc<AppState>) {
                 return;
             }
             state.lifecycle.scheduler.scan_started(now_ms());
-            if let Err(error) = scan(&state).await {
+            if let Err(error) = scan(&state, &mut pending).await {
                 state.lifecycle.scheduler.scan_error();
                 tracing::error!(%error, "schedule scan failed");
             }
@@ -83,7 +84,11 @@ pub fn start(state: &Arc<AppState>) {
 /// the Store (`schedules` table — the same source the list surface shows);
 /// per-job errors are logged and swallowed — a broken job must not starve
 /// the others, and a store read failure only delays this scan.
-async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
+async fn scan(
+    state: &Arc<AppState>,
+    pending: &mut HashMap<String, tokio::task::JoinHandle<()>>,
+) -> Result<(), anyhow::Error> {
+    pending.retain(|_, task| !task.is_finished());
     let defs = match state.store.list_schedules().await {
         Ok(defs) => defs,
         Err(error) => {
@@ -94,6 +99,9 @@ async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
     };
     for def in defs.iter().filter(|def| def.job.enabled) {
         let job = &def.job;
+        if pending.contains_key(&job.id) {
+            continue;
+        }
         // Fail-soft: a structurally invalid job (bad cron / params / target
         // contract) is skipped with a warning; it must not starve the rest.
         if let Err(error) = job.validate() {
@@ -101,10 +109,20 @@ async fn scan(state: &Arc<AppState>) -> Result<(), anyhow::Error> {
             tracing::warn!(schedule = %job.id, %error, "invalid schedule skipped");
             continue;
         }
-        if let Err(error) = fire_due(state, def).await {
-            state.lifecycle.scheduler.scan_error();
-            tracing::warn!(schedule = %job.id, %error, "schedule fire failed");
-        }
+        // A slow admission must not suspend scans of unrelated schedules.
+        // Keep one in-flight fire per definition, including across scans;
+        // durable outbox identity still governs retries after a restart.
+        let state = state.clone();
+        let def = def.clone();
+        pending.insert(
+            job.id.clone(),
+            tokio::spawn(async move {
+                if let Err(error) = fire_due(&state, &def).await {
+                    state.lifecycle.scheduler.scan_error();
+                    tracing::warn!(schedule = %def.job.id, %error, "schedule fire failed");
+                }
+            }),
+        );
     }
     Ok(())
 }

@@ -39,6 +39,12 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
     let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
+    let workdir = fleet.root().join("n0/work");
+    let config_path = workdir.join("opencoder.json");
+    let mut config = read_json(&config_path);
+    config["local_memory"] = json!(true);
+    std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+    assert!(opencoder_core::Config::load(&workdir).unwrap().local_memory);
     let saved = fleet
         .call(
             "POST",
@@ -94,7 +100,8 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
         .iter()
         .any(|index| index.id.starts_with("member-")));
 
-    // ── request layer: exactly the 12 scripted decisions/answers, in order.
+    // Exactly 12 decisions/answers even with node-level memory enabled:
+    // intermediate discussion steps must not start repository maintenance.
     let requests = client.requests();
     assert_eq!(requests.len(), 12, "{:?}", requests.len());
     let request_prompt = |i: usize| prompt_text(&requests[i]);

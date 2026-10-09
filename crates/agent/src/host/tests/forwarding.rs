@@ -1,5 +1,63 @@
 use super::*;
 
+#[tokio::test]
+async fn runtime_schema_rejection_remains_definitive_without_changing_ownership() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Host::open(&dir.path().join("host"), "node".into(), "test".into(), 1)
+        .await
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let app = axum::Router::new().route(
+        "/rpc",
+        axum::routing::post(|| async {
+            (
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "Failed to deserialize the JSON body: unknown field",
+            )
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    host.store
+        .register_runtime(&opencoder_store::fleet::handoff::RuntimeRecord {
+            id: "original".into(),
+            release_id: "original".into(),
+            mode: "staged".into(),
+            config: json!({"endpoint":endpoint,"data_dir":dir.path().join("runtime"),
+                "unit":"opencoder-runtime-original.service"}),
+        })
+        .await
+        .unwrap();
+    host.store.activate_runtime("original").await.unwrap();
+    let reply = host.handle(create(&host, "agent-rejected-schema")).await;
+    assert_eq!(
+        reply.status, 422,
+        "a definitive rejection must not become a retryable 503"
+    );
+    assert!(reply.body["error"]
+        .as_str()
+        .unwrap()
+        .contains("not accepted"));
+    assert_eq!(
+        host.store
+            .owner("agent-rejected-schema")
+            .await
+            .unwrap()
+            .unwrap()
+            .runtime_id,
+        "original"
+    );
+    let lock = tokio::time::timeout(
+        Duration::from_secs(1),
+        host.store.request_lock("runtime-use", "original"),
+    )
+    .await
+    .expect("rejected request retained its runtime lock")
+    .unwrap();
+    drop(lock);
+    server.abort();
+}
+
 async fn assert_stalled_forward_releases_its_lock(creation: bool) {
     let dir = tempfile::tempdir().unwrap();
     let host = Host::open(

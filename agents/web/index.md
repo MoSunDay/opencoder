@@ -1,11 +1,11 @@
-Commit: 1728bd89cbc86119632b83f2cc0b67d7cf6fe810
+Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
 
 # web 模块
 
 axum HTTP + SSE 会话管理 + 内嵌 SPA。
 
 ## 索引
-- [admin/users.jsx](../../crates/web/spa/src/admin/users.jsx)、[admin/tokens.jsx](../../crates/web/spa/src/admin/tokens.jsx) — 用户角色编辑与独立 Token 的签发、到期和撤销；新 Token 只展示一次。
+- [admin/users.jsx](../../crates/web/spa/src/admin/users.jsx)、[admin/tokens.jsx](../../crates/web/spa/src/admin/tokens.jsx) — 用户角色编辑与独立 Token 的签发、到期和撤销；新 Token 只展示一次。列表与节点页共用 [admin/layout.jsx](../../crates/web/spa/src/admin/layout.jsx)；[admin/model.js](../../crates/web/spa/src/admin/model.js) 提供搜索与状态判断纯函数，[admin/formModal.jsx](../../crates/web/spa/src/admin/formModal.jsx) 管理单次编辑、提交互斥和失败草稿。
 - [chat/conversationInput.jsx](../../crates/web/spa/src/chat/conversationInput.jsx) — 会话页和 Agent/Operator 执行详情共用输入组件；按当前角色控制提交，保留引导、排队与问题交互。
 - `src/lib.rs` — `AppState` 装配（`config_home`：Operator 执行 home，prompt/config 载入走 `Config::load_with_home`，drain 栈经 `DrainContext` 穿参）
 - `src/api.rs`、`src/api_*.rs` — 各域 HTTP API（prompt/events/agents/dag/todo/team/…）

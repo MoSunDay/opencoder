@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
 
 # agent 模块
 
@@ -17,6 +17,7 @@ Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点，启动前�
 ## 报告与发布边界
 
 - [host/client.rs](../../crates/agent/src/host/client.rs)：普通只读 RPC 不增加库存修订号；唤醒 Runtime 或清除休眠标记仍通知同步。Host 汇总全部 Runtime 索引，但只用活动 Runtime 的健康状态决定新任务准入；退休 Runtime 的休眠快照错误不阻断当前版本。
+- Runtime 在准入前返回的 HTTP 422 保持为明确拒绝，不能包装成可重试的 503；执行归属保持原 Runtime，转发结束释放使用锁。回归见 [host/tests/forwarding.rs](../../crates/agent/src/host/tests/forwarding.rs)。
 - [host/client.rs](../../crates/agent/src/host/client.rs) 对 `result`、`team.topic` 的分块读取复用 [result_reader](../../crates/worker/src/result_reader/mod.rs)，在原执行所属 Runtime 的目录只读读取，补齐内容版本，不唤醒、恢复或迁移原执行。其他请求仍按执行归属转发；升级顺序见 [项目模块约定](../../rules/07-project-module-contract.md)。
 - [host/service.rs](../../crates/agent/src/host/service.rs)、[host/client.rs](../../crates/agent/src/host/client.rs)：节点冻结、查询准入和重新开放跳过已休眠 Runtime；需要转发给 Runtime 的请求若触发唤醒，先依次取得 Host 准入锁和 Runtime 使用锁，再同步当前准入模式，成功后清除休眠标记并转发请求。
 - [host/mod.rs](../../crates/agent/src/host/mod.rs)：关闭信号 future 在主循环外固定，库存和通道变化不会丢弃已到达的 SIGTERM。

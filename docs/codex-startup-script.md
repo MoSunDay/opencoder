@@ -23,6 +23,26 @@ Codex Harness 的默认配置和命名 profile 支持 `startup_script`，值为�
 - 容器任务在原有容器内运行脚本，解释器或可执行脚本必须存在于该容器镜像；脚本参数引用的文件同样必须在容器内可读，不回退到宿主机。
 - 不再提供平台专用的 `auth_slot` 字段。旧配置中如带有该字段（包括 `null`），切换版本前须移除；需要扩展 Codex 参数时，由启动脚本自行组织。
 
+## 已保存执行的迁移
+
+旧版本可能在 Server 的执行配置快照中保存 `auth_slot: null`。使用
+`scripts/platform/migrations/codex_startup.py` 显式迁移，不在运行时代码中接受旧字段：
+
+```sh
+python3 scripts/platform/migrations/codex_startup.py --database /path/to/control.db
+python3 scripts/platform/migrations/codex_startup.py --database /path/to/control.db \
+  --apply --journal /private/rollback/codex-startup.json
+```
+
+默认只预览。脚本只修改 `execution_assignments` 中默认 Codex 配置和命名 profile
+里的空字段，补入 `startup_script: []`，保留已有脚本、环境变量、版本、原请求和执行归属。
+非空 `auth_slot` 会阻止整次迁移，须先确定对应的外部启动脚本，不能自动丢弃账号选择。
+脚本不修改认证表和受理回执，也不启动或停止服务。
+
+回退文件在第一次写库前以私有权限完整落盘，必须放在仓库外；同一路径可重复执行，
+不会覆盖原值。需要回退时用 `--restore --journal <原文件>`；数据库身份、记录内容
+或回退文件校验不一致时拒绝写入。所有记录在同一事务内更新，中断后沿用原文件重试。
+
 ## 外部脚本示例
 
 以下文件由使用方部署在平台仓库外：

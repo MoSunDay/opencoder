@@ -130,7 +130,15 @@ mod tests {
             assert!(!allowed(role, "GET", "/api/resource-admission-provider"));
             assert!(!allowed(role, "PUT", "/api/resource-admission-provider"));
         }
-        assert!(allowed(Role::Admin, "POST", "/api/executions/run/resources"));
-        assert!(allowed(Role::Admin, "PUT", "/api/resource-admission-provider"));
+        assert!(allowed(
+            Role::Admin,
+            "POST",
+            "/api/executions/run/resources"
+        ));
+        assert!(allowed(
+            Role::Admin,
+            "PUT",
+            "/api/resource-admission-provider"
+        ));
     }
 }

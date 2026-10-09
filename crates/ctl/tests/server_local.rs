@@ -332,3 +332,8 @@ async fn exec_list_empty_and_missing_get_rejected() {
     // Unknown execution id → 404 → the server-rejection exit code.
     assert_eq!(cli(&s, TOKEN, &["exec", "get", "exec-none"]).await, 4);
 }
+
+#[path = "project/catalog.rs"]
+mod project_catalog;
+#[path = "project/conversation.rs"]
+mod project_conversation;

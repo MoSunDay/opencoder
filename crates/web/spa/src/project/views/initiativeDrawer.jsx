@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Button, Drawer, Form, Select, Space, Typography } from 'antd';
 import { useState } from 'react';
 import { apiPatch } from '../../api.js';
@@ -17,7 +18,7 @@ export function InitiativeDrawer({ initiativeId, overview, refresh, onNotice, on
   };
   return <Drawer open={!!initiativeId} title={`专项 · ${initiative?.title || ''}`} onClose={onClose} size="100vw" className="project-initiative-drawer">
     {initiative ? <Space orientation="vertical" size={18} style={{ width: '100%' }}>
-      <Space wrap><Typography.Text type="secondary">所属项目：{initiative.goal_title || '独立专项'}</Typography.Text><Button onClick={() => setEditing(true)}>编辑专项</Button></Space>
+      <Space wrap><Typography.Text type="secondary">所属项目：{initiative.goal_title || '独立专项'}</Typography.Text><EditButton onClick={() => setEditing(true)}>编辑专项</EditButton></Space>
       <Markdown text={initiative.detail_md} /><TodoProgress progress={progressOf(initiative.todos)} />
       <TodoBoard key={initiativeId} initiative={initiative} overview={overview} refresh={refresh} onNotice={onNotice} openTodo={openTodo} />
     </Space> : initiativeId && <Typography.Text type="secondary">专项已删除或正在加载</Typography.Text>}

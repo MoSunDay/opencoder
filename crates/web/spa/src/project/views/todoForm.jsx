@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Button, Drawer, Form, Input, Select } from 'antd';
 import { useState } from 'react';
 import { apiPost } from '../../api.js';
@@ -20,7 +21,7 @@ export function CreateTodo({ open, overview, initiativeId, onClose, onCreated, o
     } catch (error) { onNotice(err(error.message)); } finally { setSaving(false); }
   };
   return <Drawer open={open} title="新建 TODO" onClose={() => { if (!saving) onClose(); }} size="min(600px, 100vw)" destroyOnHidden
-    extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>创建</Button>}>
+    extra={<EditButton type="primary" loading={saving} onClick={() => form.submit()}>创建</EditButton>}>
     <Form form={form} layout="vertical" disabled={saving} onFinish={create} initialValues={{ initiative_id: initiativeId || undefined, board_status: 'todo', tag_ids: [] }}>
       <Form.Item name="title" label="标题" rules={[{ required: true, whitespace: true, message: '请输入标题' }]}><Input /></Form.Item>
       <Form.Item name="initiative_id" label="所属专项"><Select {...searchSelect} aria-label="所属专项" placeholder="未归属专项" options={groupOptions(overview)} onChange={() => form.setFieldValue('tag_ids', [])} /></Form.Item>

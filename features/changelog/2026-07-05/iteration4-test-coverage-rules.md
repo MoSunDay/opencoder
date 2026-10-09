@@ -3,14 +3,14 @@ Commit: (working-tree, pre-initial-commit)
 # 迭代四：测试覆盖补齐 + 仓库规则落地
 
 ## Context
-迭代三结束时 workspace 有 58 个测试，但审计发现多个业务功能零覆盖：LLM 流式原语（SseDecoder/ToolAccumulator）、CLI 全部命令、6/9 工具、subagent 分发、TUI handle_key/ChatView、Web HTTP 层、prompt 构建。本迭代系统性补齐，并建立仓库级测试规则确保未来不再退化。
+迭代三结束时 workspace 有 58 个测试，但审计发现多个功能零覆盖：LLM 流式原语（SseDecoder/ToolAccumulator）、CLI 全部命令、6/9 工具、subagent 分发、TUI handle_key/ChatView、Web HTTP 层、prompt 构建。本迭代系统性补齐，并建立仓库级测试规则确保未来不再退化。
 
 ## Change Summary
 
 ### 仓库规则（rules/）
 - 新增 `rules/` 目录，含 4 个规则文件：
   - `README.md` — 规则索引 + PR 快速检查清单
-  - `01-mandatory-tests.md` — 每个业务功能必须有对应测试；禁止表面测试；达标标准 + 违规处理
+  - `01-mandatory-tests.md` — 每个功能必须有对应测试；禁止表面测试；达标标准 + 违规处理
   - `02-regression-gate.md` — 迭代收尾全量回归 + changelog 附「功能→测试名」映射
   - `03-test-pyramid.md` — 测试分层（unit 内联 / integration tests/ / e2e scripts/）+ 放置决策树
 - `agents.md` 追加「仓库规则」小节引用 `rules/`

@@ -6,13 +6,13 @@ use opencoder_core::identity::Identity;
 pub(crate) struct Actor {
     pub external_id: String,
     pub display_name: String,
-    pub is_admin: bool,
+    pub can_manage: bool,
     pub is_service: bool,
 }
 
 impl Actor {
     pub fn require_manage(&self) -> Result<(), AppError> {
-        if self.is_admin {
+        if self.can_manage {
             Ok(())
         } else {
             Err(AppError::Forbidden)
@@ -31,7 +31,7 @@ pub(crate) async fn identify(mut request: Request, next: Next) -> Response {
     request.extensions_mut().insert(Actor {
         external_id: identity.name.clone(),
         display_name: identity.name.clone(),
-        is_admin: identity.is_admin(),
+        can_manage: identity.can_edit(),
         is_service: false,
     });
     next.run(request).await

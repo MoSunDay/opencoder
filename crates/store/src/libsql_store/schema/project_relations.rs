@@ -1,5 +1,5 @@
 //! v23: independent milestones and one-time classification of legacy backlog.
-//! Runs inside the bootstrap transaction; no business record is discarded.
+//! Runs inside the bootstrap transaction; no platform record is discarded.
 use anyhow::{ensure, Result};
 use libsql::{params, Connection};
 

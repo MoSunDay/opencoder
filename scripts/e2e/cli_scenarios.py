@@ -218,7 +218,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     if os.path.isfile(test_calc):
         with open(test_calc, encoding="utf-8") as f:
             tc = f.read()
-        # Deep business contract: post-compaction the model still knew calc's API
+        # Deep platform contract: post-compaction the model still knew calc's API
         # (proves the summary + tail turns preserved usable context).
         c.soft("post-compaction test references calc's functions",
                "import calc" in tc or "calc." in tc,
@@ -297,7 +297,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
         bin_path, plan,
         "创建一个新文件 plan_test.py，内容为：print('created by plan agent')。直接用 bash 写入文件。",
     )
-    # Hard business contract: regardless of HOW the plan agent responds (tries bash
+    # Hard platform contract: regardless of HOW the plan agent responds (tries bash
     # and is blocked, or just describes a plan), it must NOT have created the file.
     c.check("plan agent created no file (disk unmutated)", not os.path.isfile(target))
 
@@ -492,7 +492,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
             or "Planning phase complete." in ap_text
         )
         c.check("transcript carries an injected autopilot phase prompt", injected)
-        # Business outcome + handoff-boundary (model-cooperation soft checks).
+        # Platform outcome + handoff-boundary (model-cooperation soft checks).
         hello_ap = os.path.join(ap_wd, "hello_ap.txt")
         c.soft("autopilot created hello_ap.txt artifact", os.path.isfile(hello_ap),
                "file missing (model did not finish the write)")

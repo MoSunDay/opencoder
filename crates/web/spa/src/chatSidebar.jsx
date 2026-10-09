@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 import { ClearOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Conversations } from '@ant-design/x';
 import { Button, Select, Spin } from 'antd';
@@ -52,24 +53,24 @@ export function DialogSidebar({
             items={dialogsToItems(dialogs)}
             activeKey={activeKey}
             onActiveChange={onActiveChange}
-            menu={(item) => ({
+            menu={onDelete ? (item) => ({
               items: [{ key: 'delete', danger: true, icon: <DeleteOutlined />, label: '删除' }],
               onClick: ({ key }) => { if (key === 'delete') onDelete?.(item.key); },
-            })}
+            }) : undefined}
           />
         </Spin>
       </div>
-      <Button
+      <EditButton
         danger
         block
         size="small"
         icon={<ClearOutlined />}
-        disabled={disabled || !dialogs.length}
+        disabled={!onDeleteAll || disabled || !dialogs.length}
         onClick={onDeleteAll}
         style={{ marginTop: 12 }}
       >
         删除全部会话
-      </Button>
+      </EditButton>
     </div>
   );
 }

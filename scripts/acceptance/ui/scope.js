@@ -1,5 +1,5 @@
 const CASES = [
-  { name: 'platform', script: 'platform.js', native: true, pages: ['nodes', 'topics', 'schedules', 'dag', 'team', 'chat', 'agents'] },
+  { name: 'platform', script: 'platform.js', native: true, pages: ['nodes', 'users', 'tokens', 'topics', 'schedules', 'dag', 'team', 'chat', 'agents'] },
   { name: 'project', script: 'project/main.js', args: ['--workbench-only'], pages: ['project'] },
   { name: 'project-capabilities', script: 'project/capabilities/main.js', native: true, pages: ['project', 'chat', 'dag', 'brain', 'topics'] },
   { name: 'project-board', script: 'project_workbench_ui.js', pages: ['project'] },

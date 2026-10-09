@@ -1,3 +1,4 @@
+import { EditButton } from '../../../ui/permissions.jsx';
 import { MilestoneRunBody } from '../milestone/run.jsx';
 // run.jsx — the v4 workbench body: layered canvas, layer barrier progress,
 // layer decisions and the v4 event journal. v3 runs never reach this module.
@@ -59,7 +60,7 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
       </div>
       <Space>
         <Button disabled={busy || terminalPhase(phase)} onClick={() => command(phase === 'paused' ? 'resume' : 'pause')}>{phase === 'paused' ? '继续调度' : '暂停调度'}</Button>
-        <Button danger disabled={busy || terminalPhase(phase)} onClick={() => command('cancel')}>取消调度</Button>
+        <EditButton danger disabled={busy || terminalPhase(phase)} onClick={() => command('cancel')}>取消调度</EditButton>
       </Space>
     </div>
     <section className="brain-layer-barrier" aria-label="层屏障进度">

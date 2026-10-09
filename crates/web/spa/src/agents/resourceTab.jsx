@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import {useState} from 'react';
 import {Alert, Button, Card, Collapse, Input, Select, Space, Switch, Typography} from 'antd';
 import {Markdown} from '../project/markdown.jsx';
@@ -20,8 +21,8 @@ export function ResourceTab({cat,label,entry,onEdit,onSave}) {
   return <div>
     <Space wrap style={{marginBottom:12}}>
       <Typography.Text>{view.baseline.resource ? `当前 v${view.baseline.version}` : view.builtin_prompt ? '内置定义' : '未配置'}</Typography.Text>
-      {view.read_only ? <Typography.Text>内置 Agent · 只读</Typography.Text> : <Button type="primary" loading={saving}
-        disabled={invalidPrompt || !isDirty(entry)} onClick={() => onSave()}>保存</Button>}
+      {view.read_only ? <Typography.Text>内置 Agent · 只读</Typography.Text> : <EditButton type="primary" loading={saving}
+        disabled={invalidPrompt || !isDirty(entry)} onClick={() => onSave()}>保存</EditButton>}
       {cat !== 'prompts' && !view.read_only && <ArchiveUpload cat={cat} files={draft} disabled={readOnly}
         onMerge={files => onEdit(files)} onError={setUploadError}/>}
       {isDirty(entry) && <Typography.Text type="warning">未保存</Typography.Text>}
@@ -42,7 +43,7 @@ export function ResourceTab({cat,label,entry,onEdit,onSave}) {
     {!!view.versions.length && <Collapse style={{marginTop:12}} items={[{key:'history',label:'历史版本',children:<Space wrap>
       <Select aria-label={`history-${cat}`} placeholder="选择历史版本" value={version} style={{minWidth:150}} onChange={setVersion}
         options={[...view.versions].reverse().map(value => ({value,label:`v${value}`}))}/>
-      {!view.read_only && <Button disabled={!version || saving} onClick={() => onSave(version)}>恢复为新版本</Button>}
+      {!view.read_only && <EditButton disabled={!version || saving} onClick={() => onSave(version)}>恢复为新版本</EditButton>}
       <Typography.Text type="secondary">恢复只影响当前 Agent。</Typography.Text>
     </Space>}]} />}
   </div>;

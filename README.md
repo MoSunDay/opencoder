@@ -220,7 +220,7 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 | 协议 | OpenAI 兼容 + ACP + MCP | OpenAI 兼容 + 子代理（explore/build） | — |
 | 会话存储 | SQLite（WAL）+ Drizzle ORM | libsql（SQLite 兼容，WAL）+ 自写 `Store` trait | 均为 SQLite；见下方[存储对比](#-存储) |
 
-> **冷启 token 开销**口径：取各 agent 首次发给 LLM 的请求体，计数其中的 `system` 消息 + `tools` 数组（首轮固定开销，发生在任何用户输入之前），用 `cl100k_base` BPE 计 token；与上表其余 `--help` 运行时基线指标独立测量。这一项是每一轮对话都重复支付的固定成本。
+> **冷启 token 开销**口径：取各 agent 首次发给 LLM 的请求体，计数其中的 `system` 消息 + `tools` 数组（首轮固定开销，发生在任何用户输入之前），用 `cl100k_base` BPE 计 token；与上表其余 `--help` 运行时基线指标独立测量。这一项是每一轮对话都会产生的固定成本。
 
 ### 🗄️ 存储
 
@@ -280,11 +280,7 @@ opencoder run "实现终端贪吃蛇..."
 
 ## 🧪 开发与测试
 
-本仓库只维护 OpenCoder 的通用基建能力、可复用工具、测试和说明。外部业务实现、专用工作流、业务数据及现场记录在仓库外独立维护，通过平台注册接口和任务输入接入。核心代码、构建和测试不依赖这些外部文件。
-
-
-
-本项目强制遵循 [`rules/`](rules/) 下的开发规则：每个业务功能必须有对应测试，每轮迭代结束前跑全量回归并附 changelog + 测试清单。
+本项目强制遵循 [`rules/`](rules/) 下的开发规则：每个功能必须有对应测试，每轮迭代结束前跑全量回归并附 changelog + 测试清单。
 
 ```bash
 # 单元 + 集成测试（确定性，零网络）

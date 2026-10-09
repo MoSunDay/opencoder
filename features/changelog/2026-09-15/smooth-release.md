@@ -50,7 +50,7 @@ Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 - 全目标 Clippy 零警告，workspace 构建通过；日志 `/tmp/opencoder-smooth-final-clippy5.log`、`/tmp/opencoder-smooth-final-build2.log`。
 - 前端全量 96 文件、683 项通过，SPA 构建与漂移检查通过；日志 `/tmp/opencoder-smooth-combined-spa4.log`。
 - 发布工具 16 项通过，包含 24 个故障子场景；旧安装/备份工具 19 项、真实模型验收夹具 3 项通过。日志 `/tmp/opencoder-smooth-final-rolling-tests4.log`、`/tmp/opencoder-smooth-platform-current.log`、`/tmp/opencoder-smooth-final-acceptance-tests.log`。
-- 业务二进制源码与 `320dbbf3` 发布候选一致，保留 TODO 目录交付及已上线 DAG 修复；发布工具另包含本机挂载预检和首次迁移修复。该候选的优化发布包另有磁盘演练证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`，详见 [TODO 目录交付](todo-directory-editor.md#联合发布验证)。
+- 平台二进制源码与 `320dbbf3` 发布候选一致，保留 TODO 目录交付及已上线 DAG 修复；发布工具另包含本机挂载预检和首次迁移修复。该候选的优化发布包另有磁盘演练证据 `/var/tmp/opencoder-smooth-h7quack9/result.json`，详见 [TODO 目录交付](todo-directory-editor.md#联合发布验证)。
 - Nginx 1.30.4 已接管固定入口；独立 NFS、Host 与 Runtime 正常运行，原 Server/Agent 已退出。
 
 首次迁移预检发现本机挂载表对同一路径重复报告 `ext4`。检查器现逐项验证所有文件系统，重复本地记录允许通过；空结果、未知类型和包含 NFS 的混合结果仍拒绝。首次尝试尚未停止生产服务。

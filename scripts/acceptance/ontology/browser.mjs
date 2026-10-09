@@ -82,7 +82,7 @@ try {
   await choose(dialog, '目标实体', '下游服务');
   await submit();
   await page.getByRole('menuitem', { name: /图谱$/ }).click();
-  await page.getByRole('checkbox', { name: '展开跨类型邻居' }).check();
+  assert.equal(await page.getByRole('checkbox', { name: '展开跨类型邻居' }).count(), 0);
   await page.getByRole('button', { name: '调整范围', exact: true }).click();
   const types = page.getByRole('combobox', { name: '实体类型多选' });
   await types.click();

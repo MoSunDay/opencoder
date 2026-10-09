@@ -41,9 +41,9 @@ export function RunDetail({ run, onNotice, onClose, onFinished }) {
     </Space>
     {current.error && <Alert type="error" showIcon title={current.error} />}
     {error && <Alert type="error" showIcon title={error} action={<Button onClick={() => setRevision((v) => v + 1)}>重试</Button>} />}
-    <DagRunContext context={detail?.dag_context} />
     {detail ? <DagRunResult key={run.id} id={run.id} spec={detail.definition.spec || detail.definition}
       status={current.status} onStatus={updateStatus} /> : !error && <Spin />}
+    <DagRunContext context={detail?.dag_context} />
     {executionOpen && <ExecutionDetail id={run.id} summary={{ ...current, kind: 'dag' }} onClose={() => setExecutionOpen(false)} onNotice={onNotice} />}
   </Space>;
 }

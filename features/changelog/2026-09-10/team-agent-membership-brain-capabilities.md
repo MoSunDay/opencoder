@@ -6,7 +6,7 @@ Commit: bf757d2e8688496f8c1be8fc8926dbd9fb2e3c21
 成员职责由大脑能力集的一句话 summary 代替，由控制面在 resolve 时固化进 pinned
 definition，worker 与 SPA 均不再消费用户录入的 role。
 
-## 协议（DTO LOCKED 之外的业务形状变更）
+## 协议（DTO LOCKED 之外的数据形状变更）
 
 - `TeamMember { agent, capabilities?: [string] }`（删除 `id`/`role`）；成员身份 =
   agent 名，团队内必须唯一；`TeamDefinition.captain` 为 agent 名且 ∈ members。
@@ -127,7 +127,7 @@ definition，worker 与 SPA 均不再消费用户录入的 role。
 
 ## 兼容与范围
 
-- Fleet 线协议版本不变（TeamDefinition 为业务负载，非 PROTOCOL_VERSION 门控字段）。
+- Fleet 线协议版本不变（TeamDefinition 为应用负载，非 PROTOCOL_VERSION 门控字段）。
 - 本地 web 链（`web/api_teams.rs`，按注册节点组队）不含职责录入，本次不动。
 - `Config::default` 补齐工作区在途 DAG 配置的缺失字段（`dag: DagConfig::default()`），
   系解锁编译的最小必要修复，非本需求语义。

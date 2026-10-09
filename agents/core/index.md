@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 
 # core 模块
 
@@ -6,6 +6,8 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 接缝：`Arc<dyn Store>`、`Arc<dyn ChatStream>` 定义于相邻 crate，Config 供全仓加载。
 
 ## 索引
+- [identity/permissions.rs](../../crates/core/src/identity/permissions.rs) — `admin`、`editor`、`viewer` 共用 HTTP 权限纯函数，Control、独立 Web 与 Ontology 使用同一读写判定。
+- [harness/settings.rs](../../crates/core/src/harness/settings.rs) — Codex `startup_script` 保存逐项命令参数，配置与 profile 随执行固定；字段校验拒绝空入口和 NUL，Debug 不输出命令内容。
 - `src/message.rs` — Message/Role/ContentBlock
 - `src/config.rs` + `src/config/` — Config 加载、配置合并与基础配置；`src/config/runtime/` 保存 Agent、DAG、Ontology、MCP、CLI、技能等运行配置。物理目录拆分不改变 `crate::config` 的公共类型和序列化字段；顶层 `local_memory` 默认关闭，供会话完成钩子读取。`load_with_home` 将候选链重定向到执行 home；`load_with_home_frozen` 额外跳过 `apply_env`（快照即最终，版本化 Operator resume 用）；`load_operator(dir)` 只读 Operator 配置平面目录（`config.json` + 域文件，不做 env 合并）；`effective_domain_value`/`domain_file_for` 供节点 bootstrap 携带域视图
 - [配置覆盖](../../crates/core/tests/config_overlay/main.rs) — Codex 与三类可配置 NFS 按显式字段覆盖；未填写的启动、凭据、环境变量和导出字段保留。运行配置保留未指定的 profile，同名项替换完整版本。私有配置容量同时检查单文件和最终合并结果，错误不包含配置值；实现见 [merge.rs](../../crates/core/src/config/merge.rs) 与 [private_settings.rs](../../crates/core/src/config/runtime/agent/private_settings.rs)。
@@ -22,7 +24,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 - [net.rs](../../crates/core/src/net.rs) — HTTP 客户端统一解析显式代理及大小写环境变量；读取 `NO_PROXY`（未设置时读取 `no_proxy`），并保留固定的回环地址例外。容器沿用配置中的代理，额外传入这两项排除变量；纯规则构造入口供测试与调用方避免读进程环境。
 - `src/data_dir.rs` — 按工作目录隔离的数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
-- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 4；项目 schema v33 移除执行结论缓存，旧 Server 无法打开新库，格式 1–3 升级必须走维护发布。
+- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 5；schema v34 将用户与 Token 分开保存，旧格式 1–4 升级须走维护发布。
 - `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
 
 ## 私有任务文件

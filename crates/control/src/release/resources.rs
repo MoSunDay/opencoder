@@ -1,4 +1,4 @@
-//! Independent NFS owner. Business servers only proxy its management API.
+//! Independent NFS owner. Platform servers only proxy its management API.
 use anyhow::{ensure, Result};
 use opencoder_core::Config;
 use std::path::PathBuf;
@@ -74,8 +74,11 @@ pub fn build_app(state: std::sync::Arc<crate::AppState>, token: String) -> axum:
             axum::routing::get(crate::api_dag_workspace_nfs::get_status)
                 .post(crate::api_dag_workspace_nfs::set_status),
         )
-        .with_state(state)
-        .layer(axum::middleware::from_fn(crate::role_gate::require_role))
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::role_gate::require_role,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             Some(std::sync::Arc::new(crate::auth_mw::AuthState::new(
                 token, store,

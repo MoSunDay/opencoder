@@ -82,3 +82,15 @@ it('aborts an unfinished list read when closing the TODO', async () => {
   expect(signal.aborted).toBe(true);
   await act(async () => old.resolve({ assignments: [] }));
 });
+
+it('opens the current execution without dispatching or saving the TODO', async () => {
+  api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/index')
+    ? { id: 'agent-current', kind: 'agent', status: 'running' }
+    : { current_execution_id: 'agent-current', assignments: [{ execution_id: 'agent-current', kind: 'agent' }, { execution_id: 'old-dag', kind: 'dag' }] }));
+  drawer();
+  await screen.findByText('执行详情');
+  expect(api.apiPost).not.toHaveBeenCalled();
+  expect(api.apiPatch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '返回 TODO' }));
+  expect(screen.getByText('old-dag')).toBeTruthy();
+});

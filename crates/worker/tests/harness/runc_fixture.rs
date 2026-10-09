@@ -80,6 +80,16 @@ pub fn rootfs(root: &Path, runner: &Path) {
         install(root, Path::new(binary), binary);
     }
     std::fs::write(root.join("usr/bin/codex"), include_str!("runc_codex.sh")).unwrap();
+    std::fs::write(
+        root.join("usr/bin/codex-start.sh"),
+        r#"set -eu
+printf '%s\n' "$OPENCODER_HARNESS_CONTEXT" > "$OPENCODER_STEP_DIR/startup-context.json"
+printf 'before\n' > "$OPENCODER_STEP_DIR/startup-state"
+"$@"
+printf 'after\n' >> "$OPENCODER_STEP_DIR/startup-state"
+"#,
+    )
+    .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(
         root.join("usr/bin/codex"),

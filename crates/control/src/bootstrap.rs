@@ -509,14 +509,14 @@ mod seed_admin_tests {
     async fn rotation_never_touches_a_non_admin_row_named_admin() {
         let store = memory_store().await;
         store
-            .create_user("admin", &token_hash("user-owned-token"), Role::User, 1)
+            .create_user("admin", &token_hash("user-owned-token"), Role::Viewer, 1)
             .await
             .unwrap();
         seed_admin(&store, "seed-token").await.unwrap();
         // The user-created row keeps its credential and role; the seed token
         // has no row of its own (the bearer middleware still authenticates it).
         let row = store.find_user_by_name("admin").await.unwrap().unwrap();
-        assert_eq!(row.role, Role::User);
+        assert_eq!(row.role, Role::Viewer);
         assert_eq!(name_of_digest(&store, "seed-token").await, None);
         assert_eq!(
             name_of_digest(&store, "user-owned-token").await,

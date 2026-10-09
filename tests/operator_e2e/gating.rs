@@ -1,8 +1,5 @@
-//! O3 — the role gate over the real control plane: a freshly minted
-//! non-admin token may read identity and executions, may submit and
-//! command OPERATOR and AGENT executions end to end, and is refused
-//! everywhere else with the documented 403s. `/api/users` stays
-//! admin-only.
+//! O3 — editors run platform executions; viewers read their records.
+//! User and token administration stays restricted to the startup admin.
 
 use crate::support::fleet_proc::Fleet;
 use crate::support::http_util::wait_until;
@@ -20,43 +17,49 @@ fn wait_idle_as(fleet: &Fleet, id: &str, token: &str) -> Value {
 }
 
 #[test]
-fn non_admin_role_gates_the_surface() {
+fn editor_runs_platform_and_role_change_makes_the_same_token_read_only() {
     let stub = LlmStub::spawn_text(&["gated-reply", "agent-gated-reply"]);
     let tmp = tempfile::tempdir().unwrap();
     let fleet = Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "op-gate-node");
 
-    // The admin mints a plain `user` token through the real admin API.
+    // The admin creates an editor, then issues a named credential.
     let (status, body) = fleet.http(
         "POST",
         "/api/users",
-        &json!({"name": "op-e2e-user", "role": "user"}),
+        &json!({"name": "op-e2e-user", "role": "editor"}),
     );
     assert_eq!(status, 200, "create user: {body}");
+    assert_eq!(body["user"]["role"], "editor");
+    let (status, body) = fleet.http(
+        "POST",
+        "/api/tokens",
+        &json!({"user_name":"op-e2e-user","name":"operator CLI"}),
+    );
+    assert_eq!(status, 200, "issue token: {body}");
     let token = body["token"]
         .as_str()
         .expect("wire token returned once")
         .to_string();
     assert!(token.starts_with("oc_"), "token shape: {token}");
-    assert_eq!(body["user"]["role"], "user");
 
     // Identity probe through the new token.
     let (status, me) = fleet.http_as("GET", "/api/me", &token, &json!({}));
     assert_eq!(status, 200, "me: {me}");
     assert_eq!(me["name"], "op-e2e-user");
-    assert_eq!(me["role"], "user");
+    assert_eq!(me["role"], "editor");
 
     // Admin-only surface refused for the non-admin token.
     let (status, body) = fleet.http_as("GET", "/api/users", &token, &json!({}));
     assert_eq!(status, 403, "users list: {body}");
-    assert_eq!(body["error"], "role 'user' may not access this endpoint");
+    assert_eq!(body["error"], "当前角色无权执行此操作");
     let (status, body) = fleet.http_as(
         "POST",
         "/api/users",
         &token,
-        &json!({"name": "nope", "role": "user"}),
+        &json!({"name": "nope", "role": "editor"}),
     );
     assert_eq!(status, 403);
-    assert_eq!(body["error"], "role 'user' may not access this endpoint");
+    assert_eq!(body["error"], "当前角色无权执行此操作");
 
     // Positive case: the non-admin CAN run an operator execution end to
     // end (submit, inspect, read the session).
@@ -136,8 +139,8 @@ fn non_admin_role_gates_the_surface() {
     assert_eq!(status, 200, "command agent as user: {body}");
     assert_eq!(body["id"], "agent-e2e-gated");
 
-    // And the transcript is readable through the messages projection (the
-    // native session relay stays admin-only): an assistant chunk with the
+    // The transcript is also readable through the messages projection:
+    // an assistant chunk with the
     // stub's reply, no operator preamble in the wire prompt (asserted on
     // the admin-side session read in `agent_session`).
     let (status, detail) = fleet.http_as(
@@ -160,10 +163,8 @@ fn non_admin_role_gates_the_surface() {
         "assistant transcript chunk: {detail}"
     );
 
-    // Non-operator submissions are refused for non-admins: the role gate
-    // lets POST /api/executions through, then the kind check rejects with
-    // the documented text.
-    for kind in ["dag", "team"] {
+    // Maintenance and historical system executions stay administrator-only.
+    for kind in ["maintenance", "system"] {
         let (status, body) = fleet.http_as(
             "POST",
             "/api/executions",
@@ -171,11 +172,38 @@ fn non_admin_role_gates_the_surface() {
             &json!({"id": format!("{kind}-forbidden"), "kind": kind}),
         );
         assert_eq!(status, 403, "{kind} submit as user: {body}");
-        assert_eq!(
-            body["error"],
-            "non-admin roles may only submit operator or agent executions"
-        );
+        assert_eq!(body["error"], "role may not submit this execution");
     }
+    let (status, body) = fleet.http("PATCH", "/api/users/op-e2e-user", &json!({"role":"viewer"}));
+    assert_eq!(status, 200, "change role: {body}");
+    assert_eq!(
+        fleet
+            .http_as("GET", "/api/sessions/agent-e2e-gated", &token, &json!({}))
+            .0,
+        200
+    );
+    assert_eq!(
+        fleet
+            .http_as(
+                "POST",
+                "/api/sessions/agent-e2e-gated/prompt",
+                &token,
+                &json!({"prompt":"viewer-denied-prompt","input_id":"viewer-denied"})
+            )
+            .0,
+        403
+    );
+    let requests = stub.wait_for_requests(2);
+    assert!(requests
+        .iter()
+        .all(|request| !request.contains("viewer-denied-prompt")));
+    let (status, pending) = fleet.http(
+        "GET",
+        "/api/sessions/agent-e2e-gated/inputs?delivery=steer",
+        &json!({}),
+    );
+    assert_eq!(status, 200, "{pending}");
+    assert_eq!(pending["inputs"], json!([]));
 }
 
 #[test]

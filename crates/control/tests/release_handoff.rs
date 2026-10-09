@@ -1,5 +1,5 @@
 //! Real HTTP/WebSocket handoff against two independent control databases
-//! connections. The node double counts business starts, not transport retries.
+//! connections. The node double counts platform starts, not transport retries.
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use serde_json::json;

@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 // Capability library: a single searchable table with a separate create/edit drawer.
 import { Alert, Button, Input, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -6,6 +7,7 @@ import { KIND_LABELS } from './fleet/model.js';
 import { TimeText } from './ui/timeText.jsx';
 import { CapabilityEditor } from './brain/capabilityEditor.jsx';
 import { ok } from './notice.js';
+import './brain/library.css';
 
 const K_OPTIONS = [3, 5, 10, 20, 50].map((value) => ({ value, label: `前 ${value} 条` }));
 
@@ -45,16 +47,14 @@ export function BrainPanel({ onNotice }) {
   const edit = (entry) => setEditor({ entry });
   const columns = [
     { title: '执行类型', dataIndex: ['capability', 'capability_type'], width: 140, render: (value) => <Tag>{KIND_LABELS[value] || value}</Tag> },
-    { title: '一句话描述', dataIndex: ['capability', 'summary'], ellipsis: true },
-    { title: '输入描述', dataIndex: ['capability', 'input_desc'], ellipsis: true },
-    { title: '输出描述', dataIndex: ['capability', 'output_desc'], ellipsis: true },
-    { title: '工程输入', width: 90, render: (_, row) => (row.eng_inputs || rows.find((entry) => entry.capability.id === row.capability.id)?.eng_inputs)?.length ?? '—' },
+    { title: '一句话描述', dataIndex: ['capability', 'summary'], ellipsis: true,
+      render: (summary) => <span className="brain-capability-summary" title={summary}>{summary}</span> },
     ...(hits ? [{ title: '距离', dataIndex: 'distance', width: 90, render: (value) => typeof value === 'number' ? value.toFixed(4) : '—' }] : []),
     { title: '更新时间', dataIndex: ['capability', 'updated_at'], width: 130, render: (value) => <TimeText ts={value} /> },
     { title: '操作', width: 130, fixed: 'right', render: (_, row) => <Space onClick={(event) => event.stopPropagation()}>
-      <Button type="link" size="small" onClick={() => edit(row)}>编辑</Button>
+      <EditButton type="link" size="small" onClick={() => edit(row)}>编辑</EditButton>
       <Popconfirm title="删除该能力？" okText="确认删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => remove(row.capability.id)}>
-        <Button type="link" size="small" danger>删除</Button>
+        <EditButton type="link" size="small" danger>删除</EditButton>
       </Popconfirm>
     </Space> },
   ];
@@ -66,11 +66,11 @@ export function BrainPanel({ onNotice }) {
         <Button loading={searching} onClick={search}>搜索</Button>
         {hits !== null && <Button onClick={resetSearch}>显示全部</Button>}
       </Space>
-      <Space><Button onClick={load} loading={loading}>刷新</Button><Button type="primary" onClick={() => setEditor({ entry: null })}>新建能力</Button></Space>
+      <Space><Button onClick={load} loading={loading}>刷新</Button><EditButton type="primary" onClick={() => setEditor({ entry: null })}>新建能力</EditButton></Space>
     </div>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
-    <Table rowKey={(row) => row.capability.id} size="middle" columns={columns} dataSource={hits ?? rows}
-      loading={loading || searching} scroll={{ x: 1000 }} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 项` }}
+    <Table rowKey={(row) => row.capability.id} size="middle" tableLayout="fixed" columns={columns} dataSource={hits ?? rows}
+      loading={loading || searching} scroll={{ x: hits ? 850 : 760 }} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 项` }}
       onRow={(row) => ({ onClick: () => edit(row), style: { cursor: 'pointer' } })}
       locale={{ emptyText: hits !== null ? '没有匹配的能力' : '暂无能力，点击「新建能力」添加' }} />
     {editor && <CapabilityEditor key={editor.entry?.capability.id || 'create'} entry={editor.entry} onClose={() => setEditor(null)}

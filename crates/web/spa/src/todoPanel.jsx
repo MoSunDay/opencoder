@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 // todoPanel.jsx — 菜单页「TODO 管理」: 两个 tab。
 //   模板 — templates 表 + 展开行版本列表（编辑/设为当前/新版本/删除版本/
 //           运行）；新建/编辑都从右侧滑出 100% 宽抽屉（不叠卡片）。
@@ -112,17 +113,17 @@ function VersionsBlock({ template, onNotice, onEdit, onChanged, initialPrompt = 
           <Text style={{ flex: 1, minWidth: 0 }} ellipsis>{v.note || '(无备注)'}</Text>
           {envBy[v.version] ? <Tag color="purple">env: {envBy[v.version]}</Tag> : <Tag>未绑定 env</Tag>}
           <Space size={0}>
-            <Button size="small" type="link" onClick={() => onEdit(name, v.version)}>编辑</Button>
-            <Button size="small" type="link" disabled={template.current === v.version} onClick={() => setCurrent(v.version)}>设为当前</Button>
-            <Button size="small" type="link" onClick={() => newVersion(v.version)}>新版本</Button>
+            <EditButton size="small" type="link" onClick={() => onEdit(name, v.version)}>编辑</EditButton>
+            <EditButton size="small" type="link" disabled={template.current === v.version} onClick={() => setCurrent(v.version)}>设为当前</EditButton>
+            <EditButton size="small" type="link" onClick={() => newVersion(v.version)}>新版本</EditButton>
             <Popconfirm title={`删除版本 ${v.version}？`} onConfirm={() => deleteVersion(v.version)}>
-              <Button size="small" type="link" danger>删除版本</Button>
+              <EditButton size="small" type="link" danger>删除版本</EditButton>
             </Popconfirm>
-            <Button size="small" type="link" onClick={() => run(v.version)}>运行</Button>
+            <EditButton size="small" type="link" onClick={() => run(v.version)}>运行</EditButton>
           </Space>
         </div>
       ))}
-      <Button size="small" type="dashed" style={{ marginTop: 6 }} onClick={() => newVersion('')}>+ 从当前新建版本</Button>
+      <EditButton size="small" type="dashed" style={{ marginTop: 6 }} onClick={() => newVersion('')}>+ 从当前新建版本</EditButton>
       <FileProblems problems={fileProblems} onClose={()=>setFileProblems([])} onLocate={()=>onEdit(name,problemVersion)}/>
     </div>
   );
@@ -188,7 +189,7 @@ function TemplatesTab({ onNotice, onRan, initialPrompt = '' }) {
       render: (_, r) => <span>{(r.versions || []).length}</span> },
     { title: '操作', key: 'ops', width: 120, render: (_, r) => (
       <Popconfirm title={`删除模板 ${r.name}？`} onConfirm={() => deleteTemplate(r.name)}>
-        <Button size="small" danger>删除模板</Button>
+        <EditButton size="small" danger>删除模板</EditButton>
       </Popconfirm>
     ) },
   ];
@@ -210,7 +211,7 @@ function TemplatesTab({ onNotice, onRan, initialPrompt = '' }) {
           onChange={(e) => setSearch(e.target.value)}
           aria-label="todo-template-search"
         />
-        <Button type="primary" onClick={() => setCreating(true)}>新建模板</Button>
+        <EditButton type="primary" onClick={() => setCreating(true)}>新建模板</EditButton>
       </Space>
       <FileProblems problems={listProblems} onClose={()=>setListProblems([])}/>
       <Table

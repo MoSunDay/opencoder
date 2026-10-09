@@ -168,7 +168,7 @@ describe('SchedulePanel', () => {
     // 补齐目标与提示词后保存 → POST /api/schedules，成功通知 + 重新拉取列表。
     await act(async () => {
       fireEvent.change(within(modal).getByLabelText('schedule_target'), { target: { value: 'act' } });
-      fireEvent.change(within(modal).getByLabelText('schedule_params'), { target: { value: '每日巡检' } });
+      fireEvent.change(within(modal).getByLabelText('schedule_params'), { target: { value: '每日测试' } });
     });
     await act(async () => { fireEvent.click(findButton('保存', modal)); });
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
@@ -178,7 +178,7 @@ describe('SchedulePanel', () => {
     expect(body.timezone).toBe('+08:00');
     expect(body.cron).toBe('*/5 * * * *');
     expect(body.kind).toBe('agent');
-    expect(body.params).toEqual({ prompt: '每日巡检' });
+    expect(body.params).toEqual({ prompt: '每日测试' });
     expect(body.overlap).toBe('skip');
     expect(body.enabled).toBe(true);
   });

@@ -1,3 +1,4 @@
+import { EditButton, useCanEdit } from '../../ui/permissions.jsx';
 import { Button, Card, Collapse, Input, Segmented, Select, Space, Typography } from 'antd';
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCorners, pointerWithin, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -26,6 +27,7 @@ function Lane({ group, status, title, rows, ...props }) {
   </section>;
 }
 export function TodoBoard({ initiative, overview, refresh, onNotice, openTodo }) {
+  const canEdit = useCanEdit();
   const [view, setView] = useProjectView(`board:${initiative?.id}`, { query: '', tagFilter: [], grouped: false });
   const { query, tagFilter, grouped } = view;
   const setQuery = (query) => setView((v) => ({ ...v, query }));
@@ -48,7 +50,7 @@ export function TodoBoard({ initiative, overview, refresh, onNotice, openTodo })
   };
   const move = async ({ active, over }) => {
     setActiveTodo(null);
-    if (!over || saving.current) return;
+    if (!canEdit || !over || saving.current) return;
     const activeId = active.data.current?.todoId;
     const overId = over.data.current?.todoId || `lane:${over.data.current?.status}`;
     if (activeId === overId) return;
@@ -62,9 +64,9 @@ export function TodoBoard({ initiative, overview, refresh, onNotice, openTodo })
     finally { setPreview(null); setBusy(false); saving.current = false; }
   };
   const board = (group) => <div className="project-board-columns">{LANES.map(([status, title]) => <Lane key={status} group={group.id} groupTitle={group.title} status={status} title={title}
-    rows={ordered(group.rows.filter((todo) => laneOf(todo) === status))} overview={overview} onOpen={openTodo} onDelete={remove} disabled={busy} />)}</div>;
+    rows={ordered(group.rows.filter((todo) => laneOf(todo) === status))} overview={overview} onOpen={openTodo} onDelete={remove} disabled={!canEdit || busy} />)}</div>;
   return <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-    <Space wrap><Button type="primary" onClick={() => setCreating(true)}>新建 TODO</Button>
+    <Space wrap><EditButton type="primary" onClick={() => setCreating(true)}>新建 TODO</EditButton>
       <Input.Search aria-label="搜索专项 TODO" placeholder="搜索标题或说明" value={query} onChange={(e) => setQuery(e.target.value)} allowClear style={{ width: 220 }} />
       <Select mode="multiple" showSearch optionFilterProp="label" aria-label="筛选 Tag" placeholder="全部 Tag" value={activeTagIds} onChange={(ids) => setTagFilter(tags.filter((tag) => ids.includes(tag.id)).map(({ id, name }) => ({ id, name })))} allowClear style={{ minWidth: 180, maxWidth: '100%' }} options={tags.map((tag) => ({ label: tag.name, value: tag.id }))} />
       <Segmented aria-label="卡片分组" value={grouped} onChange={setGrouped} options={[{ label: '不分组', value: false }, { label: '按 Tag 分组', value: true }]} />

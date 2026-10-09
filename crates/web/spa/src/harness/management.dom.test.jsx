@@ -8,30 +8,30 @@ import { apiGet, apiPut } from '../api.js';
 vi.mock('../api.js', () => ({ apiGet: vi.fn(), apiPut: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
-it('edits managed Codex parameters and literal env as one persisted configuration', async () => {
+it('edits managed Codex parameters and startup script as one persisted configuration', async () => {
   apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', managed: true, revision: 3, settings: {
-    executable: '/usr/bin/codex', model: 'model-a', reasoning_effort: 'high', sandbox_mode: 'read-only', approval_policy: 'never', envs: { OLD: 'value' },
+    executable: '/usr/bin/codex', model: 'model-a', reasoning_effort: 'high', sandbox_mode: 'read-only', approval_policy: 'never', startup_script: ['/old/launcher'],
   } }] });
   apiPut.mockResolvedValue({ revision: 4 });
   render(<HarnessManagement onNotice={vi.fn()} />);
   expect(await screen.findByText('配置 v3')).toBeTruthy();
   for (const label of ['Codex 二进制路径', '授权槽位', '推理强度', '沙箱权限', '审批策略']) expect(screen.queryByLabelText(label)).toBeNull();
   fireEvent.change(screen.getByLabelText('模型（--model）'), { target: { value: 'model-b' } });
-  fireEvent.change(screen.getByLabelText('codex-managed-envs'), { target: { value: 'KEY= literal = 中文\nEMPTY=' } });
+  fireEvent.change(screen.getByLabelText('codex-startup-script'), { target: { value: '/bin/sh\n/external/script with 空格.sh\nliteral $(argument)' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 Codex 配置' }));
   await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/harnesses/codex', {
-    model: 'model-b', envs: { KEY: ' literal = 中文', EMPTY: '' },
+    model: 'model-b', startup_script: ['/bin/sh', '/external/script with 空格.sh', 'literal $(argument)'],
   }));
   expect(await screen.findByText('配置 v4')).toBeTruthy();
 });
 
-it('invalid managed env prevents saving and load errors never submit empty defaults', async () => {
-  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', settings: { envs: {} } }] });
+it('invalid startup script prevents saving and load errors never submit empty defaults', async () => {
+  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', settings: { startup_script: [] } }] });
   render(<HarnessManagement onNotice={vi.fn()} />);
   await waitFor(() => expect(screen.getByRole('button', { name: '保存 Codex 配置' }).disabled).toBe(false));
-  fireEvent.change(screen.getByLabelText('codex-managed-envs'), { target: { value: 'INVALID' } });
+  fireEvent.change(screen.getByLabelText('codex-startup-script'), { target: { value: '\n/bin/sh' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 Codex 配置' }));
-  expect(await screen.findByText('环境变量必须为 KEY=VALUE，每行一个')).toBeTruthy();
+  expect(await screen.findByText('启动脚本第一行不能为空，命令和参数不能包含空字符')).toBeTruthy();
   expect(apiPut).not.toHaveBeenCalled();
   cleanup();
   apiGet.mockRejectedValue(new Error('unavailable'));
@@ -40,45 +40,45 @@ it('invalid managed env prevents saving and load errors never submit empty defau
   expect(screen.getByRole('button', { name: '保存 Codex 配置' }).disabled).toBe(true);
 });
 
-it('keeps model and environment edits after a failed save so the same configuration can be retried', async () => {
-  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', revision: 1, settings: { envs: {} } }], profiles: [] });
+it('keeps model and script edits after a failed save so the same configuration can be retried', async () => {
+  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', revision: 1, settings: { startup_script: [] } }], profiles: [] });
   apiPut.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({ revision: 2 });
   const notice = vi.fn();
   render(<HarnessManagement onNotice={notice} />);
   await screen.findByText('配置 v1');
   fireEvent.change(screen.getByLabelText('模型（--model）'), { target: { value: 'model-retry' } });
-  fireEvent.change(screen.getByLabelText('codex-managed-envs'), { target: { value: 'KEY=literal=value' } });
+  fireEvent.change(screen.getByLabelText('codex-startup-script'), { target: { value: '/external/retry.sh' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 Codex 配置' }));
   await waitFor(() => expect(notice).toHaveBeenCalledWith({ type: 'error', text: '保存 Harness 配置失败：unavailable' }));
   expect(screen.getByLabelText('模型（--model）').value).toBe('model-retry');
-  expect(screen.getByLabelText('codex-managed-envs').value).toBe('KEY=literal=value');
+  expect(screen.getByLabelText('codex-startup-script').value).toBe('/external/retry.sh');
   expect(screen.getByLabelText('codex-profile').disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '保存 Codex 配置' }));
   await screen.findByText('配置 v2');
-  expect(apiPut.mock.calls).toEqual(Array(2).fill(['/api/harnesses/codex', { model: 'model-retry', envs: { KEY: 'literal=value' } }]));
+  expect(apiPut.mock.calls).toEqual(Array(2).fill(['/api/harnesses/codex', { model: 'model-retry', startup_script: ['/external/retry.sh'] }]));
 });
 
 it('creates a codex profile through the modal and selects it after the upsert', async () => {
-  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', revision: 7, settings: { envs: {} } }], profiles: [{ name: 'alpha', settings: { model: 'm1' } }] });
+  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', revision: 7, settings: { startup_script: [] } }], profiles: [{ name: 'alpha', settings: { model: 'm1' } }] });
   apiPut.mockResolvedValue({ revision: 1 });
   render(<HarnessManagement onNotice={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: '新建配置档案' }));
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByLabelText('new-codex-profile'), { target: { value: 'beta' } });
   fireEvent.change(within(dialog).getByLabelText('new-codex-profile-model'), { target: { value: 'model-x' } });
-  fireEvent.change(within(dialog).getByLabelText('new-codex-profile-envs'), { target: { value: 'A=1' } });
+  fireEvent.change(within(dialog).getByLabelText('new-codex-profile-startup-script'), { target: { value: '/external/start.sh' } });
   fireEvent.click(within(dialog).getByRole('button', { name: /创\s*建/ }));
-  await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/harnesses/codex/profiles/beta', { model: 'model-x', envs: { A: '1' } }));
-  // 提交成功即关闭弹窗（jsdom 不跑离场动画，断言业务结果而非 DOM 摘除）。
+  await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/harnesses/codex/profiles/beta', { model: 'model-x', startup_script: ['/external/start.sh'] }));
+  // 提交成功即关闭弹窗（jsdom 不跑离场动画，断言执行结果而非 DOM 摘除）。
   expect(await screen.findByText('配置档案 beta 已创建，新任务将使用此版本')).toBeTruthy();
   // 自动选中新档案：版本号与编辑表单都载入其 settings（DOM 顺序主表单在前）。
   expect(screen.getByText('配置 v1')).toBeTruthy();
   expect(screen.getAllByLabelText('模型（--model）')[0].value).toBe('model-x');
-  expect(screen.getByLabelText('codex-managed-envs').value).toBe('A=1');
+  expect(screen.getByLabelText('codex-startup-script').value).toBe('/external/start.sh');
 });
 
 it('blocks invalid or duplicate profile names without submitting', async () => {
-  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', revision: 2, settings: { envs: {} } }], profiles: [{ name: 'alpha', settings: {} }] });
+  apiGet.mockResolvedValue({ harnesses: [{ name: 'codex', revision: 2, settings: { startup_script: [] } }], profiles: [{ name: 'alpha', settings: {} }] });
   render(<HarnessManagement onNotice={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: '新建配置档案' }));
   const dialog = await screen.findByRole('dialog');

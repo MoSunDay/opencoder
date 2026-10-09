@@ -26,13 +26,13 @@ it.each(['act', 'reviewer'])('changes the execution method for %s from its detai
 });
 
 it('binds and clears a named profile without overwriting agent resources', async () => {
-  apiGet.mockResolvedValue({ items: [{ name: 'business', revision: 2 }] });
+  apiGet.mockResolvedValue({ items: [{ name: 'platform', revision: 2 }] });
   const props = { onNotice: vi.fn(), onSaved: vi.fn(), meta: { name: 'reviewer', harness: 'codex' } };
   const view = render(<AgentHarnessFields {...props} />);
   await waitFor(() => expect(screen.getByLabelText('agent-harness-profile').disabled).toBe(false));
-  await pick('agent-harness-profile', 'business · v2');
-  await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/agents/reviewer', { harness_profile: 'business' }));
-  view.rerender(<AgentHarnessFields {...props} meta={{ ...props.meta, harness_profile: 'business' }} />);
+  await pick('agent-harness-profile', 'platform · v2');
+  await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/agents/reviewer', { harness_profile: 'platform' }));
+  view.rerender(<AgentHarnessFields {...props} meta={{ ...props.meta, harness_profile: 'platform' }} />);
   await pick('agent-harness-profile', '默认 Codex 配置');
   await waitFor(() => expect(apiPut).toHaveBeenLastCalledWith('/api/agents/reviewer', { harness_profile: null }));
 });
@@ -48,13 +48,13 @@ it('reports failed updates and keeps the current selection for retry', async () 
 });
 
 it('blocks profile changes after a failed read and retries without changing the stored binding', async () => {
-  apiGet.mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ items: [{ name: 'business', revision: 2 }] });
-  render(<AgentHarnessFields meta={{ name: 'act', harness: 'codex', harness_profile: 'business' }} onNotice={vi.fn()} onSaved={vi.fn()} />);
+  apiGet.mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ items: [{ name: 'platform', revision: 2 }] });
+  render(<AgentHarnessFields meta={{ name: 'act', harness: 'codex', harness_profile: 'platform' }} onNotice={vi.fn()} onSaved={vi.fn()} />);
   await screen.findByText('读取 Codex 配置档案失败：offline');
   expect(screen.getByLabelText('agent-harness-profile').disabled).toBe(true);
   expect(apiPut).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /^重\s*试$/ }));
-  await screen.findByText('business · v2');
+  await screen.findByText('platform · v2');
   expect(screen.getByLabelText('agent-harness-profile').disabled).toBe(false);
 });
 

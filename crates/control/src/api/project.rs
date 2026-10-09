@@ -9,6 +9,7 @@ use opencoder_core::fleet::*;
 use opencoder_store::ProjectExecutorKind;
 use serde_json::{json, Value};
 use std::sync::Arc;
+pub mod details;
 mod routing;
 pub(super) use routing::{brain_preresolve, initial_receipt};
 

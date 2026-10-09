@@ -124,6 +124,17 @@ pub async fn require_bearer(
     };
     match identity {
         Some(identity) => {
+            if !opencoder_core::identity::permissions::allowed(
+                identity.role,
+                req.method().as_str(),
+                req.uri().path(),
+            ) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"ok":false,"error":"当前角色无权执行此操作"})),
+                )
+                    .into_response();
+            }
             req.extensions_mut().insert(identity);
             next.run(req).await
         }
@@ -205,13 +216,13 @@ mod tests {
 
     #[tokio::test]
     async fn user_tokens_map_to_their_role() {
-        let state = state_with(Some(("alice", "alice-token", Role::User))).await;
+        let state = state_with(Some(("alice", "alice-token", Role::Viewer))).await;
         let identify =
             |token: &str| identify(state.seed_token.clone(), state.lookup.clone(), token.into());
         let identity = identify("alice-token").await;
         assert_eq!(
             identity.map(|i| (i.name, i.role.as_str())),
-            Some(("alice".to_string(), "user"))
+            Some(("alice".to_string(), "viewer"))
         );
         // Seed and unknown tokens never cross over.
         assert!(identify("seed-secret").await.is_some());

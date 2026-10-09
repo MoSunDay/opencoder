@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 // defsTab.jsx — DAG「定义」tab: definitions table (name /
 // updated_at / actions) + dispatch modal (optional target node from the
 // current fleet) + create/edit drawer (defEditor.jsx).
@@ -159,15 +160,15 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
       width: 230,
       render: (_, r) => (
         <Space>
-          <Button
+          <EditButton
             size="small"
             type="link"
             disabled={!!r.error}
             onClick={() => { setDispatchNode(undefined); setBatches({}); setDispatchFor(r); }}
           >
             派发
-          </Button>
-          <Button
+          </EditButton>
+          <EditButton
             size="small"
             type="link"
             disabled={!!r.error}
@@ -177,7 +178,7 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
             }}
           >
             编辑
-          </Button>
+          </EditButton>
           <Popconfirm
             title="删除该定义？"
             description="不影响已派发的运行（运行持有 spec 快照）。"
@@ -186,7 +187,7 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
             cancelText="取消"
             onConfirm={() => remove(r.id)}
           >
-            <Button size="small" type="link" danger>删除</Button>
+            <EditButton size="small" type="link" danger>删除</EditButton>
           </Popconfirm>
         </Space>
       ),
@@ -212,7 +213,7 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
           onChange={(e) => setSearch(e.target.value)}
           aria-label="dag-def-search"
         />
-        <Button
+        <EditButton
           type="primary"
           onClick={() => {
             setEditing(null);
@@ -220,7 +221,7 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
           }}
         >
           新建定义
-        </Button>
+        </EditButton>
         <Button onClick={() => load(false)}>刷新</Button>
       </Space>
       <Table
@@ -245,7 +246,7 @@ export function DefsTab({ onNotice, onDispatched, initialPrompt = '' }) {
         onClose={() => setDispatchFor(null)}
         size={600}
         destroyOnHidden
-        extra={<Space><Button onClick={() => setDispatchFor(null)}>取消</Button><Button type="primary" loading={dispatching} onClick={dispatch}>确认派发</Button></Space>}
+        extra={<Space><Button onClick={() => setDispatchFor(null)}>取消</Button><EditButton type="primary" loading={dispatching} onClick={dispatch}>确认派发</EditButton></Space>}
       >
         <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Text type="secondary">整个工作流会在同一个节点完成。留空时由服务端选择当前可用节点。</Text>

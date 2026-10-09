@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import {useState} from 'react';
 import {Button, Modal, Typography, Upload} from 'antd';
 import {mergeArchive, unzipArchive} from './resourceModel.js';
@@ -34,7 +35,7 @@ export function ArchiveUpload({cat,files,disabled,onMerge,onError}) {
   const confirm = () => { onMerge(pending.merged); setPending(null); };
   return <>
     <Upload accept=".zip" showUploadList={false} disabled={disabled || busy} beforeUpload={pick}>
-      <Button disabled={disabled || busy}>上传压缩包</Button>
+      <EditButton disabled={disabled || busy}>上传压缩包</EditButton>
     </Upload>
     <Modal open={!!pending} title="覆盖上传" okText="覆盖上传" cancelText="取消" onOk={confirm} onCancel={() => setPending(null)}>
       <p>压缩包内共 {pending?.paths.length ?? 0} 个文件：新增 {pending?.added ?? 0} 个，覆盖同名 {pending?.overwritten ?? 0} 个。</p>

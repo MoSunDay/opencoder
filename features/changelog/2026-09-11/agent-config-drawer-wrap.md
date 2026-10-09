@@ -6,7 +6,7 @@ Agent 列表只展示名称、生效标记和编辑／启动／删除操作。�
 
 Harness 管理只编辑 `opencoder --wrap codex` 的 `--model` 和 `--envs` 输入。表单读取与提交均仅投影这两项，删除 Codex 二进制路径、授权槽位、推理强度、沙箱及审批策略控件；保存完整配置时由 API 将省略的 Codex 自身选项置为默认值。命名配置档案继续供 Agent 引用，运行中的配置快照不变。
 
-删除重复的 Agent Harness 列表及 Runner 管理组件，宿主机执行继续使用 Operator 页签。此次修改限于 Web 管理交互；业务执行回执及服务端运行协议未变。
+删除重复的 Agent Harness 列表及 Runner 管理组件，宿主机执行继续使用 Operator 页签。此次修改限于 Web 管理交互；任务执行回执及服务端运行协议未变。
 
 ## 测试覆盖
 

@@ -6,23 +6,25 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Platform role. Wire format is snake_case (`admin` / `root` / `user`).
+pub mod permissions;
+
+/// Platform role. Wire format is snake_case (`admin` / `editor` / `viewer`).
 /// The OS-level identity of node processes is unchanged; roles gate only
 /// the platform HTTP surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Admin,
-    Root,
-    User,
+    Editor,
+    Viewer,
 }
 
 impl Role {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Admin => "admin",
-            Self::Root => "root",
-            Self::User => "user",
+            Self::Editor => "editor",
+            Self::Viewer => "viewer",
         }
     }
 }
@@ -31,8 +33,8 @@ impl Role {
 pub fn parse_role(value: &str) -> Option<Role> {
     match value {
         "admin" => Some(Role::Admin),
-        "root" => Some(Role::Root),
-        "user" => Some(Role::User),
+        "editor" => Some(Role::Editor),
+        "viewer" => Some(Role::Viewer),
         _ => None,
     }
 }
@@ -56,6 +58,10 @@ impl Identity {
     pub fn is_admin(&self) -> bool {
         self.role == Role::Admin
     }
+
+    pub fn can_edit(&self) -> bool {
+        matches!(self.role, Role::Admin | Role::Editor)
+    }
 }
 
 /// sha256 hex digest of a bearer token; the only stored representation.
@@ -76,17 +82,29 @@ mod tests {
     #[test]
     fn roles_serialize_snake_case() {
         assert_eq!(serde_json::to_string(&Role::Admin).unwrap(), "\"admin\"");
-        assert_eq!(serde_json::to_string(&Role::Root).unwrap(), "\"root\"");
-        assert_eq!(serde_json::to_string(&Role::User).unwrap(), "\"user\"");
+        assert_eq!(serde_json::to_string(&Role::Editor).unwrap(), "\"editor\"");
+        assert_eq!(serde_json::to_string(&Role::Viewer).unwrap(), "\"viewer\"");
         assert_eq!(
-            serde_json::from_str::<Role>("\"root\"").unwrap(),
-            Role::Root
+            serde_json::from_str::<Role>("\"editor\"").unwrap(),
+            Role::Editor
         );
         assert!(serde_json::from_str::<Role>("\"superuser\"").is_err());
-        for role in [Role::Admin, Role::Root, Role::User] {
+        for role in [Role::Admin, Role::Editor, Role::Viewer] {
             assert_eq!(parse_role(role.as_str()), Some(role));
         }
         assert_eq!(parse_role("nope"), None);
+        assert_eq!(parse_role("root"), None);
+        assert_eq!(parse_role("user"), None);
+        assert!(Identity {
+            name: "e".into(),
+            role: Role::Editor
+        }
+        .can_edit());
+        assert!(!Identity {
+            name: "v".into(),
+            role: Role::Viewer
+        }
+        .can_edit());
     }
 
     #[test]

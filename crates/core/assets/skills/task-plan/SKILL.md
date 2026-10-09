@@ -107,8 +107,8 @@ description: 从当前问题或候选发布面的全局影响面出发，按合�
 - 严格 consumer 合同上线前，先让 producer 产生新 canonical wire，并证明旧 consumer 可安全消费；禁止用 consumer 兼容旧歧义 wire 掩盖 producer 未迁移。发布计划必须写明 producer/consumer 顺序和每一步的跨版本兼容证据。
 - 持续保鲜计划必须定义 freshness source、刷新触发、最大陈旧时间、last-success/last-error 可见性、stale 行为、巡检频率、指标/告警、观察窗口和责任方。
 - “期间无报错”必须收敛为当前链路内零未处理异常、零合约错误、零静默降级；预期失败必须有明确响应、状态和可观测的有界重试。
-- Webhook/callback 计划必须明确 auth-before-parse：在解析或记录业务 body、执行查询和写入副作用前完成签名/token/replay 验证；同时覆盖集中脱敏和无效请求零写入。
-- 运行时必需 Secret 必须在启动或 readiness/release preflight 阶段验证键名与可用性，不能等到首个业务请求才暴露缺失；轮换要分别证明新凭证可用和旧凭证已失效。
+- Webhook/callback 计划必须明确 auth-before-parse：在解析或记录请求 body、执行查询和写入副作用前完成签名/token/replay 验证；同时覆盖集中脱敏和无效请求零写入。
+- 运行时必需 Secret 必须在启动或 readiness/release preflight 阶段验证键名与可用性，不能等到首个请求才暴露缺失；轮换要分别证明新凭证可用和旧凭证已失效。
 
 ### 3. 提炼根因与缺口地图
 

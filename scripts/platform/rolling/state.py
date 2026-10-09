@@ -66,7 +66,7 @@ class Journal:
             raise ValueError("unsupported release journal")
 
     def save(self):
-        # The business Server uses its existing service account to read status.
+        # The platform Server uses its existing service account to read status.
         # This journal contains release metadata, never credentials or inputs.
         atomic_bytes(self.path, (json.dumps(self.data, indent=2, sort_keys=True) + "\n").encode(), 0o644)
 

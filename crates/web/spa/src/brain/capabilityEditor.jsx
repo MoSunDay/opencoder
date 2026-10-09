@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import { Alert, Button, Drawer, Form, Input, Select, Space, Spin } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost, apiPut } from '../api.js';
@@ -112,9 +113,9 @@ function CapabilityEditorSession({ entry, onClose, onSaved }) {
           <Form.List name="eng_inputs">{(fields, { add, remove }) => <>
             {fields.map((field) => <div key={field.key} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <Form.Item name={field.name} rules={required} style={{ flex: 1, marginBottom: 0 }}><Input.TextArea autoSize={{ minRows: 1, maxRows: 5 }} placeholder="一条示例输入" /></Form.Item>
-              <Button type="text" danger onClick={() => remove(field.name)}>移除</Button>
+              <EditButton type="text" danger onClick={() => remove(field.name)}>移除</EditButton>
             </div>)}
-            <Button type="dashed" onClick={() => add('')}>添加工程输入</Button>
+            <EditButton type="dashed" onClick={() => add('')}>添加工程输入</EditButton>
           </>}</Form.List>
         </Form.Item>
       </Form>

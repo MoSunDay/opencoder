@@ -49,7 +49,9 @@ pub fn build_app_with_metrics(
         .route("/api/time", get(auth_mw::server_time))
         .route("/api/me", get(api::users::me))
         .route("/api/users", get(api::users::list).post(api::users::create))
-        .route("/api/users/:name", axum::routing::delete(api::users::delete))
+        .route("/api/users/:name", patch(api::users::update).delete(api::users::delete))
+        .route("/api/tokens", get(api::users::tokens::list).post(api::users::tokens::create))
+        .route("/api/tokens/:id", axum::routing::delete(api::users::tokens::revoke))
         .route("/api/nodes", get(catalog::nodes))
         .route("/api/nodes/:id/execution-capabilities", get(catalog::execution_capabilities))
         .route("/api/nodes/:id", axum::routing::delete(catalog::unregister))
@@ -119,14 +121,14 @@ pub fn build_app_with_metrics(
         .route("/api/todo/templates/:name/:version", axum::routing::delete(api_todo_template_versions::delete_version))
         .route("/api/project/overview", get(project::overview))
         .route("/api/project/goals", get(api_project::list_goals).post(api_project::create_goal))
-        .route("/api/project/goals/:id", patch(api_project::patch_goal).delete(api_project::delete_goal))
+        .route("/api/project/goals/:id", get(project::details::goal).patch(api_project::patch_goal).delete(api_project::delete_goal))
         .route("/api/project/initiatives", get(api_project_initiatives::list).post(api_project_initiatives::create))
-        .route("/api/project/initiatives/:id", patch(api_project_initiatives::patch).delete(api_project_initiatives::delete))
+        .route("/api/project/initiatives/:id", get(project::details::initiative).patch(api_project_initiatives::patch).delete(api_project_initiatives::delete))
         .route("/api/project/tags", get(api_project_tags::list).post(api_project_tags::create))
         .route("/api/project/tags/:id", patch(api_project_tags::update).delete(api_project_tags::delete))
         .route("/api/project/todos", get(api_project_todos::list_todos).post(api_project_todos::create_todo))
         .route("/api/project/todos/order", put(api_project_todos::reorder_todos))
-        .route("/api/project/todos/:id", patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo))
+        .route("/api/project/todos/:id", get(project::details::todo).patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo))
         .route("/api/project/todos/:id/dispatch", post(project_links::dispatch))
         .route("/api/project/todos/:id/executions", get(project_links::list).post(project_links::link))
         .route("/api/project/todos/:id/executions/:execution_id", axum::routing::delete(project_links::unlink))
@@ -160,12 +162,15 @@ pub fn build_app_with_metrics(
             crate::release::track,
         ))
         .layer(axum::middleware::from_fn_with_state(
-            state,
+            state.clone(),
             crate::resource_scope::configured_agents,
         ))
         // Runs after the bearer middleware: role-gates the non-admin
         // surface (see role_gate::allowed).
-        .layer(axum::middleware::from_fn(crate::role_gate::require_role));
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::role_gate::require_role,
+        ));
     if let Some(token) = token {
         app = app.layer(axum::middleware::from_fn_with_state(
             Some(Arc::new(

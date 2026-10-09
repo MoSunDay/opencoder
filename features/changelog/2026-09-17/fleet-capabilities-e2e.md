@@ -2,7 +2,7 @@ Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
 
 # Fleet 能力根级进程级 e2e 套件（todos/team/brain 三面）
 
-为 fleet 三大业务能力新增三个根级进程级 e2e target：`tests/todos_e2e/`（T 系列）、`tests/team_e2e/`（M 系列）、`tests/brain_e2e/`（B 系列），全部走真 `opencoder-server` + `opencoder-agent` 二进制、真 WebSocket 节点注册与真实 HTTP，由脚本化 loopback LLM stub 驱动。`tests/support/llm_stub.rs` 同步扩展，根 `Cargo.toml` 零改动（各 target 以 `#[path="../support/mod.rs"]` 挂载共享 support）。
+为 fleet 三大平台能力新增三个根级进程级 e2e target：`tests/todos_e2e/`（T 系列）、`tests/team_e2e/`（M 系列）、`tests/brain_e2e/`（B 系列），全部走真 `opencoder-server` + `opencoder-agent` 二进制、真 WebSocket 节点注册与真实 HTTP，由脚本化 loopback LLM stub 驱动。`tests/support/llm_stub.rs` 同步扩展，根 `Cargo.toml` 零改动（各 target 以 `#[path="../support/mod.rs"]` 挂载共享 support）。
 
 ## stub 扩展（tests/support/llm_stub.rs）
 

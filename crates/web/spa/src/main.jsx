@@ -40,7 +40,6 @@ import {
 import { PANELS } from './shell/panels.jsx';
 import { CategoryTabs } from './shell/categoryTabs.jsx';
 import { clearCredentials, setState, setIdentity, useStore } from './store.js';
-import { UsersDrawer } from './admin/usersDrawer.jsx';
 import { normalizeNotice } from './notice.js';
 import { theme } from './theme.js';
 import { bootUrlCredential } from './boot.js';
@@ -79,7 +78,7 @@ function ServerBase() {
 }
 
 /// identity.role → 中文标签（GET /api/me 的词表：admin/root/user）。
-const ROLE_LABELS = { admin: '管理员', root: 'Root', user: '普通用户' };
+const ROLE_LABELS = { admin: '管理员', editor: '可编辑', viewer: '只读' };
 
 /// Authenticated identity readout for the Header: 「name · 角色」; nothing
 /// before the login probe resolves an identity.
@@ -126,7 +125,6 @@ function FleetShell() {
   // clear convention) renders nothing.
   const [notice, setNotice] = useState(null);
   // 后台管理抽屉（平台用户），仅 admin 身份可见入口。
-  const [usersOpen, setUsersOpen] = useState(false);
   const [identityError, setIdentityError] = useState('');
   const [identityRevision, setIdentityRevision] = useState(0);
   // Stable identity: panels key useCallback/useEffect deps on onNotice — a
@@ -137,7 +135,7 @@ function FleetShell() {
   // renders the topics panel instead (highlight never dangles).
   const visible = visibleCategories(identity);
   const allowed = allowedPages(identity);
-  const shownPage = allowed.includes(page) ? page : 'topics';
+  const shownPage = allowed.includes(page) ? page : 'project';
   const category = visible.find((c) => c.items.some((i) => i.page === shownPage)) || visible[0];
   const categoryOptions = visible.map((c) => ({ value: c.key, label: c.label }));
 
@@ -165,7 +163,7 @@ function FleetShell() {
     apiGet('/api/me')
       .then((me) => {
         if (live) {
-          if (typeof me?.name !== 'string' || !me.name || !['admin', 'root', 'user'].includes(me.role)) throw new Error('登录身份响应格式错误，请重试');
+          if (typeof me?.name !== 'string' || !me.name || !['admin', 'editor', 'viewer'].includes(me.role)) throw new Error('登录身份响应格式错误，请重试');
           setIdentityError('');
           setIdentity(me);
         }
@@ -185,9 +183,6 @@ function FleetShell() {
               <ConnectionBadge />
               <ServerBase />
               <IdentityBadge />
-              {identity?.role === 'admin' ? (
-                <Button size="small" onClick={() => setUsersOpen(true)}>后台管理</Button>
-              ) : null}
               <Button size="small" type="text" onClick={() => draftGuard.run(clearCredentials)}>退出</Button>
             </div>
           </Header>
@@ -266,7 +261,6 @@ function FleetShell() {
           </Layout>
         </Layout>
         <LoginModal open={!token} onConnected={() => setNotice(null)} />
-        <UsersDrawer open={usersOpen} onClose={() => setUsersOpen(false)} onNotice={notify} />
       </div>
   );
 }

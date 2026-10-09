@@ -18,7 +18,7 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 | TUI 能力选择、独立任务、恢复、Codex 包装器 | 原有功能映射见 [TUI Server 能力](tui-server-capabilities.md#功能与测试) | [TUI 真终端验收](../../../scripts/acceptance/tui_server.py) |
 | 各初始化断点恢复、`@` 原文和首轮不重复 | `recovery_admits_once_from_every_pre_execution_fault_point`、`resume_after_completed_first_turn_does_not_call_the_model_again` | [initial_input_recovery.rs](../../../crates/worker/tests/initial_input_recovery.rs) |
 | 半完成 Operator 会话保留 Server Codex profile、线程与 HOME | `operator_recovery_completes_each_initialization_stage_and_keeps_server_profile` | [operator_initialization_recovery.rs](../../../crates/worker/tests/operator_initialization_recovery.rs) |
-| 新库版本在业务 DDL 前拒绝且数据不变 | `newer_schema_is_rejected_before_creating_or_modifying_tables` | [schema_bootstrap.rs](../../../crates/store/tests/schema_bootstrap.rs) |
+| 新库版本在表结构 DDL 前拒绝且数据不变 | `newer_schema_is_rejected_before_creating_or_modifying_tables` | [schema_bootstrap.rs](../../../crates/store/tests/schema_bootstrap.rs) |
 | 数据格式 1/2 不能滚动混用 | `native_project_release_requires_maintenance_from_previous_format` | [release.rs](../../../crates/core/src/fleet/release.rs) |
 | 资源版本、认证、二进制发布/下载与中继 | `resource_service_publishes_native_versions_to_its_exported_pool` | [resource_service_native.rs](../../../crates/control/tests/resource_service_native.rs) |
 | 迁移启动回执丢失后禁止旧库恢复 | `test_lost_schema_start_reply_forbids_old_restore_before_public_writes` | [test_flow.py](../../../scripts/platform/maintenance_tests/test_flow.py) |

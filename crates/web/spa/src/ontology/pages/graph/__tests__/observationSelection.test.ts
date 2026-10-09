@@ -24,7 +24,7 @@ describe("centersDisconnected", () => {
     expect(centersDisconnected(graph(["a", "c"], []), ["a", "c"])).toBe(true);
   });
 
-  it("does not count directory containment as a business path", () => {
+  it("does not count directory containment as a platform path", () => {
     const data = graph(["root", "a", "b"], [["root", "a"], ["root", "b"]]);
     data.edges.forEach((edge) => { edge.relationship_type_id = "contains"; });
     expect(centersDisconnected(data, ["a", "b"])).toBe(false);

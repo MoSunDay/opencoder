@@ -1,4 +1,6 @@
-import { Alert, Button, Drawer, Input, Select, Space, Spin, Typography } from 'antd';
+import { EditButton } from '../ui/permissions.jsx';
+import { useCanEdit } from '../ui/permissions.jsx';
+import { Alert, Button, ConfigProvider, Drawer, Input, Select, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { ExecutionView } from '../fleet/detail.jsx';
@@ -20,6 +22,7 @@ const STATUS_OPTIONS = [
 const linkPath = (todoId) => `/api/project/todos/${encodeURIComponent(todoId)}/executions`;
 
 function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
+  const canEdit = useCanEdit();
   const todo = flattenTodos(overview).find((item) => item.id === todoId);
   const [draft, setDraft] = useState(todo?.draft || '');
   const [title, setTitle] = useState(todo?.title || '');
@@ -39,6 +42,7 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
   const [busy, setBusy] = useState(false);
   const guidanceAttempt = useRef(null);
   const navigation = useRef(0);
+  const initiallyOpened = useRef(false);
   const pendingRead = useRef(null);
   const mounted = useRef(true);
   const [error, setError] = useState('');
@@ -63,10 +67,19 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
       const resolved = Object.fromEntries(found);
       if (request.signal.aborted) return null;
       setIndexes(resolved);
+      if (!initiallyOpened.current && navigation.current === 0) {
+        initiallyOpened.current = true;
+        const currentId = result.current_execution_id;
+        if (currentId && resolved[currentId]?.kind) {
+          setExecutionId(currentId); setMode('execution');
+        } else if (todo?.capability_id && !currentId && canEdit) {
+          setMode('launch');
+        }
+      }
       return resolved;
     } catch (failure) { if (!request.signal.aborted) setError(failure.message); return null; }
     finally { if (pendingRead.current === request) pendingRead.current = null; }
-  }, [todoId]);
+  }, [todoId, todo?.capability_id, canEdit]);
   useEffect(() => {
     mounted.current = true;
     loadLinks();
@@ -78,6 +91,7 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
   }, [loadLinks]);
 
   const save = async () => {
+    navigation.current += 1;
     if (!title.trim()) { setError('TODO 标题不能为空'); return; }
     setBusy(true);
     try {
@@ -131,17 +145,18 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
     { title: '状态', key: 'status', width: '18%', kind: 'enum', searchValue: (r) => r.status || r.readError || '等待读取', render: (_, row) => row.readError || row.status || '等待读取' },
     { title: '操作', key: 'actions', width: '17%', render: (_, row) => <Space>
       <Button type="link" disabled={!row.kind} onClick={() => { setExecutionId(row.id); navigate('execution'); }}>查看</Button>
-      <Button danger type="link" disabled={busy} onClick={() => unlink(row.id)}>解除关联</Button>
+      <EditButton danger type="link" disabled={!canEdit || busy} onClick={() => unlink(row.id)}>解除关联</EditButton>
     </Space> },
   ];
   return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" destroyOnHidden>
     <Space style={{ marginBottom: 16 }}>
       {mode !== 'overview' && <Button onClick={() => navigate('overview')}>返回 TODO</Button>}
-      {mode === 'overview' && <Button type="primary" disabled={!capabilityId || catalog.loading || !!catalog.error} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</Button>}
+      {mode === 'overview' && <EditButton type="primary" disabled={!canEdit || !capabilityId || catalog.loading || !!catalog.error} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</EditButton>}
     </Space>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
     {pendingId && <Button loading={busy} onClick={() => link(pendingId)}>重试关联 {pendingId}</Button>}
     {mode === 'overview' && <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      <ConfigProvider componentDisabled={!canEdit}>
       <Input aria-label="TODO 标题" value={title} onChange={(event) => setTitle(event.target.value)} />
       <Select {...searchSelect} aria-label="所属专项" placeholder="未归属专项" value={groupId} onChange={(value) => { setTagIds(remapTagIds(overview, tagIds, value || null)); setGroupId(value || null); }} options={groupOptions(overview)} style={{ width: '100%' }} />
       <Select mode="multiple" aria-label="TODO Tag" value={selectedTags} onChange={setTagIds} disabled={!groupId} showSearch optionFilterProp="label" placeholder={groupId ? "选择 Tag" : "关联专项后可选择 Tag"} options={availableTags.map((tag) => ({ value: tag.id, label: tag.name }))} style={{ width: '100%' }} />
@@ -149,20 +164,22 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
       {catalog.error && <Alert type="error" title={catalog.error} action={<Button onClick={catalog.reload}>重试能力列表</Button>} />}
       <Select aria-label="执行能力" placeholder="选择能力库中的能力" value={capabilityId} onChange={(value) => setCapabilityId(value || null)} allowClear loading={catalog.loading} options={capabilityOptions(catalog.capabilities)} style={{ width: '100%' }} showSearch optionFilterProp="label" />
       <Input.TextArea aria-label="任务说明" value={draft} onChange={(event) => setDraft(event.target.value)} rows={6} placeholder="写下任务要求，指派时会带入执行界面" />
-      <Button type="primary" loading={busy} onClick={save}>保存 TODO</Button>
+      <EditButton type="primary" loading={busy} onClick={save}>保存 TODO</EditButton>
+      </ConfigProvider>
       <Typography.Title level={5}>指派记录</Typography.Title>
       {links[0]?.execution_id && <ExecutionResult key={links[0].execution_id} id={links[0].execution_id} />}
       <Space.Compact style={{ width: '100%' }}>
         <Input aria-label="已有执行 ID" placeholder="粘贴已有执行 ID" value={linkInput} onChange={(event) => setLinkInput(event.target.value)} />
-        <Button disabled={!linkInput.trim()} loading={busy} onClick={() => link(linkInput)}>关联</Button>
+        <EditButton disabled={!canEdit || !linkInput.trim()} loading={busy} onClick={() => link(linkInput)}>关联</EditButton>
       </Space.Compact>
       <ProjectTable label="TODO 指派记录" viewKey={`assignments:${todoId}`} pagination={false} rows={links.map((record) => ({ ...indexes[record.execution_id], ...record, id: record.execution_id, kind: record.kind || indexes[record.execution_id]?.kind, name: record.name || indexes[record.execution_id]?.name, status: indexes[record.execution_id]?.status, missing: indexes[record.execution_id]?.missing, readError: indexes[record.execution_id]?.readError }))} columns={columns} />
     </Space>}
-    {mode === 'launch' && <CapabilityLauncher key={capabilityId} capability={catalog.capabilities.find((cap) => cap.id === capabilityId)} todoId={todoId} onNotice={onNotice}
+    {mode === 'launch' && catalog.loading && <Spin />}
+    {mode === 'launch' && !catalog.loading && <CapabilityLauncher key={capabilityId} capability={catalog.capabilities.find((cap) => cap.id === capabilityId)} todoId={todoId} onNotice={onNotice}
       prompt={[title, draft].filter(Boolean).join('\n\n')} onCreated={(id) => link(id, true)} />}
     {mode === 'execution' && (indexes[executionId]
-      ? <ExecutionView key={executionId} executionRef={{ id: executionId, kind: indexes[executionId].kind || links.find((link) => link.execution_id === executionId)?.kind }} summary={indexes[executionId]} onNotice={onNotice}
-        allowGuidance={indexes[executionId].kind === 'team' && indexes[executionId].status === 'running'}
+      ? <ExecutionView key={executionId} executionRef={{ id: executionId, kind: indexes[executionId].kind || links.find((link) => link.execution_id === executionId)?.kind }} summary={indexes[executionId]} onNotice={onNotice} mode={["agent", "operator"].includes(indexes[executionId].kind) ? "conversation" : "full"}
+        allowGuidance={canEdit && indexes[executionId].kind === 'team' && indexes[executionId].status === 'running'}
         onGuidance={async (prompt) => {
           try {
             const signature = `${executionId}:${prompt}`;

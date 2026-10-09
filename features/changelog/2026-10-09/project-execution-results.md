@@ -1,8 +1,6 @@
 Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
-# 仓库范围清理与项目执行结果读取
-
-仓库只保留 OpenCoder 通用基建、可复用工具、测试和说明。业务专用统计脚本、相关历史描述和现场信息移到仓库外；19 份原稿已按摘要核对。README、仓库规则和 AGENTS 明确相同边界，Windows 安装入口改为显式提供主机地址和允许访问的网关。
+# 项目执行结果实时读取
 
 项目模块按用户确认的方案只保存执行引用，结论通过所属节点实时读取。移除本地尚未提交的结论缓存、后台收集和重新收集实现，保留标签、全屏详情、Ontology、上下文容量检查、历史结果读取与执行容量恢复等通用平台改动。规则 07 与验收脚本同步到实际行为。
 
@@ -12,7 +10,6 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 | 功能 | 测试或检查入口 |
 | --- | --- |
-| 仓库范围、密钥格式、冲突标记、文件行数及文档链接 | 全部待提交文本与改动文件审查 |
 | 四类能力派发、回复丢失重试、实时结果、离线、失败、空结果、取消与手工进度 | [project/capabilities/main.js](../../../scripts/acceptance/project/capabilities/main.js) |
 | 注册 Operator 经 Agent、DAG 和 Brain 复用及上下文能力声明 | `six_registered_codex_employees_are_reusable_by_agent_dag_and_brain`：[operators.rs](../../../crates/control/tests/e2e/project_links/operators.rs) |
 | 专项与 TODO 全宽详情 | `opens project progress, then the initiative board and TODO in full-width right-side drawers`：[project.dom.test.jsx](../../../crates/web/spa/src/project/project.dom.test.jsx) |
@@ -24,7 +21,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 ## 验证结果
 
-- 后端全量回归：`cargo test --locked --workspace --no-fail-fast -- --test-threads=8` → 455 组，5,716 passed / 0 failed / 8 ignored，进程退出码 0。实际输出保存在下方验证目录的 `workspace-verified.log`。
+- 后端全量回归：`cargo test --locked --workspace --no-fail-fast -- --test-threads=8` → 455 组，5,716 passed / 0 failed / 8 ignored，进程退出码 0。
 - 流式重试五个用例连续运行五轮全部通过，并在全量回归中再次通过。
 - 格式、全目标 Clippy 与工作区二进制及示例构建通过。
 - SPA：150 个文件、1,060 项通过；Ontology 类型检查及独立 97 项测试通过；隔离提交副本的产物漂移检查通过。
@@ -36,7 +33,5 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 首轮 Rust 回归发现旧夹具缺少 Brain 上下文能力声明，补齐后复验。流式重试模拟服务完整读取请求体后再返回响应，避免分段请求留下未读数据；正常响应统一写入，保留原有超时阈值和全部断言。代理排除测试使用文档示例地址。
 
 共享磁盘上的一次观察任务超过 30 秒，DAG 页面启动也曾超时；后续在独立临时存储中验证。Rust 隔离测试使用同一份源码构建配套二进制与容器镜像，避免与旧构建的版本信息混用；源码以摘要清单核对。此前失败日志保留在外部验证目录。
-
-源码和验证清单位于 `/tmp/opencoder-cleanup-validation-20261009/`，原生、全站与切换回执位于 `/data00/opencoder-safety/cleanup-20261009/validation/`；仓库外原稿及其摘要清单位于 `/data00/opencoder-tools/repository-cleanup-20261009/`。
 
 相关：[项目模块约定](../../../rules/07-project-module-contract.md)、[项目工作台](../../project/index.md)、[仓库逻辑地图](../../../repo-memory.md)。

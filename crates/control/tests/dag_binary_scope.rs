@@ -171,7 +171,7 @@ fn role_gate_binary_pool_is_read_only_for_users() {
     use opencoder_core::identity::Role;
     let allowed = |method: &str, path: &str| {
         opencoder_control::role_gate::allowed(
-            Role::User,
+            Role::Viewer,
             &Method::from_bytes(method.as_bytes()).unwrap(),
             path,
         )

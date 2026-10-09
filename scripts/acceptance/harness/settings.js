@@ -1,6 +1,7 @@
 // Agent identity, managed Codex settings and node scheduling through the UI.
 const assert = require('assert/strict');
 const path = require('path');
+const fs = require('fs');
 
 module.exports = async ({ page, api, until, root, envs }) => {
   const workspace = path.join(root, 'workspace');
@@ -71,17 +72,27 @@ module.exports = async ({ page, api, until, root, envs }) => {
   await page.getByRole('tab', { name: 'Harness 管理', exact: true }).click();
   await page.getByLabel('模型（--model）').waitFor();
   for (const name of ['Codex 二进制路径', '授权槽位', '推理强度', '沙箱权限', '审批策略']) assert.equal(await page.getByLabel(name, { exact: true }).count(), 0);
-  await page.getByLabel('codex-managed-envs').fill('INVALID');
+  await page.getByLabel('codex-startup-script').fill('\n/bin/sh');
   await page.getByRole('button', { name: '保存 Codex 配置', exact: true }).click();
-  await page.getByText('环境变量必须为 KEY=VALUE，每行一个', { exact: true }).waitFor();
+  await page.getByText('启动脚本第一行不能为空，命令和参数不能包含空字符', { exact: true }).waitFor();
   assert.equal((await api('GET', '/api/executions')).executions.length, 0, 'invalid input must not dispatch');
-  await page.screenshot({ path: path.join(root, 'invalid-environment.png'), animations: 'disabled' });
-  await page.getByLabel('codex-managed-envs').fill(envs.join('\n'));
+  await page.screenshot({ path: path.join(root, 'invalid-startup-script.png'), animations: 'disabled' });
+  const launcher = path.join(root, 'codex-start.sh');
+  const quote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+  const exports = envs.map((line) => {
+    const equal = line.indexOf('='); const key = line.slice(0, equal);
+    assert.match(key, /^[A-Za-z_][A-Za-z0-9_]*$/);
+    return `export ${key}=${quote(line.slice(equal + 1))}`;
+  });
+  fs.writeFileSync(launcher, ['set -eu', ...exports, 'exec "$@"', ''].join('\n'), { mode: 0o600 });
+  const startup = ['/bin/sh', launcher];
+  await page.getByLabel('codex-startup-script').fill(startup.join('\n'));
   await page.getByRole('button', { name: '保存 Codex 配置', exact: true }).click();
   await page.getByText('配置 v1', { exact: true }).waitFor();
   const saved = (await api('GET', '/api/harnesses')).harnesses.find((h) => h.name === 'codex').settings;
-  assert.deepEqual(saved.envs, Object.fromEntries(envs.map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])));
-  for (const field of ['executable', 'auth_slot', 'reasoning_effort', 'sandbox_mode', 'approval_policy']) assert.equal(saved[field], null);
+  assert.deepEqual(saved.startup_script, startup);
+  assert.equal(Object.hasOwn(saved, 'auth_slot'), false);
+  for (const field of ['executable', 'reasoning_effort', 'sandbox_mode', 'approval_policy']) assert.equal(saved[field], null);
   await page.getByRole('tab', { name: 'Harness 管理', exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(root, 'harness-management.png'), animations: 'disabled' });
 };

@@ -178,10 +178,18 @@ async fn shared_execution_guidance_keeps_each_human_input_id_and_the_same_node()
             .req(
                 Method::POST,
                 "/api/users",
-                Some(json!({"name":name,"role":"user"})),
+                Some(json!({"name":name,"role":"editor"})),
             )
             .await;
-        assert_eq!(status, 200);
+        assert_eq!(status, 200, "{body}");
+        let (status, body) = h
+            .req(
+                Method::POST,
+                "/api/tokens",
+                Some(json!({"user_name":name,"name":"shared guidance"})),
+            )
+            .await;
+        assert_eq!(status, 200, "{body}");
         tokens.push(body["token"].as_str().unwrap().to_owned());
     }
     h.node.set_inspect(

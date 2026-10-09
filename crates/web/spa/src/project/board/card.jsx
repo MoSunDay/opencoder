@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Button, Card, Popconfirm, Space, Tag, Typography } from 'antd';
 import { MenuOutlined } from '@ant-design/icons';
 import { useSortable } from '@dnd-kit/sortable';
@@ -14,7 +15,7 @@ export function TodoCard({ todo, group, overview, onOpen, onDelete, disabled }) 
       <Space orientation="vertical" size={6} style={{ width: '100%' }}>
         {todo.draft && <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>{todo.draft}</Typography.Paragraph>}
         <Space wrap size={[0, 4]}>{todoTags(overview, todo).map((tag) => <Tag key={tag.id}>{tag.name}</Tag>)}{badge && <Tag color={badge.color}>{badge.label}</Tag>}</Space>
-        <Space><Button size="small" onClick={() => onOpen(todo.id)}>详情</Button><Popconfirm title="删除该 TODO？" onConfirm={() => onDelete(todo)}><Button size="small" danger disabled={disabled}>删除</Button></Popconfirm></Space>
+        <Space><Button size="small" onClick={() => onOpen(todo.id)}>详情</Button><Popconfirm title="删除该 TODO？" onConfirm={() => onDelete(todo)}><EditButton size="small" danger disabled={disabled}>删除</EditButton></Popconfirm></Space>
       </Space>
     </Card>
   </div>;

@@ -24,6 +24,6 @@ SPA 112 文件、886 项测试通过，卡片调整后相关 18 项复测通过�
 
 ## 相关
 
-- [能力与业务规则](../../brain/index.md)
+- [能力与功能规则](../../brain/index.md)
 - [Brain 逻辑](../../../agents/brain/index.md)
 - [运行协议](../../../docs/brain-orchestration.md)

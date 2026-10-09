@@ -31,8 +31,8 @@ const ALL_PAGES = ALL_ITEMS.map((i) => i.page);
 
 describe('NAV_CATEGORIES shape', () => {
   it('declares the four IA categories in order', () => {
-    expect(NAV_CATEGORIES.map((c) => c.key)).toEqual(['project', 'agent', 'ontology', 'node']);
-    expect(NAV_CATEGORIES.map((c) => c.label)).toEqual(['项目', 'Agent', 'Ontology', '节点']);
+    expect(NAV_CATEGORIES.map((c) => c.key)).toEqual(['project', 'agent', 'ontology', 'admin']);
+    expect(NAV_CATEGORIES.map((c) => c.label)).toEqual(['项目', 'Agent', 'Ontology', '后台管理']);
   });
 
   it('has no duplicate page keys across categories', () => {
@@ -40,7 +40,7 @@ describe('NAV_CATEGORIES shape', () => {
   });
 
   it('renames the fleet list to 节点列表 (old label Opencoder 列表 is gone)', () => {
-    const node = NAV_CATEGORIES.find((c) => c.key === 'node');
+    const node = NAV_CATEGORIES.find((c) => c.key === 'admin');
     expect(node.items.find((i) => i.page === 'nodes').menu).toBe('节点列表');
     expect(ALL_ITEMS.some((i) => i.menu === 'Opencoder 列表')).toBe(false);
   });
@@ -69,12 +69,12 @@ describe('categoryOf', () => {
   });
 
   it('falls back to the default category for unknown pages', () => {
-    expect(DEFAULT_CATEGORY).toBe('node');
-    expect(categoryOf('nope')).toBe('node');
-    expect(categoryOf('')).toBe('node');
-    expect(categoryOf(undefined)).toBe('node');
+    expect(DEFAULT_CATEGORY).toBe('admin');
+    expect(categoryOf('nope')).toBe('admin');
+    expect(categoryOf('')).toBe('admin');
+    expect(categoryOf(undefined)).toBe('admin');
     // Case-sensitive: not a nodes alias.
-    expect(categoryOf('Nodes')).toBe('node');
+    expect(categoryOf('Nodes')).toBe('admin');
   });
 });
 
@@ -82,7 +82,7 @@ describe('categoryHome / pagesOf', () => {
   it('returns the first page of each category', () => {
     expect(categoryHome('project')).toBe('project');
     expect(categoryHome('agent')).toBe('brain');
-    expect(categoryHome('node')).toBe('nodes');
+    expect(categoryHome('admin')).toBe('nodes');
   });
 
   it('falls back to the default category home for unknown keys', () => {
@@ -93,15 +93,15 @@ describe('categoryHome / pagesOf', () => {
     expect(pagesOf('project')).toEqual(['project']);
     // schedules（调度）挂在「全部执行」之后：cron 台账是执行面的时间维度。
     expect(pagesOf('agent')).toEqual(['brain', 'topics', 'schedules', 'dag', 'todos', 'team', 'chat', 'agents']);
-    expect(pagesOf('node')).toEqual(['nodes']);
+    expect(pagesOf('admin')).toEqual(['nodes', 'users', 'tokens']);
   });
 });
 
 describe('menuOf / selectOptionsOf scoping', () => {
   it('builds antd Menu items keyed by page with matching labels', () => {
-    const items = menuOf('node');
-    expect(items.map((i) => i.key)).toEqual(['nodes']);
-    expect(items.map((i) => i.label)).toEqual(['节点列表']);
+    const items = menuOf('admin');
+    expect(items.map((i) => i.key)).toEqual(['nodes', 'users', 'tokens']);
+    expect(items.map((i) => i.label)).toEqual(['节点列表', '用户权限', 'Token 管理']);
     expect(items.every((i) => isValidElement(i.icon))).toBe(true);
   });
 
@@ -146,7 +146,7 @@ describe('CATEGORY_OPTIONS / PAGE_META coverage', () => {
       { value: 'project', label: '项目' },
       { value: 'agent', label: 'Agent' },
       { value: 'ontology', label: 'Ontology' },
-      { value: 'node', label: '节点' },
+      { value: 'admin', label: '后台管理' },
     ]);
   });
 
@@ -177,32 +177,16 @@ describe('CATEGORY_OPTIONS / PAGE_META coverage', () => {
   });
 });
 
-describe('visibleCategories / allowedPages (permission view)', () => {
-  it('admin and the pre-probe null identity see the full IA', () => {
-    expect(visibleCategories(null)).toBe(NAV_CATEGORIES);
-    expect(visibleCategories({ name: 'boss', role: 'admin' })).toBe(NAV_CATEGORIES);
-    expect(allowedPages(null)).toEqual(ALL_PAGES);
+describe('visibleCategories / allowedPages', () => {
+  it('admin sees every page', () => {
+    expect(visibleCategories({ role: 'admin' })).toBe(NAV_CATEGORIES);
+    expect(allowedPages({ role: 'admin' })).toEqual(ALL_PAGES);
   });
-
-  it('non-admin sees 全部执行 and the complete Ontology category', () => {
-    const visible = visibleCategories({ name: 'guest', role: 'user' });
-    expect(visible).toHaveLength(2);
-    expect(visible[1].key).toBe('ontology');
-    expect(visible[0].key).toBe('agent');
-    expect(visible[0].label).toBe('Agent');
-    // 全部执行 item 与全量 IA 同一行（icon/menu 不漂移）。
-    const topics = NAV_CATEGORIES.find((c) => c.key === 'agent').items.find((i) => i.page === 'topics');
-    expect(visible[0].items).toEqual([topics]);
-    expect(allowedPages({ name: 'guest', role: 'user' })).toEqual(['topics', ...pagesOf('ontology')]);
-  });
-
-  it('feeds the shell Menu/Select builders without dangling keys', () => {
-    const visible = visibleCategories({ name: 'guest', role: 'root' });
-    const menu = menuItemsOf(visible[0].items);
-    const select = selectItemsOf(visible[0].items);
-    expect(menu.map((i) => i.key)).toEqual(['topics']);
-    expect(menu[0].label).toBe('全部执行');
-    expect(isValidElement(menu[0].icon)).toBe(true);
-    expect(select).toEqual([{ value: 'topics', label: '全部执行' }]);
+  it.each(['editor', 'viewer', undefined])('keeps platform pages and hides administration for %s', (role) => {
+    const visible = visibleCategories(role ? { role } : null);
+    expect(visible.map((category) => category.key)).toEqual(['project', 'agent', 'ontology']);
+    expect(allowedPages({ role })).toEqual([...pagesOf('project'), ...pagesOf('agent'), ...pagesOf('ontology')]);
+    expect(menuItemsOf(visible[0].items).map((item) => item.key)).toEqual(['project']);
+    expect(selectItemsOf(visible[0].items)).toEqual([{ value: 'project', label: '项目' }]);
   });
 });

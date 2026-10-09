@@ -269,13 +269,21 @@ async fn file_seed_is_one_time_and_table_gated() {
 /// The schedules surface (reads AND writes) is admin-only (unknown paths
 /// default to closed).
 #[tokio::test]
-async fn schedule_apis_are_admin_only() {
+async fn viewer_reads_schedules_but_cannot_change_them() {
     let h = Harness::new().await;
     let (status, body) = h
         .req(
             reqwest::Method::POST,
             "/api/users",
-            Some(json!({"name": "alice", "role": "user"})),
+            Some(json!({"name": "alice", "role": "viewer"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = h
+        .req(
+            reqwest::Method::POST,
+            "/api/tokens",
+            Some(json!({"user_name":"alice","name":"test"})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
@@ -284,7 +292,7 @@ async fn schedule_apis_are_admin_only() {
     let resp = h
         .req_raw(reqwest::Method::GET, "/api/schedules", None, Some(&token))
         .await;
-    assert_eq!(resp.status().as_u16(), 403);
+    assert_eq!(resp.status().as_u16(), 200);
     let resp = h
         .req_raw(
             reqwest::Method::GET,
@@ -293,7 +301,8 @@ async fn schedule_apis_are_admin_only() {
             Some(&token),
         )
         .await;
-    assert_eq!(resp.status().as_u16(), 403);
+    assert_eq!(resp.status().as_u16(), 200);
+    assert_eq!(resp.json::<Value>().await.unwrap(), json!({"runs": []}));
 
     // Write paths are gated the same way.
     let body = json!({"id": "evil", "cron": USER_AGENT_CRON, "kind": "agent", "target": "act"});

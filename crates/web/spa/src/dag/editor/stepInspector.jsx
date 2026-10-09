@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 // stepInspector.jsx — right-hand property panel for the DAG spec editor.
 // StepInspector edits ONE selected step (name / kind / prompt / resource /
 // agent / model / how_append / sandbox / timeout) as fully controlled antd
@@ -153,9 +154,9 @@ export function StepInspector({ step, allNames, problemList, onChange, onRename,
         cancelText="取消"
         onConfirm={onRemove}
       >
-        <Button danger block>
+        <EditButton danger block>
           删除步骤
-        </Button>
+        </EditButton>
       </Popconfirm>
     </div>
   );

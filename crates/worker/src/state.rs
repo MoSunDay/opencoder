@@ -53,6 +53,8 @@ pub(crate) struct Inner {
     pub active: Mutex<HashMap<String, CancellationToken>>,
     pub tasks: Arc<ExecutionTasks>,
     pub background_tasks: Arc<ExecutionTasks>,
+    #[cfg(not(windows))]
+    pub sandbox_stores: Mutex<HashMap<String, std::sync::Weak<opencoder_store::LibsqlStore>>>,
     pub lifecycle_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub preparation_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub slots: Arc<Semaphore>,
@@ -242,6 +244,8 @@ impl Worker {
                 active: Mutex::new(HashMap::new()),
                 tasks: Arc::new(ExecutionTasks::new()),
                 background_tasks: Arc::new(ExecutionTasks::new()),
+                #[cfg(not(windows))]
+                sandbox_stores: Mutex::new(HashMap::new()),
                 lifecycle_gates: Mutex::new(HashMap::new()),
                 preparation_gates: Mutex::new(HashMap::new()),
                 slots: Arc::new(Semaphore::new(MAX_NODE_RUNS)),

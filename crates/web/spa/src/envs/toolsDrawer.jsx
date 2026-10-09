@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import { useEvent } from '../ui/editing/useEvent.js';
 // toolsDrawer.jsx — env 行内工具抽屉：点 env 行（或工具数 Tag）打开，工具的
 // 查看/添加/移除/导入全部发生在这个抽屉里（tools 跟随 env）。打开时并行拉
@@ -132,9 +133,9 @@ function EnvToolsDrawerSession({
     { title: 'ref', dataIndex: 'ref', key: 'ref', ellipsis: true,
       render: (v) => <Text style={REF_MONO}>{v}</Text> },
     { title: '操作', key: 'op', width: 90, render: (_, row) => (
-      <Button size="small" danger loading={busy === `remove:${row.ref}`}
+      <EditButton size="small" danger loading={busy === `remove:${row.ref}`}
         disabled={!!busy && busy !== `remove:${row.ref}`}
-        onClick={() => removeTool(row.ref)}>移除</Button>
+        onClick={() => removeTool(row.ref)}>移除</EditButton>
     ) },
   ];
 
@@ -145,9 +146,9 @@ function EnvToolsDrawerSession({
     { title: 'version', dataIndex: 'version', key: 'version', width: 80, ellipsis: true },
     { title: 'tool', dataIndex: 'tool', key: 'tool', ellipsis: true },
     { title: '操作', key: 'op', width: 90, render: (_, t) => (
-      <Button size="small" loading={busy === `import:${t.ref}`}
+      <EditButton size="small" loading={busy === `import:${t.ref}`}
         disabled={!!busy && busy !== `import:${t.ref}`}
-        onClick={() => importTool(t)}>导入</Button>
+        onClick={() => importTool(t)}>导入</EditButton>
     ) },
   ];
 
@@ -182,8 +183,8 @@ function EnvToolsDrawerSession({
                   onChange={setPending} placeholder="选择 share 中已导入的工具"
                   aria-label="env-add-tools" disabled={loading || !!busy}
                   style={{ minWidth: 260, maxWidth: '100%' }} />
-                <Button type="primary" loading={busy === 'add'} disabled={!pending.length}
-                  onClick={addTools}>添加</Button>
+                <EditButton type="primary" loading={busy === 'add'} disabled={!pending.length}
+                  onClick={addTools}>添加</EditButton>
               </Space>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
                 只有 share 中已导入的工具可添加；可导入条目请先在下方导入。

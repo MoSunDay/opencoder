@@ -48,7 +48,7 @@ tmux 底部状态栏占据一整行屏幕。当 opencode TUI 全屏运行时，�
 
 > rules/01 I/O 豁免：`current_status` / `set_status` / `inside_tmux` 直接调用 tmux
 > 二进制或读进程环境，属「纯 I/O 包装，无法在无 tmux 的 CI 沙箱内测试」，按
-> rules/01 豁免。唯一业务逻辑（状态串解析）已抽为纯函数 `parse_status` 并完整覆盖。
+> rules/01 豁免。唯一处理逻辑（状态串解析）已抽为纯函数 `parse_status` 并完整覆盖。
 
 ## Gate
 

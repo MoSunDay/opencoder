@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Alert, Button, Form, Input, Modal, Space } from 'antd';
 import { useState } from 'react';
 import { apiPost, apiPut } from '../../api.js';
@@ -32,7 +33,7 @@ export function BinaryEditor({ pool, onClose, onSaved }) {
       <Form.Item label="Linux 可执行文件" extra="ELF64，x86_64 或 aarch64，不超过 32 MiB；新版本不会改写已受理任务的固定版本。">
         <input type="file" aria-label="Linux 可执行文件" disabled={busy} onChange={(event) => { setFile(event.target.files?.[0] || null); setError(''); }} />
       </Form.Item>
-      <Space><Button type="primary" htmlType="submit" loading={busy}>保存二进制</Button><Button disabled={busy} onClick={onClose}>取消</Button></Space>
+      <Space><EditButton type="primary" htmlType="submit" loading={busy}>保存二进制</EditButton><Button disabled={busy} onClick={onClose}>取消</Button></Space>
     </Form>
   </Modal>;
 }

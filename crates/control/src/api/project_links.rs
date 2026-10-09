@@ -32,14 +32,31 @@ fn linkable(kind: ExecutionKind) -> bool {
     )
 }
 
+fn current_execution<'a>(
+    capability: Option<&str>,
+    assignments: &'a [ProjectAssignment],
+) -> Option<&'a str> {
+    let capability = capability?;
+    assignments
+        .iter()
+        .filter(|item| item.capability_id.as_deref() == Some(capability))
+        .max_by(|a, b| (a.created_at, &a.execution_id).cmp(&(b.created_at, &b.execution_id)))
+        .map(|item| item.execution_id.as_str())
+}
+
 pub async fn list(State(state): State<Arc<AppState>>, Path(todo_id): Path<String>) -> Response {
-    match state.projects.get_todo(&todo_id).await {
-        Ok(Some(_)) => {}
+    let todo = match state.projects.get_todo(&todo_id).await {
+        Ok(Some(todo)) => todo,
         Ok(None) => return response(RpcReply::error(404, "todo not found")),
         Err(error) => return response(RpcReply::error(500, error.to_string())),
-    }
+    };
     match state.projects.list_todo_assignments(&todo_id).await {
-        Ok(assignments) => response(RpcReply::ok(json!({ "assignments": assignments }))),
+        Ok(assignments) => {
+            let current = current_execution(todo.capability_id.as_deref(), &assignments);
+            response(RpcReply::ok(
+                json!({ "assignments": assignments, "current_execution_id":current }),
+            ))
+        }
         Err(error) => response(RpcReply::error(500, error.to_string())),
     }
 }
@@ -128,6 +145,27 @@ pub async fn unlink(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_execution_follows_selected_capability_not_latest_other_kind() {
+        let assignment = |id: &str, cap: &str, created_at| ProjectAssignment {
+            todo_id: "t".into(),
+            execution_id: id.into(),
+            capability_id: Some(cap.into()),
+            kind: "agent".into(),
+            name: id.into(),
+            created_at,
+        };
+        let rows = vec![
+            assignment("a", "agent", 1),
+            assignment("b", "agent", 2),
+            assignment("d", "dag", 3),
+        ];
+        assert_eq!(current_execution(Some("agent"), &rows), Some("b"));
+        assert_eq!(current_execution(Some("dag"), &rows), Some("d"));
+        assert_eq!(current_execution(Some("new"), &rows), None);
+        assert_eq!(current_execution(None, &rows), None);
+    }
 
     #[test]
     fn only_agent_execution_capabilities_can_be_linked() {

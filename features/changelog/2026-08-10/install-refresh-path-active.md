@@ -53,5 +53,5 @@ Commit: 0e0ec867c45170ffb244e38469baf7f4508bacc9
 - 现场刷新：`/root/.local/bin/opencoder`（PATH 生效位）、`/usr/local/bin/opencoder`（FHS 位）。
 - 备份：`/root/.local/bin/opencoder.bak.20260810191519`、`/usr/local/bin/opencoder.bak.20260810191520`
   （均不覆盖历史备份）。
-- 不影响：任何 Rust crate 源码、`Store` / `ChatStream` 抽象、session/web/cli/tui 业务行为。
+- 不影响：任何 Rust crate 源码、`Store` / `ChatStream` 抽象、session/web/cli/tui 功能行为。
 - 不影响：`opencode`（旧二进制）及依赖它的 systemd 隧道。

@@ -55,15 +55,43 @@ pub fn spawn(
     prompt: String,
     images: &[std::path::PathBuf],
 ) -> Result<Running> {
-    let binary = configured_binary(
+    let launcher = super::launch::startup_program(
         session.harness.codex.as_ref(),
         &session.harness.envs,
         &session.working_dir,
     )?;
-    let (mut cmd, lease) = match crate::process::command(&binary)? {
-        Some((cmd, lease)) => (cmd, Some(lease)),
-        None => (Command::new(&binary), None),
+    // A launcher may prepare PATH or install its runtime before invoking Codex.
+    // Resolve Codex here only when the platform starts it directly.
+    let binary = if launcher.is_some() {
+        session
+            .harness
+            .codex
+            .as_ref()
+            .and_then(|s| s.executable.as_deref())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                if cfg!(windows) {
+                    "codex.exe".into()
+                } else {
+                    "codex".into()
+                }
+            })
+    } else {
+        configured_binary(
+            session.harness.codex.as_ref(),
+            &session.harness.envs,
+            &session.working_dir,
+        )?
     };
+    let program = launcher.as_ref().unwrap_or(&binary);
+    let (mut cmd, lease) = match crate::process::command(program)? {
+        Some((cmd, lease)) => (cmd, Some(lease)),
+        None => (Command::new(program), None),
+    };
+    cmd.args(super::launch::prefix(
+        session.harness.codex.as_ref(),
+        &binary,
+    ));
     if let Some(settings) = &session.harness.codex {
         settings.validate().map_err(anyhow::Error::msg)?;
         cmd.args(settings.config_args());
@@ -107,6 +135,9 @@ pub fn spawn(
         let mut paths = session.tools_path.clone();
         paths.extend(std::env::split_paths(&inherited));
         cmd.env("PATH", std::env::join_paths(paths)?);
+    }
+    if launcher.is_some() {
+        cmd.env("OPENCODER_HARNESS_CONTEXT", super::launch::context(session));
     }
     #[cfg(unix)]
     cmd.process_group(0);

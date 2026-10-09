@@ -387,3 +387,6 @@ fn operator_mode_card_stays_on_host() {
         requests[0]
     );
 }
+
+#[path = "sandbox_inputs.rs"]
+mod inputs;

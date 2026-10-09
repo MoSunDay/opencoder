@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 import { useEvent } from './ui/editing/useEvent.js';
 // promptEditor.jsx — 引用的 prompts 资源之 soul/how/output 编辑器：从
 // CURRENT 版本读取 soul.md|how.md|output.md（缺失 ⇒ 空文本，404 吞掉），
@@ -110,7 +111,7 @@ function PromptEditorSession({ resourceName, onNotice: noticeCallback, onSaved }
       size="small"
       title={`Prompt 内容（当前 v${version}）`}
       loading={loading}
-      extra={<Button size="small" type="primary" loading={saving} disabled={!loaded} onClick={save}>保存</Button>}
+      extra={<EditButton size="small" type="primary" loading={saving} disabled={!loaded} onClick={save}>保存</EditButton>}
       style={{ marginTop: 12 }}
     >
       {loadError && <Alert type="error" showIcon title={loadError} />}

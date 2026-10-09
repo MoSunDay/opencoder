@@ -1,354 +1,292 @@
-//! Platform-user administration + role gate over the real router: /api/me,
-//! admin user CRUD, the non-admin read/launch profile, and the operator-only
-//! submission/command rules for non-admin roles.
-
+//! Real-router coverage for live roles, independent credentials and startup admin.
+use crate::support::{http::Harness, TOKEN};
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 
-use crate::support::{http::Harness, TOKEN};
-
-/// JSON request with an explicit bearer; returns (status, parsed body).
 async fn auth(
     h: &Harness,
     method: Method,
     path: &str,
     token: &str,
     body: Option<Value>,
-) -> (reqwest::StatusCode, Value) {
-    let resp = h.req_raw(method, path, body, Some(token)).await;
-    let status = resp.status();
-    let bytes = resp.bytes().await.unwrap();
-    let parsed = if bytes.is_empty() {
-        json!({})
-    } else {
-        serde_json::from_slice(&bytes).unwrap_or(json!({}))
-    };
-    (status, parsed)
+) -> (StatusCode, Value) {
+    let response = h.req_raw(method, path, body, Some(token)).await;
+    let status = response.status();
+    (status, response.json().await.unwrap_or(json!({})))
 }
-
-/// Bearer-less request.
-async fn anon(h: &Harness, method: Method, path: &str) -> reqwest::StatusCode {
-    h.req_raw(method, path, None, None).await.status()
-}
-
-#[tokio::test]
-async fn me_reports_the_seed_admin_and_rejects_missing_tokens() {
-    let h = Harness::new().await;
-    let (status, body) = auth(&h, Method::GET, "/api/me", TOKEN, None).await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body, json!({"name": "admin", "role": "admin"}));
-
-    let status = anon(&h, Method::GET, "/api/me").await;
-    assert_eq!(status, 401);
-    let (status, _) = auth(&h, Method::GET, "/api/me", "wrong-token", None).await;
-    assert_eq!(status, 401);
-}
-
-/// Create → probe with the issued token → list → revoke → token dead.
-#[tokio::test]
-async fn admin_creates_lists_and_revokes_users() {
-    let h = Harness::new().await;
-    let (status, body) = auth(
-        &h,
-        Method::POST,
-        "/api/users",
-        TOKEN,
-        Some(json!({"name": "alice", "role": "user"})),
-    )
-    .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body["user"]["name"], json!("alice"));
-    assert_eq!(body["user"]["role"], json!("user"));
-    let token = body["token"].as_str().unwrap().to_string();
-    // The plaintext is returned exactly once and in the `oc_` wire format.
-    assert!(
-        token.starts_with("oc_"),
-        "plaintext oc_ token returned exactly once: {token}"
-    );
-    assert!(
-        token.len() > "oc_".len(),
-        "plaintext token carries randomness"
-    );
-
-    // The issued token authenticates as its user.
-    let (status, me) = auth(&h, Method::GET, "/api/me", &token, None).await;
-    assert_eq!(status, 200, "{me}");
-    assert_eq!(me, json!({"name": "alice", "role": "user"}));
-
-    // Duplicate names collide with 409; unknown roles and bad names 400.
-    let (status, _) = auth(
-        &h,
-        Method::POST,
-        "/api/users",
-        TOKEN,
-        Some(json!({"name": "alice", "role": "root"})),
-    )
-    .await;
-    assert_eq!(status, 409);
-    let (status, _) = auth(
-        &h,
-        Method::POST,
-        "/api/users",
-        TOKEN,
-        Some(json!({"name": "x y", "role": "user"})),
-    )
-    .await;
-    assert_eq!(status, 400);
-    let (status, _) = auth(
-        &h,
-        Method::POST,
-        "/api/users",
-        TOKEN,
-        Some(json!({"name": "ok", "role": "boss"})),
-    )
-    .await;
-    assert_eq!(status, 400);
-
-    // Listing shows the user without any token material.
-    let (status, list) = auth(&h, Method::GET, "/api/users", TOKEN, None).await;
-    assert_eq!(status, 200, "{list}");
-    let users = list["users"].as_array().unwrap();
-    assert_eq!(users.len(), 1);
-    assert_eq!(users[0]["name"], json!("alice"));
-    assert!(users[0].get("token_hash").is_none());
-    assert!(users[0].get("token").is_none());
-
-    // Revocation kills the credential; double delete is 404.
-    let (status, body) = auth(&h, Method::DELETE, "/api/users/alice", TOKEN, None).await;
-    assert_eq!(status, 200, "{body}");
-    let (status, _) = auth(&h, Method::GET, "/api/me", &token, None).await;
-    assert_eq!(status, 401);
-    let (status, _) = auth(&h, Method::DELETE, "/api/users/alice", TOKEN, None).await;
-    assert_eq!(status, 404);
-}
-
-#[tokio::test]
-async fn delete_protections_cover_self_and_the_last_admin() {
-    let h = Harness::new().await;
-    // The seed identity is "admin": self-delete is refused before lookup.
-    let (status, body) = auth(&h, Method::DELETE, "/api/users/admin", TOKEN, None).await;
-    assert_eq!(status, 400, "{body}");
-    assert_eq!(
-        body["error"],
-        json!("cannot delete the caller's own account")
-    );
-
-    // A lone table admin cannot be removed…
-    auth(
-        &h,
-        Method::POST,
-        "/api/users",
-        TOKEN,
-        Some(json!({"name": "boss", "role": "admin"})),
-    )
-    .await;
-    let (status, body) = auth(&h, Method::DELETE, "/api/users/boss", TOKEN, None).await;
-    assert_eq!(status, 400, "{body}");
-    assert_eq!(body["error"], json!("cannot delete the last admin"));
-
-    // …but a second admin unlocks the removal.
-    auth(
-        &h,
-        Method::POST,
-        "/api/users",
-        TOKEN,
-        Some(json!({"name": "boss2", "role": "admin"})),
-    )
-    .await;
-    let (status, _) = auth(&h, Method::DELETE, "/api/users/boss", TOKEN, None).await;
-    assert_eq!(status, 200);
-}
-
-async fn user_token_h(h: &Harness, name: &str, role: &str) -> String {
+async fn create_user(h: &Harness, name: &str, role: &str) {
     let (status, body) = auth(
         h,
         Method::POST,
         "/api/users",
         TOKEN,
-        Some(json!({"name": name, "role": role})),
+        Some(json!({"name":name,"role":role})),
     )
     .await;
     assert_eq!(status, 200, "{body}");
-    body["token"].as_str().unwrap().to_string()
+    assert!(body.get("token").is_none());
+}
+async fn issue(h: &Harness, name: &str) -> Value {
+    let (status, body) = auth(
+        h,
+        Method::POST,
+        "/api/tokens",
+        TOKEN,
+        Some(json!({"user_name":name,"name":"CLI"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body["token"].as_str().unwrap().starts_with("oc_"));
+    body
 }
 
 #[tokio::test]
-async fn non_admins_get_the_read_and_operator_launch_profile() {
+async fn startup_admin_is_protected_and_missing_credentials_fail() {
     let h = Harness::new().await;
-    for role in ["user", "root"] {
-        let token = user_token_h(&h, &format!("nina-{role}"), role).await;
-        // Reads allowed…
-        let (status, _) = auth(&h, Method::GET, "/api/nodes", &token, None).await;
-        assert_eq!(status, 200, "{role} nodes");
-        let (status, _) = auth(&h, Method::GET, "/api/executions", &token, None).await;
-        assert_eq!(status, 200, "{role} executions");
-        // …management and other surfaces stay admin-only.
-        let (status, _) = auth(&h, Method::GET, "/api/users", &token, None).await;
-        assert_eq!(status, 403, "{role} users");
-        let (status, _) = auth(
+    let (status, body) = auth(&h, Method::GET, "/api/me", TOKEN, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, json!({"name":"admin","role":"admin"}));
+    assert_eq!(
+        h.req_raw(Method::GET, "/api/me", None, None).await.status(),
+        401
+    );
+    assert_eq!(auth(&h, Method::GET, "/api/me", "wrong", None).await.0, 401);
+    for role in ["admin", "user", "root", "unknown"] {
+        assert_eq!(
+            auth(
+                &h,
+                Method::POST,
+                "/api/users",
+                TOKEN,
+                Some(json!({"name":"other","role":role}))
+            )
+            .await
+            .0,
+            400
+        );
+    }
+    assert_eq!(
+        auth(&h, Method::DELETE, "/api/users/admin", TOKEN, None)
+            .await
+            .0,
+        400
+    );
+    assert_eq!(
+        auth(
+            &h,
+            Method::PATCH,
+            "/api/users/admin",
+            TOKEN,
+            Some(json!({"role":"viewer"}))
+        )
+        .await
+        .0,
+        400
+    );
+    assert_eq!(
+        auth(
+            &h,
+            Method::POST,
+            "/api/tokens",
+            TOKEN,
+            Some(json!({"user_name":"admin","name":"extra"}))
+        )
+        .await
+        .0,
+        400
+    );
+}
+
+#[tokio::test]
+async fn credentials_are_independent_and_inherit_live_user_roles() {
+    let h = Harness::new().await;
+    create_user(&h, "alice", "viewer").await;
+    assert_eq!(
+        auth(
             &h,
             Method::POST,
             "/api/users",
-            &token,
-            Some(json!({"name": "x", "role": "user"})),
+            TOKEN,
+            Some(json!({"name":"alice","role":"editor"}))
         )
-        .await;
-        assert_eq!(status, 403, "{role} create user");
-        let (status, _) = auth(&h, Method::GET, "/api/agents", &token, None).await;
-        assert_eq!(status, 403, "{role} agents");
-        let (status, _) = auth(&h, Method::GET, "/api/brain/capabilities", &token, None).await;
-        assert_eq!(status, 403, "{role} brain");
-        let (status, _) = auth(
-            &h,
-            Method::POST,
-            "/api/nodes/node-e2e/maintenance",
-            &token,
-            Some(json!({})),
-        )
-        .await;
-        assert_eq!(status, 403, "{role} maintenance");
-    }
-}
-
-#[tokio::test]
-async fn non_admins_submit_and_command_operator_and_agent_executions() {
-    let h = Harness::new().await;
-    let token = user_token_h(&h, "op-user", "user").await;
-
-    // operator submissions are accepted and pinned to the requested node.
-    let (status, receipt) = auth(
-        &h,
-        Method::POST,
-        "/api/executions",
-        &token,
-        Some(json!({
-            "id": "operator-nina-1",
-            "kind": "operator",
-            "node_id": "node-e2e",
-            "input": {"prompt": "hi"}
-        })),
-    )
-    .await;
-    assert_eq!(status, 202, "{receipt}");
-    assert_eq!(receipt["node_id"], json!("node-e2e"));
-    assert!(h
-        .node
-        .journal_ids()
-        .contains(&"operator-nina-1".to_string()));
-
-    // agent submissions pass the same gate end to end.
-    let (status, receipt) = auth(
-        &h,
-        Method::POST,
-        "/api/executions",
-        &token,
-        Some(json!({
-            "id": "agent-nina-1",
-            "kind": "agent",
-            "node_id": "node-e2e",
-            "input": {"prompt": "hi"}
-        })),
-    )
-    .await;
-    assert_eq!(status, 202, "{receipt}");
-    assert_eq!(receipt["kind"], json!("agent"));
-    assert_eq!(receipt["node_id"], json!("node-e2e"));
-    assert!(h.node.journal_ids().contains(&"agent-nina-1".to_string()));
-
-    // dag/team (or any other kind) submissions are refused before placement
-    // with the documented message.
-    for kind in ["dag", "team"] {
-        let (status, body) = auth(
-            &h,
-            Method::POST,
-            "/api/executions",
-            &token,
-            Some(json!({"id": format!("{kind}-nina-1"), "kind": kind})),
-        )
-        .await;
-        assert_eq!(status, 403, "{kind}: {body}");
+        .await
+        .0,
+        409
+    );
+    let first = issue(&h, "alice").await;
+    let second = issue(&h, "alice").await;
+    let a = first["token"].as_str().unwrap();
+    let b = second["token"].as_str().unwrap();
+    assert_ne!(a, b);
+    assert!(first["metadata"]["expires_at"].is_null());
+    for token in [a, b] {
         assert_eq!(
-            body["error"],
-            json!("non-admin roles may only submit operator or agent executions")
+            auth(&h, Method::GET, "/api/me", token, None).await.1["role"],
+            "viewer"
         );
     }
-
-    // Reading the operator execution works; the id must keep the operator-
-    // prefix (the scripted node supplies the inspect body).
-    h.node
-        .set_inspect("operator-nina-1", json!({"status": "running"}));
-    let (status, body) = auth(
-        &h,
-        Method::GET,
-        "/api/executions/operator-nina-1",
-        &token,
-        None,
-    )
-    .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body["status"], json!("running"));
-
-    // Commands on operator AND agent executions pass the kind rule (the
-    // node's scripted 400 for an unknown command is the passthrough proof).
-    for id in ["operator-nina-1", "agent-nina-1"] {
-        let (status, body) = auth(
-            &h,
-            Method::POST,
-            &format!("/api/executions/{id}/commands"),
-            &token,
-            Some(json!({"action": "prompt", "input": {"prompt": "more"}})),
-        )
-        .await;
-        assert_eq!(status, 400, "{id}: {body}");
-        assert_eq!(body["error"], json!("unknown execution command"));
-    }
-
-    // An admin-owned non-operator/agent execution stays untouchable for
-    // commands (the gate reads the durable index kind).
-    h.put_index("team-admin-1", ExecutionKind::Team, ExecutionStatus::Idle)
-        .await;
-    let (status, body) = auth(
-        &h,
-        Method::POST,
-        "/api/executions/team-admin-1/commands",
-        &token,
-        Some(json!({"action": "prompt", "input": {"prompt": "more"}})),
-    )
-    .await;
-    assert_eq!(status, 403, "{body}");
     assert_eq!(
-        body["error"],
-        json!("non-admin roles may only command operator or agent executions")
+        auth(
+            &h,
+            Method::PATCH,
+            "/api/users/alice",
+            TOKEN,
+            Some(json!({"role":"editor"}))
+        )
+        .await
+        .0,
+        200
+    );
+    for token in [a, b] {
+        assert_eq!(
+            auth(&h, Method::GET, "/api/me", token, None).await.1["role"],
+            "editor"
+        );
+    }
+    for path in ["/api/users", "/api/tokens"] {
+        let (status, body) = auth(&h, Method::GET, path, TOKEN, None).await;
+        assert_eq!(status, 200);
+        let text = body.to_string();
+        assert!(!text.contains(a) && !text.contains(b) && !text.contains("token_hash"));
+    }
+    let path = format!("/api/tokens/{}", first["metadata"]["id"].as_str().unwrap());
+    assert_eq!(auth(&h, Method::DELETE, &path, TOKEN, None).await.0, 200);
+    assert_eq!(auth(&h, Method::GET, "/api/me", a, None).await.0, 401);
+    assert_eq!(auth(&h, Method::GET, "/api/me", b, None).await.0, 200);
+    assert_eq!(
+        auth(&h, Method::DELETE, "/api/users/alice", TOKEN, None)
+            .await
+            .0,
+        200
+    );
+    assert_eq!(auth(&h, Method::GET, "/api/me", b, None).await.0, 401);
+    assert_eq!(
+        auth(&h, Method::DELETE, "/api/users/alice", TOKEN, None)
+            .await
+            .0,
+        404
     );
 }
 
-/// Old nodes never registered `operator`; since PROTOCOL_VERSION is not
-/// bumped, an unregistered kind must fail closed through the regular
-/// eligibility gate (same 503 shape as the unserved maintenance kind).
 #[tokio::test]
-async fn operator_kind_without_an_eligible_node_fails_closed() {
+async fn viewer_reads_platform_editor_writes_and_both_cannot_administer() {
     let h = Harness::new().await;
-    let (status, body) = auth(
-        &h,
-        Method::POST,
-        "/api/executions",
-        TOKEN,
-        Some(json!({
-            "id": "operator-ghost-1",
-            "kind": "operator",
-            "node_id": "node-ghost",
-            "input": {"prompt": "hi"}
-        })),
+    h.put_index(
+        "maintenance-private",
+        ExecutionKind::Maintenance,
+        ExecutionStatus::Idle,
     )
     .await;
-    assert_eq!(status, 503, "{body}");
+    h.put_index("team-public", ExecutionKind::Team, ExecutionStatus::Idle)
+        .await;
+    for role in ["viewer", "editor"] {
+        create_user(&h, role, role).await;
+        let issued = issue(&h, role).await;
+        let token = issued["token"].as_str().unwrap();
+        for path in [
+            "/api/nodes",
+            "/api/executions",
+            "/api/agents",
+            "/api/brain/capabilities",
+            "/api/project/goals",
+        ] {
+            let (status, body) = auth(&h, Method::GET, path, token, None).await;
+            assert_eq!(status, 200, "{role} {path}: {body}");
+        }
+        let (_, list) = auth(&h, Method::GET, "/api/executions", token, None).await;
+        assert!(!list.to_string().contains("maintenance-private"));
+        for path in [
+            "/api/users",
+            "/api/tokens",
+            "/api/executions/maintenance-private",
+            "/api/sessions/maintenance-private",
+        ] {
+            assert_eq!(
+                auth(&h, Method::GET, path, token, None).await.0,
+                403,
+                "{role} {path}"
+            );
+        }
+        for path in [
+            "/api/users",
+            "/api/tokens",
+            "/api/nodes/node-e2e/maintenance",
+        ] {
+            assert_eq!(
+                auth(&h, Method::POST, path, token, Some(json!({}))).await.0,
+                403
+            );
+        }
+        let (status, body) = auth(
+            &h,
+            Method::POST,
+            "/api/project/goals",
+            token,
+            Some(json!({"title":format!("{role} project")})),
+        )
+        .await;
+        assert_eq!(status, if role == "viewer" { 403 } else { 200 }, "{body}");
+        for kind in ["agent", "operator"] {
+            let (status,body)=auth(&h,Method::POST,"/api/executions",token,Some(json!({"id":format!("{kind}-{role}"),"kind":kind,"node_id":"node-e2e","input":{"prompt":"hello"}}))).await;
+            assert_eq!(status, if role == "viewer" { 403 } else { 202 }, "{body}");
+        }
+        // An invalid platform payload reaches validation for editors, but is denied before routing for viewers.
+        for kind in ["dag", "team", "todos", "brain"] {
+            let (status, body) = auth(
+                &h,
+                Method::POST,
+                "/api/executions",
+                token,
+                Some(json!({"id":format!("{kind}-{role}"),"kind":kind})),
+            )
+            .await;
+            if role == "viewer" {
+                assert_eq!(status, 403);
+            } else {
+                assert_ne!(status, 403, "{body}");
+            }
+        }
+        assert_eq!(
+            auth(
+                &h,
+                Method::POST,
+                "/api/executions",
+                token,
+                Some(json!({"id":"maintenance-forbidden","kind":"maintenance"}))
+            )
+            .await
+            .0,
+            403
+        );
+    }
+}
+
+#[tokio::test]
+async fn token_validation_rejects_expired_and_missing_owners() {
+    let h = Harness::new().await;
+    create_user(&h, "alice", "viewer").await;
+    for body in [
+        json!({"user_name":"alice","name":"","expires_at":null}),
+        json!({"user_name":"alice","name":"expired","expires_at":1}),
+    ] {
+        assert_eq!(
+            auth(&h, Method::POST, "/api/tokens", TOKEN, Some(body))
+                .await
+                .0,
+            400
+        );
+    }
     assert_eq!(
-        body["error"],
-        json!("no ready online node can accept this execution")
+        auth(
+            &h,
+            Method::POST,
+            "/api/tokens",
+            TOKEN,
+            Some(json!({"user_name":"missing","name":"x"}))
+        )
+        .await
+        .0,
+        404
     );
-    assert!(!h
-        .node
-        .journal_ids()
-        .contains(&"operator-ghost-1".to_string()));
 }

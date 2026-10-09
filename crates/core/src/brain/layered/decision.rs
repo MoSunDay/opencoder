@@ -128,7 +128,7 @@ impl LayeredOperationStatus {
     }
 }
 
-/// Business assessment is distinct from a capability process exit status.
+/// Task assessment is distinct from a capability process exit status.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MilestoneAssessment {

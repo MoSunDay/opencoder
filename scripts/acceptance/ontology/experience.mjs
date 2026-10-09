@@ -71,10 +71,10 @@ export async function checkGraph(page) {
   await results.getByRole('button', { name: '在图中定位', exact: true }).click();
   await page.locator('canvas:visible').first().waitFor();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('oc_ontology_observation:debug')));
-  assert.equal(saved.expandNeighbors, true);
+  assert.equal(Object.hasOwn(saved, 'expandNeighbors'), false);
   assert.equal(saved.selection.centerIds.length, 1);
   await page.reload();
   await page.locator('canvas:visible').first().waitFor();
-  assert.equal(await page.getByRole('checkbox', { name: '展开跨类型邻居' }).isChecked(), true);
+  assert.equal(await page.getByRole('checkbox', { name: '展开跨类型邻居' }).count(), 0);
   await page.getByText('已展示 2/2 个实体 · 2/2 条关系', { exact: true }).waitFor();
 }

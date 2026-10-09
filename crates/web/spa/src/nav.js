@@ -1,5 +1,5 @@
 // nav.js — the single source of truth for the fleet-console information
-// architecture (IA): 项目 / Agent / Ontology / 节点, each owning
+// architecture (IA): 项目 / Agent / Ontology / 后台管理, each owning
 // an ordered page list. The Sider renders scrollable category tabs above a Menu
 // scoped to the active category; the active category is PURELY derived from
 // the store `page` (no extra global navigation state). `items` is the single
@@ -60,10 +60,12 @@ export const NAV_CATEGORIES = [
     ],
   },
   {
-    key: 'node',
-    label: '节点',
+    key: 'admin',
+    label: '后台管理',
     items: [
       { page: 'nodes', menu: '节点列表', icon: ClusterOutlined },
+      { page: 'users', menu: '用户权限', icon: TeamOutlined },
+      { page: 'tokens', menu: 'Token 管理', icon: SettingOutlined },
     ],
   },
 ];
@@ -76,7 +78,7 @@ export const ALL_PAGES = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => i.page
 
 /// Fallbacks mirror the pre-IA shell: unknown pages land on the node
 /// category / the nodes page.
-export const DEFAULT_CATEGORY = 'node';
+export const DEFAULT_CATEGORY = 'admin';
 export const DEFAULT_PAGE = 'nodes';
 
 /// Category labels for the scrollable tabs (Sider + mobile row 1).
@@ -119,6 +121,8 @@ export const HEADERLESS_PAGES = Object.keys(HEADERLESS_REASONS);
 /// header contract test mounts every panel and fails on it, so this map
 /// stays truthful.
 export const PAGE_META = {
+  users: { title: '用户权限', desc: '管理用户及其资源权限' },
+  tokens: { title: 'Token 管理', desc: '为用户签发和撤销访问 Token' },
   project: { title: '项目', desc: '项目、专项与 TODO 工作台' },
   ontologyGraph: { title: '图谱', desc: '关系观测与切面管理' },
   ontologyEntities: { title: '实体', desc: '目录、属性与正文' },
@@ -175,20 +179,9 @@ export function selectItemsOf(items) {
   return items.map((i) => ({ value: i.page, label: i.menu }));
 }
 
-/// Permission view over the IA: admin (and the pre-probe null identity)
-/// sees everything; any other role sees Agent's 全部执行 and the read-only
-/// Ontology category. Pure: derives from NAV_CATEGORIES rows, so
-/// icon/menu copy can never drift from the admin view.
+/// Admin sees administration; editor and viewer share all platform pages.
 export function visibleCategories(identity) {
-  if (!identity || identity.role === 'admin') {
-    return NAV_CATEGORIES;
-  }
-  const agent = NAV_CATEGORIES.find((c) => c.key === 'agent');
-  return [{
-    key: agent.key,
-    label: agent.label,
-    items: [agent.items.find((i) => i.page === 'topics')],
-  }, NAV_CATEGORIES.find((c) => c.key === 'ontology')];
+  return identity?.role === 'admin' ? NAV_CATEGORIES : NAV_CATEGORIES.filter((category) => category.key !== 'admin');
 }
 
 /// Flat page keys a given identity may open (menu scoping + shell routing

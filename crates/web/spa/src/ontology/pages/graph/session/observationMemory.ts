@@ -1,7 +1,7 @@
 import type { Entity, EntityType, GraphAspect, RelationshipType } from "../../../types";
 import type { ObservationSelection } from "../observationSelection";
 
-export type ObservationMemory = { mode: "aspect-observe" | "aspect-test"; aspectKey?: string; selection: ObservationSelection; expandNeighbors?: boolean };
+export type ObservationMemory = { mode: "aspect-observe" | "aspect-test"; aspectKey?: string; selection: ObservationSelection };
 const storageKey = (env: string) => `oc_ontology_observation:${env}`;
 export function readObservation(env: string): ObservationMemory | undefined {
   try {

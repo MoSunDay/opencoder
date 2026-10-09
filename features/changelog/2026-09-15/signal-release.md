@@ -30,7 +30,7 @@ Commit: 3c1222a5e61536ec96914a7edb40d246bc6665e6
 - `14f594b1` 优化包完成四个二进制的编译元数据、SPA 摘要和文件摘要校验；日志 `/var/tmp/opencoder-signal-release-r1-build.log`。
 - 使用原平滑协议从 `320dbbf3` 上线 `14f594b1`，发布阶段 `complete`、独立引导作业退出 0；日志 `/var/tmp/opencoder-signal-bootstrap.log`。后续验收包用于信号发布、回滚和再发布演练。
 - 激活前在线备份 6 个数据库：`/var/lib/opencoder-platform/backups/pre-signal-20260915`，明确非跨库同一时刻快照。
-- 校验发现本机 root 用户 inotify 实例配额耗尽：`inotify_init1` 返回 EMFILE。将 `/etc/sysctl.d/90-opencoder-inotify.conf` 的 `fs.inotify.max_user_instances` 从系统原值 128 提高为 1,024，分配及 systemd 校验复测通过；不涉及业务进程重启。
+- 校验发现本机 root 用户 inotify 实例配额耗尽：`inotify_init1` 返回 EMFILE。将 `/etc/sysctl.d/90-opencoder-inotify.conf` 的 `fs.inotify.max_user_instances` 从系统原值 128 提高为 1,024，分配及 systemd 校验复测通过；不涉及服务进程重启。
 
 - 首次 CLI 信号检查发现本机 systemd 不支持 `--kill-whom=main`，命令在发信号前失败，生产保持原状。已使用本机支持的 `--kill-who=main`，新增 `test_systemctl_accepts_emitted_signal_arguments_without_sending_a_signal` 对生成参数执行真实 systemctl 解析检查；失败日志保留 `/var/tmp/opencoder-signal-bootstrap-signal.log`。
 

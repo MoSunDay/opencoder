@@ -79,7 +79,7 @@ describe('App shell navigation and layout', () => {
     expect(document.querySelector('.fleet-desktop-nav')).toBeNull();
     const categories = document.querySelector('.fleet-content .fleet-mobile-nav[role="tablist"]');
     expect(categories).toBeTruthy();
-    expect(within(categories).getByRole('tab', { name: '节点', selected: true })).toBeTruthy();
+    expect(within(categories).getByRole('tab', { name: '后台管理', selected: true })).toBeTruthy();
   });
 
   it('names every menu-only page in the mobile page Select', async () => {

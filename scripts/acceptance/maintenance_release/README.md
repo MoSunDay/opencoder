@@ -25,7 +25,7 @@ units, configuration, mounts and authentication data remain outside this fixture
 The first controller process exits at durable `installing`, after stopping old
 writers and sealing the backup. Recovery restores the old configuration and
 services and proves the old project API can still read and write. A second fault
-after real catalog migration keeps public business and Host writes closed.
+after real catalog migration keeps public platform and Host writes closed.
 Recovery again restores old project tables, indexes and schema version while
 preserving authentication rows. A new attempt then fails at private verification
 and retries the identical candidate and immutable backup through reopening. Public

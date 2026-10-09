@@ -46,7 +46,7 @@ pub(crate) fn validate_scope(
 ) -> Result<(), AppError> {
     if source.is_none() && !legacy {
         return Err(AppError::invalid(
-            "business relationship types require a source entity type",
+            "relationship types require a source entity type",
         ));
     }
     if source.is_some() && targets.is_empty() {

@@ -179,7 +179,7 @@ describe('problemsFromApiError', () => {
 });
 
 it('rejects Runner even with valid registered bindings', () => {
-  const spec = { name: 'business', steps: [{ name: 'workflow', kind: { type: 'runner', runner: 'custom-runner', agent: 'custom-agent' } }] };
+  const spec = { name: 'platform', steps: [{ name: 'workflow', kind: { type: 'runner', runner: 'custom-runner', agent: 'custom-agent' } }] };
   expect(validateSpec(spec)).toEqual(['steps[0].kind.type 必须是 agent | binary | dynamic']);
 });
 

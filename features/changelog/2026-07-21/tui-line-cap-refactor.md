@@ -31,7 +31,7 @@ Commit: (working-tree, pre-initial-commit)
 
 ## 测试覆盖
 
-本轮为纯结构性重构，无新增业务功能；抽取行为完全被既有 324 个 tui 库测试 + `app_tests.rs` 覆盖。
+本轮为纯结构性重构，无新增功能；抽取行为完全被既有 324 个 tui 库测试 + `app_tests.rs` 覆盖。
 
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
@@ -60,5 +60,5 @@ Commit: (working-tree, pre-initial-commit)
 
 ## Related Docs
 
-- [agents/tui](../../agents/tui/index.md)
+- [agents/tui](../../../agents/tui/index.md)
 - [既有相关 changelog：/config 与 /model 拆分](./config-model-split-provider-crud-headers.md)

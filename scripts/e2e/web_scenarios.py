@@ -227,7 +227,7 @@ def _run_e11_delivery(c: Counter, base: str, port: int, webdir: str) -> None:
         c.check("delivery order preserves A before B",
                 roles.count("user") >= 2 and roles.count("assistant") >= 2,
                 f"roles={roles}")
-        # Business outcome (stronger than per-message text): steer A created
+        # Platform outcome (stronger than per-message text): steer A created
         # the artifact; queue B extended it — proves both turns took effect.
         app_py = os.path.join(webdir, "app.py")
         if os.path.isfile(app_py):

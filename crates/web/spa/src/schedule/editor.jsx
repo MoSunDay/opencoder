@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 // editor.jsx —「调度」页新建/编辑 Modal：cron / kind / target / params(单键
 // 文本) / overlap / node_id / enabled。新建隐藏 ID 与时区（id 缺省由后端
 // 生成 schedule-<ULID>，时区固定 +08:00）；编辑保留两字段（id 是主键、时区
@@ -36,7 +37,7 @@ const PARAM_FIELDS = {
   agent: {
     key: 'prompt', label: '提示词', required: false,
     extra: '触发时作为首轮消息提交，成功后追加进该 agent 的 how.md',
-    placeholder: '每日巡检 {{now-1d:%Y-%m-%d}}',
+    placeholder: '每日测试 {{now-1d:%Y-%m-%d}}',
   },
   team: {
     key: 'prompt', label: '话题需求', required: false,
@@ -46,7 +47,7 @@ const PARAM_FIELDS = {
   todos: {
     key: 'prompt', label: '提示词', required: false,
     extra: '触发时追加到工作流 objective',
-    placeholder: '聚焦昨晚的线上告警',
+    placeholder: '检查本次执行的结果',
   },
   dag: {
     key: 'args', label: '参数数组', required: false,
@@ -149,7 +150,7 @@ export function ScheduleEditorModal({ open, initial, nodes, onCancel, onSaved })
     destroyOnHidden
     footer={[
       <Button key="cancel" disabled={saving} onClick={onCancel}>取消</Button>,
-      <Button key="save" type="primary" loading={saving} onClick={save}>保存</Button>,
+      <EditButton key="save" type="primary" loading={saving} onClick={save}>保存</EditButton>,
     ]}
   >
     <Form form={form} layout="vertical">

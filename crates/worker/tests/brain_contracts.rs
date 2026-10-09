@@ -62,7 +62,7 @@ async fn run_output(text: String, required: &[&str]) -> (Value, Value, RpcReply,
 }
 
 #[tokio::test]
-async fn structured_business_failure_survives_summary_and_missing_pointer_is_actionable() {
+async fn structured_task_failure_survives_summary_and_missing_pointer_is_actionable() {
     let output = json!({"summary":"Tests executed","passed":false,
         "failures":["expected 2, got 1"],"revision":"patch-1"});
     let (detail, summary, missing, _) =

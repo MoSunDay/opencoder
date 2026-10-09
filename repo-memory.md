@@ -6,12 +6,6 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 抽象口子：`Arc<dyn Store>`、`Arc<dyn ChatStream>`。细节见各模块索引，代码是最终事实。
 
-仓库只实现通用执行、调度、资源管理和交互能力。业务工作流通过注册能力、定义、输入和私有任务文件使用平台；核心配置、运行器和界面不内置具体业务系统的协议或流程。
-
-## 仓库记忆范围
-
-`repo-memory.md`、`agents/` 和 `features/`（含 changelog）只记录 OpenCoder 本身的模块、通用基建能力、接口契约及其演进。外部业务系统的需求、业务逻辑、数据结论、部署现场、巡检结果和一次性执行回执不得写入本仓库记忆。涉及外部系统的工作，仅在解释 OpenCoder 自身接口或能力边界所必需时记录通用事实，不沉淀具体业务状态。
-
 ## 模块索引
 
 - [agents/core](agents/core/index.md) — 共享类型与 Config。
@@ -43,7 +37,7 @@ OpenCoder 能力入口见 [features/index.md](features/index.md)。
 
 ## 仓库规则
 
-- [rules/01-mandatory-tests.md](rules/01-mandatory-tests.md) — 每个业务功能必须有测试
+- [rules/01-mandatory-tests.md](rules/01-mandatory-tests.md) — 每个功能必须有测试
 - [rules/02-regression-gate.md](rules/02-regression-gate.md) — 迭代结束全量回归 + changelog 附测试清单
 - [rules/03-test-pyramid.md](rules/03-test-pyramid.md) — 测试分层（unit/integration/e2e）
 - [rules/04-dag-execution-contract.md](rules/04-dag-execution-contract.md) — DAG 单节点单容器与原生步骤执行约定

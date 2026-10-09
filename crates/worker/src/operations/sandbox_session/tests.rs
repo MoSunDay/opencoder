@@ -1,7 +1,7 @@
 //! Unit tests for the `run_mode: agent` command interception: sandbox
 //! sessions must never reach the host web app with a prompt (a native POST
 //! would start a HOST turn), session-shaping POSTs are rejected, and the
-//! staged turn text fails closed through the runc preflights — at prompt
+//! admitted native input fails closed through the runc preflights — at prompt
 //! admission (inside `create::prepare`) and again inside the round. The
 //! full container round is covered by the root-package e2e suite.
 
@@ -127,7 +127,7 @@ async fn sandbox_session_rejects_host_only_session_operations() {
             reply.status, 409,
             "{tail}: {reply:?} (must not fake host-session success)"
         );
-        assert!(reply.body.to_string().contains("runc sandbox"));
+        assert!(reply.body.to_string().contains("sandbox conversations"));
     }
     // GETs keep flowing through the native app (store-backed reads).
     let reply = command(&worker, "http", json!({"method": "GET", "tail": ""}))
@@ -144,8 +144,7 @@ async fn sandbox_prompt_fails_closed_without_a_runtime() {
         .await
         .unwrap();
     assert_eq!(reply.status, 400, "{reply:?}");
-    // A real prompt is staged into the durable input first (at-least-once:
-    // the turn lives in the execution input), then admission's runc
+    // A real prompt is persisted in the native input store, then runc
     // preflight rejects it — this node has no provisioned sandbox runtime,
     // and a sandbox request must never fall back to a host turn.
     let error = command(
@@ -160,14 +159,21 @@ async fn sandbox_prompt_fails_closed_without_a_runtime() {
         error.contains("runc executable unavailable") || error.contains("runc rootfs unavailable"),
         "unexpected rejection: {error}"
     );
+    let record = worker.inner.journal.lock().await.records[ID].clone();
+    assert!(record.assignment.request.input["prompt"].is_null());
+    let runtime = crate::workloads::agent_runc::inputs::open(&worker, &record, false)
+        .await
+        .unwrap();
+    use opencoder_store::Store;
     assert_eq!(
-        worker.inner.journal.lock().await.records[ID]
-            .assignment
-            .request
-            .input["prompt"],
-        json!("turn 2")
+        runtime
+            .pending_inputs(ID, opencoder_store::Delivery::Steer)
+            .await
+            .unwrap()[0]
+            .prompt,
+        "turn 2"
     );
-    // No host session rows: the turn never ran in the host process.
+    // The host may expose metadata, but never runs the turn.
     assert!(worker
         .inner
         .state
@@ -187,7 +193,7 @@ async fn queued_sandbox_prompt_replays_as_a_round_not_a_host_turn() {
         .resources_dir(ExecutionKind::Agent, ID)
         .unwrap();
     // A queued follow-up exactly as enqueue_with_command would persist it;
-    // the replay must stage the turn and run the sandbox round, never POST
+    // the replay must drain the native input store, never POST
     // to the host web app.
     let mut config = worker.configuration().unwrap();
     config.agent.agents_dir = Some(pool);
@@ -207,6 +213,17 @@ async fn queued_sandbox_prompt_replays_as_a_round_not_a_host_turn() {
         }));
         journal.save(record).unwrap();
     }
+    let record = worker.inner.journal.lock().await.records[ID].clone();
+    let runtime = crate::workloads::agent_runc::inputs::open(&worker, &record, false)
+        .await
+        .unwrap();
+    crate::workloads::agent_runc::inputs::admit(
+        runtime.as_ref(),
+        ID,
+        &json!({"prompt":"queued turn","input_id":"followup"}),
+    )
+    .await
+    .unwrap();
     queue::dispatch_locked(&worker).await.unwrap();
     let (status, error) = settle(&worker).await;
     assert_eq!(status, ExecutionStatus::Error);
@@ -214,15 +231,21 @@ async fn queued_sandbox_prompt_replays_as_a_round_not_a_host_turn() {
         error.contains("runc executable unavailable") || error.contains("runc rootfs unavailable"),
         "unexpected workload error: {error}"
     );
-    // The replay staged the queued text and the round failed closed — no
-    // host session ever started.
+    // The native input survives the failed preflight for a later retry.
+    use opencoder_store::Store;
     assert_eq!(
-        worker.inner.journal.lock().await.records[ID]
-            .assignment
-            .request
-            .input["prompt"],
-        json!("queued turn")
+        runtime
+            .pending_inputs(ID, opencoder_store::Delivery::Steer)
+            .await
+            .unwrap()[0]
+            .prompt,
+        "queued turn"
     );
+    assert!(worker.inner.journal.lock().await.records[ID]
+        .assignment
+        .request
+        .input["prompt"]
+        .is_null());
     assert!(worker
         .inner
         .state
@@ -255,4 +278,117 @@ async fn host_sessions_keep_the_native_prompt_path() {
             .is_null(),
         "native follow-ups must not rewrite the request input"
     );
+}
+
+#[tokio::test]
+async fn running_sandbox_admits_idempotent_steer_and_queue_in_native_store() {
+    use crate::workloads::agent_runc::inputs;
+    use opencoder_store::{Delivery, Store};
+    let (worker, _dir) = worker_with_execution("myagent", "agent").await;
+    worker
+        .inner
+        .active
+        .lock()
+        .await
+        .insert(ID.into(), tokio_util::sync::CancellationToken::new());
+    let first = command(
+        &worker,
+        "steer",
+        json!({"prompt":"more context","input_id":"stable"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.status, 200, "{first:?}");
+    let duplicate = command(
+        &worker,
+        "steer",
+        json!({"prompt":"more context","input_id":"stable"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(duplicate.body["inserted"], false);
+    assert_eq!(duplicate.body["seq"], first.body["seq"]);
+    assert_eq!(
+        command(
+            &worker,
+            "steer",
+            json!({"prompt":"different","input_id":"stable"})
+        )
+        .await
+        .unwrap()
+        .status,
+        409
+    );
+    assert_eq!(
+        command(
+            &worker,
+            "queue",
+            json!({"prompt":"next task","input_id":"next"})
+        )
+        .await
+        .unwrap()
+        .status,
+        200
+    );
+    let record = worker.inner.journal.lock().await.records[ID].clone();
+    let runtime = inputs::open(&worker, &record, false).await.unwrap();
+    assert_eq!(
+        runtime
+            .pending_inputs(ID, Delivery::Steer)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        runtime
+            .pending_inputs(ID, Delivery::Queue)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        worker
+            .inner
+            .state
+            .store
+            .pending_inputs(ID, Delivery::Steer)
+            .await
+            .unwrap()
+            .is_empty(),
+        "host must not consume the sandbox input"
+    );
+    let list = command(
+        &worker,
+        "http",
+        json!({"method":"GET","tail":"inputs?delivery=queue"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(list.body["inputs"][0]["prompt"], "next task");
+    // Reopening a runtime connection retains admission and retry receipts.
+    let reopened = opencoder_store::LibsqlStore::open(
+        inputs::directory(&worker, ID, false)
+            .unwrap()
+            .join("runtime.db"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reopened
+            .pending_inputs(ID, Delivery::Queue)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let receipt = inputs::admit(
+        &reopened,
+        ID,
+        &json!({"prompt":"next task","input_id":"next","delivery":"queue"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.body["inserted"], false);
 }

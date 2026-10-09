@@ -24,7 +24,7 @@ Commit: e797e184412ac6df34cd5e8189634e1361945362
 ## 关键发现（记录）
 
 - inspect 文档的 `session.messages` 是 base64 字节分块（`encoding:"base64"`），明文转录断言必须走中继的原生 `GET /api/sessions/:id`（`{id,meta,harness,messages,draining}`，已解码）。
-- SSE 事件流在业务终帧（`run_finished`/`done`）之后还有传输尾帧 `stream_end{"finished":true}`；「最后一帧」断言必须先滤掉它。
+- SSE 事件流在任务终帧（`run_finished`/`done`）之后还有传输尾帧 `stream_end{"finished":true}`；「最后一帧」断言必须先滤掉它。
 - DAG cancel 路由是 `POST /api/dag/runs/:id/cancel`（200 `{ok,phase}`），不是 `/api/executions/:id/cancel`；live run 返回 phase `cancelling`。
 - text_delta 事件 payload 是 `{"text":…}`；事件分页 `finished` = 非 draining 且不在 active 表，故 idle 会话的 SSE 会正常收尾。
 

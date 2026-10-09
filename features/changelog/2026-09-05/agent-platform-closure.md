@@ -40,7 +40,7 @@ Commit: (working-tree, 基于 c1a1b2e78e1ccd4a3cc2ac6dc408a76d30bf46e6)
 - `cargo build --workspace`：通过。命令使用 `--offline -j 8`，隔离构建目录 `/data00/rust-build/cargo/opencoder-platform`。
 - SPA：35 组、335 项通过；构建成功，dist 无漂移。现有单 bundle 大小提示为非阻断构建提示。
 - 真实浏览器：PASS，双 Node，1600px/390px、错误场景和 VM 随节点崩溃终止；证据 `/tmp/opencoder-platform-browser-HSOHXg`。
-- 行数和新增目录容量检查通过；无新增凭据或业务环境变量。旧数据库和生产环境未变更。
+- 行数和新增目录容量检查通过；无新增凭据或应用环境变量。旧数据库和生产环境未变更。
 
 原始输出：`/tmp/opencoder-closure-clippy.log`、`/tmp/opencoder-closure-workspace-tests.log`、`/tmp/opencoder-closure-build.log`、`/tmp/opencoder-closure-manual.log`、`/tmp/opencoder-closure-spa-tests.log`、`/tmp/opencoder-closure-spa-drift.log`、`/tmp/opencoder-closure-browser.log`。
 

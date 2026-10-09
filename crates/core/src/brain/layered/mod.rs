@@ -1,5 +1,5 @@
 //! Schema 7: layer milestones containing parallel single-capability executions.
-//! The Brain evaluates business criteria after every terminal layer barrier.
+//! The Brain evaluates task criteria after every terminal layer barrier.
 //! Returning starts a fresh round while retaining every historical execution.
 mod decision;
 mod plan;

@@ -15,6 +15,6 @@ Team 长文件使用有界快照缓存，首次流式计算摘要，后续按偏
 | 旧 Runtime、新 Host、执行中升级、休眠、重启与回滚；HTTP 分块及引用不缓存结果 | [result_upgrade.rs](../../../crates/agent/src/host/tests/result_upgrade.rs) |
 | 64 MiB Team 只计算一次摘要，文件替换和原位修改失效、身份与符号链接拒绝 | [result_reader/tests.rs](../../../crates/worker/src/result_reader/tests.rs) |
 
-本次合并的完整验证见 2026-10-09 仓库清理记录；跨版本用例需显式提供旧发布二进制。
+本次合并的完整验证见 [项目执行结果实时读取](../2026-10-09/project-execution-results.md)；跨版本用例需显式提供旧发布二进制。
 
 相关：[Host](../../../agents/agent/index.md)、[Worker](../../../agents/worker/index.md)。

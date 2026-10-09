@@ -27,7 +27,7 @@ const BACKOFF_CAP_MS = 15000;
 const REPLAY_CAP_FRAMES = 400;
 const MAX_ATTEMPTS = 5;
 
-export function openStream({ path, sessionId, after, onFrame, onStatus, onResync, signal, executionHistory = false, requireEnd = false }) {
+export function openStream({ path, sessionId, after, onFrame, onStatus, onResync, onEnd, signal, executionHistory = false, requireEnd = false }) {
   // `ctrl` is the CURRENT connection's abort controller: restart() swaps it
   // after aborting so the replacement stream gets a fresh signal.
   let ctrl = new AbortController();
@@ -117,7 +117,13 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, onResync
     if (!frame) {
       return;
     }
-    if (frame.event === 'stream_end' && frame.data?.finished === true) { stop(); return; }
+    if (frame.event === 'stream_end' && frame.data?.finished === true) {
+      stop();
+      // Transport completion is distinct from a session done/error event.
+      // The chat owner must reconcile it even when no runner event exists.
+      onEnd?.(lastSeq);
+      return;
+    }
     if (frame.event === 'reconnect') {
       releaseReconnect = true;
       attempts = 0;

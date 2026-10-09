@@ -1,0 +1,7 @@
+.brain-capability-summary {
+  display: block;
+  max-width: 32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -86,6 +86,14 @@ pub fn resolve(
             .and_then(|c| c.executable.as_deref())
             .unwrap();
         validate_executable(rootfs, executable)?;
+        if let Some(program) = runtime
+            .codex
+            .as_ref()
+            .and_then(|s| s.startup_script.first())
+        {
+            validate_executable(rootfs, program)
+                .context("Codex startup script unavailable in rootfs")?;
+        }
         Ok(Some(Launch { runtime, home }))
     })
 }

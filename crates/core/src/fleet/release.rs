@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const HANDOFF_PROTOCOL: u32 = 1;
-// Project schema v33 removes cached result columns. Older Servers cannot
+// Identity schema v34 separates users and tokens. Older Servers cannot
 // read or reopen the upgraded store, so the upgrade requires maintenance.
-pub const HANDOFF_DATA_FORMAT: u32 = 4;
+pub const HANDOFF_DATA_FORMAT: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn project_reference_schema_requires_maintenance_from_previous_formats() {
         let current = ReleaseCompatibility::current();
-        assert_eq!(current.data_format, CompatibleRange { min: 4, max: 4 });
+        assert_eq!(current.data_format, CompatibleRange { min: 5, max: 5 });
         assert!(current.compatible(&current));
         for version in 1..=3 {
             let mut previous = current.clone();

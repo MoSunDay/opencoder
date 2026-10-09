@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 
 # dag-runtime 模块
 
@@ -31,6 +31,8 @@ Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
 - [tests/preflight.rs](../../crates/dag-runtime/tests/preflight.rs)、[tests/run_loop](../../crates/dag-runtime/tests/run_loop/main.rs) 和 [两节点验收](../../scripts/acceptance/runc_scheduling/main.py) 覆盖版本拒绝、共享容器与实际恢复。
 
 ## 相关
+- [sandbox/codex](../../crates/dag-runtime/src/sandbox/codex/mod.rs) 将固定的 Codex 启动脚本参数传入原生步骤；执行仍使用工作流容器和节点上的入口。
+
 
 - [执行约定](../../rules/04-dag-execution-contract.md)、[DAG 能力](../../features/dag/index.md)
 - [dag-binary](../dag-binary/index.md)、[worker](../worker/index.md)

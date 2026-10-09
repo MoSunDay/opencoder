@@ -36,7 +36,7 @@ function OntologyPanel({ page, Component }: { page: string; Component: Component
   useEffect(() => { void refreshEnvironments(); return () => { request.current += 1; }; }, [refreshEnvironments]);
   const env = environments.some((item) => item.env_key === storedEnv) ? storedEnv : environments[0]?.env_key;
   const changeEnv = (next: string) => { if (next !== env) guard.run(() => setEnv(next)); };
-  const context = { env: env ?? "debug", environments, setEnv: changeEnv, refreshEnvironments, canManage: identity?.role === "admin" };
+  const context = { env: env ?? "debug", environments, setEnv: changeEnv, refreshEnvironments, canManage: ["admin", "editor"].includes(identity?.role ?? "") };
   return <PageShell page={page} extra={<Space><span>环境</span><Select aria-label="Ontology 环境" value={env} loading={loading}
     style={{ minWidth: 140 }} onChange={changeEnv} options={environments.map((item) => ({ value: item.env_key, label: item.name }))} /></Space>}>
     {error ? <Alert title={error} type="error" showIcon action={<Button onClick={() => void refreshEnvironments()}>重试</Button>} />

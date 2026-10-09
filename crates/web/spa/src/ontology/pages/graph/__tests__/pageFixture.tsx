@@ -138,7 +138,7 @@ async function expandFilters() {
 async function renderPage(canManage = true) { const page = render(pageElement(canManage)); await expandFilters(); return page; }
 
 async function chooseScope() {
-  await screen.findByText("请先选择实体类型，再选择关系类型");
+  await screen.findByText("请先选择实体类型");
   expect(apiMock.graph).not.toHaveBeenCalled();
   expect(screen.getByRole("combobox", { name: "实体多选" })).toBeDisabled();
   fireEvent.mouseDown(screen.getByRole("combobox", { name: "实体类型多选" }));
@@ -146,7 +146,7 @@ async function chooseScope() {
     finishSelection();
   fireEvent.keyDown(screen.getByRole("combobox", { name: "实体类型多选" }), { key: "Escape" });
   await waitFor(() => expect(screen.getByRole("combobox", { name: "关系类型多选" })).toBeEnabled());
-  expect(screen.getByRole("combobox", { name: "实体多选" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "实体多选" })).toBeEnabled();
   fireEvent.mouseDown(screen.getByRole("combobox", { name: "关系类型多选" }));
   fireEvent.click(await screen.findByText("依赖（服务类型→服务类型）"));
     finishSelection();
@@ -156,6 +156,7 @@ async function chooseScope() {
   fireEvent.click(await screen.findByText("实体 A 完整名称"));
     finishSelection();
   await waitFor(() => expect(apiMock.graph).toHaveBeenCalledWith("debug", {
+    expandNeighbors: true,
     entityTypeIds: ["service"],
     centerIds: ["a"],
     upstreamDepth: 3,

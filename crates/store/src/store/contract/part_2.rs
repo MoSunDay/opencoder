@@ -213,6 +213,18 @@ macro_rules! store_contract_1 {
     async fn update_user_token_hash(&self, _name: &str, _token_hash: &str) -> Result<bool> {
         anyhow::bail!("user store API is not supported by {}", self.backend_name())
     }
+    async fn update_user_role(&self, _name: &str, _role: opencoder_core::identity::Role) -> Result<bool> {
+        anyhow::bail!("user store API unsupported")
+    }
+    async fn list_access_tokens(&self) -> Result<Vec<crate::AccessToken>> {
+        anyhow::bail!("token store API unsupported")
+    }
+    async fn create_access_token(&self, _token: &crate::AccessToken, _hash: &str) -> Result<()> {
+        anyhow::bail!("token store API unsupported")
+    }
+    async fn revoke_access_token(&self, _id: &str, _now: i64) -> Result<bool> {
+        anyhow::bail!("token store API unsupported")
+    }
     async fn count_admin_users(&self) -> Result<i64> {
         Ok(0)
     }

@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import { Alert, Button, Form, Select, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../../api.js';
@@ -37,7 +38,7 @@ export function Launch({ onCreated, initialPlan, capabilities, initialPrompt = '
       {plan && <><Typography.Paragraph>{plan.plan.objective}</Typography.Paragraph><PlanPreview plan={plan.plan} capabilities={capabilities} /><Typography.Paragraph type="secondary">执行计划 v{plan.version}；本次工程输入可以调整。</Typography.Paragraph></>}
       <Form.Item name="node" label="大脑所在节点" rules={[{ required: true, message: '请选择节点' }]}><Select options={explicitNodeOptions(nodes, 'brain')} placeholder="选择执行节点" /></Form.Item>
       <EngineeringFields />
-      <Space><Button type="primary" htmlType="submit" loading={busy} disabled={(!!initialPlan && !plan)}>开始执行</Button></Space>
+      <Space><EditButton type="primary" htmlType="submit" loading={busy} disabled={(!!initialPlan && !plan)}>开始执行</EditButton></Space>
     </Form>}
   </div>;
 }

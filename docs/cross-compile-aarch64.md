@@ -42,4 +42,4 @@ file target/aarch64-unknown-linux-gnu/release/opencoder-cli
 
 默认产物位于 `target/aarch64-unknown-linux-gnu/release/`。配置了其他 target 目录时，在对应目录检查产物。`file` 应显示 ARM aarch64 ELF；部署前还需确认产物依赖的 glibc 符号版本不高于目标系统提供的版本。
 
-构建并发可通过 Cargo 的 `-j` 参数按宿主资源调整。具体机器的缓存目录、资源竞争、构建大小和现场执行记录保存在仓库外。
+构建并发可通过 Cargo 的 `-j` 参数按宿主资源调整。

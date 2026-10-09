@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 // envsPanel.jsx — 菜单页「Env 管理」：朴素表格列出 env（列检索、头部新建、
 // 行内编辑/删除），编辑走抽屉（description / env_vars 键值行；tools 由服务端
 // 部分合并语义保留）。工具跟随 env：点行（或工具数 Tag）打开右侧工具抽屉，
@@ -67,7 +68,7 @@ function CreateEnvModal({ open, onClose, onCreated, onNotice: noticeCallback }) 
           <Input placeholder="可选" />
         </Form.Item>
         <Space>
-          <Button type="primary" htmlType="submit" loading={saving}>创建</Button>
+          <EditButton type="primary" htmlType="submit" loading={saving}>创建</EditButton>
           <Button onClick={onClose}>取消</Button>
         </Space>
       </Form>
@@ -89,10 +90,10 @@ function VarRows({ rows, setRows, disabled }) {
             onChange={(e) => update(i, 0, e.target.value)} />
           <Input value={r[1]} placeholder="VALUE" style={{ width: 320 }} aria-label="var-value" disabled={disabled}
             onChange={(e) => update(i, 1, e.target.value)} />
-          <Button type="link" danger aria-label="var-remove" disabled={disabled} onClick={() => remove(i)}>删除</Button>
+          <EditButton type="link" danger aria-label="var-remove" disabled={disabled} onClick={() => remove(i)}>删除</EditButton>
         </Space>
       ))}
-      <Button type="dashed" onClick={add} disabled={disabled} style={{ width: 200 }}>+ 添加变量</Button>
+      <EditButton type="dashed" onClick={add} disabled={disabled} style={{ width: 200 }}>+ 添加变量</EditButton>
     </div>
   );
 }
@@ -165,7 +166,7 @@ function EnvDrawerSession({ name, open, onClose, onNotice: noticeCallback, onSav
       footer={
         <Space style={{ float: 'right' }}>
           <Button onClick={onClose} disabled={saving}>关闭</Button>
-          <Button type="primary" loading={saving} disabled={!loaded} onClick={save}>保存</Button>
+          <EditButton type="primary" loading={saving} disabled={!loaded} onClick={save}>保存</EditButton>
         </Space>
       }
     >
@@ -257,9 +258,9 @@ export function TodoEnvsPanel({ onNotice: noticeCallback }) {
       render: (_, e) => <Tag>{Object.keys(e.env_vars || {}).length} 个</Tag> },
     { title: '操作', key: 'ops', width: 140, render: (_, e) => (
       <Space size={0} onClick={(event) => event.stopPropagation()}>
-        <Button size="small" type="link" onClick={() => setEditing(e.name)}>编辑</Button>
+        <EditButton size="small" type="link" onClick={() => setEditing(e.name)}>编辑</EditButton>
         <Popconfirm title={`删除 env ${e.name}？`} okText="确认删除" onConfirm={() => deleteEnv(e.name)}>
-          <Button size="small" type="link" danger>删除</Button>
+          <EditButton size="small" type="link" danger>删除</EditButton>
         </Popconfirm>
       </Space>
     ) },
@@ -271,7 +272,7 @@ export function TodoEnvsPanel({ onNotice: noticeCallback }) {
   // would have started rendering a title the moment PAGE_META gained `todos`.
   return (
     <PageShell
-      extra={<Button type="primary" onClick={() => setCreating(true)}>新建</Button>}
+      extra={<EditButton type="primary" onClick={() => setCreating(true)}>新建</EditButton>}
     >
       <Table
         rowKey="name"

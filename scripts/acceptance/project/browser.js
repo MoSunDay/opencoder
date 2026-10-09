@@ -85,6 +85,7 @@ async function createHierarchy(page) {
 async function verifyWorkbench(page, root, executionId) {
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();
   await page.getByRole('button', { name: 'Acceptance TODO', exact: true }).click();
+  await page.getByRole('button', { name: '返回 TODO' }).click();
   await page.getByText('指派记录', { exact: true }).waitFor();
   await page.getByRole('button', { name: '指派所选能力' }).waitFor();
   const row = page.locator('tr').filter({ hasText: executionId });
@@ -110,6 +111,7 @@ async function verifyWorkbench(page, root, executionId) {
 async function launchFromTodo(page, todoTitle, agent) {
   await page.locator('.ant-drawer-close').click();
   await page.getByRole('button', { name: todoTitle, exact: true }).click();
+  await page.getByRole('button', { name: '返回 TODO' }).click();
   if (agent) {
     await page.getByRole('combobox', { name: '执行能力' }).click();
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: 'acceptance-agent' }).click();

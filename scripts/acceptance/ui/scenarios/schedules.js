@@ -43,7 +43,16 @@ async function schedules({ page, api, root, until }) {
   await until(async () => (await api('GET', `/api/executions/${run.execution_id}`)).execution.status === 'done', 'manual native schedule completes', 120000);
   await row.getByRole('button', { name: '触发历史', exact: true }).click();
   await page.getByRole('button', { name: run.execution_id, exact: true }).click();
-  await page.locator('.oc-execution-detail').getByText('全部步骤共享本次 DAG 容器', { exact: true }).waitFor();
+  const executionDetail = page.locator('.oc-execution-detail');
+  const canvas = executionDetail.locator('.dag-detail-graph');
+  const table = executionDetail.locator('[aria-label="DAG 运行环境"] .ant-table-wrapper');
+  await canvas.waitFor();
+  await table.waitFor();
+  assert.equal(await executionDetail.getByText('全部步骤共享本次 DAG 容器', { exact: true }).count(), 0);
+  const canvasBounds = await canvas.boundingBox();
+  const tableBounds = await table.boundingBox();
+  assert(canvasBounds && tableBounds && canvasBounds.y + canvasBounds.height <= tableBounds.y,
+    'execution canvas appears above the pinned resource table');
   await page.screenshot({ path: path.join(root, 'schedule-execution-detail.png'), animations: 'disabled' });
   await page.locator('.oc-execution-detail .ant-drawer-close').click();
   await page.locator('.ant-drawer-open .ant-drawer-close').click();

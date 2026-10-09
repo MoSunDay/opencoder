@@ -6,7 +6,7 @@ import { apiMock, graphHandlers, graphMock, entityTypes, entities, relationshipT
 describe("GraphPage", () => {
 
 
-  it("follows the type-first observation flow with a required relationship type", async () => {
+  it("automatically expands neighbors while retaining selected relationships and hop depths", async () => {
     await renderPage();
     expect(apiMock.graph).not.toHaveBeenCalled();
     await chooseScope();
@@ -16,6 +16,7 @@ describe("GraphPage", () => {
     fireEvent.click(await screen.findByText("2 跳"));
     finishSelection();
     await waitFor(() => expect(apiMock.graph).toHaveBeenCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"],
       centerIds: ["a"],
       upstreamDepth: 2,
@@ -26,7 +27,6 @@ describe("GraphPage", () => {
 
   it("lets debug start from an entity without selecting a relationship type", async () => {
     render(pageElement(true, "debug"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "展开跨类型邻居" }));
     fireEvent.click(screen.getByRole("tab", { name: "自定义观测" }));
     await expandFilters();
     await screen.findByText("请先选择实体类型");
@@ -40,8 +40,8 @@ describe("GraphPage", () => {
     fireEvent.click(await screen.findByText("实体 A 完整名称"));
     finishSelection();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
-      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3,
       expandNeighbors: true,
+      entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3,
     }));
   });
 
@@ -55,7 +55,6 @@ describe("GraphPage", () => {
     }] });
     apiMock.graph.mockResolvedValue({ nodes: [...graphNodes, root], edges: containment, available_relationship_type_ids: ["contains"] });
     render(pageElement(true, "debug"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "展开跨类型邻居" }));
     fireEvent.click(screen.getByRole("tab", { name: "自定义观测" }));
     await expandFilters();
     fireEvent.mouseDown(await screen.findByRole("combobox", { name: "实体类型多选" }));
@@ -70,11 +69,11 @@ describe("GraphPage", () => {
 
   it("lists only entities of the chosen types as centers", async () => {
     await renderPage();
-    await screen.findByText("请先选择实体类型，再选择关系类型");
+    await screen.findByText("请先选择实体类型");
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "实体类型多选" }));
     fireEvent.click(await screen.findByText("服务类型"));
     finishSelection();
-    expect(screen.getByRole("combobox", { name: "实体多选" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "实体多选" })).toBeEnabled();
     fireEvent.keyDown(screen.getByRole("combobox", { name: "实体类型多选" }), { key: "Escape" });
     await waitFor(() => expect(screen.getByRole("combobox", { name: "关系类型多选" })).toBeEnabled());
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "关系类型多选" }));
@@ -108,10 +107,12 @@ describe("GraphPage", () => {
     };
     await clickOption();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3,
     }));
     await clickOption();
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], centerIds: ["a"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["depends"],
     }));
   });
@@ -124,6 +125,7 @@ describe("GraphPage", () => {
     expect(screen.queryByRole("button", { name: /创建关系/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "待固定关系" })).not.toBeInTheDocument();
     expect(screen.queryByText("固定观测")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "展开跨类型邻居" })).not.toBeInTheDocument();
     fireEvent.click(await screen.findByTestId("node-a"));
     expect(screen.getByText("entity-drawer-a")).toBeInTheDocument();
     fireEvent.click(screen.getByText("edge-edge"));
@@ -147,29 +149,31 @@ describe("GraphPage", () => {
 
   it("hides the save-aspect entry for read-only users", async () => {
     await renderPage(false);
-    await screen.findByText("请先选择实体类型，再选择关系类型");
+    await screen.findByText("请先选择实体类型");
     expect(screen.queryByRole("button", { name: "保存切面" })).toBeNull();
   });
 
   it("restores the successful custom observation including cross-type neighbors", async () => {
     const page = await renderPage();
     await chooseScope();
-    fireEvent.click(screen.getByRole("checkbox", { name: "展开跨类型邻居" }));
-    await waitFor(() => expect(JSON.parse(localStorage.getItem("oc_ontology_observation:debug")!).expandNeighbors).toBe(true));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("oc_ontology_observation:debug")!)).not.toHaveProperty("expandNeighbors"));
+    const stored = JSON.parse(localStorage.getItem("oc_ontology_observation:debug")!);
+    localStorage.setItem("oc_ontology_observation:debug", JSON.stringify({ ...stored, expandNeighbors: false }));
     page.unmount();
     apiMock.graph.mockClear();
     render(pageElement());
     await waitFor(() => expect(apiMock.graph).toHaveBeenLastCalledWith("debug", {
+      expandNeighbors: true,
       entityTypeIds: ["service"], centerIds: ["a"], relationshipTypeIds: ["depends"],
-      upstreamDepth: 3, downstreamDepth: 3, expandNeighbors: true,
+      upstreamDepth: 3, downstreamDepth: 3,
     }));
     expect(screen.getByRole("tab", { name: "自定义观测" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("checkbox", { name: "展开跨类型邻居" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "展开跨类型邻居" })).not.toBeInTheDocument();
   });
 
   it("saves the chosen scope as a new named aspect", async () => {
     await renderPage();
-    await screen.findByText("请先选择实体类型，再选择关系类型");
+    await screen.findByText("请先选择实体类型");
     expect(screen.getByRole("button", { name: "保存切面" })).toBeDisabled();
     await chooseScope();
     fireEvent.click(screen.getByRole("button", { name: "保存切面" }));

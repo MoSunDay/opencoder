@@ -12,8 +12,8 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 
 ## 图谱
 
-- [GraphPage.tsx](../../crates/web/spa/src/ontology/pages/graph/GraphPage.tsx)、[useGraphObservation.ts](../../crates/web/spa/src/ontology/pages/graph/useGraphObservation.ts) 组织元数据、观测请求和最后成功结果；[aspects/](../../crates/web/spa/src/ontology/pages/graph/aspects/) 连接命名切面与自定义范围。
-- [observationMemory.ts](../../crates/web/spa/src/ontology/pages/graph/session/observationMemory.ts) 按环境保存成功的范围与跨类型邻居选项，恢复前校验类型、关系和中心是否仍有效。
+- [GraphPage.tsx](../../crates/web/spa/src/ontology/pages/graph/GraphPage.tsx)、[useGraphObservation.ts](../../crates/web/spa/src/ontology/pages/graph/useGraphObservation.ts) 组织元数据、观测请求和最后成功结果，图谱请求固定启用 `expandNeighbors`；[aspects/](../../crates/web/spa/src/ontology/pages/graph/aspects/) 连接命名切面与自定义范围。
+- [observationMemory.ts](../../crates/web/spa/src/ontology/pages/graph/session/observationMemory.ts) 按环境保存成功的范围与命名切面，恢复前校验类型、关系和中心是否仍有效；观测记录不保存邻居展开选项。
 - [projection/model.ts](../../crates/web/spa/src/ontology/pages/graph/projection/model.ts) 用纯函数选择画布节点和边，保留实际连接路径；[useProjection.ts](../../crates/web/spa/src/ontology/pages/graph/projection/useProjection.ts) 管理展示预算。[ResultList.tsx](../../crates/web/spa/src/ontology/pages/graph/projection/ResultList.tsx) 使用完整查询结果。
 - [GraphCanvas.tsx](../../crates/web/spa/src/ontology/pages/graph/GraphCanvas.tsx) 组织 G6；[canvas/](../../crates/web/spa/src/ontology/pages/graph/canvas/) 管理实例、尺寸变化、视口、工具栏和关系标签测量。画布展示预算与查询结果分开，缩放及容器尺寸变化不重建观测范围；单个观测中心的定位按钮一次点击直接执行，复用同一 G6 实例切换切面时等待新数据布局完成后重新渲染并把中心恢复到 100% 居中。
 - [details/](../../crates/web/spa/src/ontology/pages/graph/details/) 保存实体和关系详情的返回路径、标签及滚动位置，并支持以当前实体重新观测。

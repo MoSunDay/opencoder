@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 // schedule/panel.jsx —「调度」页：控制面 cron 定时任务的管理视图。
 //
 // schema v27 起 libsql `schedules` 表是定义事实源，本页是它的全功能
@@ -89,7 +90,7 @@ export function SchedulePanel({ onNotice }) {
   return <PageShell page="schedules">
     {error && <Alert type="error" showIcon title={error} action={<Button onClick={() => load('reset')}>重试定时任务</Button>} />}
     <Space style={{ marginBottom: 12 }}>
-      <Button type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建任务</Button>
+      <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建任务</EditButton>
       <Button onClick={() => load('reset')}>刷新</Button>
     </Space>
     <Table
@@ -112,12 +113,12 @@ export function SchedulePanel({ onNotice }) {
         { title: '操作', key: 'actions', render: (_, row) => <Space size={0}>
           <Button type="link" size="small" onClick={() => setHistory(row)}>触发历史</Button>
           <Popconfirm title="立即触发一次？" description="绕过启用与重叠策略，马上提交一次执行。" onConfirm={() => runNow(row)} okText="确认触发" cancelText="取消">
-            <Button type="link" size="small">立即触发</Button>
+            <EditButton type="link" size="small">立即触发</EditButton>
           </Popconfirm>
-          <Button type="link" size="small" onClick={() => { setEditing(row); setOpen(true); }}>编辑</Button>
-          <Button type="link" size="small" onClick={() => toggle(row)}>{row.enabled ? '停用' : '启用'}</Button>
+          <EditButton type="link" size="small" onClick={() => { setEditing(row); setOpen(true); }}>编辑</EditButton>
+          <EditButton type="link" size="small" onClick={() => toggle(row)}>{row.enabled ? '停用' : '启用'}</EditButton>
           <Popconfirm title="删除该定时任务？" description="定义删除后不可恢复；触发历史保留可查。" onConfirm={() => remove(row)} okText="确认删除" cancelText="取消">
-            <Button danger type="link" size="small">删除</Button>
+            <EditButton danger type="link" size="small">删除</EditButton>
           </Popconfirm>
         </Space> },
       ]}

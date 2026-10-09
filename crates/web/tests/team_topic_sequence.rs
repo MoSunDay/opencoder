@@ -206,8 +206,8 @@ fn script(
             &risk.id,
             vec![
                 ok("超时必须降级放行，不能阻塞主链路"),
-                ok("对齐：降级开关由风控平台持有，回调侧只执行"),
-                ok("放行必须携带风控降级标记"),
+                ok("对齐：降级开关由资源服务持有，回调侧只执行"),
+                ok("放行必须携带资源降级标记"),
             ],
         )
 }
@@ -218,14 +218,14 @@ fn script(
 async fn team_topic_sequence_drives_two_topics_to_a_final_conclusion() {
     let env = env().await;
     let captain = register(&env, "arch-captain").await;
-    let backend = register(&env, "pay-backend").await;
+    let backend = register(&env, "runtime-backend").await;
     let sre = register(&env, "sre").await;
-    let risk = register(&env, "risk-ctl").await;
+    let risk = register(&env, "resource-ctl").await;
     let app = Arc::new(app_for(
         &env,
         Arc::new(script(&captain, &backend, &sre, &risk)),
     ));
-    let team = "pay-alignment";
+    let team = "runtime-alignment";
 
     let (status, body) = call(
         &app,
@@ -245,7 +245,7 @@ async fn team_topic_sequence_drives_two_topics_to_a_final_conclusion() {
         &app,
         "POST",
         &format!("/api/teams/{team}/topics"),
-        Some(json!({"title": "回调超时与降级", "requirement": "确定支付回调的超时阈值与降级策略"})),
+        Some(json!({"title": "回调超时与降级", "requirement": "确定执行回调的超时阈值与降级策略"})),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::CREATED, "{body}");

@@ -55,7 +55,7 @@ async fn create_relationship_type(
     actor.require_manage()?;
     if body.source_entity_type_id.is_none() {
         return Err(AppError::invalid(
-            "business relationship types require a source entity type",
+            "relationship types require a source entity type",
         ));
     }
     let env = resolve_env(&state, &env).await?;

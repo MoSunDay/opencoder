@@ -162,7 +162,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
         )
     });
     timing.mark("queue_snapshot");
-    for mut record in records {
+    for record in records {
         let mut entry =
             super::admission::timing::Timing::new(&record.assignment.index.id, "queue_entry");
         let Some(permit) = worker.try_slot() else {
@@ -196,28 +196,14 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                 worker.finish_slot(ticket.as_deref()).await?;
                 continue;
             }
-            // A queued sandbox prompt must replay as a sandbox round, not
-            // as a host web-app POST (which would start a HOST turn): stage
-            // the turn text into the record and skip the native call; the
-            // launch below runs `run_round`. Non-sandbox commands replay
-            // unchanged.
+            // Sandbox inputs were admitted before capacity queuing. Launch the
+            // native store drain without admitting again or starting a host turn.
             let reply = if command.tail == "prompt"
                 && crate::workloads::agent_runc::sandbox_session(
                     &record,
                     queued.config.agent.agents_dir.as_deref(),
                 ) {
-                let prompt = command.body["prompt"]
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|p| !p.is_empty());
-                match prompt {
-                    Some(prompt) => {
-                        record.assignment.request.input["prompt"] = serde_json::json!(prompt);
-                        worker.inner.journal.lock().await.save(record.clone())?;
-                        RpcReply::ok(serde_json::json!({"status": "accepted"}))
-                    }
-                    None => RpcReply::error(400, "prompt is required for sandbox sessions"),
-                }
+                RpcReply::ok(serde_json::json!({"status": "accepted"}))
             } else {
                 opencoder_core::harness::scope::with_execution(
                     queued.config.agent.codex.clone(),

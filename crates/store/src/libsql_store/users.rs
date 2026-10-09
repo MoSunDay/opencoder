@@ -1,12 +1,13 @@
-//! Platform users (`platform_users`): name UNIQUE, token_hash UNIQUE, role.
-//! Only sha256 digests are stored (see `opencoder_core::token_hash`); tokens
-//! are returned exactly once at creation time by the control API.
+//! User identities and their independently managed token digests.
+//! Plaintext credentials are returned once by the control API.
 
 use anyhow::{Context, Result};
 use libsql::{params, Connection};
 
 use crate::users::{GuardedDelete, PlatformUser};
 use opencoder_core::identity::Role;
+
+pub(super) mod tokens;
 
 const USER_COLS: &str = "name, role, created_at";
 
@@ -29,11 +30,11 @@ pub async fn find_by_token_hash(
     token_hash: &str,
 ) -> Result<Option<PlatformUser>> {
     let stmt = conn
-        .prepare(&format!(
-            "SELECT {USER_COLS} FROM platform_users WHERE token_hash = ?1"
-        ))
+        .prepare("SELECT u.name,u.role,u.created_at FROM platform_users u JOIN platform_tokens t ON t.user_name=u.name WHERE t.token_hash = ?1 AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?2)")
         .await?;
-    let mut rows = stmt.query(params![token_hash]).await?;
+    let mut rows = stmt
+        .query(params![token_hash, opencoder_core::message::now_ms()])
+        .await?;
     match rows.next().await? {
         Some(row) => Ok(Some(row_to_user(&row)?)),
         None => Ok(None),
@@ -89,10 +90,29 @@ pub async fn create(
     role: Role,
     created_at: i64,
 ) -> Result<PlatformUser> {
-    conn.execute(
-        "INSERT INTO platform_users (name, token_hash, role, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![name, token_hash, role.as_str(), created_at],
-    )
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async {
+        conn.execute(
+            "INSERT INTO platform_users (name,role,created_at) VALUES (?1,?2,?3)",
+            params![name, role.as_str(), created_at],
+        )
+        .await?;
+        if !token_hash.is_empty() {
+            tokens::create(
+                conn,
+                &crate::AccessToken {
+                    id: format!("user:{name}"),
+                    user_name: name.into(),
+                    name: "初始 Token".into(),
+                    created_at,
+                    expires_at: None,
+                    revoked_at: None,
+                },
+                token_hash,
+            )
+            .await?;
+        }
+        anyhow::Ok(())
+    })
     .await
     .context("create platform user")?;
     find_by_name(conn, name)
@@ -137,12 +157,23 @@ pub async fn delete_guarding_last_admin(conn: &Connection, name: &str) -> Result
 pub async fn update_token_hash(conn: &Connection, name: &str, token_hash: &str) -> Result<bool> {
     let changed = conn
         .execute(
-            "UPDATE platform_users SET token_hash = ?2 WHERE name = ?1",
+            "UPDATE platform_tokens SET token_hash = ?2 WHERE id = 'user:' || ?1",
             params![name, token_hash],
         )
         .await
         .context("rotate platform user token")?;
     Ok(changed > 0)
+}
+
+pub async fn update_role(conn: &Connection, name: &str, role: Role) -> Result<bool> {
+    anyhow::ensure!(role != Role::Admin, "admin uses the startup credential");
+    Ok(conn
+        .execute(
+            "UPDATE platform_users SET role=?2 WHERE name=?1 AND role != 'admin'",
+            params![name, role.as_str()],
+        )
+        .await?
+        > 0)
 }
 
 #[cfg(test)]
@@ -157,18 +188,18 @@ mod tests {
     #[tokio::test]
     async fn crud_roundtrip_and_unique_constraints() {
         let conn = db().await;
-        let created = create(&conn, "alice", &"h1".repeat(8), Role::User, 10)
+        let created = create(&conn, "alice", &"h1".repeat(8), Role::Viewer, 10)
             .await
             .unwrap();
         assert_eq!(created.name, "alice");
-        assert_eq!(created.role, Role::User);
+        assert_eq!(created.role, Role::Viewer);
 
         // Same name conflicts.
-        assert!(create(&conn, "alice", &"h2".repeat(8), Role::Root, 11)
+        assert!(create(&conn, "alice", &"h2".repeat(8), Role::Editor, 11)
             .await
             .is_err());
         // Same token hash conflicts (different name).
-        assert!(create(&conn, "bob", &"h1".repeat(8), Role::User, 12)
+        assert!(create(&conn, "bob", &"h1".repeat(8), Role::Viewer, 12)
             .await
             .is_err());
         // Distinct user is fine.
@@ -221,7 +252,7 @@ mod tests {
             GuardedDelete::Missing
         );
         // …non-admins always delete…
-        create(&conn, "plain", &"h2".repeat(8), Role::User, 11)
+        create(&conn, "plain", &"h2".repeat(8), Role::Viewer, 11)
             .await
             .unwrap();
         assert_eq!(
@@ -268,7 +299,7 @@ mod tests {
         assert!(!update_token_hash(&conn, "ghost", &"h3".repeat(8))
             .await
             .unwrap());
-        create(&conn, "other", &"h4".repeat(8), Role::User, 11)
+        create(&conn, "other", &"h4".repeat(8), Role::Viewer, 11)
             .await
             .unwrap();
         assert!(

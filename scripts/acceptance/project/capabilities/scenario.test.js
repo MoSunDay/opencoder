@@ -15,7 +15,7 @@ test('task conclusions require structured computed values, including Markdown an
   ]) assert.throws(() => assertResult(text, marker));
 });
 
-test('Brain child outputs accept native text or objects while checking the business result', () => {
+test('Brain child outputs accept native text or objects while checking the task result', () => {
   const marker = 'pcap-example-brain';
   const output = { marker, sum: 10, passed: true };
   assertTaskOutput(output, marker);

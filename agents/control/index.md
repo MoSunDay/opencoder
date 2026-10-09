@@ -1,10 +1,12 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 
 # control 模块
 
 平台控制面：节点接入、全局定义、执行索引与调度。
 
 ## 索引
+- [api/users.rs](../../crates/control/src/api/users.rs)、[api/users/tokens.rs](../../crates/control/src/api/users/tokens.rs) — 用户与 Token 分开管理；仅管理员可管理，启动管理员凭据只读，角色变更对同一 Token 的后续请求立即生效。
+- [api/project/details.rs](../../crates/control/src/api/project/details.rs) — 项目、专项和 TODO 详情复用已有关系投影；TODO 对话按当前关联定位同一原生执行。
 - `src/bootstrap.rs` — control.db、definitions.db 与独立 ontology.db 装配；就绪检查包含 Ontology 数据库和正文根，Server 退休等待已接纳的 Ontology 写事务排空。
 - `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）
 - `src/api/session.rs` — 会话执行面（`?kind=operator|agent` 泳道）
@@ -15,7 +17,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 - [api/executions/results/](../../crates/control/src/api/executions/results/) — `GET /api/executions/:id/result` 从所属节点即时读取有界结论，不在 Server 缓存；失败、离线与内容省略显式返回。
 - `src/api/compat/dag_instances.rs`、`src/api/stream.rs`、`src/api/streaming/` — 实例中继与 SSE（v4 运行沿用同一 `/events` 通道，负载由节点按运行版本给出）
 - `src/api/brain_runs/` — schema 7 计划与运行；`plan_capabilities.rs` 注册保存计划版本能力，`v4/` 实现目录负责准入、派发、读取和事件确认。
-- [api/brain_runs/tui.rs](../../crates/control/src/api/brain_runs/tui.rs) — `GET /api/tui/agent-capabilities` 复用能力库目录，仅投影可用 Agent/Operator 的 ID、种类、目标和摘要；User 可读，不返回定义与 Harness 私有设置。
+- [api/brain_runs/tui.rs](../../crates/control/src/api/brain_runs/tui.rs) — `GET /api/tui/agent-capabilities` 复用能力库目录，仅投影可用 Agent/Operator 的 ID、种类、目标和摘要；editor 与 viewer 可读，不返回定义与 Harness 私有设置。
 - `src/transport/layered_tests.rs` — 分层 wake 的 generation 栅栏（只确认本次激活准入的那一轮）
 - `src/scheduler.rs`、`src/scheduler/telemetry.rs`、`src/api/schedules/`、`src/api/scheduler_metrics.rs`、`src/seed_schedules.rs` — cron 调度、进程内计数、定义 CRUD、调度总览与遗留导入
 - `src/bootstrap.rs`、`src/routes.rs` — 管理凭据与独立指标凭据分开装配；指标凭据只允许读取 `GET /metrics`，相同凭据拒绝启动
@@ -26,11 +28,11 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 ## 接缝
 - Brain 根运行另要求 `brain_context_budget_v1`：`api/executions/capabilities.rs` 用实际请求探测模型容量，`submit.rs` 保留容量拒绝的 413；创建和唤醒均检查帧大小。超限唤醒明确阻塞，避免不断重试无法传输的上下文。先升级节点再启用 Server，预算实现见 [brain](../brain/index.md)。
 - Brain 里程碑计划：根运行及托管子执行的节点须同时广告 `brain_scheduler_v7`、`brain_contracts_v1`；保存版本和直接运行准入均规范化内部层间路径，旧版本显式路径保持原样。普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation，且沿用父运行的节点。节点持有运行与操作投影；视图按轮次和激活提供执行索引，详情由执行 ID 查询。Control 为每次激活解析冻结能力与完整有界结果；受理拒绝从根事件读取具体原因，不等待不存在的子执行。Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。目录解析失败只标记对应能力不可用，计划引用它时返回原因，不阻断其他计划。字段约定与回执入口见 [brain](../brain/index.md)。
-- [api/executions/submit.rs](../../crates/control/src/api/executions/submit.rs) 接收用户注册的工作流定义，受理时原样固定定义与输入；找不到目标时拒绝提交，不按业务名称改写工作流。
+- [api/executions/submit.rs](../../crates/control/src/api/executions/submit.rs) 接收用户注册的工作流定义，受理时原样固定定义与输入；找不到目标时拒绝提交，不按能力名称改写工作流。
 - [api/brain_runs/attachments](../../crates/control/src/api/brain_runs/attachments/mod.rs) 提供通用图片附件上传与读取，核验名称、实际图片内容和 MIME；附件引用包含摘要，不依赖特定任务表单。
 - `POST /api/brain/runs/:id/inputs` 将人工文本提交给根运行的事件日志。`v4/runtime.rs` 组装新上下文，`v4/delivery.rs` 对当前运行中的 Agent/Operator/Team 投递大脑确认的引导；后到的人工输入会使尚未投递的旧引导失效，投递与输入共用运行锁。
 - `src/api/admission.rs` — `/ready` 在开放模式读取准入与节点就绪快照；冻结模式读取完整 drain 状态和活动执行数。
-- [api/executions/capabilities.rs](../../crates/control/src/api/executions/capabilities.rs) — 静态与动态 DAG 均要求 `dag_container_v1`，动态还要求 `dag_dynamic_v1`；通用兼容响应不能代替原生容器能力。定义由用户维护，启动不自动注册专用业务 DAG。
+- [api/executions/capabilities.rs](../../crates/control/src/api/executions/capabilities.rs) — 静态与动态 DAG 均要求 `dag_container_v1`，动态还要求 `dag_dynamic_v1`；通用兼容响应不能代替原生容器能力。定义由用户维护，启动不自动注册专用应用 DAG。
 
 ## 相关
 - [agents/node](../node/index.md)、[agents/worker](../worker/index.md)

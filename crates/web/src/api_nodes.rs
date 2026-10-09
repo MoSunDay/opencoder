@@ -3,7 +3,7 @@
 //! Split from `api.rs` for the file-size budget. Task *operations*
 //! (claim / upload / status / cancel) live in `api_nodes_ops.rs`; the browser
 //! SSE stream lives in `sse_nodes.rs`. Handlers are pure composition over the
-//! [`Store`] node API — no business logic here.
+//! [`Store`] node API — no platform logic here.
 
 use std::sync::Arc;
 

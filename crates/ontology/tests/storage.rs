@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 async fn creation_is_atomic_idempotent_and_preserves_text_history_after_restart() {
     let f = Fixture::new().await;
     let kind = f.kind().await;
-    let body = creation(&kind, "订单服务");
+    let body = creation(&kind, "执行服务");
     // Force a storage failure after the request claim and staged entity exist.
     std::fs::write(f.directory.path().join("files/debug"), b"blocked").unwrap();
     assert!(!f

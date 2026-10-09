@@ -15,6 +15,7 @@ const option = (name) => {
 };
 let h, harness, browser, state, observation;
 const control = { mode: 'normal', waiting: [], requests: [] };
+const browserRequests = [];
 const save = () => fs.writeFileSync(path.join(h.root, 'state.json'), JSON.stringify(state, null, 2), { mode: 0o600 });
 
 async function live(base) {
@@ -68,6 +69,14 @@ async function main() {
     h.nodeName = (await h.api('GET', '/api/nodes')).nodes.find((node) => node.id === h.nodeId).name;
   }
   console.log(JSON.stringify({ stage: 'ready', evidence: h.root, live: Boolean(h.live) }));
+  h.page.on('response', (response) => {
+    const route = new URL(response.url()).pathname;
+    if (route.startsWith('/api/')) {
+      const item = { route, status: response.status(), method: response.request().method() };
+      browserRequests.push(item);
+      if (/\/project\/todos\/[^/]+\/executions$/.test(route)) response.json().then((body) => { item.body = body; }).catch((error) => { item.error = error.message; });
+    }
+  });
   const health = await h.api('GET', '/api/health');
   const served = Buffer.from(await fetch(new URL('/static/app.js', h.page.url())).then((response) => {
     assert(response.ok, 'SPA asset must be readable'); return response.arrayBuffer();
@@ -105,7 +114,7 @@ async function main() {
 main().catch(async (error) => {
   console.error(error);
   if (h) {
-    fs.writeFileSync(path.join(h.root, 'failure.json'), JSON.stringify({ error: error.stack }, null, 2));
+    fs.writeFileSync(path.join(h.root, 'failure.json'), JSON.stringify({ error: error.stack, browserErrors: h.errors, requests: browserRequests }, null, 2));
     try { await h.page.screenshot({ path: path.join(h.root, 'failure.png'), animations: 'disabled' }); } catch {}
     try { fs.writeFileSync(path.join(h.root, 'failure.html'), await h.page.content()); } catch {}
   }

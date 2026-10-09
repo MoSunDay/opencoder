@@ -1,4 +1,4 @@
-"""Private read-only NFS exports and mounts, retained across business switches."""
+"""Private read-only NFS exports and mounts, retained across platform switches."""
 import subprocess
 
 

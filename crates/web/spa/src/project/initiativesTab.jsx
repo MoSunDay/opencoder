@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import { Button, Form, Popconfirm, Select, Space, Tag } from 'antd';
 import { useState } from 'react';
 import { apiDel, apiPatch, apiPost } from '../api.js';
@@ -35,11 +36,11 @@ export function InitiativesTab({ overview, refresh, onNotice, openInitiative }) 
     catch (error) { onNotice(err(error.message)); }
   };
   const columns = [...initiativeColumns({ openInitiative }), dateColumn, { title: '操作', key: 'actions', width: '15%', render: (_, row) => <Space onClick={(e) => e.stopPropagation()} wrap size={0}>
-    <Button type="link" size="small" onClick={() => { setEditing(row); setOpen(true); }}>编辑</Button>
-    <Popconfirm title="删除该专项？" onConfirm={() => remove(row)}><Button danger type="link" size="small" disabled={!!row.todos?.length} title={row.todos?.length ? '先迁移或移除 TODO，再删除专项' : ''}>删除</Button></Popconfirm>
+    <EditButton type="link" size="small" onClick={() => { setEditing(row); setOpen(true); }}>编辑</EditButton>
+    <Popconfirm title="删除该专项？" onConfirm={() => remove(row)}><EditButton danger type="link" size="small" disabled={!!row.todos?.length} title={row.todos?.length ? '先迁移或移除 TODO，再删除专项' : ''}>删除</EditButton></Popconfirm>
   </Space> }];
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
-    <Button type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建专项</Button>
+    <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建专项</EditButton>
     <ProjectTable label="专项表格" rows={rows} columns={columns} onRowClick={(row) => openInitiative(row.id)} locale={{ emptyText: '还没有专项' }} />
     <MdEditDrawer open={open} title={editing ? '编辑专项' : '新建专项'} initial={editing}
       extraTop={<><Form.Item name="goal_id" label="所属项目"><Select {...searchSelect} aria-label="goal_id" placeholder="独立专项" options={projectOptions(overview)} /></Form.Item><Form.Item name="status" label="状态"><Select options={['planned', 'in_progress', 'done'].map((value) => ({ value, label: statusLabel(value) }))} /></Form.Item></>}

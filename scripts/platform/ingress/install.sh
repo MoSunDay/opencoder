@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time ingress installation, separate from compatible business releases.
+# One-time ingress installation, separate from compatible platform releases.
 # Requires a C compiler, make, curl, PCRE, zlib and OpenSSL development headers.
 set -euo pipefail
 version=1.30.4

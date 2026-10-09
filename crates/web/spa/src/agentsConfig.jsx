@@ -1,3 +1,4 @@
+import { EditButton } from './ui/permissions.jsx';
 import {
   Button, Drawer, Form, Input, Modal, Popconfirm, Segmented, Select, Space, Table, Tabs, Typography,
 } from 'antd';
@@ -56,7 +57,7 @@ function CreateAgentModal({ open, onClose, onCreated, onNotice }) {
           <Segmented options={RUN_MODE_OPTIONS} aria-label="new-agent-run-mode" />
         </Form.Item>
         <Space>
-          <Button type="primary" htmlType="submit" loading={saving}>创建</Button>
+          <EditButton type="primary" htmlType="submit" loading={saving}>创建</EditButton>
           <Button onClick={onClose}>取消</Button>
         </Space>
       </Form>
@@ -162,10 +163,10 @@ function AgentListPanel({ onNotice }) {
       width: 200,
       render: (_, r) => (
         <Space size={0}>
-          <Button size="small" type="link" onClick={() => setDetail(r.name)}>编辑</Button>
-          <Button size="small" type="link" onClick={() => { launchForm.resetFields(); setLaunch(r); }}>启动</Button>
+          <EditButton size="small" type="link" onClick={() => setDetail(r.name)}>编辑</EditButton>
+          <EditButton size="small" type="link" onClick={() => { launchForm.resetFields(); setLaunch(r); }}>启动</EditButton>
           <Popconfirm title={`删除 agent ${r.name}？`} okText="确认删除" onConfirm={() => remove(r.name)}>
-            <Button size="small" type="link" danger>删除</Button>
+            <EditButton size="small" type="link" danger>删除</EditButton>
           </Popconfirm>
         </Space>
       ),
@@ -189,7 +190,7 @@ function AgentListPanel({ onNotice }) {
             onChange={(e) => setSearch(e.target.value)}
             aria-label="agent-search"
           />
-          <Button type="primary" onClick={() => setCreating(true)}>新建</Button>
+          <EditButton type="primary" onClick={() => setCreating(true)}>新建</EditButton>
         </Space>
       <Table
         rowKey="name"
@@ -234,7 +235,7 @@ function AgentListPanel({ onNotice }) {
           <Form.Item name="node" label="执行节点"><Select options={nodeOptions(nodes, 'agent')} /></Form.Item>
           <HarnessFields initialHarness={launch?.harness || 'opencoder'} />
           <Form.Item name="prompt" label="任务要求" rules={[{ required: true, message: '请输入任务要求' }]}><Input.TextArea rows={5} /></Form.Item>
-          <Button type="primary" htmlType="submit" loading={launching}>启动并查看</Button>
+          <EditButton type="primary" htmlType="submit" loading={launching}>启动并查看</EditButton>
         </Form>
       </Modal>
       {execution && <ExecutionDetail id={execution.id} summary={execution} onClose={() => setExecution(null)} onNotice={onNotice} />}

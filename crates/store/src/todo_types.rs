@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Durable workflow projection. Domain-specific state stays JSON so Store
+/// Durable workflow projection. Workflow state stays JSON so Store
 /// remains independent from the orchestration crate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodoWorkflowRecord {

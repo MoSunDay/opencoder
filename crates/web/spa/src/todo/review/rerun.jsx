@@ -1,3 +1,4 @@
+import { EditButton } from '../../ui/permissions.jsx';
 import {Alert,Button,Input,Modal,Space,Tag} from 'antd';
 import {useEffect,useRef,useState} from 'react';
 import {apiPost} from '../../api.js';
@@ -28,7 +29,7 @@ export function RerunDialog({id,todoId,snapshot,onClose,onAccepted}) {
   };
   return <Modal open={!!todoId} title={`从 ${todoId} 重新执行`} onCancel={onClose} footer={<Space>
     <Button onClick={onClose}>关闭</Button><Button disabled={busy||!!receipt} onClick={refresh}>刷新影响预览</Button>
-    <Button type="primary" loading={busy} disabled={!preview||!!preview.blockers?.length||!reason.trim()||!!receipt} onClick={submit}>确认暂停并重跑</Button>
+    <EditButton type="primary" loading={busy} disabled={!preview||!!preview.blockers?.length||!reason.trim()||!!receipt} onClick={submit}>确认暂停并重跑</EditButton>
   </Space>}>
     <p>保留当前文件、外部操作结果和历史记录。旧执行停止后，父 Agent 将重新派发目标及下游任务。</p>
     {preview&&<><p>重新执行：{preview.affected.map(id=><Tag color="orange" key={id}>{id}</Tag>)}</p>

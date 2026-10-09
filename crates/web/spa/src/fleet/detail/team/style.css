@@ -1,0 +1,69 @@
+.team-discussion,
+.team-discussion-rounds {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.team-discussion .ant-collapse-title { min-width: 0; }
+.team-discussion .team-member-tag {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-discussion-conclusion,
+.team-discussion-goal {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+}
+.team-discussion-conclusion,
+.team-captain-summary {
+  background: var(--oc-fill-subtle);
+}
+.team-discussion-text {
+  max-height: min(480px, 55vh);
+  min-width: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.team-discussion-heading,
+.team-round-heading,
+.team-statement header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.team-discussion-heading {
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.team-round-heading strong { flex-shrink: 0; }
+.team-round-heading span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-round-plan { margin-top: 8px; }
+.team-discussion-statements { display: grid; gap: 12px; min-width: 0; }
+.team-statement {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+}
+.team-statement header { flex-wrap: wrap; margin-bottom: 8px; overflow-wrap: anywhere; }
+.team-statement header strong { min-width: 0; overflow-wrap: anywhere; }
+.team-followup,
+.team-ambiguities { overflow-wrap: anywhere; }
+.team-ambiguities ul { padding-left: 20px; margin-bottom: 0; }
+.team-round-pagination { margin-top: 12px; }
+@media (max-width: 600px) {
+  .team-discussion-conclusion,
+  .team-discussion-goal,
+  .team-statement { padding: 10px; }
+  .team-discussion .ant-collapse-header { flex-wrap: wrap; }
+}

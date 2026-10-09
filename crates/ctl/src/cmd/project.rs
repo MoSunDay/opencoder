@@ -2,6 +2,9 @@
 //! per-todo plan/execute runs. Pure `plan()` mapping only; execution goes
 //! through the shared `exec_plan` transport.
 
+pub mod conversation;
+pub mod tags;
+
 use anyhow::Result;
 use clap::Subcommand;
 
@@ -20,6 +23,9 @@ fn required_body(raw: &str) -> Result<serde_json::Value> {
 pub enum ProjectCmd {
     /// GET /api/project/overview — nested goals→initiatives→todos snapshot.
     Overview,
+    /// Project and initiative tag definitions.
+    #[command(subcommand)]
+    Tags(tags::TagsCmd),
     /// Goal records.
     #[command(subcommand)]
     Goals(GoalsCmd),
@@ -33,6 +39,8 @@ pub enum ProjectCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum GoalsCmd {
+    /// Fetch one record.
+    Get { id: String },
     /// GET /api/project/goals — all goals, sort then created_at order.
     List,
     /// POST /api/project/goals — {"title","detail_md"?,"sort"?}.
@@ -54,6 +62,8 @@ pub enum GoalsCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum InitiativesCmd {
+    /// Fetch one record.
+    Get { id: String },
     /// GET /api/project/initiatives — one goal's initiatives via --goal,
     /// or across all goals when absent.
     List {
@@ -80,6 +90,23 @@ pub enum InitiativesCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum TodosCmd {
+    /// Fetch a TODO including its selected tags and capability.
+    Get { id: String },
+    /// Move/reorder a board lane: {initiative_id,board_status,ids}.
+    Reorder {
+        #[arg(long)]
+        json: String,
+    },
+    /// Continue or guide this TODO's Agent/Operator conversation.
+    Prompt(conversation::Prompt),
+    /// Read the linked conversation with native pagination.
+    Messages(conversation::Messages),
+    /// Follow native execution events, resuming after a sequence.
+    Events(conversation::Events),
+    /// Read the current result from its owning node.
+    Result(conversation::Target),
+    /// Interrupt the linked conversation.
+    Interrupt(conversation::Target),
     /// GET /api/project/todos — one initiative's todos via --initiative,
     /// or every todo (backlog included) when absent.
     List {
@@ -150,6 +177,7 @@ pub enum TodosCmd {
 
 pub fn plan(sub: &ProjectCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        ProjectCmd::Tags(sub) => tags::plan(sub)?,
         ProjectCmd::Overview => RequestPlan::get("/api/project/overview"),
         ProjectCmd::Goals(sub) => plan_goals(sub)?,
         ProjectCmd::Initiatives(sub) => plan_initiatives(sub)?,
@@ -159,6 +187,9 @@ pub fn plan(sub: &ProjectCmd) -> Result<RequestPlan> {
 
 fn plan_goals(sub: &GoalsCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        GoalsCmd::Get { id } => {
+            RequestPlan::get(format!("/api/project/goals/{}", crate::http::urlencode(id)))
+        }
         GoalsCmd::List => RequestPlan::get("/api/project/goals"),
         GoalsCmd::Create { json } => {
             RequestPlan::post("/api/project/goals").with_body(required_body(json)?)
@@ -172,6 +203,10 @@ fn plan_goals(sub: &GoalsCmd) -> Result<RequestPlan> {
 
 fn plan_initiatives(sub: &InitiativesCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        InitiativesCmd::Get { id } => RequestPlan::get(format!(
+            "/api/project/initiatives/{}",
+            crate::http::urlencode(id)
+        )),
         InitiativesCmd::List { goal } => {
             RequestPlan::get("/api/project/initiatives").with_opt("goal_id", goal.clone())
         }
@@ -190,6 +225,19 @@ fn plan_initiatives(sub: &InitiativesCmd) -> Result<RequestPlan> {
 
 fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        TodosCmd::Get { id } => {
+            RequestPlan::get(format!("/api/project/todos/{}", crate::http::urlencode(id)))
+        }
+        TodosCmd::Reorder { json } => {
+            RequestPlan::put("/api/project/todos/order").with_body(required_body(json)?)
+        }
+        TodosCmd::Prompt(_)
+        | TodosCmd::Messages(_)
+        | TodosCmd::Events(_)
+        | TodosCmd::Result(_)
+        | TodosCmd::Interrupt(_) => {
+            anyhow::bail!("conversation commands resolve the TODO execution before planning")
+        }
         TodosCmd::List { initiative } => {
             RequestPlan::get("/api/project/todos").with_opt("initiative_id", initiative.clone())
         }
@@ -240,6 +288,47 @@ fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
 }
 
 pub async fn run(ctx: &Ctx, sub: ProjectCmd) -> Result<i32> {
+    if let ProjectCmd::Todos(command) = &sub {
+        match command {
+            TodosCmd::Prompt(args) => {
+                return conversation::run(
+                    ctx,
+                    &args.target,
+                    "prompt",
+                    Some(required_body(&args.json)?),
+                    vec![],
+                )
+                .await
+            }
+            TodosCmd::Messages(args) => {
+                let mut query = vec![];
+                if let Some(seq) = args.after_seq {
+                    query.push(("after_seq", seq.to_string()));
+                }
+                if let Some(offset) = args.message_offset {
+                    query.push(("message_offset", offset.to_string()));
+                }
+                return conversation::run(ctx, &args.target, "messages", None, query).await;
+            }
+            TodosCmd::Events(args) => {
+                return conversation::run(
+                    ctx,
+                    &args.target,
+                    "events",
+                    None,
+                    vec![("after", args.after.to_string())],
+                )
+                .await
+            }
+            TodosCmd::Result(target) => {
+                return conversation::run(ctx, target, "result", None, vec![]).await
+            }
+            TodosCmd::Interrupt(target) => {
+                return conversation::run(ctx, target, "interrupt", None, vec![]).await
+            }
+            _ => {}
+        }
+    }
     exec_plan(ctx, plan(&sub)?).await
 }
 

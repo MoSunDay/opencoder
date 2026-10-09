@@ -1,3 +1,4 @@
+import { useCanEdit } from './ui/permissions.jsx';
 // agentNfsCard.jsx — 「Agent 配置」页的 NFS 导出卡片：GET /api/agents/nfs
 // 状态快照（running/host/port/read_only/export_root）+ Switch 显式启停
 // （POST /api/agents/nfs {enabled}）。运行中给出 mount(8) 提示行；导出
@@ -23,6 +24,7 @@ export function AgentNfsCard({ onNotice, endpoint = '/api/agents/nfs', title = '
   const msg = useMessage();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const canEdit = useCanEdit();
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState('');
   const [confirmStop, setConfirmStop] = useState(false);
@@ -89,7 +91,7 @@ export function AgentNfsCard({ onNotice, endpoint = '/api/agents/nfs', title = '
           {status && !error ? (s.running ? <Tag color="green">运行中</Tag> : <Tag>已停止</Tag>) : <Tag>状态未知</Tag>}
         </Space>
         <Space>
-          <Switch checked={!!s.running} loading={switching} disabled={loading || !!error || !status} onChange={(enabled) => enabled ? setEnabled(true) : setConfirmStop(true)} aria-label={`${label}-enabled`} />
+          <Switch checked={!!s.running} loading={switching} disabled={!canEdit || loading || !!error || !status} onChange={(enabled) => enabled ? setEnabled(true) : setConfirmStop(true)} aria-label={`${label}-enabled`} />
           <Button size="small" disabled={switching} onClick={load}>刷新</Button>
         </Space>
       </Space>

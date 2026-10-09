@@ -381,3 +381,50 @@ fn malformed_bodies_fail_at_plan_time() {
     // Resource file needs at least one path segment.
     rejects(&["agents", "resources", "file", "skills", "shell", "3"]);
 }
+
+#[test]
+fn project_details_tags_order_and_conversation_commands_parse() {
+    for resource in ["goals", "initiatives", "todos"] {
+        assert_eq!(
+            planned_project(&[resource, "get", "abc"]).path,
+            format!("/api/project/{resource}/abc")
+        );
+    }
+    assert_eq!(
+        planned_project(&["tags", "list", "--scope-type", "goal", "--scope-id", "g"]).query,
+        vec![
+            ("scope_type".into(), "goal".into()),
+            ("scope_id".into(), "g".into())
+        ]
+    );
+    for (command, method) in [
+        ("create", reqwest::Method::POST),
+        ("patch", reqwest::Method::PATCH),
+    ] {
+        let mut args = vec!["tags", command];
+        if command == "patch" {
+            args.push("tag");
+        }
+        args.extend(["--json", r#"{"name":"urgent"}"#]);
+        assert_eq!(planned_project(&args).method, method);
+    }
+    assert_eq!(
+        planned_project(&["tags", "delete", "tag"]).method,
+        reqwest::Method::DELETE
+    );
+    assert_eq!(
+        planned_project(&["todos", "reorder", "--json", r#"{"items":[]}"#]).method,
+        reqwest::Method::PUT
+    );
+    for operation in ["messages", "events", "result", "interrupt"] {
+        project(&["todos", operation, "t", "--execution", "agent-history"]);
+    }
+    project(&[
+        "todos",
+        "prompt",
+        "t",
+        "--json",
+        r#"{"prompt":"more","input_id":"once"}"#,
+    ]);
+    rejects(&["project", "todos", "prompt", "t"]);
+}

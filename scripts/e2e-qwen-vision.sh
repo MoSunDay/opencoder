@@ -2,7 +2,7 @@
 # E2E regression: real multimodal (vision) closed loop against qwen provider.
 #
 # Feeds logo/logo.png + a prompt to `qwen/qwen3.8-max-preview`, then asserts
-# actual business contracts (not surface markers):
+# actual platform contracts (not surface markers):
 #   1. user turn persisted a ContentBlock::Image carrying a base64 data URI
 #   2. assistant turn persisted substantive vision text (describes the image)
 #   3. streamed stdout exactly equals the persisted assistant text

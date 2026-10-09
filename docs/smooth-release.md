@@ -33,7 +33,7 @@ Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
 `server_data` 传给 Server 的 `--data-dir`；`state_dir` 包含 `host/`、`resources/`、`runtimes/<版本>/`、`releases/` 和 `backups/`。发布工具把每个 Runtime 目录传给 Agent 的 `--data-dir`，DAG 过程文件位于该目录的 `dag/runs/`。两个配置项都应指向已挂载的数据磁盘，并提前设置服务账号权限。已有部署不能仅修改路径后启动空目录：应迁移完整数据、保留节点身份及锁文件，并保持已接受执行记录中的旧路径可访问。
 
 ```bash
-# 没有 Nginx 时执行一次；不会启动业务监听。
+# 没有 Nginx 时执行一次；不会启动服务监听。
 scripts/platform/ingress/install.sh
 
 scripts/platform/release/build.sh --output /srv/releases/opencoder-first
@@ -82,7 +82,7 @@ Ontology 正文使用第四个只读导出，默认关闭。首次启用时在�
 
 关闭、恢复及重新开放入口时，都等待旧 Nginx worker 关闭监听 socket 后再继续；已有节点长连接可以继续存活。仅收到 reload 成功不能证明新请求已切换。
 
-维护发布先将公共业务入口关闭为 503（保留节点通道），冻结新任务并等待已接纳任务结束，再停止所有保留版本的 Server、Host、Runtime 和资源服务。停服前确认 Runtime 没有运行进程或保留容量，并保存它的最终库存信息。停服后保存独立备份目录，包含 Server、资源服务及 Host 的共享数据库和文件、旧包校验、配置、systemd 服务、挂载信息、控制器模板和命令行入口。历史 Runtime 和旧节点的执行目录原地保留，升级与回滚都不改写它们，因此不再次复制镜像、会话和产物；随后使用现有休眠记录保留旧 Runtime 的索引，让新 Host 可以启动。资源服务二进制和 unit 随候选一起升级；每个 Runtime 使用独立镜像。候选 Server 执行事务迁移后，通过私有 DAG 探针、项目读取和资源验证，才重新开放 admission 和公共入口。
+维护发布先将公共入口关闭为 503（保留节点通道），冻结新任务并等待已接纳任务结束，再停止所有保留版本的 Server、Host、Runtime 和资源服务。停服前确认 Runtime 没有运行进程或保留容量，并保存它的最终库存信息。停服后保存独立备份目录，包含 Server、资源服务及 Host 的共享数据库和文件、旧包校验、配置、systemd 服务、挂载信息、控制器模板和命令行入口。历史 Runtime 和旧节点的执行目录原地保留，升级与回滚都不改写它们，因此不再次复制镜像、会话和产物；随后使用现有休眠记录保留旧 Runtime 的索引，让新 Host 可以启动。资源服务二进制和 unit 随候选一起升级；每个 Runtime 使用独立镜像。候选 Server 执行事务迁移后，通过私有 DAG 探针、项目读取和资源验证，才重新开放 admission 和公共入口。
 
 `release-state.json` 的 `maintenance` 保存候选、备份地址、阶段和阶段时间。中断后续跑使用同一备份、配置快照和候选；完整备份不被重试覆盖。启动候选 Server 的迁移意图先落盘，但旧备份恢复的边界是重新开放写入的持久化意图，不能用迁移是否已经开始替代这一边界。
 
@@ -100,7 +100,7 @@ Server 的源工作区必须预先存在，并允许实际资源服务账号读�
 - **USR1：**回到上一兼容版本；重复回滚保持同一目标，已接收任务留在各自 Runtime。
 - Server 经认证的本机 Host 启动独立 systemd 作业；当前 Server/Host 退役不会终止作业。控制器脚本固定到 `state_dir/controllers/<digest>`，不依赖正在编辑的仓库文件。
 - 若手动发信号，先从发布记录的 `releases[current].server_unit` 取得当前 unit 并核验能力，再执行 `systemctl kill --kill-who=main --signal=SIGUSR2 <unit>`；回滚使用 SIGUSR1。发布工具使用管理员的 systemd 管理权限。
-- 作业启动、完成和失败保存到 `state_dir/signal-receipts`；`deploy.sh --status` 的 `signals` 返回候选和回执。等待超时后先检查作业与回执，不能将旧的成功回执当成本次结果，也不能通过重启业务进程处理超时。
+- 作业启动、完成和失败保存到 `state_dir/signal-receipts`；`deploy.sh --status` 的 `signals` 返回候选和回执。等待超时后先检查作业与回执，不能将旧的成功回执当成本次结果，也不能通过重启服务进程处理超时。
 
 完整发布工作流见 [opencoder-release skill](../skills/opencoder-release/SKILL.md)。
 

@@ -46,7 +46,7 @@ fn guest_settings_keep_profile_and_credentials_private() {
             ("NOTE", "literal $(value)"),
         ]),
         codex: Some(CodexSettings {
-            auth_slot: Some(2),
+            startup_script: vec!["/usr/bin/launcher".into()],
             reasoning_effort: Some("high".into()),
             sandbox_mode: Some("read-only".into()),
             ..Default::default()
@@ -68,7 +68,7 @@ fn guest_settings_keep_profile_and_credentials_private() {
     assert_eq!(guest.envs["OPENAI_API_KEY"], "fixture-key");
     assert_eq!(guest.model.as_deref(), Some("profile-model"));
     let settings = guest.codex.unwrap();
-    assert_eq!(settings.auth_slot, Some(2));
+    assert_eq!(settings.startup_script, ["/usr/bin/launcher"]);
     assert_eq!(settings.sandbox_mode.as_deref(), Some("read-only"));
     assert_eq!(settings.approval_policy.as_deref(), Some("never"));
     assert_eq!(settings.executable.as_deref(), Some(DEFAULT_BINARY));
@@ -128,6 +128,26 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
         home.display().to_string()
     );
     assert_eq!(launch.runtime.model.as_deref(), Some("selected-model"));
+    config
+        .agent
+        .runtime
+        .profiles
+        .get_mut("selected")
+        .unwrap()
+        .settings
+        .startup_script = vec!["/usr/bin/missing-launcher".into()];
+    assert!(resolve(&config, "check", &rootfs)
+        .unwrap_err_text()
+        .contains("startup script"));
+    config
+        .agent
+        .runtime
+        .profiles
+        .get_mut("selected")
+        .unwrap()
+        .settings
+        .startup_script
+        .clear();
     let run = root.join("run");
     std::fs::create_dir_all(&run).unwrap();
     let spec = crate::sandbox::oci::BundleSpec {

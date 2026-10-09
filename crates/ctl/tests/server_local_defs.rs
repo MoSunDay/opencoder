@@ -71,11 +71,11 @@ impl Server {
         )
         .unwrap();
         let mock = Arc::new(MockChatClient::new());
-        let state = opencoder_control::new_state(
+        let state = Box::pin(opencoder_control::new_state(
             work,
             dir.path().join("data"),
             Some(mock as Arc<dyn ChatStream>),
-        )
+        ))
         .await
         .unwrap();
         let app = opencoder_control::build_app(state.clone(), Some(TOKEN.into()), false);
@@ -109,7 +109,7 @@ pub async fn cli(server: &Server, token: &str, args: &[&str]) -> i32 {
     ];
     argv.extend(args.iter().map(|arg| arg.to_string()));
     let parsed = opencoder_cli::Cli::try_parse_from(argv).unwrap();
-    opencoder_cli::run(parsed).await.unwrap()
+    Box::pin(opencoder_cli::run(parsed)).await.unwrap()
 }
 
 /// Assert the success path (exit 0) for a full argv tail.

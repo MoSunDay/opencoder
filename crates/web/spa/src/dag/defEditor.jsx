@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 // defEditor.jsx — create/edit drawer for a DAG definition with TWO edit
 // modes: 画布 (visual canvas — editor/canvasEditor.jsx over a spec draft
 // OBJECT, default) and JSON (textarea power mode over the same draft).
@@ -142,9 +143,9 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
       footer={
         <Space style={{ float: 'right' }}>
           <Button disabled={saving} onClick={onClose}>取消</Button>
-          <Button type="primary" loading={saving} onClick={submit}>
+          <EditButton type="primary" loading={saving} onClick={submit}>
             保存
-          </Button>
+          </EditButton>
         </Space>
       }
     >

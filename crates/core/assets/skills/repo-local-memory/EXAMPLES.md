@@ -10,7 +10,7 @@ Use this file mainly when:
 
 ---
 
-## Positive Example 1: Internal refactor with no business change
+## Positive Example 1: Internal refactor with no platform change
 ### Change
 A parser implementation is replaced, but responsibility, boundary, and external behavior stay the same.
 
@@ -32,7 +32,7 @@ A scheduling subsystem is restructured into a clearer coordinator-based architec
 ### Correct Action
 - Update relevant `agents/*` if responsibilities, boundaries, or main flows changed.
 - Write a changelog entry if the refactor is substantial and worth future retrieval.
-- Do not update `features/*` unless business behavior changed.
+- Do not update `features/*` unless platform behavior changed.
 - Do not update top-level indexes unless the module or feature map changed.
 
 ### Why

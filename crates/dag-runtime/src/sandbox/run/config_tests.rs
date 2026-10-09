@@ -63,3 +63,45 @@ fn codex_steps_share_one_home_at_the_original_node_path() {
     }
     assert!(!root.join("workspace/first/launch.json").exists());
 }
+
+#[test]
+fn run_binds_only_declared_directories_without_inheriting_host_submounts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    for name in [
+        "bundle/rootfs",
+        "workspace",
+        "private",
+        "knowledge",
+        "agents",
+        "credentials",
+    ] {
+        std::fs::create_dir_all(root.join(name)).unwrap();
+    }
+    let mut config = opencoder_core::Config::default();
+    config.dag.knowledge_root = Some(root.join("knowledge"));
+    config.agent.agents_dir = Some(root.join("agents"));
+    config.dag.execution_private_root = Some(root.join("credentials"));
+    let run: DagClaimedRun = serde_json::from_value(json!({
+        "run_id":"bind-check", "dag_id":"bind-check", "created_at":0,
+        "spec":{"name":"bind-check", "steps":[
+            {"name":"binary","kind":{"type":"binary","resource":"fixture@v1","args":[]}}
+        ]}
+    }))
+    .unwrap();
+    let spec = render(root, &config, &run, root.metadata().unwrap().uid()).unwrap();
+    let binds: Vec<_> = spec["mounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|mount| mount["type"] == "bind")
+        .collect();
+    assert_eq!(binds.len(), 6);
+    for mount in binds {
+        let options = mount["options"].as_array().unwrap();
+        assert!(options.contains(&json!("bind")));
+        assert!(!options.contains(&json!("rbind")));
+        let writable = mount["destination"] == "/workspace";
+        assert!(options.contains(&json!(if writable { "rw" } else { "ro" })));
+    }
+}

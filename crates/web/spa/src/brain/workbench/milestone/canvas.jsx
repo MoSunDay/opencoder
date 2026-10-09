@@ -1,3 +1,4 @@
+import { EditButton } from '../../../ui/permissions.jsx';
 import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, applyNodeChanges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Button, Tag } from 'antd';
@@ -10,7 +11,7 @@ function LayerCard({ data, selected }) {
     <Handle id="forward-in" type="target" position={Position.Top} isConnectable={false} />
     <header><Tag>第 {data.index + 1} 层</Tag><strong>{data.layer.title || '新里程碑'}</strong>{data.status && <Tag>{data.status}</Tag>}</header>
     <p>{data.layer.task || '点击配置里程碑要做什么'}</p>
-    {data.editable && <Button className="nodrag" size="small" onClick={(event) => { event.stopPropagation(); data.onAddNode(data.layer.layer_id); }}>＋ 并行执行节点</Button>}
+    {data.editable && <EditButton className="nodrag" size="small" onClick={(event) => { event.stopPropagation(); data.onAddNode(data.layer.layer_id); }}>＋ 并行执行节点</EditButton>}
     <Handle id="forward-out" type="source" position={Position.Bottom} isConnectable={false} />
   </article>;
 }
@@ -73,13 +74,13 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
     style: { stroke: '#87a3c2', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed },
   }));
   return <div ref={container} className={`brain-milestone-canvas ${editable ? 'is-editable' : ''}`} aria-label="里程碑编辑画布">
-    {editable && <div className="brain-milestone-tools"><Button onClick={onAddLayer}>＋ 里程碑</Button><Button onClick={() => onPositions?.({})}>整理布局</Button><span>大脑根据执行结果决定前进或回到已执行的里程碑</span></div>}
+    {editable && <div className="brain-milestone-tools"><EditButton onClick={onAddLayer}>＋ 里程碑</EditButton><EditButton onClick={() => onPositions?.({})}>整理布局</EditButton><span>大脑根据执行结果决定前进或回到已执行的里程碑</span></div>}
     <div className="brain-milestone-flow"><ReactFlow onInit={(instance) => { flow.current = instance; }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={editable} nodesConnectable={false} fitView minZoom={0.15} maxZoom={2}
       onNodesChange={(changes) => setNodes((old) => applyNodeChanges(changes, old))}
       onNodeClick={(_, node) => onSelect?.({ type: node.type === 'layer' ? 'layer' : 'node', id: originalFlowId(node.id) })}
       onNodeDragStop={(_, node) => { if (node.type === 'layer') onPositions?.({ ...positions, [originalFlowId(node.id)]: node.position }); }}>
       <Background /><Controls showInteractive={false} /><MiniMap pannable zoomable />
     </ReactFlow></div>
-    {!plan.layers.length && <div className="brain-milestone-empty"><h3>从第一个里程碑开始</h3><p>在画布配置里程碑和并行节点</p><Button type="primary" onClick={onAddLayer}>添加第一个里程碑</Button></div>}
+    {!plan.layers.length && <div className="brain-milestone-empty"><h3>从第一个里程碑开始</h3><p>在画布配置里程碑和并行节点</p><EditButton type="primary" onClick={onAddLayer}>添加第一个里程碑</EditButton></div>}
   </div>;
 }

@@ -1,3 +1,4 @@
+import { EditButton } from '../ui/permissions.jsx';
 import { useEvent } from '../ui/editing/useEvent.js';
 import { Button, Form, Input, Modal, Select, Space, Spin, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
@@ -7,7 +8,8 @@ import { useMessage } from '../ui/appMessage.js';
 import { wrapForm, wrapSettings } from './configuration.js';
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/;
-const ENV_RULE = [{ validator: (_, value) => { try { wrapSettings({ envs: value }); return Promise.resolve(); } catch (e) { return Promise.reject(e); } } }];
+const SCRIPT_RULE = [{ validator: (_, value) => { try { wrapSettings({ startup_script: value }); return Promise.resolve(); } catch (e) { return Promise.reject(e); } } }];
+const SCRIPT_HELP = '每行一项：第一行是脚本或解释器，后续行是参数。脚本接收并负责执行 Codex 完整命令，可自行准备环境；留空直接启动 Codex。';
 
 export function HarnessManagement({ onNotice: noticeCallback }) {
   const onNotice = useEvent(noticeCallback);
@@ -74,15 +76,15 @@ export function HarnessManagement({ onNotice: noticeCallback }) {
   return <Spin spinning={loading}>
     <Space wrap style={{ marginBottom: 16 }}>
       <Select disabled={loading || !ready || saving || dirty} aria-label="codex-profile" style={{ minWidth: 210 }} value={selected} onChange={(name) => select(name)} options={[{ value: '', label: '默认 Codex 配置' }, ...profiles.map((p) => ({ value: p.name, label: p.name }))]} />
-      <Button type="primary" disabled={loading || !ready || saving || dirty} onClick={() => setCreateOpen(true)}>新建配置档案</Button>
+      <EditButton type="primary" disabled={loading || !ready || saving || dirty} onClick={() => setCreateOpen(true)}>新建配置档案</EditButton>
     </Space>
     <Space style={{ marginBottom: 16 }}><Typography.Text strong>Codex</Typography.Text><Tag>{revision ? `配置 v${revision}` : '尚未保存统一配置'}</Tag><Button disabled={loading || saving || dirty} onClick={load}>刷新配置</Button></Space>
     <Form form={form} layout="vertical" onValuesChange={() => setDirty(true)} onFinish={save} disabled={loading || !ready || saving} style={{ maxWidth: 760 }}>
       <Form.Item name="model" label="模型（--model）"><Input placeholder="留空使用 Codex 默认模型" /></Form.Item>
-      <Form.Item name="envs" label="环境变量（--envs）" extra="每行一个 KEY=VALUE。保存在私有配置中，不进入 NFS 资源，也不在执行详情中显示值。" rules={ENV_RULE}>
-        <Input.TextArea rows={6} aria-label="codex-managed-envs" autoComplete="off" spellCheck={false} />
+      <Form.Item name="startup_script" label="启动脚本" extra={SCRIPT_HELP} rules={SCRIPT_RULE}>
+        <Input.TextArea rows={4} aria-label="codex-startup-script" placeholder={'/bin/sh\n/opt/scripts/codex-start.sh'} autoComplete="off" spellCheck={false} />
       </Form.Item>
-      <Button type="primary" htmlType="submit" loading={saving}>保存 Codex 配置</Button>
+      <EditButton type="primary" htmlType="submit" loading={saving}>保存 Codex 配置</EditButton>
     </Form>
     <Modal
       title="新建配置档案"
@@ -103,8 +105,8 @@ export function HarnessManagement({ onNotice: noticeCallback }) {
           <Input placeholder="如 codex-review" aria-label="new-codex-profile" autoComplete="off" />
         </Form.Item>
         <Form.Item name="model" label="模型（--model）" initialValue=""><Input placeholder="留空使用 Codex 默认模型" aria-label="new-codex-profile-model" /></Form.Item>
-        <Form.Item name="envs" label="环境变量（--envs）" extra="每行一个 KEY=VALUE。保存在私有配置中，不进入 NFS 资源，也不在执行详情中显示值。" initialValue="" rules={ENV_RULE}>
-          <Input.TextArea rows={6} aria-label="new-codex-profile-envs" autoComplete="off" spellCheck={false} />
+        <Form.Item name="startup_script" label="启动脚本" extra={SCRIPT_HELP} initialValue="" rules={SCRIPT_RULE}>
+          <Input.TextArea rows={4} aria-label="new-codex-profile-startup-script" placeholder={'/bin/sh\n/opt/scripts/codex-start.sh'} autoComplete="off" spellCheck={false} />
         </Form.Item>
       </Form>
     </Modal>

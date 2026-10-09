@@ -32,7 +32,7 @@ vi.mock("../../api", () => ({
 const systemType = {
   id: "00000000-0000-4000-8000-000000000001",
   env_num: 1,
-  type_key: "sre_inspection_system",
+  type_key: "platform_service",
   name: "关联系统",
   description: "工作流读取、写入或托管所依赖的系统",
   is_system: true,
@@ -44,8 +44,8 @@ const entity = {
   id: "00000000-0000-4000-8000-000000000010",
   env_num: 1,
   entity_type_id: systemType.id,
-  name: "bytecli",
-  description: "巡检调度系统",
+  name: "opencoder-cli",
+  description: "执行调度服务",
   revision: 3,
   is_deleted: false,
 };
@@ -84,7 +84,7 @@ const relationship = {
   relationship_type_id: relationshipType.id,
   source_entity_id: entity.id,
   target_entity_id: "00000000-0000-4000-8000-000000000099",
-  description: "bytecli 依赖外部系统",
+  description: "opencoder-cli 依赖外部系统",
   revision: 1,
   is_deleted: false,
   is_pinned: false,
@@ -152,7 +152,7 @@ describe("EntityTypesPage 实体类型详情抽屉", () => {
     baseMocks();
     await openTypeDetail();
     const drawer = typeDrawer();
-    expect(await drawer.findByText("bytecli")).toBeInTheDocument();
+    expect(await drawer.findByText("opencoder-cli")).toBeInTheDocument();
     expect(drawer.queryByText(/source-contract/)).not.toBeInTheDocument();
     expect(api.entities).toHaveBeenCalledWith("debug", true);
   });
@@ -164,7 +164,7 @@ describe("EntityTypesPage 实体类型详情抽屉", () => {
       structured_attributes: [{ attribute_definition_id: "1", value: "调度", revision: 2 }],
     });
     await openEntityDetail();
-    await entityDrawer().findByText("bytecli");
+    await entityDrawer().findByText("opencoder-cli");
     expect(await entityDrawer().findByRole("tab", { name: "基本信息" })).toHaveAttribute("aria-selected", "true");
     const drawerExtra = [...document.querySelectorAll<HTMLElement>(".ant-drawer-extra")].at(-1);
     expect(within(drawerExtra!).getByRole("button", { name: /编辑/ })).toBeInTheDocument();
@@ -201,10 +201,10 @@ describe("EntityTypesPage 实体类型详情抽屉", () => {
     const workflowType = {
       ...systemType,
       id: "00000000-0000-4000-8000-000000000002",
-      type_key: "sre_inspection_workflow",
-      name: "巡检工作流",
+      type_key: "platform_workflow",
+      name: "测试工作流",
     };
-    const workflowEntity = { ...entity, id: "00000000-0000-4000-8000-000000000011", entity_type_id: workflowType.id, name: "巡检主流程" };
+    const workflowEntity = { ...entity, id: "00000000-0000-4000-8000-000000000011", entity_type_id: workflowType.id, name: "测试主流程" };
     vi.mocked(api.entityTypes).mockResolvedValue({ items: [workflowType] });
     vi.mocked(api.entities).mockResolvedValue({ items: [workflowEntity] });
     vi.mocked(api.attributes).mockResolvedValue({
@@ -250,7 +250,7 @@ describe("EntityTypesPage 实体类型详情抽屉", () => {
     const drawer = typeDrawer();
     fireEvent.click(drawer.getByRole("tab", { name: /关系/ }));
     expect(await drawer.findByText("依赖关系")).toBeInTheDocument();
-    expect(drawer.getAllByText("bytecli").length).toBeGreaterThan(0);
+    expect(drawer.getAllByText("opencoder-cli").length).toBeGreaterThan(0);
     expect(drawer.getByText(/依赖外部系统/)).toBeInTheDocument();
   });
 });

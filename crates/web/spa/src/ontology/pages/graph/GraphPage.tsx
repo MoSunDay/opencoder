@@ -1,6 +1,6 @@
 import { ReloadOutlined } from "@ant-design/icons";
 import { Section } from "../../ui";
-import { Alert, Button, Checkbox, Space, Tabs, Tooltip } from "antd";
+import { Alert, Button, Space, Tabs, Tooltip } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useEnv } from "../../env";
 import type { GraphAspect } from "../../types";
@@ -29,12 +29,12 @@ export default function GraphPage() {
 }
 
 function GraphWorkspace({ env, canManage }: { env: string; canManage: boolean }) {
-  const [expandNeighbors, setExpandNeighbors] = useState(() => Boolean(readObservation(env)?.expandNeighbors));
+  const expandNeighbors = true;
   const guard = useDraftGuard();
   const detail = useDetailNavigation();
   const restored = useRef(false);
   const [restoreNotice, setRestoreNotice] = useState("");
-  const [activeTab, setActiveTab] = useState(expandNeighbors ? OBSERVE : TEST);
+  const [activeTab, setActiveTab] = useState(TEST);
   const observing = activeTab === OBSERVE;
   const { entities, entityTypes, relationships, relationshipTypes, selection, appliedSelection, metadataReady, data, loading, error, metadataError, refresh, changeSelection } = useGraphObservation(env, expandNeighbors, !observing);
   const aspectStore = useGraphAspects(env);
@@ -71,7 +71,7 @@ function GraphWorkspace({ env, canManage }: { env: string; canManage: boolean })
     if (memory && validSelection(memory.selection, { entities, entityTypes, relationshipTypes })
       && (memory.mode === TEST || (savedAspect && savedAspect.entity_type_ids.length === memory.selection.entityTypeIds.length
         && savedAspect.entity_type_ids.every((id) => memory.selection.entityTypeIds.includes(id))))) {
-      setActiveTab(memory.mode); setExpandNeighbors(Boolean(memory.expandNeighbors));
+      setActiveTab(memory.mode);
       if (memory.mode === TEST) changeSelection(memory.selection);
       else {
         setAspect(savedAspect); setAspectCenterIds(memory.selection.centerIds); setAspectRelationshipTypeIds(memory.selection.relationshipTypeIds);
@@ -92,10 +92,10 @@ function GraphWorkspace({ env, canManage }: { env: string; canManage: boolean })
   }, [aspect, aspectStore.aspects, aspectStore.loading]);
   useEffect(() => {
     const applied = aspectObservation.applied;
-    if (restored.current && applied) writeObservation(env, { mode: OBSERVE, aspectKey: applied.aspectKey, selection: applied.selection, expandNeighbors });
+    if (restored.current && applied) writeObservation(env, { mode: OBSERVE, aspectKey: applied.aspectKey, selection: applied.selection });
   }, [aspectObservation.applied, env]);
   useEffect(() => {
-    if (restored.current && appliedSelection) writeObservation(env, { mode: TEST, selection: appliedSelection, expandNeighbors });
+    if (restored.current && appliedSelection) writeObservation(env, { mode: TEST, selection: appliedSelection });
   }, [appliedSelection, env]);
   const handleNodeClick = (id: string) => {
     if (observing ? aspectObservation.loading : loading) return;
@@ -133,7 +133,6 @@ function GraphWorkspace({ env, canManage }: { env: string; canManage: boolean })
   return <>
     <div ref={workspace.ref} className="graph-workspace" style={{ height: workspace.height }}>
       <Section>
-        <Checkbox checked={expandNeighbors} onChange={(event) => setExpandNeighbors(event.target.checked)}>展开跨类型邻居</Checkbox>
         {restoreNotice ? <Alert type="info" showIcon closable onClose={() => setRestoreNotice("")} message={restoreNotice} /> : null}
         {metadataError ? <Alert type="error" message="观测范围加载失败" description={metadataError} showIcon action={<Button onClick={() => void refresh()}>重试</Button>} /> : null}
         <Tabs activeKey={activeTab} onChange={(key) => guard.run(() => { clearDetail(); setActiveTab(key); })} tabBarExtraContent={toolbar} items={[

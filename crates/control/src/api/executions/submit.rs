@@ -14,6 +14,23 @@ pub(crate) async fn submit_private(
     request: CreateExecution,
     private_context: Option<PrivateExecutionContext>,
 ) -> RpcReply {
+    submit_mode(state, request, private_context, false).await
+}
+
+pub(crate) async fn dispatch_queued(
+    state: &Arc<AppState>,
+    request: CreateExecution,
+    private_context: Option<PrivateExecutionContext>,
+) -> RpcReply {
+    submit_mode(state, request, private_context, true).await
+}
+
+async fn submit_mode(
+    state: &Arc<AppState>,
+    request: CreateExecution,
+    private_context: Option<PrivateExecutionContext>,
+    dispatch_resources: bool,
+) -> RpcReply {
     if let Err(message) = super::private_context::validate(&request, private_context.as_ref()) {
         return RpcReply::error(400, message);
     }
@@ -65,7 +82,7 @@ pub(crate) async fn submit_private(
     {
         return RpcReply::error(413, "Brain frozen request exceeds transport capacity; reduce plan inputs or capability definitions before starting");
     }
-    match submit_inner(state, request, private_context).await {
+    match submit_inner(state, request, private_context, dispatch_resources).await {
         Ok(reply) => reply,
         Err(error) => RpcReply::error(500, format!("submit execution: {error:#}")),
     }
@@ -75,6 +92,7 @@ async fn submit_inner(
     state: &Arc<AppState>,
     request: CreateExecution,
     private_context: Option<PrivateExecutionContext>,
+    dispatch_resources: bool,
 ) -> anyhow::Result<RpcReply> {
     let started = Instant::now();
     let _request_lock = state.fleet.request_lock("execution", &request.id).await?;
@@ -250,11 +268,43 @@ async fn submit_inner(
     {
         return Ok(RpcReply::error(413, "Brain assignment exceeds transport capacity; reduce frozen inputs or configuration before starting"));
     }
-    state.hub.reserve(&assignment.index).await;
+    let managed = assignment.request.input.get("_resource_request").is_some();
+    if !managed {
+        // Keep ordinary admission's reservation before persistence so other
+        // submissions cannot select the same capacity while this write waits.
+        state.hub.reserve(&assignment.index).await;
+    }
     state
         .fleet
         .prepare_assignment(&assignment, &fingerprint)
         .await?;
+    // Pending resource admission is durable in the existing dispatch outbox.
+    // No node slot or process is started until the external authority grants it.
+    if managed && !dispatch_resources {
+        return Ok(RpcReply {
+            status: 202,
+            body: serde_json::to_value(&assignment.index)?,
+        });
+    }
+    match crate::api::resource_admission::ready(state, &assignment).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Ok(RpcReply {
+                status: 202,
+                body: serde_json::to_value(&assignment.index)?,
+            })
+        }
+        Err(error) => {
+            tracing::warn!(id=%assignment.index.id, %error, "resource admission waiting; assignment retained");
+            return Ok(RpcReply {
+                status: 202,
+                body: serde_json::to_value(&assignment.index)?,
+            });
+        }
+    }
+    if managed {
+        state.hub.reserve(&assignment.index).await;
+    }
     let prepared_at = Instant::now();
     let index = assignment.index.clone();
     let mut reply = state

@@ -17,6 +17,16 @@ pub(super) struct Retries {
 }
 
 impl Retries {
+    pub fn deferred(&mut self, id: String, generation: String, now: Instant) {
+        self.failures.insert(
+            id,
+            Failure {
+                generation,
+                attempts: 0,
+                next: now + Duration::from_secs(5),
+            },
+        );
+    }
     pub fn observe(&mut self, ids: impl Iterator<Item = String>) {
         self.seen.extend(ids);
     }

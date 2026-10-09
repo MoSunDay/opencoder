@@ -20,6 +20,7 @@ mod executions_core;
 mod executions_paging;
 mod executions_streams;
 mod executions_submit;
+mod resource_admission;
 mod fleet_admin_extra;
 mod fleet_maintenance;
 mod infra_static;

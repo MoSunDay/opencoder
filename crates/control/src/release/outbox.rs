@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod resources;
 mod retry;
 
 pub fn start(state: &Arc<AppState>) {
@@ -20,6 +21,7 @@ pub fn start(state: &Arc<AppState>) {
     tokio::spawn(async move {
         let mut after = String::new();
         let mut retries = retry::Retries::default();
+        let mut resources = Vec::new();
         loop {
             let Some(state) = weak.upgrade() else {
                 return;
@@ -63,6 +65,10 @@ pub fn start(state: &Arc<AppState>) {
             let due: Vec<_> = assignments
                 .into_iter()
                 .filter_map(|assignment| {
+                    if assignment.request.input.get("_resource_request").is_some() {
+                        resources.push((assignment.index.created_at, assignment.index.id));
+                        return None;
+                    }
                     let generation = ready.get(&assignment.index.node_id)?;
                     retries
                         .ready(&assignment.index.id, generation, now)
@@ -90,6 +96,14 @@ pub fn start(state: &Arc<AppState>) {
             };
             for (id, generation, status, completed_at) in completed {
                 retries.completed(id, generation, status, completed_at);
+            }
+            // Resource admission is serialized in durable submission order over
+            // the complete scan. New API submissions cannot bypass this queue.
+            if after.is_empty() {
+                tokio::select! {
+                    _ = resources::dispatch(&state, std::mem::take(&mut resources), &ready, &mut retries) => {},
+                    _ = state.lifecycle.retired() => return,
+                }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }

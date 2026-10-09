@@ -17,6 +17,8 @@ Server/Node 调度、DAG 定义管理、执行查看与平滑发布；细节以�
 - 节点冻结或复开不会启动已休眠 Runtime；持久化结果与 Team topic 的分块读取由 Host 直接从原执行目录提供，也不会唤醒。其他需要 Runtime 的查询或继续执行会唤醒原版本，并在放行请求前同步当前准入模式。
 - Runtime 重启后的容量恢复只处理已证明属于当前受管 Runtime 的遗留 `running` reservation：先完成节点锁、runc 容器和 journal 恢复，再检查 systemd cgroup 内无其他进程，最后按 ticket、execution、runtime 精确身份事务化释放；任何归属、阶段或进程状态不明确都会拒绝恢复。
 
+资源受管任务可携带 `_resource_request`：Server 持久受理后等待外部授权，由同一执行队列重试派发。资源服务不可用时保留等待状态，普通任务仍可正常提交。等待中的取消只在确认未分配资源后完成；停止未知或已分配时不能直接当作空任务取消。重试保持原执行身份和冻结输入。接口与边界见 [control](../../agents/control/index.md)。
+
 ## 维护升级
 
 - 当前数据格式为 5；schema v34 分离用户与 Token，TODO 继续只保存能力与执行引用。格式 1–4 升级使用维护窗口，关闭公共入口为 503，保留节点通道直到已接纳任务排空。

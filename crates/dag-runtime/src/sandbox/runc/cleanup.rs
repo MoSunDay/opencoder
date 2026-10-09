@@ -35,6 +35,12 @@ async fn delete_using(
             Ok(()) => return Ok(()),
             Err(error) if attempt == 0 => {
                 tracing::warn!(%error, path = %state.display(), "retrying owned runc cleanup");
+                // runc itself has a ten-second init-exit deadline. A killed
+                // init can still be finishing kernel writeback after that.
+                // Wait for that exact process identity before retrying delete.
+                super::init_exit::wait(state)
+                    .await
+                    .context("wait for owned container init after failed delete")?;
             }
             Err(error) => return Err(error).context("runc cleanup failed after retry"),
         }
@@ -84,7 +90,11 @@ mod tests {
     fn state(root: &Path) -> std::path::PathBuf {
         let path = root.join("owned-container");
         std::fs::create_dir(&path).unwrap();
-        std::fs::write(path.join("state.json"), b"owned state").unwrap();
+        std::fs::write(
+            path.join("state.json"),
+            br#"{"id":"owned-container","init_process_pid":0,"init_process_start":0}"#,
+        )
+        .unwrap();
         path
     }
 
@@ -164,7 +174,7 @@ mod tests {
             .all(|pid| !Path::new(&format!("/proc/{pid}")).exists()));
         assert_eq!(
             std::fs::read(path.join("state.json")).unwrap(),
-            b"owned state"
+            br#"{"id":"owned-container","init_process_pid":0,"init_process_start":0}"#
         );
     }
 }

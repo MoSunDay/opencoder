@@ -1,4 +1,4 @@
-Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
+Commit: cbc3c311082c070a4169e408c1c20fb202084476
 
 # web 模块
 
@@ -42,7 +42,8 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `spa/src/dag/dynamic/`、`spa/src/brain/workbench/` — 动态 DAG 与 Brain 工作台
 - [dag/step/binaryLogs.jsx](../../crates/web/spa/src/dag/step/binaryLogs.jsx) — 原生二进制步骤输出；编辑器只提供 Binary、Agent 与 Dynamic，运行页面按节点所属执行读取实例、日志与声明产物。
 - [dag/run/context.jsx](../../crates/web/spa/src/dag/run/context.jsx) — DAG 与执行明细共用的只读运行环境；容器、工作目录、版本和摘要来自节点保存的运行资料，不从当前资源池推测历史。
-- `spa/src/brain/workbench/` — schema 7 工作台。`scheduler/editor.jsx` 在 `milestone/` 画布上配置必填里程碑信息和绑定泛化能力的并行节点，随后用表单提交计划信息；节点名称和任务由能力库生成。画布按顺序展示相邻层，大脑在运行时决定是否回到已执行层。`milestone/run.jsx` 保持状态与画布为主视图，`runDetails.jsx` 将历史激活按轮次汇入右侧抽屉表格，执行记录复用 `ExecutionView`；右侧抽屉中的人工输入，以及受计划管理的 Agent/Operator/Team 明细引导，统一提交到 Brain 输入事件；托管明细不暴露单独中断/取消执行的控件。`useRun.js` 读取 `/layered`，由事件流及轮询刷新。
+- `spa/src/brain/workbench/` — schema 7 工作台。`scheduler/editor.jsx` 在 `milestone/` 画布上配置必填里程碑信息和绑定泛化能力的并行节点，随后用表单提交计划信息；节点名称和任务由能力库生成。画布按顺序展示相邻层，大脑在运行时决定是否回到已执行层。`milestone/run.jsx` 管理画布与详情抽屉，`milestone/runtime/viewport.js` 计算可用高度；`runtime/model.js` 从全部历史操作中选择层或节点的最新执行，`runtime/layerDetails.jsx` 展示单任务、多任务与历史记录，复用 `ExecutionView`。`runDetails.jsx` 保留按轮次汇总的详情表格；右侧抽屉中的人工输入，以及受计划管理的 Agent/Operator/Team 明细引导，统一提交到 Brain 输入事件；托管明细不暴露单独中断/取消执行的控件。`useRun.js` 读取 `/layered`，由事件流及轮询刷新。
+- [milestone/canvas.jsx](../../crates/web/spa/src/brain/workbench/milestone/canvas.jsx) — 运行画布按可用宽度排列层级；层与节点声明固定尺寸，更新选择或详情时保留测量结果。编辑器保持纵向布局。
 - [brain/workbench/plans.jsx](../../crates/web/spa/src/brain/workbench/plans.jsx) — 新建计划、点击当前计划名称与修改操作共用 `PlanEditor`；历史版本预览独立打开，旧格式必须显式转换后编辑。读取请求用序号隔离，迟到响应不能覆盖新建表单。
 - [brainPanel.jsx](../../crates/web/spa/src/brainPanel.jsx)、[brain/library.css](../../crates/web/spa/src/brain/library.css) — 能力表格固定布局，一句话描述限制宽度并省略；输入、输出与工程示例由 `CapabilityEditor` 读取完整详情后展示，列表和搜索结果共用入口。
 - `tests/` — 集成测试
@@ -52,6 +53,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [serve](../../crates/web/src/lib.rs) 为会话与 `ProjectService` 提供同一 `LibsqlStore` 实例，共享连接和锁；存储接口见 [store](../store/index.md)。
 - [全站验收入口](../../scripts/acceptance/ui/main.js) 以 `nav.js` 注册页和 `ui/scope.js` 功能覆盖表为范围，校验成套构建、SPA 产物、四种屏宽、真实功能与 Server TUI；缺页、异常、超时或构建摘要不一致使验收失败。
 - 验收 `--resume` 只复用覆盖范围及二进制摘要相同的成功记录，失败保留日志并重跑，SPA 漂移检查始终执行；`--brain-test` 可使用同批构建的测试可执行文件，其原生镜像版本检查仍然执行。
+- [大脑运行画布验收](../../scripts/acceptance/brain/ui/run-canvas.js) — 只读打开已有运行，在四种屏宽核对画布尺寸、全屏和每层实际执行详情；可用本地候选页面代理真实 API。
 - [项目能力对接验收](../../scripts/acceptance/project/README.md) 的 `capabilities/main.js` 覆盖浏览器创建项目、专项和 TODO，连接 Agent、Operator、DAG、Brain，核验同一执行详情、实时结果读取、完整结果绑定与看板进度；隔离环境只替换模型传输，正式环境模式保留具名数据和版本回执。
 
 ## 相关

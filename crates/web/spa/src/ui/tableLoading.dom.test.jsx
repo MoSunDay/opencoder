@@ -145,6 +145,8 @@ describe('table loading convention in the DOM', () => {
     expect(screen.getByText('暂无 Opencoder 节点')).toBeTruthy();
   });
 
+  // The 200 ms behavior is checked with the fake clock below. Give the real
+  // Team page's repeated DOM renders enough wall time on shared CI machines.
   it('hides a refresh shorter than the spin delay and only masks a still-pending one', async () => {
     apiGetMock.mockImplementation((path) => Promise.resolve(path === '/api/teams' ? TEAMS
       : (path === '/api/nodes' ? { nodes: [NODE] } : { agents: [{ agent: 'act', capabilities: [] }] })));
@@ -164,5 +166,5 @@ describe('table loading convention in the DOM', () => {
     await flush();
     expect(isMasked()).toBe(false);
     expect(screen.getByText('release')).toBeTruthy();
-  });
+  }, 15000);
 });

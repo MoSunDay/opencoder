@@ -1,4 +1,4 @@
-Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
+Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
 
 # worker 模块
 
@@ -39,7 +39,7 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 - DAG 的 how 追加由 dag-runtime 写入本地副本；普通 Agent 会话资源追加由 `agent_how.rs` 管理。
 - Brain：仅 `brain/v4/`，根节点持有运行、操作与事件投影；`layer` 是已派发层。每层并行执行，全部终态后唤醒决策；人工输入也唤醒一次决策，并取消正在生成的旧决策。层屏障未满足时只可 `guide`，引导动作经 `layered_guidance` outbox 按事件序列投递和确认；模型可依据证据选择正常前进或任一已执行层，内部路径约束由计划准入补齐，回退消耗轮次；末层达标收口。generation 栅栏保障恢复与重复回执幂等。
 - [brain/v4/output.rs](../../crates/worker/src/brain/v4/output.rs) 校验冻结的必填输出，保留完整结构化决策证据；[brain/v4/api.rs](../../crates/worker/src/brain/v4/api.rs) 将不可重试的派发拒绝和具体原因原子写入根投影。[workloads/dag.rs](../../crates/worker/src/workloads/dag.rs) 从 Brain 的 `layered_inputs` 读取参数。约定及原生循环测试见 [brain](../brain/index.md)。
-- Team 的 `steer` 命令按 `input_id` 去重并写入执行 journal，保留最近 32 条引导；`workloads/team.rs` 在下一次成员发问时读取，正在生成的成员回答不会被打断。
+- Team 的 `steer` 命令按 `input_id` 去重并写入执行 journal，保留最近 32 条引导；[workloads/team.rs](../../crates/worker/src/workloads/team.rs) 在下一次成员发问时读取，正在生成的成员回答不会被打断。每次讨论回答关闭任务完成后的本地记忆维护，避免为中间发言额外启动模型轮次。
 - 上限（`opencoder_brain::layered` 纯域校验）：`LAYERED_MAX_NODES=256`、`LAYERED_MAX_LAYER_WIDTH`=32/层、`LAYERED_MAX_DEPTH=3`、每节点恰好一个能力。Worker 持有模型决策、投影及 generation 栅栏；Control 解析上下文并执行准入。伪造或越权派发帧被拒绝，迟到回执不推进当前尝试。
 
 ## 相关

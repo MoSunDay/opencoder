@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 9a56d79f7b7e3d67f9e2ed5f3f797571cf5c4793
 
 # ctl 模块
 
@@ -13,7 +13,7 @@ Commit: c854143bd187656f4d74be6cca0f153176e44a21
 - `src/cmd/brain/ontology.rs` — 仅受理 schema_version 7；CLI 读分层视图、层明细及事件，隔离激活通过 OpenCoder session agent loop 输出一次分层模型决策。
 - `tests/` — 子命令→RequestPlan 契约与集成 e2e
 
-连接参数由 [ctx.rs](../../crates/ctl/src/ctx.rs) 解析：`--server` 优先于 `OPENCODER_SERVER_URL`；`--token` 或 `--token-file` 优先于 `OPENCODER_SERVER_TOKEN`，两个 token 参数互斥。省略 token 参数即可直接使用环境变量。
+[connection.rs](../../crates/ctl/src/connection.rs) 为 [ctx.rs](../../crates/ctl/src/ctx.rs) 提供连接默认值：自动读取 `$XDG_CONFIG_HOME/opencoder/ctl.json`，未设置 XDG 时读取 `$HOME/.config/opencoder/ctl.json`；`--client-config` 可指定文件。命令行优先于 `OPENCODER_SERVER_URL` / `OPENCODER_SERVER_TOKEN`，环境变量优先于文件。文件支持 `server`、`token` 或 `token_file` 和 `verbose`，相对 Token 文件路径基于配置文件目录解析；同一来源的 `token` 与 `token_file` 互斥。
 
 ## DAG 调用链
 - [dag.rs](../../crates/ctl/src/cmd/dag.rs) 将定义、dispatch、运行概况及事件映射到 Server；[workflows.rs](../../crates/control/src/api/compat/workflows.rs) 的 `dag_view` 只投影运行索引、定义和错误，不包含步骤输出。

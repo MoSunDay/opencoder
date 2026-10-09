@@ -1,4 +1,4 @@
-Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
+Commit: 9a56d79f7b7e3d67f9e2ed5f3f797571cf5c4793
 
 # store 模块
 
@@ -7,7 +7,7 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 项目接口 `ProjectStore` 由同一 `LibsqlStore` 实现；独立 Web 在 [serve](../../crates/web/src/lib.rs) 中复用同一实例，项目后端没有独立配置或工厂。
 
 ## 索引
-- [schema/access.rs](../../crates/store/src/libsql_store/schema/access.rs)、[users/tokens.rs](../../crates/store/src/libsql_store/users/tokens.rs) — schema v34 分离用户身份与独立 Token；鉴权读取用户当前角色，逐 Token 校验到期与撤销状态，升级保留已有凭据摘要。
+- [schema/access.rs](../../crates/store/src/libsql_store/schema/access.rs)、[users/tokens.rs](../../crates/store/src/libsql_store/users/tokens.rs) — schema v35 分离用户身份与独立 Token；鉴权读取用户当前角色，逐 Token 校验到期与撤销状态，升级保留已有凭据摘要。
 - `src/lib.rs` — `Store` trait
 - `src/libsql_store/` — libsql 实现（WAL）
 - [Cargo.toml](../../Cargo.toml) 固定 libsql 上游提交 `0070ff3331cd6d09425b812e1cd3ebe32e1d4206`，避免连接释放时重复关闭 SQLite 句柄；[connection_lifecycle.rs](../../crates/store/tests/connection_lifecycle.rs) 验证连接与派生持有者生命周期，以及最后持有者释放后的 Windows 独占文件访问。
@@ -18,7 +18,7 @@ Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
 - `src/schedule_types.rs`、`src/libsql_store/schedule.rs` — 调度台账与定义表（schema v26/v27）
 - `src/fleet/` — 节点容量/归属/派发回执（`handoff/`），容量领取在 `handoff/capacity.rs`
 - `src/fleet/records.rs` — 终态执行索引批删
-- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 34）
+- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，当前值为 35）
 - [project.rs](../../crates/store/src/project.rs)、[project_links.rs](../../crates/store/src/libsql_store/project_links.rs) — TODO 看板及执行引用；关联只保存能力 ID、执行 ID、类型、名称和创建时间，删除关联不删除节点执行；排序按专项或未归属范围校验，拒绝缺失或外部 TODO，在 libsql 事务内提交。
 - [project/tags.rs](../../crates/store/src/project/tags.rs)、[libsql_store/project/tags.rs](../../crates/store/src/libsql_store/project/tags.rs) — Tag 范围解析与关联整理；名称与归属可修改，保留 ID，目标项目或专项必须存在；按保存后的名称重匹配已有选择，不给未选 TODO 添加关联，Tag 与 TODO 变更原子提交。
 - [schema/catalog.rs](../../crates/store/src/libsql_store/schema/catalog.rs) — schema v32 的专项、Tag 与 TODO 关联结构；迁移校验专项复制结果，解除旧里程碑的 TODO 归属并移除旧容器，保留执行记录。

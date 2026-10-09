@@ -109,7 +109,7 @@ async function launch(page, scenario, todo, kind, loseReceipt = false) {
   const send = async () => {
     const [response] = await Promise.all([
       page.waitForResponse((response) => new URL(response.url()).pathname === createPath && response.request().method() === 'POST'),
-      drawer.getByRole('button', { name: '开始执行', exact: true }).click(),
+      drawer.getByRole('button', { name: /开始执行$/ }).click(),
     ]);
     return response;
   };

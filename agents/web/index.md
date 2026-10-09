@@ -1,4 +1,4 @@
-Commit: df06a3b0a177c14b53171818717eaca0e0c35e64
+Commit: 1728bd89cbc86119632b83f2cc0b67d7cf6fe810
 
 # web 模块
 
@@ -7,7 +7,6 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 ## 索引
 - [admin/users.jsx](../../crates/web/spa/src/admin/users.jsx)、[admin/tokens.jsx](../../crates/web/spa/src/admin/tokens.jsx) — 用户角色编辑与独立 Token 的签发、到期和撤销；新 Token 只展示一次。
 - [chat/conversationInput.jsx](../../crates/web/spa/src/chat/conversationInput.jsx) — 会话页和 Agent/Operator 执行详情共用输入组件；按当前角色控制提交，保留引导、排队与问题交互。
-- [chat/stream/completion.js](../../crates/web/spa/src/chat/stream/completion.js) — 流结束后对齐持久化消息及执行状态，恢复发送状态；迟到的旧请求不能覆盖新会话。
 - `src/lib.rs` — `AppState` 装配（`config_home`：Operator 执行 home，prompt/config 载入走 `Config::load_with_home`，drain 栈经 `DrainContext` 穿参）
 - `src/api.rs`、`src/api_*.rs` — 各域 HTTP API（prompt/events/agents/dag/todo/team/…）
 - [api_transcript.rs](../../crates/web/src/api_transcript.rs) — `GET /api/sessions/:id/transcript` 按消息序号和字节偏移读取完整展示消息块；TUI 经 Server 执行命令的 `http` 转发调用，复用已有渲染。
@@ -20,7 +19,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [harness/management.jsx](../../crates/web/spa/src/harness/management.jsx)、[configuration.js](../../crates/web/spa/src/harness/configuration.js) — Codex 默认配置与命名档案编辑模型和外部启动脚本；每行对应一个命令参数，空白表单保存为空数组。
 - [SPA 产物检查](../../scripts/check-spa-drift.sh) — 在临时目录用 SPA 源码与包内资源重建，逐文件比较 `dist`；不复制仓库示例目录，不重试掩盖差异。
 - `spa/src/chat.jsx`、`spa/src/chatSidebar.jsx`、`spa/src/chat/` — 会话页（Operator/Agent 双模式 lane）；Operator 创建前可选 Codex Harness 与逐行 env，随 `/api/sessions` 创建请求发送，启动后固定。`app.css` 在窄屏将会话侧栏与输入区纵向排列，保持输入区可操作；[modelModal.jsx](../../crates/web/spa/src/modelModal.jsx) 负责会话模型选择与切换。
-- [chat/useTranscriptStream.js](../../crates/web/spa/src/chat/useTranscriptStream.js)、[chat/stream/completion.js](../../crates/web/spa/src/chat/stream/completion.js) — `sse.js` 的 `onEnd` 单独通知 `stream_end`；会话页限时读取执行结果与会话快照，恢复内容及结束状态，取消订阅使未完成的读取失效。
+- [chat/useTranscriptStream.js](../../crates/web/spa/src/chat/useTranscriptStream.js)、[chat/stream/completion.js](../../crates/web/spa/src/chat/stream/completion.js) — `sse.js` 的 `onEnd` 单独通知 `stream_end`；Hook 在 15 秒内读取执行结果与会话快照，纯函数合并消息与结束状态。读取失败恢复输入；取消或重新订阅使旧读取失效，包括同一会话的新订阅。
 - `spa/src/main.jsx` — 身份确认完成后才挂载导航与页面；身份格式错误和读取失败提供重试，401 返回登录入口。
 - [nav.js](../../crates/web/spa/src/nav.js)、[shell/categoryTabs.jsx](../../crates/web/spa/src/shell/categoryTabs.jsx) — 项目、Agent、Ontology、后台管理四类导航；标签保持完整宽度，容器支持滚轮、触摸和键盘滚动，并保持当前标签可见。editor 与 viewer 可打开平台页面，后台管理仅管理员可见；viewer 的写入控件禁用。
 - [Ontology 前端](ontology.md) — 五个页面、图谱与结果列表、实体详情草稿及环境观测记忆；复用平台身份、请求与 antd。接口与存储见 [ontology](../ontology/index.md)。

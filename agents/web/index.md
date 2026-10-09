@@ -1,4 +1,4 @@
-Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # web 模块
 
@@ -18,12 +18,13 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `spa/src/chat.jsx`、`spa/src/chatSidebar.jsx`、`spa/src/chat/` — 会话页（Operator/Agent 双模式 lane）；Operator 创建前可选 Codex Harness 与逐行 env，随 `/api/sessions` 创建请求发送，启动后固定。`app.css` 在窄屏将会话侧栏与输入区纵向排列，保持输入区可操作
 - `spa/src/main.jsx` — 身份确认完成后才挂载导航与页面；身份格式错误和读取失败提供重试，401 返回登录入口。
 - [nav.js](../../crates/web/spa/src/nav.js)、[shell/categoryTabs.jsx](../../crates/web/spa/src/shell/categoryTabs.jsx) — 项目、Agent、Ontology、节点四类导航；标签保持完整宽度，容器支持滚轮、触摸和键盘滚动，并保持当前标签可见。非管理员可打开全部执行和全部 Ontology 页面。
-- [ontology/panels.tsx](../../crates/web/spa/src/ontology/panels.tsx)、[ontology/env.tsx](../../crates/web/spa/src/ontology/env.tsx) — TypeScript + antd 的五个 Ontology 页面，复用平台身份与请求；图谱使用 G6，环境切换重新建立页面状态，管理控件由服务端能力决定。接口与存储见 [ontology](../ontology/index.md)。
+- [Ontology 前端](ontology.md) — 五个页面、图谱与结果列表、实体详情草稿及环境观测记忆；复用平台身份、请求与 antd。接口与存储见 [ontology](../ontology/index.md)。
 - `spa/src/ui/requests/query.js` — 读取请求的取消、迟到响应丢弃、响应校验与错误状态；失败不替换为空数据。
 - `spa/src/fleet/`、`spa/src/schedule/` — 执行表与定时任务页；`schedule/history.jsx` 按历史记录的执行 ID 打开原执行，不重新派发。节点调度设置读取失败时禁止保存默认值。
 - [fleet/detail.jsx](../../crates/web/spa/src/fleet/detail.jsx)、[fleet/detail/workloads.jsx](../../crates/web/spa/src/fleet/detail/workloads.jsx) — TODO 执行明细在工作流建立后加载工作台；初始化、停止和初始化失败只展示对应状态，初始化错误只显示一次。工作流建立后的读取错误仍显示实际原因。
 - `src/api_project*.rs` — 项目、专项、TODO 与 Tag 的共享 HTTP 处理器；Tag 范围和选择经存储验证，顺序写入携带 `initiative_id` 范围，负数位置保留给迁移且 API 拒绝；Control 复用同一组处理器
-- `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 三个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和专项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`
+- `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 项目、专项、TODO、Tag 四个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和专项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`；专项详情与 `todoDrawer.jsx` 的外层 Drawer 均使用 `size="100vw"`，不设置固定最大宽度。
+- [tags/tab.jsx](../../crates/web/spa/src/project/tags/tab.jsx)、[tags/editor.jsx](../../crates/web/spa/src/project/tags/editor.jsx)、[tags/model.js](../../crates/web/spa/src/project/tags/model.js) — 独立 Tag 管理表格、名称与归属编辑、定义行纯投影；保存失败保留草稿，切换归属类型清空旧归属。共享 [api_project_tags.rs](../../crates/web/src/api_project_tags.rs) 的创建和修改均校验 `name`、`scope_type`、`scope_id`，修改保留原 ID。
 - `spa/src/project/board/`、`model/board.js`、`model/catalog.js` — dnd-kit 看板与纯移动、进度、Tag 解析；按完整任务集合计算筛选后的拖动顺序，多 Tag 卡片共享 TODO ID，失败回退原数据
 - [project/todoDrawer.jsx](../../crates/web/spa/src/project/todoDrawer.jsx)、[project/execute/](../../crates/web/spa/src/project/execute/) — TODO 选择实际能力 ID，以稳定执行 ID 派发并关联；回复丢失时保留同一请求重试。结论在打开时向所属节点读取，失败清空旧结果并显示错误；`ExecutionView` 复用原会话、事件与引导入口。
 - [chat/inputAttempt.js](../../crates/web/spa/src/chat/inputAttempt.js) — 会话页与执行明细共享人工输入 ID 的生成与重试规则，未确认的回复保持原输入 ID，避免断线重试重复提交。
@@ -43,6 +44,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [serve](../../crates/web/src/lib.rs) 为会话与 `ProjectService` 提供同一 `LibsqlStore` 实例，共享连接和锁；存储接口见 [store](../store/index.md)。
 - [全站验收入口](../../scripts/acceptance/ui/main.js) 以 `nav.js` 注册页和 `ui/scope.js` 功能覆盖表为范围，校验成套构建、SPA 产物、四种屏宽、真实功能与 Server TUI；缺页、异常、超时或构建摘要不一致使验收失败。
 - 验收 `--resume` 只复用覆盖范围及二进制摘要相同的成功记录，失败保留日志并重跑，SPA 漂移检查始终执行；`--brain-test` 可使用同批构建的测试可执行文件，其原生镜像版本检查仍然执行。
+- [项目能力对接验收](../../scripts/acceptance/project/README.md) 的 `capabilities/main.js` 覆盖浏览器创建项目、专项和 TODO，连接 Agent、Operator、DAG、Brain，核验同一执行详情、实时结果读取、完整结果绑定与看板进度；隔离环境只替换模型传输，正式环境模式保留具名数据和版本回执。
 
 ## 相关
 - [control](../control/index.md)、[brain](../brain/index.md) — Brain 校验/快照发布/执行在后端

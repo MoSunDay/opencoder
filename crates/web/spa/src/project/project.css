@@ -80,7 +80,6 @@
 .project-todo-card .ant-card-head-title { min-width: 0; }
 .project-todo-card .ant-card-head { padding-inline: 10px; }
 .project-todo-card .ant-card-body { padding: 10px; }
-.project-tag-manager { width: 100%; }
 @media (max-width: 800px) {
   .project-table .ant-table-content { overflow-x: auto; }
   .project-table table { min-width: 760px; }

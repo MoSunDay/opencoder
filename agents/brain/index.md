@@ -1,4 +1,4 @@
-Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # brain 模块
 
@@ -7,6 +7,8 @@ Commit: 4bb3a745544f3b3f9898447088a919da502de6e5
 运行创建、层屏障和人工输入是决策唤醒事件。人工输入持久化后令当前决策失效并重新组装上下文；层屏障未满足时只允许 `guide`，不能派发下一层。`guide` 可向当前运行中的 Agent/Operator 投递 steer，或让 Team 在下一次成员发问时应用引导，投递事件按序确认并可重放。生产模型激活经 OpenCoder session agent loop，每次唤醒只产生一个有限决策。
 
 调度范围是计划已绑定的能力，每次派发覆盖目标层全部节点；运行中不检索能力库来增加节点或替换能力。能力描述、输入输出描述及必填字段随能力定义冻结，进入调度与执行提示词。[字段校验](../../crates/brain/src/contracts.rs) 负责字段名、输入值和输出证据的纯函数校验；字段要求存于现有 `capability_target`，不扩展数据库表。
+
+[容量预算](../../crates/brain/src/layered/budget.rs) 按完整计划、冻结能力、各节点结果上限和输出预留计算准入容量，包含 JSON 转义与嵌套回执。Control 携带真实请求探测支持 `brain_context_budget_v1` 的节点；[节点预算](../../crates/worker/src/brain/v4/budget.rs) 按有效模型配置再次检查并冻结预算。人工输入按累计内容检查，实际决策上下文在模型调用前复核；超限不裁剪成功证据，准入返回 413，存量超限运行保留证据并明确阻塞。上限及部署顺序见调度规则。
 
 [Control gateway](../../crates/control/src/api/brain_runs/v4/gateway.rs) 解析实际输入，缺失引用或字段以 422 回执结束该次派发，原因与操作终态一同持久化并重新唤醒大脑；临时不可用继续重试。[Worker 输出适配](../../crates/worker/src/brain/v4/output.rs) 向大脑传递完整结构化结果，`summary` 不能覆盖其他字段。叶子能力的成功决策证据限 16 KiB；缺失必填输出或超限转为 Error，完整结果保留在子执行，失败上下文明确标记省略部分。Done 仅表示能力执行结束，里程碑是否达标由大脑判断。
 

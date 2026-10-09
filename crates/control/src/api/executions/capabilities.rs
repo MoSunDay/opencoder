@@ -26,6 +26,9 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
         features.push(MILESTONE_BRAIN);
         features.push(opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY);
     }
+    if request.kind == ExecutionKind::Brain && request.input["schema_version"] == 7 {
+        features.push(opencoder_brain::layered::budget::CAPABILITY);
+    }
     features
 }
 
@@ -158,7 +161,8 @@ mod tests {
             required(&layered, None),
             vec![
                 MILESTONE_BRAIN,
-                opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY
+                opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,
+                opencoder_brain::layered::budget::CAPABILITY
             ]
         );
         let nested = CreateExecution {

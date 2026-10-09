@@ -13,6 +13,8 @@ mod hibernation;
 mod maintenance;
 #[path = "tests/read_reports.rs"]
 mod read_reports;
+#[path = "tests/result_upgrade.rs"]
+mod result_upgrade;
 #[path = "tests/runtime_lifecycle.rs"]
 mod runtime_lifecycle;
 

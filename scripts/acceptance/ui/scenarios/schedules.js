@@ -30,6 +30,9 @@ async function schedules({ page, api, root, until }) {
   await until(async () => (await api('GET', '/api/schedules')).schedules.find((item) => item.id === receipt.id).enabled, 'schedule enabled');
   await row.getByRole('button', { name: /^停\s*用$/ }).click();
   await until(async () => !(await api('GET', '/api/schedules')).schedules.find((item) => item.id === receipt.id).enabled, 'schedule disabled');
+  // The write can reach the server before the browser replaces the old row.
+  // Open the confirmation only after the refreshed disabled state is visible.
+  await row.getByRole('button', { name: /^启\s*用$/ }).waitFor({ state: 'visible' });
   await row.getByRole('button', { name: '立即触发', exact: true }).click();
   await page.getByRole('button', { name: '确认触发', exact: true }).click();
   let run;

@@ -134,7 +134,7 @@ function TodoDrawerSession({ todoId, overview, refresh, onClose, onNotice }) {
       <Button danger type="link" disabled={busy} onClick={() => unlink(row.id)}>解除关联</Button>
     </Space> },
   ];
-  return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" styles={{ wrapper: { maxWidth: 1000 } }} destroyOnHidden>
+  return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" destroyOnHidden>
     <Space style={{ marginBottom: 16 }}>
       {mode !== 'overview' && <Button onClick={() => navigate('overview')}>返回 TODO</Button>}
       {mode === 'overview' && <Button type="primary" disabled={!capabilityId || catalog.loading || !!catalog.error} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</Button>}

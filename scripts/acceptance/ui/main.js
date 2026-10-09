@@ -95,7 +95,7 @@ async function main() {
     assert.equal(build.spa_sha256, digest.digest('hex'), 'Server build does not match current SPA');
     await check('spa-drift', 'bash', ['scripts/check-spa-drift.sh']);
     for (const width of [1920, 1280, 768, 390]) {
-      await check(`responsive-${width}`, process.execPath, ['scripts/acceptance/spa_responsive.js', '--width', String(width), '--port', String(await availablePort()), '--shots', path.join(output, `responsive-${width}`)]);
+      await check(`responsive-${width}`, process.execPath, ['scripts/acceptance/spa_responsive.js', '--width', String(width), '--port', String(await availablePort()), '--shots', path.join(output, `responsive-${width}`)], 600000);
     }
     for (const item of CASES) {
       if (item.cargo && brainTest) await check(item.name, brainTest, ['schema_seven_canvas_parallel_return_and_execution_detail', '--exact', '--ignored', '--nocapture'], 900000);

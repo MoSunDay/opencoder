@@ -1,6 +1,6 @@
 # Windows 部署与回退
 
-本目录用于将固定版本的 Cua 服务部署到已有 Windows 用户桌面。首次验证节点为 win-11，使用原生后端；不重启虚拟机，不建立公共 NodePort，不更换 OpenCoder 主模型。
+本目录用于将固定版本的 Cua 服务部署到已有 Windows 用户桌面，使用原生后端。目标地址、网关和连接方式由部署方提供。
 
 ## 安装服务
 
@@ -8,8 +8,8 @@
 
 安装前准备一个仅在受控网络内可访问的制品目录：
 
-- `python.tar.gz`：Windows x64 Python 3.12 的独立发行包；本次使用 Astral python-build-standalone 20260807 / Python 3.12.13。
-- `uv.zip`：Windows x64 uv；本次使用 0.12.7。
+- `python.tar.gz`：Windows x64 Python 3.12 的独立发行包。
+- `uv.zip`：Windows x64 uv。
 - `cua_computer_server-0.3.46-py3-none-any.whl`：从 README 指定的 Cua 提交构建。
 - `windows-requirements.txt`：对该 wheel 使用 `uv pip compile --python-version 3.12 --python-platform windows` 生成的依赖清单。
 - `packages/`：按清单下载的 Windows cp312 或通用 wheel，包括上述服务 wheel。离线安装避免 Windows 上下载依赖时卡住。
@@ -20,8 +20,8 @@
 在目标用户的桌面会话中运行：
 
 ```powershell
-.\install-windows.ps1 -ArtifactBase 'http://private-artifact-host:18180' `
-    -HostAddress '192.168.127.10' -Gateway '192.168.127.1'
+.\install-windows.ps1 -ArtifactBase 'https://artifacts.example.com/computer' `
+    -HostAddress '<desktop-private-ip>' -Gateway '<allowed-gateway-ip>'
 ```
 
 保留 `install-windows.ps1` 与同目录的 `windows/` 辅助脚本。默认安装目录为 `$env:LOCALAPPDATA\OpenCoder\computer`。完整清单预检只允许上述固定文件与 `packages/` 下的 wheel，拒绝越界路径、重复目标、重解析点和非法哈希；预检失败不创建安装文件。下载先写临时文件，哈希通过后才替换目标；失败保留已有制品。ZIP/tar 在解压前逐项检查路径，拒绝链接和特殊文件。
@@ -34,32 +34,30 @@
 
 ## 连接控制端
 
-支持 SSH 时优先使用主 README 的本机隧道。现有 Kubernetes Windows 虚拟机没有 SSH 时，可用 `forward.py`：
+支持 SSH 时优先使用主 README 的本机隧道。Kubernetes 中的 Windows 虚拟机没有 SSH 时，可用 `forward.py`，显式提供命名空间、标签和桌面私有地址：
 
 ```bash
-python3 forward.py --namespace bits-fleet --selector app=bits-fleet-11 \
-  --guest 192.168.127.10 --local-port 18000
+python3 forward.py --namespace '<namespace>' --selector 'app=<desktop-app>' \
+  --guest '<desktop-private-ip>' --local-port 18000
 ```
 
 控制端需要已有的 Kubernetes 访问权限。脚本要求标签匹配唯一运行 Pod，在 Pod 的回环地址创建带 PID 记录的 socat 转发，再通过只绑定控制端 `127.0.0.1` 的 `kubectl port-forward` 接入。关闭时只清理自己记录并核验过的进程。转发恢复仅恢复连接，不重放任何 GUI 任务。
 
-持续使用时把该命令放入独立 systemd 服务。本次控制端服务为 `opencoder-computer-win11.service`，配置目标 URL 为 `http://127.0.0.1:18000`。私有网段、防火墙来源限制和 Kubernetes 认证共同保护该连接；不能把无认证的 Cua 服务直接开放到公网。
+持续使用时把该命令放入独立 systemd 服务，配置目标 URL 为 `http://127.0.0.1:18000`。私有网段、防火墙来源限制和 Kubernetes 认证共同保护该连接；不能把无认证的 Cua 服务直接开放到公网。
 
 ```bash
-opencoder-computer doctor --target win-11
-opencoder-computer doctor --target win-11 --check-model --timeout 120
+opencoder-computer doctor --target windows
+opencoder-computer doctor --target windows --check-model --timeout 120
 ```
 
-OpenCoder 主模型使用已有代理环境时，访问内网模型网关应使用能直连该地址的进程环境。本次诊断发现既有 OpenCoder 版本的显式代理只排除回环地址，不能依赖 `NO_PROXY` 排除内网地址；测试时仅对启动的 OpenCoder 进程移除了代理环境变量，全局配置保持不变。
-
-本次内网 GLM 网关能够通过单次只读检查，但在多轮任务中返回过混合工具格式及未达成的完成摘要。因此桌面模型改用现有 `glm` provider 的直连接口，仍请求 `glm-5.3-flash`，主模型配置不变。只读检查通过后仍需做业务验收；最终摘要不能替代截图与保存文件的核对。
+桌面模型独立配置。只读模型检查通过后，仍需用截图与保存文件核对实际任务结果。
 
 ## 回退
 
 先取消运行中的任务，并查询到终态。只撤销本次创建的条目：
 
 1. 从 CLI 注册文件移除 `computer-use`；已有其他注册保留。移除独立 `computer.json` 和本次独有的密钥文件时先确认没有其他使用者。
-2. 控制端停止并移除 `opencoder-computer-win11.service`；转发脚本会清理自己的隧道与 Pod socat 进程。
+2. 控制端停止并移除部署时创建的转发服务；转发脚本会清理自己的隧道与 Pod socat 进程。
 3. Windows 停止并删除 `OpenCoder Cua Computer`，删除对应防火墙规则。确认 Python 进程已退出后才删除本次服务目录。
 4. `uv tool uninstall opencoder-computer` 卸载本次独立 CLI。回退前保存需要的运行证据。
 

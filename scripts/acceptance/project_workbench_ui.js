@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const spa = path.resolve(__dirname, '../../crates/web/spa/dist');
 const out = process.env.PROJECT_UI_ARTIFACTS || '/tmp/opencoder-project-ui';
 const todo = (id, title, status, position, tags = []) => ({ id, title, draft: `${title}说明`, board_status: status, position, initiative_id: 'i', tag_ids: tags, created_at: 1000, updated_at: 2000 });
-const overview = { goals: [{ id: 'p', title: '项目浏览器验收', status: 'active', updated_at: 2000, initiatives: [{ id: 'i', title: '专项浏览器验收', goal_id: 'p', status: 'in_progress', todos: [todo('a', '可拖动任务', 'todo', 1000, ['local', 'focus']), todo('hidden', '隐藏任务', 'done', 1000), todo('b', '目标任务', 'done', 2000, ['local'])] }] }], standalone_initiatives: [], backlog: [todo('free', '未归属任务', 'backlog', 1000)], tags: [
+const overview = { goals: [{ id: 'p', title: '项目浏览器验收', status: 'active', updated_at: 2000, initiatives: [{ id: 'i', title: '专项浏览器验收', goal_id: 'p', status: 'in_progress', todos: [todo('a', '可拖动任务', 'todo', 1000, ['local', 'focus']), todo('hidden', '隐藏任务', 'done', 1000), todo('b', '目标任务', 'done', 2000, ['local'])] }] }], standalone_initiatives: [{ id: 'solo', title: '独立专项验收', status: 'planned', todos: [] }], backlog: [todo('free', '未归属任务', 'backlog', 1000)], tags: [
   { id: 'parent', scope_type: 'project', scope_id: 'p', name: '模块' }, { id: 'local', scope_type: 'initiative', scope_id: 'i', name: '模块' }, { id: 'focus', scope_type: 'project', scope_id: 'p', name: '重点' },
 ] };
 overview.backlog[0].initiative_id = null;
@@ -31,6 +31,7 @@ async function main() {
             }
           }
           const id = url.pathname.split('/')[4];
+          if (url.pathname.startsWith('/api/project/tags') && req.method !== 'DELETE' && overview.tags.some((tag) => tag.id !== id && tag.scope_type === body.scope_type && tag.scope_id === body.scope_id && tag.name === body.name)) return send(409, { error: '同一归属已有同名 Tag' });
           if (url.pathname === '/api/project/tags') overview.tags.push({ ...body, id: 'created-tag' });
           if (id && url.pathname.startsWith('/api/project/tags/')) {
             if (req.method === 'PATCH') Object.assign(overview.tags.find((tag) => tag.id === id), body);
@@ -63,16 +64,17 @@ async function main() {
     await page.mouse.move(target.x + target.width / 2, target.y + Math.min(target.height / 2, 70), { steps: 18 }); await page.mouse.up();
     return response;
   }
-  const errors = []; page.on('pageerror', (error) => { errors.push(error.message); console.error('PAGE ERROR', error.stack); });
+  const errors = []; const fullscreenDrawers = [];
+  page.on('pageerror', (error) => { errors.push(error.message); console.error('PAGE ERROR', error.stack); });
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'fixture-token'));
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: 'networkidle' });
     await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
     await page.getByRole('button', { name: '项目浏览器验收', exact: true }).waitFor();
-    assert.deepEqual(await page.locator('.fleet-content .ant-tabs').getByRole('tab').allTextContents(), ['项目', '专项', 'TODO']);
+    assert.deepEqual(await page.locator('.fleet-content .ant-tabs').getByRole('tab').allTextContents(), ['项目', '专项', 'TODO', 'Tag']);
     for (const width of [1920, 1280, 768, 390]) {
       await page.setViewportSize({ width, height: 1000 });
-      for (const tab of ['项目', '专项', 'TODO']) {
+      for (const tab of ['项目', '专项', 'TODO', 'Tag']) {
         await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: tab, exact: true }).click();
         const table = page.getByRole('tabpanel', { name: tab, exact: true }).locator('.project-table');
         await table.waitFor();
@@ -90,6 +92,32 @@ async function main() {
     await project.getByRole('button', { name: '专项浏览器验收' }).click();
     const board = page.getByRole('dialog', { name: '专项 · 专项浏览器验收' });
     await board.getByRole('button', { name: '拖动 可拖动任务', exact: true }).waitFor();
+    async function verifyFullscreen(drawer, kind, width) {
+      await page.waitForFunction((title) => {
+        const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.getAttribute('aria-labelledby') && document.getElementById(item.getAttribute('aria-labelledby'))?.textContent === title);
+        if (!dialog) return false;
+        const bounds = dialog.getBoundingClientRect();
+        return Math.abs(bounds.left) < 1 && Math.abs(bounds.width - innerWidth) < 1;
+      }, kind === 'initiative' ? '专项 · 专项浏览器验收' : 'TODO · 可拖动任务');
+      const bounds = await drawer.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      });
+      assert(Math.abs(bounds.x) <= 1 && Math.abs(bounds.y) <= 1 && Math.abs(bounds.width - width) <= 1 && Math.abs(bounds.height - 1000) <= 1, `${kind} fullscreen ${width}: ${JSON.stringify(bounds)}`);
+      fullscreenDrawers.push({ kind, viewport: { width, height: 1000 }, bounds });
+      await page.screenshot({ path: path.join(out, `${kind}-fullscreen-${width}.png`), animations: 'disabled' });
+    }
+    for (const width of [1920, 1280, 768, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await verifyFullscreen(board, 'initiative', width);
+      await board.getByRole('button', { name: '可拖动任务', exact: true }).click();
+      const todoDetail = page.getByRole('dialog', { name: 'TODO · 可拖动任务' });
+      await verifyFullscreen(todoDetail, 'todo', width);
+      await todoDetail.locator('.ant-drawer-close').click();
+      await todoDetail.waitFor({ state: 'hidden' });
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    console.log('PASS fullscreen initiative and TODO drawers');
     await board.getByLabel('搜索专项 TODO', { exact: true }).fill('任务');
     await board.getByRole('combobox', { name: '筛选 Tag', exact: true }).click();
     await page.locator('.ant-select-item-option-content').getByText('模块', { exact: true }).click();
@@ -129,18 +157,54 @@ async function main() {
     await page.getByRole('tab', { name: '专项', exact: true }).click(); await page.getByRole('button', { name: '专项浏览器验收' }).click();
     await board.getByText('按 Tag 分组', { exact: true }).waitFor();
     assert.equal(await board.getByRole('button', { name: '可拖动任务', exact: true }).count(), 2);
-    await board.getByLabel('Tag 名称', { exact: true }).fill('验收标签');
-    await board.getByRole('button', { name: '新建 Tag', exact: true }).click();
-    await board.getByLabel('编辑 Tag 验收标签', { exact: true }).waitFor();
-    assert.deepEqual(requests.find((r) => r.path === '/api/project/tags').body, { name: '验收标签', scope_type: 'initiative', scope_id: 'i' });
-    await board.getByLabel('编辑 Tag 验收标签', { exact: true }).click();
-    await board.getByLabel('Tag 名称', { exact: true }).fill('已改名标签');
-    await board.getByRole('button', { name: /保存 Tag/ }).click();
-    await board.getByLabel('删除 Tag 已改名标签', { exact: true }).click();
-    await page.getByRole('tooltip').getByRole('button', { name: /确.*定/ }).click();
-    await board.getByLabel('删除 Tag 已改名标签', { exact: true }).waitFor({ state: 'hidden' });
-    console.log('PASS tag CRUD');
     await board.locator('.ant-drawer-close').click();
+    await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: 'Tag', exact: true }).click();
+    const tags = page.getByLabel('Tag 表格', { exact: true });
+    assert.equal(await tags.getByText('模块', { exact: true }).count(), 2);
+    await page.getByRole('button', { name: '新建 Tag', exact: true }).click();
+    let tagEditor = page.getByRole('dialog', { name: '新建 Tag', exact: true });
+    await tagEditor.getByLabel('Tag 名称', { exact: true }).fill('验收标签');
+    for (const width of [1920, 1280, 768, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.waitForFunction(() => {
+        const dialog = [...document.querySelectorAll('[role="dialog"]')].find((el) => document.getElementById(el.getAttribute('aria-labelledby'))?.textContent === '新建 Tag');
+        if (!dialog) return false;
+        const bounds = dialog.getBoundingClientRect();
+        return bounds.left >= -1 && bounds.right <= innerWidth + 1;
+      });
+      const bounds = await tagEditor.evaluate((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, scroll: document.documentElement.scrollWidth }));
+      assert(bounds.left >= -1 && bounds.right <= width + 1 && bounds.scroll <= width + 1, `Tag editor ${width}: ${JSON.stringify(bounds)}`);
+      await page.screenshot({ path: path.join(out, `tag-editor-${width}.png`), animations: 'disabled' });
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    async function chooseTagOwner(type, owner) {
+      await tagEditor.getByRole('combobox', { name: 'Tag 归属类型', exact: true }).click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(type, { exact: true }).click();
+      await tagEditor.getByRole('combobox', { name: 'Tag 归属', exact: true }).click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(owner, { exact: true }).click();
+    }
+    await chooseTagOwner('专项', '独立专项验收 · 独立专项');
+    await tagEditor.getByRole('button', { name: /保存 Tag/ }).click();
+    await tagEditor.waitFor({ state: 'hidden' });
+    await tags.getByLabel('编辑 Tag 验收标签', { exact: true }).waitFor();
+    assert.deepEqual(requests.find((r) => r.path === '/api/project/tags').body, { name: '验收标签', scope_type: 'initiative', scope_id: 'solo' });
+    await tags.getByLabel('编辑 Tag 验收标签', { exact: true }).click();
+    tagEditor = page.getByRole('dialog', { name: '编辑 Tag', exact: true });
+    await chooseTagOwner('项目', '项目浏览器验收');
+    await tagEditor.getByLabel('Tag 名称', { exact: true }).fill('模块');
+    await tagEditor.getByRole('button', { name: /保存 Tag/ }).click();
+    await page.getByText('同一归属已有同名 Tag', { exact: true }).waitFor();
+    assert.equal(await tagEditor.getByLabel('Tag 名称', { exact: true }).inputValue(), '模块');
+    await tagEditor.getByLabel('Tag 名称', { exact: true }).fill('已改名标签');
+    await tagEditor.getByRole('button', { name: /保存 Tag/ }).click();
+    await tagEditor.waitFor({ state: 'hidden' });
+    const movedTag = tags.locator('.ant-table-row').filter({ hasText: '已改名标签' });
+    await movedTag.getByText('项目浏览器验收', { exact: true }).waitFor();
+    assert.deepEqual(requests.filter((r) => r.path === '/api/project/tags/created-tag' && r.method === 'PATCH').at(-1).body, { name: '已改名标签', scope_type: 'project', scope_id: 'p' });
+    await movedTag.getByLabel('删除 Tag 已改名标签', { exact: true }).click();
+    await page.getByRole('tooltip').getByRole('button', { name: /删.*除/ }).click();
+    await tags.getByLabel('删除 Tag 已改名标签', { exact: true }).waitFor({ state: 'hidden' });
+    console.log('PASS tag CRUD, owner changes and failed-save draft');
     await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
     await page.getByRole('button', { name: '新建项目', exact: true }).click();
     const editor = page.getByRole('dialog', { name: '新建项目', exact: true });
@@ -159,7 +223,7 @@ async function main() {
     await page.getByRole('dialog', { name: '删除该项目？' }).getByRole('button', { name: /确.*定/ }).click();
     await page.getByRole('button', { name: 'CRUD 已修改项目', exact: true }).waitFor({ state: 'hidden' });
     assert.deepEqual(errors, []);
-    const receipt = { result: 'PASS', screenshots: out, widths: [1920, 1280, 768, 390], filtered_drag: move.body, grouped_cards: true, grouped_move_sync: true, failed_save_rollback: true, scope_precedence: true, tag_crud: true, project_crud: true, page_errors: errors };
+    const receipt = { result: 'PASS', screenshots: out, widths: [1920, 1280, 768, 390], fullscreen_drawers: fullscreenDrawers, filtered_drag: move.body, grouped_cards: true, grouped_move_sync: true, failed_save_rollback: true, scope_precedence: true, tag_crud: true, tag_owner_changes: true, tag_failed_save_draft: true, project_crud: true, page_errors: errors };
     await writeFile(path.join(out, 'receipt.json'), JSON.stringify(receipt, null, 2));
     console.log(JSON.stringify(receipt));
   } catch (error) {

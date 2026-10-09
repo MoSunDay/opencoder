@@ -7,7 +7,6 @@ DAG 编辑器两处显示文案 `Runner 工作流` → `Runner 步骤`：
 - `crates/web/spa/src/dag/editor/canvasToolbar.jsx` 步骤面板标题
 - `crates/web/spa/src/dag/editor/stepInspector.jsx` 类型下拉 label
 
-旧文案暗示存在 workflow/sub-workflow 步骤类型，与并列的「Agent 步骤」「Wasm 步骤」命名不一致。wire 值 `'runner'`（PALETTE kindType / KIND_OPTIONS value / 线协议 tag）不变，spec 校验与执行路径零接触。
 
 随同：
 

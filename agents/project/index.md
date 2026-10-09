@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 # project 模块
 
@@ -13,6 +13,6 @@ Commit: c854143bd187656f4d74be6cca0f153176e44a21
 - [executions/results/](../../crates/control/src/api/executions/results/) — 按需从所属节点读取当前结论；离线返回错误，DAG 产物由步骤明细读取。
 
 ## 相关
-- [项目模块约定](../../rules/07-project-module-contract.md) — 归属、看板、执行关联、结论回写与进度规则
+- [项目模块约定](../../rules/07-project-module-contract.md) — 归属、看板、执行关联、实时结果读取与进度规则
 - [brain](../brain/index.md)、[control](../control/index.md)
 - [dag-runtime](../dag-runtime/index.md)、[执行约定](../../rules/04-dag-execution-contract.md)

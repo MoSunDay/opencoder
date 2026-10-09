@@ -7,7 +7,6 @@ import { initiativeColumns } from '../initiativesTab.jsx';
 import { progressOf } from '../model/catalog.js';
 import { ProjectTable } from './projectTable.jsx';
 import { TodoProgress } from './progress.jsx';
-import { TagManager } from './tagManager.jsx';
 import { MdEditDrawer } from './mdDrawer.jsx';
 export function ProjectDrawer({ projectId, overview, refresh, onNotice, onClose, openInitiative }) {
   const project = overview?.goals?.find((g) => g.id === projectId);
@@ -24,7 +23,6 @@ export function ProjectDrawer({ projectId, overview, refresh, onNotice, onClose,
     {!project && projectId ? <Typography.Text type="secondary">项目已删除或正在加载</Typography.Text> : <Space orientation="vertical" size={20} style={{ width: '100%' }}>
       <Button onClick={() => setEditing('project')}>编辑项目</Button>
       <Markdown text={project?.detail_md} /><TodoProgress progress={progressOf(rows.flatMap((i) => i.todos || []))} />
-      <TagManager overview={overview} scopeType="project" scopeId={projectId} refresh={refresh} onNotice={onNotice} />
       <Space><Typography.Title level={5} style={{ margin: 0 }}>专项进度</Typography.Title><Button onClick={() => setEditing('initiative')}>新建专项</Button></Space>
       <ProjectTable label="项目内专项表格" columns={initiativeColumns({ openInitiative })} rows={rows} pagination={false} onRowClick={(r) => openInitiative(r.id)} locale={{ emptyText: '这个项目还没有专项' }} />
     </Space>}

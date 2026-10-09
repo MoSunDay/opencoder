@@ -407,7 +407,7 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         )
         .route(
             "/api/project/tags/:id",
-            patch(api_project_tags::rename).delete(api_project_tags::delete),
+            patch(api_project_tags::update).delete(api_project_tags::delete),
         )
         .route(
             "/api/project/goals",

@@ -103,3 +103,12 @@ pub fn terminal_notice(
         source_sequence,
     }
 }
+
+/// Reflection fixtures exercise two full evidence slots with an explicit model window.
+pub fn isolated_config() -> (opencoder_core::config::ScopedConfigHome, tempfile::TempDir) {
+    let (guard, home) = crate::support::isolated_config();
+    let path = opencoder_core::Config::global_config_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, r#"{"context_limit":1000000}"#).unwrap();
+    (guard, home)
+}

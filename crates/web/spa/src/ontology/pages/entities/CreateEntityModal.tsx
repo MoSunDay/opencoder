@@ -1,6 +1,6 @@
+import { ModalForm } from "../../ui/ModalForm";
 import { PlusOutlined } from "@ant-design/icons";
 import {
-  ModalForm,
   NumberField,
   SelectField,
   SwitchField,
@@ -114,7 +114,7 @@ export default function CreateEntityModal({
         rules={[{ required: true, whitespace: true }]}
       />
       <TextAreaField name="description" label="描述" />
-      {error ? <Alert type="error" title={error} /> : null}
+      {error ? <Alert type="error" message={error} /> : null}
       <TextAreaField
         name="source"
         label="来源"

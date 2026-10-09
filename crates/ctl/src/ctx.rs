@@ -1,6 +1,5 @@
-//! Connection context resolution: `--server`/`--token`/`--token-file` flags
-//! override the `OPENCODER_SERVER_URL` / `OPENCODER_SERVER_TOKEN` environment
-//! (same token variable the server and agent binaries already honor).
+//! Connection flags override environment values, then local file defaults.
+//! Credential files are read only when their source wins resolution.
 
 use std::path::{Path, PathBuf};
 
@@ -32,8 +31,7 @@ fn token_value(value: String, source: &str) -> Result<String> {
     Ok(token.to_owned())
 }
 
-/// Pure resolution over explicit inputs plus an environment lookup function
-/// (injectable for tests). Flags win; env vars are the fallback.
+/// Resolve connection values, reading a selected credential file when needed.
 pub fn resolve_with_env(
     server: Option<&str>,
     token: Option<&str>,
@@ -46,7 +44,7 @@ pub fn resolve_with_env(
         Some(value) => clean_url(value, "--server")?,
         None => match env("OPENCODER_SERVER_URL") {
             Some(value) => clean_url(&value, "OPENCODER_SERVER_URL")?,
-            None => anyhow::bail!("server URL required: pass --server or set OPENCODER_SERVER_URL"),
+            None => anyhow::bail!("server URL required: configure ctl.json, pass --server, or set OPENCODER_SERVER_URL"),
         },
     };
     anyhow::ensure!(
@@ -63,7 +61,7 @@ pub fn resolve_with_env(
         match env("OPENCODER_SERVER_TOKEN") {
             Some(value) => token_value(value, "OPENCODER_SERVER_TOKEN")?,
             None => anyhow::bail!(
-                "bearer token required: pass --token, --token-file, or set OPENCODER_SERVER_TOKEN"
+                "bearer token required: configure ctl.json, pass --token/--token-file, or set OPENCODER_SERVER_TOKEN"
             ),
         }
     };
@@ -71,18 +69,28 @@ pub fn resolve_with_env(
 }
 
 pub fn resolve(
+    client_config: Option<&Path>,
     server: Option<&str>,
     token: Option<&str>,
     token_file: Option<PathBuf>,
     verbose: bool,
 ) -> Result<Ctx> {
-    let (server, token) = resolve_with_env(server, token, token_file.as_deref(), verbose, |key| {
-        std::env::var(key).ok().filter(|v| !v.trim().is_empty())
-    })?;
+    let env = |key: &str| std::env::var(key).ok().filter(|v| !v.trim().is_empty());
+    let path = crate::connection::default_path(env);
+    let defaults = crate::connection::load(client_config, path.as_deref())?;
+    let options =
+        crate::connection::merge(server, token, token_file.as_deref(), verbose, defaults, env);
+    let (server, token) = resolve_with_env(
+        options.server.as_deref(),
+        options.token.as_deref(),
+        options.token_file.as_deref(),
+        options.verbose,
+        |_| None,
+    )?;
     Ok(Ctx {
         server,
         token,
-        verbose,
+        verbose: options.verbose,
         http: http::client()?,
     })
 }

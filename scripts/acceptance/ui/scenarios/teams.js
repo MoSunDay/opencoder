@@ -36,10 +36,11 @@ async function teams({ page, api, root, until }) {
   assert(saved.members.some((member) => member.agent === 'act'));
   await row.getByRole('button', { name: '启动 Team', exact: true }).click();
   await page.locator('.ant-drawer').getByLabel('任务要求').fill('ui-team-real-execution');
-  const accepted = page.waitForResponse((response) => response.url().endsWith('/api/executions') && response.request().method() === 'POST');
+  const submitted = page.waitForRequest((request) => request.url().endsWith('/api/executions') && request.method() === 'POST');
   await page.locator('.ant-drawer').getByRole('button', { name: /^启\s*动$/ }).click();
-  const run = await (await accepted).json();
+  const run = (await submitted).postDataJSON();
   assert(run.id);
+  await page.getByText('Team 已启动', { exact: true }).waitFor({ timeout: 180000 });
   await until(async () => {
     const detail = await api('GET', `/api/executions/${run.id}`);
     assert(!['error', 'cancelled', 'interrupted'].includes(detail.execution.status), JSON.stringify(detail));
@@ -50,6 +51,12 @@ async function teams({ page, api, root, until }) {
   const detail = await api('GET', `/api/executions/${run.id}`);
   fs.writeFileSync(path.join(root, 'team-ui.json'), JSON.stringify({ id: run.id, execution: detail.execution, team: saved }, null, 2));
   await page.locator('.oc-execution-detail .ant-drawer-close').click();
+  assert.equal(await page.getByRole('tab', { name: '执行记录', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.getByRole('link', { name: run.id, exact: true }).click();
+  await page.locator('.oc-execution-detail').getByText('ui-team-completed', { exact: true }).first().waitFor();
+  await page.screenshot({ path: path.join(root, 'team-history-reopened.png'), animations: 'disabled' });
+  await page.locator('.oc-execution-detail .ant-drawer-close').click();
+  await page.getByRole('tab', { name: 'Team 列表', exact: true }).click();
 }
 
 module.exports = { teamAnswer, teams };

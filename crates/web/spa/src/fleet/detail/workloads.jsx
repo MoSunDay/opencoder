@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { apiGet } from '../../api.js';
 import { Markdown } from '../../project/markdown.jsx';
 import { InlineFields } from './fields.jsx';
-import { TeamDetail } from './team/index.jsx';
+import { TeamExecutionProcess } from './team/index.jsx';
 
 function PageButtons({ page, busy, more, previous, next }) {
   return <Space style={{ marginTop: 8 }}>
@@ -116,7 +116,7 @@ function ProjectDetail({ id, detail, onOpen }) {
 
 export function WorkloadDetail({ id, detail, kind, onOpen }) {
   if (!detail) return null;
-  if (kind === 'team') return <TeamDetail key={id} id={id} detail={detail} />;
+  if (kind === 'team') return <TeamExecutionProcess key={id} id={id} detail={detail} />;
   if (kind === 'todos') return <TodoDetail id={id} detail={detail} />;
   if (kind === 'project') return detail.run ? null : <ProjectDetail id={id} detail={detail} onOpen={onOpen} />;
   if (kind === 'dag') {

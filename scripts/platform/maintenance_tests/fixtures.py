@@ -64,7 +64,7 @@ class Fixture:
             (self.settings.systemd_dir / self.old[key]).write_text('old unit\n')
         self.bundle = root / 'bundle'
         (self.bundle / 'bin').mkdir(parents=True)
-        for name in ('opencoder-server', 'opencoder-agent', 'dag-runner', 'agent-step-runner'):
+        for name in ('opencoder-server', 'opencoder-agent', 'dag-runner', 'agent-step-runner', 'agent-session-runner'):
             (self.bundle / 'bin' / name).write_bytes(b'new binary')
         self.rootfs = root / 'rootfs'
         (self.rootfs / 'usr/bin').mkdir(parents=True)

@@ -24,7 +24,8 @@ class PublisherTests(unittest.TestCase):
             os.link(programs / 'git', programs / 'git-status')
             (programs / 'dag-runner').write_bytes(b'old runner')
             os.link(programs / 'dag-runner', programs / 'agent-step-runner')
-            for name in ['dag-runner', 'agent-step-runner']:
+            os.link(programs / 'dag-runner', programs / 'agent-session-runner')
+            for name in ['dag-runner', 'agent-step-runner', 'agent-session-runner']:
                 (binaries / name).write_bytes(name.encode())
             image = freeze_rootfs({'runtime_data': str(root / 'runtime')}, source, binaries)
             copied = image / 'usr/bin'
@@ -32,7 +33,7 @@ class PublisherTests(unittest.TestCase):
             self.assertNotEqual((copied / 'git').stat().st_ino, (programs / 'git').stat().st_ino)
             (programs / 'git').write_bytes(b'changed after snapshot')
             self.assertEqual((copied / 'git-status').read_bytes(), b'original git')
-            for name in ['dag-runner', 'agent-step-runner']:
+            for name in ['dag-runner', 'agent-step-runner', 'agent-session-runner']:
                 self.assertEqual((copied / name).read_bytes(), name.encode())
                 self.assertEqual((programs / name).read_bytes(), b'old runner')
 

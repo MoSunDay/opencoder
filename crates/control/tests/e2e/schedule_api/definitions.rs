@@ -301,6 +301,7 @@ async fn viewer_reads_schedules_but_cannot_change_them() {
             Some(&token),
         )
         .await;
+    // History remains readable after a definition is deleted.
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(resp.json::<Value>().await.unwrap(), json!({"runs": []}));
 

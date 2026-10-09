@@ -57,7 +57,7 @@ def plan(settings, candidate, rootfs, original, scope):
     # Runner replacement can grow the new image. Old execution trees and the
     # new candidate image stay in place; shared-data recovery never copies them.
     binaries = sum(item['bytes'] for name, item in candidate['files'].items()
-                   if name in ('bin/dag-runner', 'bin/agent-step-runner'))
+                   if name in ('bin/dag-runner', 'bin/agent-step-runner', 'bin/agent-session-runner'))
     image = tree_bytes(rootfs, {'dev', 'proc', 'sys', 'tmp', 'workspace/context'}, block_size) + binaries
     freeze = 0 if frozen.exists() else image
     roots = list(backup_roots(settings, runtime_data=False).values())
@@ -72,6 +72,7 @@ def plan(settings, candidate, rootfs, original, scope):
                     for name in ('opencoder.json', '.opencoder'))
     controls.extend(settings.bin_dir / name for name in
                     ('opencoder', 'opencoder-cli', 'opencoder-server', 'opencoder-agent',
+                  'dag-runner', 'agent-step-runner', 'agent-session-runner',
                      '.opencoder-platform-current', '.opencoder-platform-manifest.json'))
     control = sum(tree_bytes(path, block_size=block_size) for path in dict.fromkeys(controls))
     # Staging and installed bundle copies can coexist. Existing/incomplete

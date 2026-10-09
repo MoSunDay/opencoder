@@ -20,7 +20,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 34, "schema_version must be latest (34) after bootstrap");
+    assert_eq!(v, 35, "schema_version must be latest (35) after bootstrap");
 }
 
 #[tokio::test]
@@ -94,7 +94,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 34, "schema version must be latest (34) after migration");
+        assert_eq!(v, 35, "schema version must be latest (35) after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -126,7 +126,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 34, "schema version stays (34) after idempotent re-open");
+    assert_eq!(v, 35, "schema version stays (35) after idempotent re-open");
 }
 
 #[tokio::test]
@@ -223,8 +223,8 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 34,
-            "schema version must be latest (34) after v2→v3 migration"
+            v, 35,
+            "schema version must be latest (35) after v2→v3 migration"
         );
     }
 
@@ -240,5 +240,5 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 34, "schema version stays (34) after idempotent re-open");
+    assert_eq!(v, 35, "schema version stays (35) after idempotent re-open");
 }

@@ -172,7 +172,7 @@ def database_inventory(path):
         raise ValueError('maintenance requires an existing definitions database')
     with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as conn:
         version = conn.execute('SELECT version FROM schema_version LIMIT 1').fetchone()
-        if version is None or version[0] > 34:
+        if version is None or version[0] > 35:
             raise ValueError('unsupported definitions database schema')
         names = conn.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'project_%'").fetchall()
         tables = {name: conn.execute('SELECT count(*) FROM "' + name.replace('"', '""') + '"').fetchone()[0]

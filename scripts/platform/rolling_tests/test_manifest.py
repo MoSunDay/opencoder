@@ -13,11 +13,11 @@ import json
 
 
 class ResourceTests(unittest.TestCase):
-    def test_project_reference_format_verifies_but_cannot_overlap_cached_result_servers(self):
-        candidate = {'release_id': 'reference-index', 'protocol_version': 10,
+    def test_identity_format_verifies_but_cannot_overlap_legacy_identity_servers(self):
+        candidate = {'release_id': 'identity-index', 'protocol_version': 10,
                      'brain_schema_version': 7, 'compatibility': {
                          'protocol': {'min': 1, 'max': 1},
-                         'data_format': {'min': 4, 'max': 4}}}
+                         'data_format': {'min': 6, 'max': 6}}}
         info = {'brain_schema_version': 7,
                 'release_compatibility': candidate['compatibility']}
         from rolling.manifest import _installer
@@ -26,8 +26,8 @@ class ResourceTests(unittest.TestCase):
                 patch.object(_installer, 'build_info', return_value=info):
             self.assertEqual(verify(Path('bundle')), candidate)
         compatible(candidate, [candidate])
-        previous = {**candidate, 'release_id': 'cached-results', 'compatibility': {
-            **candidate['compatibility'], 'data_format': {'min': 3, 'max': 3}}}
+        previous = {**candidate, 'release_id': 'legacy-identity', 'compatibility': {
+            **candidate['compatibility'], 'data_format': {'min': 5, 'max': 5}}}
         for new, old in [(candidate, previous), (previous, candidate)]:
             with self.assertRaisesRegex(ValueError, 'different data_format; use --maintenance'):
                 compatible(new, [old])

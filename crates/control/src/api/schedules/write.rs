@@ -71,7 +71,8 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>)
 
 /// PUT /api/schedules/:id — full update of an existing definition. The path
 /// id wins over any body id; `created_at` is preserved by the store's
-/// upsert, `updated_at` moves to now. 404 when the id is unknown.
+/// upsert; changed definitions move `updated_at` to now. Identical writes
+/// preserve the scheduling baseline. 404 when the id is unknown.
 pub async fn update(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -88,6 +89,9 @@ pub async fn update(
         return error_400(msg);
     }
     match state.store.get_schedule(&id).await {
+        Ok(Some(def)) if def.job == job => {
+            return response(super::RpcReply::ok(json!({"ok": true, "id": id})))
+        }
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("schedule {id} not found")),
         Err(e) => return error_500(e.to_string()),
@@ -111,9 +115,13 @@ pub async fn toggle(
         Ok(None) => return error_404(&format!("schedule {id} not found")),
         Err(e) => return error_500(e.to_string()),
     };
+    let changed = def.job.enabled != body.enabled;
     def.job.enabled = body.enabled;
     if let Err(msg) = def.job.validate() {
         return error_400(msg);
+    }
+    if !changed {
+        return response(super::RpcReply::ok(json!({"ok": true, "id": id})));
     }
     match state.store.upsert_schedule(&def.job, now_ms()).await {
         Ok(()) => response(super::RpcReply::ok(json!({"ok": true, "id": id}))),

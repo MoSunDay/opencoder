@@ -18,6 +18,7 @@ clap.workspace = true
 futures.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 tokio.workspace = true
 ulid.workspace = true
 
@@ -28,5 +29,4 @@ base64.workspace = true
 opencoder-control.workspace = true
 opencoder-llm.workspace = true
 opencoder-node.workspace = true
-serde.workspace = true
 tempfile.workspace = true

@@ -24,14 +24,14 @@ pub(crate) async fn delete_force(root: &Path, id: &str) -> Result<()> {
 
 async fn delete_using(
     state: &Path,
-    budget: Duration,
+    warn_after: Duration,
     mut launch: impl FnMut() -> Result<Child>,
 ) -> Result<()> {
     for attempt in 0..2 {
         if opencoder_session::process::remove_empty_runc_state(state)? {
             return Ok(());
         }
-        match finish_delete(launch()?, state, budget).await {
+        match finish_delete(launch()?, state, warn_after).await {
             Ok(()) => return Ok(()),
             Err(error) if attempt == 0 => {
                 tracing::warn!(%error, path = %state.display(), "retrying owned runc cleanup");
@@ -42,19 +42,17 @@ async fn delete_using(
     unreachable!("both cleanup attempts return or report failure")
 }
 
-async fn finish_delete(mut child: Child, state: &Path, budget: Duration) -> Result<()> {
-    let status = match timeout(budget, child.wait()).await {
+async fn finish_delete(mut child: Child, state: &Path, warn_after: Duration) -> Result<()> {
+    let status = match timeout(warn_after, child.wait()).await {
         Ok(status) => status?,
         Err(_) => {
-            child.kill().await.context("reap timed-out runc cleanup")?;
-            // Completion can win the timer while its wait notification is
-            // delayed. The reaped command and absent state prove removal.
-            ensure!(
-                opencoder_session::process::remove_empty_runc_state(state)?,
-                "runc delete exceeded {}s",
-                budget.as_secs_f64()
-            );
-            return Ok(());
+            // Deleting the mount namespace may wait for OverlayFS writeback.
+            // Killing runc here interrupts valid cleanup and cannot cancel
+            // that kernel work. Retain ownership until the actual exit, as
+            // we already do for the following unmount operation.
+            tracing::warn!(path = %state.display(), elapsed_seconds = warn_after.as_secs_f64(),
+                "waiting for owned runc cleanup to finish");
+            child.wait().await.context("wait for slow runc cleanup")?
         }
     };
     let removed = opencoder_session::process::remove_empty_runc_state(state)?;
@@ -70,9 +68,14 @@ async fn finish_delete(mut child: Child, state: &Path, budget: Duration) -> Resu
 mod tests {
     use super::*;
 
-    fn sleeping_child() -> Child {
+    fn delete_child(path: &Path) -> Child {
         Command::new("sh")
-            .args(["-c", "exec sleep 10"])
+            .args([
+                "-c",
+                "rm -- \"$1/state.json\" && rmdir -- \"$1\"",
+                "cleanup",
+            ])
+            .arg(path)
             .kill_on_drop(true)
             .spawn()
             .unwrap()
@@ -86,37 +89,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn late_delete_reply_succeeds_only_after_reaping_and_removed_state() {
+    async fn slow_delete_keeps_ownership_until_reaped_and_removed() {
+        use tokio::io::AsyncWriteExt;
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("removed-container");
-        let child = sleeping_child();
-        let pid = child.id().unwrap();
-        finish_delete(child, &path, Duration::from_millis(20))
-            .await
+        let path = state(root.path());
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "read reply; rm -- \"$1/state.json\" && rmdir -- \"$1\"",
+                "cleanup",
+            ])
+            .arg(&path)
+            .stdin(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
             .unwrap();
+        let mut gate = child.stdin.take().unwrap();
+        let pid = child.id().unwrap();
+        let owned = path.clone();
+        let mut cleanup =
+            tokio::spawn(
+                async move { finish_delete(child, &owned, Duration::from_millis(1)).await },
+            );
+        assert!(timeout(Duration::from_millis(20), &mut cleanup)
+            .await
+            .is_err());
+        assert!(!cleanup.is_finished());
+        assert!(path.join("state.json").exists());
+        assert!(Path::new(&format!("/proc/{pid}")).exists());
+        gate.write_all(b"finish\n").await.unwrap();
+        drop(gate);
+        cleanup.await.unwrap().unwrap();
+        assert!(!path.exists());
         assert!(!Path::new(&format!("/proc/{pid}")).exists());
     }
 
     #[tokio::test]
-    async fn timed_out_delete_retries_same_owned_state_before_success() {
+    async fn failed_delete_retries_same_owned_state_before_success() {
         let root = tempfile::tempdir().unwrap();
         let path = state(root.path());
         let mut attempts = 0;
         delete_using(&path, Duration::from_secs(1), || {
             attempts += 1;
             if attempts == 1 {
-                return Ok(sleeping_child());
+                return Command::new("sh")
+                    .args(["-c", "exit 1"])
+                    .spawn()
+                    .map_err(Into::into);
             }
-            Command::new("sh")
-                .args([
-                    "-c",
-                    "rm -- \"$1/state.json\" && rmdir -- \"$1\"",
-                    "cleanup",
-                ])
-                .arg(&path)
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(Into::into)
+            Ok(delete_child(&path))
         })
         .await
         .unwrap();
@@ -130,13 +151,13 @@ mod tests {
         let path = state(root.path());
         let mut pids = Vec::new();
         let error = delete_using(&path, Duration::from_millis(20), || {
-            let child = sleeping_child();
+            let child = Command::new("sh").args(["-c", "exit 1"]).spawn().unwrap();
             pids.push(child.id().unwrap());
             Ok(child)
         })
         .await
         .unwrap_err();
-        assert!(format!("{error:#}").contains("runc delete exceeded"));
+        assert!(format!("{error:#}").contains("runc delete failed"));
         assert_eq!(pids.len(), 2);
         assert!(pids
             .iter()

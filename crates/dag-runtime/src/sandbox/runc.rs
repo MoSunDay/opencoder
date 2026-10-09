@@ -1,4 +1,4 @@
-//! Bounded runc lifecycle: cancellation/timeout stops the container and
+//! Owned runc lifecycle: cancellation/timeout stops the container and
 //! reaps the launcher before returning; cleanup failures remain visible.
 use anyhow::{Context, Result};
 use std::{path::Path, process::Stdio, time::Duration};

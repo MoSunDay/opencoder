@@ -55,10 +55,7 @@ async fn dispatch_survives_reopen_and_preserves_original_assignment() {
         .apply_index_report("node-one", &[], Some(std::slice::from_ref(&a.index.id)))
         .await
         .unwrap();
-    assert_eq!(
-        second.index(&a.index.id).await.unwrap().unwrap().status,
-        ExecutionStatus::Pending
-    );
+    assert!(second.index(&a.index.id).await.unwrap().is_none());
     let reply = RpcReply {
         status: 202,
         body: json!(a.index),

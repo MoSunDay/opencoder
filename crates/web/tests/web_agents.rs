@@ -6,7 +6,8 @@
 //! receiver, exactly like the envs tests. 全局激活端点已移除，卡片写一律
 //! 无条件扇出 ReloadConfig。
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
+use tokio::sync::{Mutex, MutexGuard};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -18,13 +19,13 @@ use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_store::{LibsqlStore, Store};
 
 /// Serializes tests that touch the process-global agents-root override.
-static OVERRIDE_LOCK: Mutex<()> = Mutex::new(());
+static OVERRIDE_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// Point the agents root at a fresh tempdir under the override lock; the
 /// guard must be held across every agents call in the test body.
-fn scoped() -> (tempfile::TempDir, MutexGuard<'static, ()>) {
+async fn scoped() -> (tempfile::TempDir, MutexGuard<'static, ()>) {
     let dir = tempfile::tempdir().unwrap();
-    let guard = OVERRIDE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = OVERRIDE_LOCK.lock().await;
     opencoder_core::agent::set_agents_dir_override(Some(dir.path().to_path_buf()));
     (dir, guard)
 }
@@ -124,7 +125,7 @@ fn seed_prompt_pool(root: &std::path::Path, name: &str) {
 #[tokio::test]
 async fn empty_root_lists_cards_only_without_active_field() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     let (status, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["ok"], true);
@@ -144,7 +145,7 @@ async fn empty_root_lists_cards_only_without_active_field() {
 #[tokio::test]
 async fn cards_crud_activation_and_listing() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     seed_prompt_pool(_scoped.0.path(), "pack");
     // "b" carries a live prompt ref (activatable); "a" stays plain.
     let (status, v) = call(
@@ -249,7 +250,7 @@ async fn cards_crud_activation_and_listing() {
 #[tokio::test]
 async fn list_items_carry_soul_first_line_description_with_generic_fallback() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     let root = _scoped.0.path();
     // Multi-line soul: the description skips leading blank/whitespace lines.
     let pool = root.join("prompts/writer");
@@ -304,7 +305,7 @@ async fn list_items_carry_soul_first_line_description_with_generic_fallback() {
 #[tokio::test]
 async fn patch_active_endpoint_is_gone() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     let (status, v) = call(
         app(state.clone()),
         "PATCH",
@@ -323,7 +324,7 @@ async fn patch_active_endpoint_is_gone() {
 #[tokio::test]
 async fn put_fans_reload_on_every_write() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     seed_prompt_pool(_scoped.0.path(), "pack");
     call(
         app(state.clone()),
@@ -361,7 +362,7 @@ async fn put_fans_reload_on_every_write() {
 #[tokio::test]
 async fn delete_card_fans_reload_without_marker() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     seed_prompt_pool(_scoped.0.path(), "pack");
     call(
         app(state.clone()),
@@ -391,7 +392,7 @@ async fn delete_card_fans_reload_without_marker() {
 #[tokio::test]
 async fn harness_settings_apply_to_builtin_and_custom_agents() {
     let state = state().await;
-    let _scoped = scoped();
+    let _scoped = scoped().await;
     let (status, body) = call(
         app(state.clone()),
         "PUT",
@@ -428,103 +429,21 @@ async fn harness_settings_apply_to_builtin_and_custom_agents() {
     assert_eq!(body["meta"]["harness"], "codex");
 }
 
-/// `run_mode` rides the card through POST/PUT: create pins it (`operator`
-/// when omitted), PUT flips it with one `run_mode` history entry, an
-/// omitted PUT leaves it untouched, and a bogus string rejects through the
-/// typed enum exactly like `harness` does (axum Json data rejection, 422).
+/// Runtime placement belongs to the execution request, not its identity card.
 #[tokio::test]
-async fn run_mode_flows_through_create_put_and_meta() {
-    let state = state().await;
-    let _scoped = scoped();
-    // Create with `agent`: meta carries it.
-    let (status, v) = call(
-        app(state.clone()),
+async fn identity_cards_expose_resources_without_a_runtime_switch() {
+    let (_dir, _guard) = scoped().await;
+    let app = app(state().await);
+    let (status, _) = call(
+        app.clone(),
         "POST",
         "/api/agents",
-        Some(serde_json::json!({ "name": "boxed", "run_mode": "agent" })),
+        Some(serde_json::json!({"name":"reviewer"})),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{v}");
-    let (_, v) = call(app(state.clone()), "GET", "/api/agents/boxed/meta", None).await;
-    assert_eq!(v["meta"]["run_mode"], "agent");
-    // Create without: default `operator`.
-    let (status, v) = call(
-        app(state.clone()),
-        "POST",
-        "/api/agents",
-        Some(serde_json::json!({ "name": "hosted" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{v}");
-    let (_, v) = call(app(state.clone()), "GET", "/api/agents/hosted/meta", None).await;
-    assert_eq!(v["meta"]["run_mode"], "operator");
-
-    // PUT flips operator to agent: one `run_mode` history entry (from/to).
-    let (status, v) = call(
-        app(state.clone()),
-        "PUT",
-        "/api/agents/hosted",
-        Some(serde_json::json!({ "run_mode": "agent" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    let (_, v) = call(app(state.clone()), "GET", "/api/agents/hosted/meta", None).await;
-    assert_eq!(v["meta"]["run_mode"], "agent");
-    let fields: Vec<&str> = v["meta"]["history"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|h| h["field"].as_str().unwrap())
-        .collect();
-    assert_eq!(fields, vec!["run_mode"]);
-    assert_eq!(v["meta"]["history"][0]["from"], "operator");
-    assert_eq!(v["meta"]["history"][0]["to"], "agent");
-
-    // PUT without run_mode: unchanged, no extra history entries.
-    let (status, v) = call(
-        app(state.clone()),
-        "PUT",
-        "/api/agents/hosted",
-        Some(serde_json::json!({ "current": {} })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    let (_, v) = call(app(state.clone()), "GET", "/api/agents/hosted/meta", None).await;
-    assert_eq!(v["meta"]["run_mode"], "agent");
-    assert_eq!(v["meta"]["history"].as_array().unwrap().len(), 1, "{v}");
-
-    // List items carry run_mode alongside harness.
-    let (_, v) = call(app(state.clone()), "GET", "/api/agents", None).await;
-    let agents = v["agents"].as_array().unwrap();
-    let by_name = |n: &str| {
-        agents
-            .iter()
-            .find(|a| a["name"] == n)
-            .unwrap_or_else(|| panic!("missing card {n}: {agents:?}"))
-            .clone()
-    };
-    assert_eq!(by_name("boxed")["run_mode"], "agent");
-    assert_eq!(by_name("hosted")["run_mode"], "agent");
-
-    // Bogus values reject like `harness` (typed enum, axum Json data
-    // rejection, 422).
-    for (method, uri, body) in [
-        (
-            "POST",
-            "/api/agents",
-            serde_json::json!({ "name": "bad", "run_mode": "bogus" }),
-        ),
-        (
-            "PUT",
-            "/api/agents/boxed",
-            serde_json::json!({ "run_mode": "bogus" }),
-        ),
-    ] {
-        let (status, v) = call(app(state.clone()), method, uri, Some(body)).await;
-        assert_eq!(
-            status,
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "{method} {uri}: {v}"
-        );
-    }
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, value) = call(app, "GET", "/api/agents/reviewer/meta", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["meta"]["name"], "reviewer");
+    assert!(value["meta"].get("run_mode").is_none());
 }

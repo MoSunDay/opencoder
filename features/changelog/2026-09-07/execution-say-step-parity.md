@@ -21,7 +21,7 @@ Commit: 8ed37a1aef29f864c8a7ad302e04766c38e5c627
 | 多轮 done/error、续写与重复序号去重 | `execution replay and continuation` | `crates/web/spa/src/fleet/detail/transcript.test.js` |
 | 追平事件水位、续写游标、切换执行与离线错误 | `execution transcript subscription lifecycle` | `crates/web/spa/src/fleet/detail/liveTranscript.dom.test.jsx` |
 | 历史终态后继续回放与单轮终态兼容 | `fleet execution event history` | `crates/web/spa/src/sse.history.test.js` |
-| 实际贪吃蛇执行记录、真实 bash 续写、Markdown、桌面与 390px 视口 | Chromium + 正式 Server / Node / 模型 | `/data00/opencoder-delivery/20260907-say-step-parity/` |
+| 实际会话执行记录、真实 bash 续写、Markdown、桌面与 390px 视口 | Chromium + 正式 Server / Node / 模型 | `/data00/opencoder-delivery/20260907-say-step-parity/` |
 
 验收结果：
 

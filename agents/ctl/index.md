@@ -1,4 +1,4 @@
-Commit: 9a56d79f7b7e3d67f9e2ed5f3f797571cf5c4793
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # ctl 模块
 
@@ -10,6 +10,8 @@ Commit: 9a56d79f7b7e3d67f9e2ed5f3f797571cf5c4793
 - `src/cmd/` — 按域子命令（纯 plan() 映射）
 - `src/cmd/brain.rs` — brain 子命令，与 Web 共用 API
 - `src/cmd/project.rs` — 项目、专项及 TODO API 映射；专项使用 `initiatives` 路由，TODO 查询和编辑使用 `initiative_id`，不提供项目里程碑命令别名；`project todos links/attach/detach/dispatch` 管理原生执行引用和能力派发
+- [project.rs](../../crates/ctl/src/cmd/project.rs) 的 `project people` 映射只返回用户名的 `/api/project/people`；三层创建与修改 JSON 透传独立的 `owner_user_name`、`follower_user_names`。
+- [project/summary/](../../crates/ctl/src/cmd/project/summary/) — `project initiatives summary-context` 读取全部 TODO、去重后的全部执行引用和原生证据；消息、事件、Team 轮次、TODO 项及省略正文按原生游标读取，失败保留来源和原因。`project goals summary-context` 返回全部专项及概述，提示缺失或过时内容；调用方总结后通过已有 PATCH 写入，见 [概述用法](../../docs/project-summaries.md)。`summary-versions` 查看最近 10 个版本，`summary-restore` 调用服务端将历史正文恢复为新版本。
 - `src/cmd/brain/ontology.rs` — 仅受理 schema_version 7；CLI 读分层视图、层明细及事件，隔离激活通过 OpenCoder session agent loop 输出一次分层模型决策。
 - `tests/` — 子命令→RequestPlan 契约与集成 e2e
 

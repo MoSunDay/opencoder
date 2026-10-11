@@ -7,8 +7,8 @@ export function tagRows(overview) {
     const initiative = tag.scope_type === 'initiative' ? initiatives.get(tag.scope_id) : null;
     return {
       ...tag,
-      scope_label: tag.scope_type === 'initiative' ? '专项' : '项目',
-      project_title: tag.scope_type === 'project'
+      scope_label: { global: '全局', project: '项目', initiative: '专项' }[tag.scope_type],
+      project_title: tag.scope_type === 'global' ? '所有项目 / 专项' : tag.scope_type === 'project'
         ? projects.get(tag.scope_id)?.title || '项目已删除'
         : initiative?.goal_title || (initiative ? '独立专项' : '专项已删除'),
       initiative_title: tag.scope_type === 'initiative' ? initiative?.title || '专项已删除' : '—',

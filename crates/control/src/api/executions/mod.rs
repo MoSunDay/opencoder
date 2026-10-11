@@ -78,6 +78,9 @@ pub async fn dispatch_command_as(
     mut command: ExecutionCommand,
     identity: Option<&opencoder_core::identity::Identity>,
 ) -> RpcReply {
+    if identity.is_some_and(|identity| !identity.can_edit()) {
+        return RpcReply::error(403, "role may not command this execution");
+    }
     match state.fleet.index(id).await {
         Ok(Some(index))
             if identity.is_some_and(|i| {

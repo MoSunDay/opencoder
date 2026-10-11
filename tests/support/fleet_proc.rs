@@ -183,11 +183,15 @@ impl Fleet {
         extra: Value,
         node_name: &str,
     ) -> Self {
-        Self::spawn_inner(workdir, stub_port, extra, node_name, false)
+        Self::spawn_inner(workdir, stub_port, extra, node_name, None)
     }
 
     pub fn spawn_native(workdir: &Path, stub_port: u16, extra: Value, node_name: &str) -> Self {
-        Self::spawn_inner(workdir, stub_port, extra, node_name, true)
+        Self::spawn_inner(workdir, stub_port, extra, node_name, Some(true))
+    }
+
+    pub fn spawn_conversations(workdir: &Path, stub_port: u16, node_name: &str) -> Self {
+        Self::spawn_inner(workdir, stub_port, json!({}), node_name, Some(false))
     }
 
     fn spawn_inner(
@@ -195,9 +199,15 @@ impl Fleet {
         stub_port: u16,
         extra: Value,
         node_name: &str,
-        native: bool,
+        native: Option<bool>,
     ) -> Self {
-        let native = native.then(|| super::native::NativeMounts::prepare(workdir, extra.clone()));
+        let native = native.map(|dag| {
+            if dag {
+                super::native::NativeMounts::prepare(workdir, extra.clone())
+            } else {
+                super::native::NativeMounts::conversations(workdir, extra.clone())
+            }
+        });
         let extra = native
             .as_ref()
             .map(|plan| plan.server_config.clone())

@@ -26,6 +26,41 @@ def execution_data(root):
 
 
 class MaintenanceBackupScopeTests(unittest.TestCase):
+    def test_online_backup_keeps_nested_databases_and_does_not_follow_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = Fixture(root)
+            runtime = fixture.settings.state_dir / 'runtimes/old'
+            nested = runtime / 'agent/session/resources/memory/version'
+            execution_data(nested)
+            outside = root / 'outside'
+            execution_data(outside)
+            (runtime / 'linked-directory').symlink_to(outside, target_is_directory=True)
+            (runtime / 'linked.db').symlink_to(outside / 'runtime.db')
+            output = root / 'backup'
+            backup.snapshot(fixture.settings, output)
+            saved = output / 'runtimes/old/agent/session/resources/memory/version/runtime.db'
+            with sqlite3.connect(saved) as conn:
+                self.assertEqual(conn.execute('SELECT content FROM execution_context').fetchone(),
+                                 ('keep context',))
+            self.assertFalse((output / 'runtimes/old/linked-directory').exists())
+            self.assertFalse((output / 'runtimes/old/linked.db').exists())
+            manifest = json.loads((output / 'backup-manifest.json').read_text())
+            self.assertIn(str(saved.relative_to(output)), manifest['files'])
+
+    def test_corrupt_database_never_publishes_a_partial_online_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = Fixture(root)
+            runtime = fixture.settings.state_dir / 'runtimes/old'
+            execution_data(runtime)
+            (runtime / 'corrupt.db').write_bytes(b'not a SQLite database')
+            output = root / 'backup'
+            with self.assertRaises(sqlite3.DatabaseError):
+                backup.snapshot(fixture.settings, output)
+            self.assertFalse(output.exists())
+            self.assertTrue(list(root.glob('.backup.incomplete-*')))
+
     def test_shared_backup_requires_stopped_writers(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory))

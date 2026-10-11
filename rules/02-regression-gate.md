@@ -1,48 +1,22 @@
 Commit: (working-tree, pre-initial-commit)
 
-# 规则 02：迭代回归 Gate
+# 规则 02：按改动范围回归
 
 ## 核心原则
 
-**每轮迭代结束前必须全量回归 `cargo test --workspace`，并在 changelog 中附「功能 → 测试名」映射。**
+**改到哪里测哪里：只运行本次改动及其直接影响链路的定向测试，发布时也一样。除非用户明确要求，否则不运行全量测试。**
 
-回归不通过 = 迭代未完成。
+先根据改动文件和调用关系确定测试范围，再选择相关模块、测试文件或具体用例。只有具体失败或明确的依赖影响需要时，才扩大到相关范围。已通过且代码未再变化的检查不重复运行。
 
-## 迭代收尾检查清单
+## 迭代收尾检查
 
-每轮迭代（iteration）宣告完成前，必须依次执行并通过：
-
-1. **Lint gate**
-   ```bash
-   cargo clippy --workspace --all-targets -- -D warnings
-   ```
-   零警告。有警告必须修复，不允许 `#[allow]` 绕过（除非有明确技术原因并注释）。
-
-2. **全量测试 gate**
-   ```bash
-   cargo test --workspace
-   ```
-   全部通过。不允许用 `#[ignore]` 跳过失败测试来"修绿"。
-
-3. **构建 gate**
-   ```bash
-   cargo build --workspace
-   ```
-   零错误。
-
-4. **行数 gate**
-   新增文件 ≤ 400 行；迭代中文件 ≤ 800 行。超限必须拆分。
-
-5. **安全 gate**
-   无硬编码密钥 / 凭证 / token / 连接串。
-
-6. **文档同步 gate**
-   - 触及区的 `agents/*` / `features/*` memory 文档已更新
-   - changelog 新增条目，附测试清单（见下）
+1. 修改 Rust 时，对相关 crate 执行 Clippy，例如 `cargo clippy -p <crate> --all-targets -- -D warnings`。零警告，不用 `#[allow]` 绕过问题。
+2. 执行相关测试，例如 `cargo test -p <crate> --test <target> <case>`，或将改动相关测试文件显式传给 Vitest。不得以日常收尾或发布为由默认执行 `cargo test --workspace`、SPA 全量测试或全站 UI 验收。
+3. 按交付需要构建相关产物，检查格式和构建结果。正式发布所需的成套二进制及其摘要校验仍须完成，构建不等于要求运行全量测试。
+4. 新增文件 ≤ 400 行；迭代中文件 ≤ 800 行。超限拆分，无硬编码密钥或凭证。
+5. 同步触及区的 `agents/*`、`features/*` 索引，changelog 记录「功能 → 测试名」映射与实际执行结果。纯文档改动检查内容和链接即可。
 
 ## Changelog 测试清单格式
-
-每轮迭代的 changelog 必须包含以下小节：
 
 ```markdown
 ## 测试覆盖
@@ -50,28 +24,14 @@ Commit: (working-tree, pre-initial-commit)
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
 | Store WAL 恢复 | `wal_crash_recovery` | `store/tests/store_integration.rs` |
-| 压缩触发 | `compaction_triggers_by_token_estimate` | `session/tests/compaction_and_model.rs` |
-| ... | ... | ... |
 
-- 全量回归：`cargo test --workspace` → N passed / 0 failed
-- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
+- 定向回归：实际命令 → N passed / 0 failed
+- Clippy：相关 crate 的实际命令 → 零警告（未修改 Rust 时不适用）
+- 测试范围：本次修改及其直接影响的链路；未运行全量测试。
 ```
 
 ## 禁止行为
 
-- ❌ 删除测试来让 `cargo test` 通过
-- ❌ 用 `#[ignore]` 隐藏失败测试
-- ❌ 降低断言严格度来"修绿"（如 `assert!(result.is_ok())` 替代具体值断言）
-- ❌ 在 changelog 中虚报测试数量（必须附实际 `cargo test` 输出）
-- ❌ 跳过 lint gate（clippy 警告不算"不影响功能"）
-
-## 回归基线
-
-每轮迭代开始时记录当前测试基线：
-
-```
-迭代 N 开始基线：cargo test --workspace → {X} passed / 0 failed
-迭代 N 结束目标：cargo test --workspace → {X + 新增} passed / 0 failed
-```
-
-迭代结束时的测试数必须 ≥ 开始基线 + 本轮新增功能数。测试数下降 = 回归失败。
+- 删除测试、用 `#[ignore]` 隐藏失败或降低断言来让结果通过。
+- 虚报数量，或把局部测试通过写成全量通过。
+- 无具体失败或依赖影响依据，扩大测试范围或反复运行已通过的检查。

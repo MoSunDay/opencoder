@@ -82,11 +82,12 @@ mod tests {
     #[test]
     fn progress_uses_manual_board_completion() {
         let i = ProjectInitiativeRecord {
+            summary: Default::default(),
+            people: Default::default(),
             id: "i".into(),
             goal_id: None,
             title: "I".into(),
             detail_md: None,
-            status: crate::ProjectInitiativeStatus::Planned,
             sort: 0,
             created_at: 0,
             updated_at: 0,

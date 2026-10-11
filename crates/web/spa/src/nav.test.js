@@ -90,24 +90,25 @@ describe('categoryHome / pagesOf', () => {
   });
 
   it('lists category pages in menu order', () => {
-    expect(pagesOf('project')).toEqual(['project']);
+    expect(pagesOf('project')).toEqual(['project', 'projectTags']);
     // schedules（调度）挂在「全部执行」之后：cron 台账是执行面的时间维度。
     expect(pagesOf('agent')).toEqual(['brain', 'topics', 'schedules', 'dag', 'todos', 'team', 'chat', 'agents']);
-    expect(pagesOf('admin')).toEqual(['nodes', 'users', 'tokens']);
+    expect(pagesOf('admin')).toEqual(['nodes', 'users']);
   });
 });
 
 describe('menuOf / selectOptionsOf scoping', () => {
   it('builds antd Menu items keyed by page with matching labels', () => {
     const items = menuOf('admin');
-    expect(items.map((i) => i.key)).toEqual(['nodes', 'users', 'tokens']);
-    expect(items.map((i) => i.label)).toEqual(['节点列表', '用户权限', 'Token 管理']);
+    expect(items.map((i) => i.key)).toEqual(['nodes', 'users']);
+    expect(items.map((i) => i.label)).toEqual(['节点列表', '用户权限']);
     expect(items.every((i) => isValidElement(i.icon))).toBe(true);
   });
 
   it('never leaks other categories into a menu', () => {
     const labels = menuOf('project').map((i) => i.label);
-    expect(labels).toEqual(['项目']);
+    expect(labels).toEqual(['Overview', 'Tag']);
+    expect(selectOptionsOf('project')).toEqual([{ value: 'project', label: 'Overview' }, { value: 'projectTags', label: 'Tag' }]);
     for (const foreign of ['大脑调度', '全部执行', '节点列表']) {
       expect(labels).not.toContain(foreign);
     }
@@ -186,7 +187,7 @@ describe('visibleCategories / allowedPages', () => {
     const visible = visibleCategories(role ? { role } : null);
     expect(visible.map((category) => category.key)).toEqual(['project', 'agent', 'ontology']);
     expect(allowedPages({ role })).toEqual([...pagesOf('project'), ...pagesOf('agent'), ...pagesOf('ontology')]);
-    expect(menuItemsOf(visible[0].items).map((item) => item.key)).toEqual(['project']);
-    expect(selectItemsOf(visible[0].items)).toEqual([{ value: 'project', label: '项目' }]);
+    expect(menuItemsOf(visible[0].items).map((item) => item.key)).toEqual(['project', 'projectTags']);
+    expect(selectItemsOf(visible[0].items)).toEqual([{ value: 'project', label: 'Overview' }, { value: 'projectTags', label: 'Tag' }]);
   });
 });

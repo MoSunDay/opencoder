@@ -1,4 +1,4 @@
-Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # worker 模块
 
@@ -7,11 +7,12 @@ Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
 Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类在准入时拒绝，不装配 DAG/runc/NFS。依赖与实现通过平台模块隔开；原生验收入口见 [windows_operator.rs](../../crates/worker/tests/windows_operator.rs)，用户边界见 [Windows](../../features/windows/index.md)。
 
 ## 索引
-- [operations/sandbox_session/mod.rs](../../crates/worker/src/operations/sandbox_session/mod.rs)、[workloads/agent_runc/inputs.rs](../../crates/worker/src/workloads/agent_runc/inputs.rs) — 容器会话的 steer 与 queue 使用原生输入存储，按 `input_id` 去重；运行中引导进入当前循环，排队输入在后续轮次消费，续会话沿用同一执行和上下文。
 - `crates/worker/src/service.rs` — 根执行与会话清单
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器
-- `crates/worker/src/workloads/agent_how.rs`、`agent_runc.rs`（+ `agent_runc/`）— how 契约与 `run_mode: agent` runc 运行时（准入 fail-closed）
-- [workloads/agent.rs](../../crates/worker/src/workloads/agent.rs)、[agent_runc.rs](../../crates/worker/src/workloads/agent_runc.rs) — 持久化调用方的 `literal_mentions`；容器通过 staged Harness JSON 继承该策略。宿主首轮使用队列投递，展示原文与模型执行前缀分别保存；托管 Codex 设置仍由 Server 冻结。
+- 普通 Agent/Operator 共用宿主机后台会话路径，按 Server 固定的 Agent 身份、资源与 Harness 执行；DAG 容器仍由 [dag-runtime](../dag-runtime/index.md) 管理。
+- [operations/query/session](../../crates/worker/src/operations/query/session/mod.rs) — 已持久接收但尚未初始化的会话由 journal 提供元信息、空消息和零游标；已有会话行但执行仍在排队或运行时也保持事件订阅。[事件分页](../../crates/worker/src/operations/query/mod.rs)在续聊等待名额时返回未结束。未知 ID 保持 404，初始化前终止返回实际原因。覆盖见 [conversations](../../crates/worker/tests/conversations/main.rs)。
+- [workloads/agent_how.rs](../../crates/worker/src/workloads/agent_how.rs) — Agent 的 how 追加契约与结果投影。
+- [workloads/agent.rs](../../crates/worker/src/workloads/agent.rs) — Agent/Operator 宿主会话首轮使用队列投递，保留用户输入原文；Operator 默认规则由 [session](../session/index.md) 按会话类型构建，Maintenance 首轮附加维护指令。托管 Codex 设置由 Server 冻结。
 - [workloads/agent/initialization.rs](../../crates/worker/src/workloads/agent/initialization.rs) — 首轮投递前补齐 Harness、启动环境、展示策略及 Server 模型设置；已有 session 行也执行该步骤。恢复保留已启动的 Codex 线程和冻结设置，Operator HOME 最后覆盖输入与托管环境。
 - `crates/worker/src/operations/` — 准入/launch/维护命令/查询（含 `query/instances/`、`artifacts.rs`、`operator_env.rs` Operator 隔离快照、`operator_config.rs` 节点级 Operator 配置平面）
 - [operations/create/preflight_agents.rs](../../crates/worker/src/operations/create/preflight_agents.rs) — 项目 Agent、Team、DAG 的 Agent 依赖提取纯函数；DAG 仅收集 Agent 步骤。
@@ -22,7 +23,9 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 
 ## Operator 执行隔离
 
-配置平面：`operations/operator_config.rs` 维护节点数据根下的 `<data>/operator-config/`（`config.json` + `mcp|cli|skills|ap|schedules` 五域文件 + `skills/` 技能包目录）。首个 Operator 执行准入时（`state.rs::configuration_for` → `operator_configuration`）从节点 live 视图 `bootstrap` 一次，以私有权限按 first-writer-wins 发布，此后冻结：TUI/CLI 对共享 workdir 配置的保存不再进入 Operator 执行；`freeze_skills` 把平面 `skills/` 包 + 内置 seed 写入执行 home（用户全局池永远不是来源）；`operations/launch.rs` 用 `core::skill::with_execution` 把 workload 包进执行技能根。
+- [operations/fork.rs](../../crates/worker/src/operations/fork.rs)、[operator_env/fork.rs](../../crates/worker/src/operations/operator_env/fork.rs) — 派生会话按父执行类型生成 ID、资源目录及请求；隔离 Operator 复制父配置、冻结 skills 与私有 Codex 状态，创建空 workspace，重新固定 Harness HOME 与环境版本。普通 Agent 沿用节点工作目录。
+
+配置平面：`operations/operator_config.rs` 维护节点数据根下的 `<data>/operator-config/`（`config.json` + `mcp|cli|skills|ap|schedules` 五域文件 + `skills/` 技能包目录）。首个 Operator 执行准入时（`state.rs::configuration_for` → `operator_configuration`）从节点 live 视图 `bootstrap` 一次，以私有权限按 first-writer-wins 发布，此后冻结：TUI/CLI 对共享 workdir 配置的保存不再进入 Operator 执行；`freeze_skills` 把平面 `skills/` 包 + 内置 seed 写入执行 home（用户全局池永远不是来源）；`operations/launch.rs` 用 `core::skill::with_execution` 把 workload 包进执行技能根，[Web 后台会话](../web/index.md) 继续传递该目录。
 
 `operations/operator_env.rs` 为 `ExecutionKind::Operator` 提供按执行的 HOME/WORKSPACE 隔离：`materialize()` 在准入通过后把冻结配置快照（明文含 provider api key）以私有权限写入 `<data_dir>/operator/<id>/home/.opencoder/config.json`，`resolve()` 核验快照与 workspace。`env_pairs()` 产出 HOME 覆盖对，Windows 同时隔离 USERPROFILE、APPDATA、LOCALAPPDATA；fresh 会话在输入 envs 之后注入，随后经 harness envs 持久化，resume 由 `resume.rs` 重建 env_passthrough。`operations/create.rs` 准入接受 Operator 的显式 Harness 选择，Codex 预检合并托管设置与输入 envs；`workloads/agent.rs` 固定所选 Harness 和环境。配置加载走 core `Config::load_with_home`，web drain 栈经 `AppState.config_home` 穿参，执行目录由 `brain/workdir.rs` `session_dirs()` 裁定。Maintenance/Agent/Brain 不受影响。
 

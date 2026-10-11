@@ -4,15 +4,19 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 out="${1:-}"
-[ -n "$out" ] || { echo "usage: $0 <rootfs-dir> [--codex <native-codex-binary>]" >&2; exit 2; }
+[ -n "$out" ] || { echo "usage: $0 <rootfs-dir> [--codex <native-codex-binary>] [--python <python3.11+-binary>]" >&2; exit 2; }
 shift
 codex_binary=""
-if [ "$#" -gt 0 ]; then
-  [ "$#" -eq 2 ] && [ "$1" = "--codex" ] || {
-    echo "expected --codex <native-codex-binary>" >&2; exit 2;
-  }
-  codex_binary="$2"
-fi
+python_binary="python3"
+while [ "$#" -gt 0 ]; do
+  [ "$#" -ge 2 ] || { echo "option requires an executable" >&2; exit 2; }
+  case "$1" in
+    --codex) codex_binary="$2" ;;
+    --python) python_binary="$2" ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift 2
+done
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 
@@ -47,7 +51,7 @@ done | sort -u | while read -r lib; do
 done
 
 bash "$repo_root/scripts/dag-rootfs/install-tools.sh" "$out"
-bash "$repo_root/scripts/dag-rootfs/install-python.sh" "$out"
+bash "$repo_root/scripts/dag-rootfs/install-python.sh" "$out" "$python_binary"
 
 if [ -n "$codex_binary" ]; then
   bash "$repo_root/scripts/dag-rootfs/install-codex.sh" "$out" "$codex_binary"

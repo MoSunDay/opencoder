@@ -21,6 +21,23 @@ struct GetTodoFailingStore {
 
 #[async_trait::async_trait]
 impl ProjectStore for GetTodoFailingStore {
+    async fn summary_versions(
+        &self,
+        scope: opencoder_store::project::summary::SummaryScope,
+        id: &str,
+    ) -> anyhow::Result<Option<Vec<opencoder_store::project::summary::SummaryVersion>>> {
+        self.inner.summary_versions(scope, id).await
+    }
+    async fn restore_summary(
+        &self,
+        scope: opencoder_store::project::summary::SummaryScope,
+        id: &str,
+        version: i64,
+        now: i64,
+    ) -> anyhow::Result<Option<opencoder_store::project::summary::SummaryVersion>> {
+        self.inner.restore_summary(scope, id, version, now).await
+    }
+
     async fn list_todo_assignments(
         &self,
         todo_id: &str,

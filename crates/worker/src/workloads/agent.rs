@@ -71,19 +71,6 @@ pub(super) async fn run(
     // pair when materialized; other kinds keep node/brain workdir resolution
     // with live config discovery.
     let (session_workdir, config_home) = crate::brain::workdir::session_dirs(worker, record)?;
-    // kind=agent against a `run_mode: agent` card: every turn is one runc
-    // sandbox round instead of a host session loop (see `agent_runc`).
-    // Operator/maintenance never take this path — their `kind` differs even
-    // when they share the host session code below.
-    if kind == ExecutionKind::Agent
-        && config
-            .agent
-            .agents_dir
-            .as_deref()
-            .is_some_and(|root| super::agent_runc::session_uses_sandbox(root, agent))
-    {
-        return super::agent_runc::run_round(worker, record, config, cancel, how_append).await;
-    }
     let fresh = worker.inner.state.store.get_session(id).await?.is_none();
     let before = worker
         .inner
@@ -124,10 +111,6 @@ pub(super) async fn run(
     if let Some(prompt) = input["prompt"].as_str().filter(|s| !s.trim().is_empty()) {
         let prompt = match kind {
             ExecutionKind::Maintenance => format!("你是本节点的维护 agent。使用 node_maintenance 工具查询真实的状态、日志、资源和任务；只有用户明确要求时才修改配置或控制任务，不主动修复，不删除鉴权数据。\n\n用户指令：{prompt}"),
-            // Operator runs the agent loop directly in the host process (no
-            // runc sandbox, no node_maintenance tool), so the preamble asks
-            // for host-level care instead of the maintenance tool contract.
-            ExecutionKind::Operator => format!("你是 Operator agent：直接运行在宿主机进程内（非 runc 容器，也非节点维护模式）。你的操作会直接影响宿主机环境，请谨慎执行，避免破坏性与不可逆命令，仅完成用户明确交代的任务。\n\n用户指令：{prompt}"),
             _ => prompt.into(),
         };
         let reply = native(

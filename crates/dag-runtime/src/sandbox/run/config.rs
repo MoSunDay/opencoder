@@ -24,9 +24,48 @@ fn bind(
     std::fs::create_dir_all(&target)?;
     mounts.push(
         json!({"type":"bind","source":source,"destination":destination,
-        // Bind only the declared directory; unrelated host submounts must stay outside the run.
+        // Each entry binds only its declared path, without inheriting writable submounts.
         "options":["bind",if writable {"rw"} else {"ro"},"nosuid","nodev"]}),
     );
+    Ok(())
+}
+
+// Freeze the visible knowledge submounts as individual read-only binds. A plain
+// bind hides them; rbind + ro only protects the top mount on older Linux/runc.
+fn bind_knowledge(rootfs: &Path, entries: &mut Vec<Value>, source: &Path) -> Result<()> {
+    let destination = crate::exec::native::io::KNOWLEDGE_MOUNT;
+    bind(rootfs, entries, source, destination, false)?;
+    let source = source.canonicalize()?;
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo")?;
+    for nested in mounts::nested_mounts(&mountinfo, &source)? {
+        let guest = Path::new(destination).join(nested.strip_prefix(&source)?);
+        let guest = guest
+            .to_str()
+            .context("knowledge mount path must be UTF-8")?;
+        let metadata = std::fs::symlink_metadata(&nested)?;
+        if metadata.is_dir() {
+            bind(rootfs, entries, &nested, guest, false)?;
+        } else {
+            ensure!(
+                metadata.is_file(),
+                "knowledge submount must be a directory or regular file"
+            );
+            mounts::real_dir(
+                nested
+                    .parent()
+                    .context("knowledge submount has no parent")?,
+            )?;
+            let target = super::super::codex::guest_path(rootfs, guest)?;
+            std::fs::create_dir_all(target.parent().context("knowledge target has no parent")?)?;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(target)?;
+            entries.push(json!({"type":"bind","source":nested,"destination":guest,
+                "options":["bind","ro","nosuid","nodev"]}));
+        }
+    }
     Ok(())
 }
 
@@ -41,6 +80,8 @@ pub(super) fn render(
         json!({"destination":"/proc","type":"proc","source":"proc","options":["nosuid","nodev","noexec"]}),
         json!({"destination":"/tmp","type":"tmpfs","source":"tmpfs","options":["rw","nosuid","nodev","mode=1777","size=256m"]}),
         json!({"destination":"/dev","type":"tmpfs","source":"tmpfs","options":["rw","nosuid","mode=755","size=16m"]}),
+        json!({"destination":"/dev/pts","type":"devpts","source":"devpts",
+            "options":["rw","nosuid","noexec","newinstance","ptmxmode=0666","mode=0620","gid=5"]}),
     ];
     bind(
         &rootfs,
@@ -58,13 +99,7 @@ pub(super) fn render(
     )?;
     mounts::permissions(&rootfs.join("run/opencoder-private"), agent_uid, 0o700)?;
     if let Some(source) = config.dag.knowledge_root.as_deref() {
-        bind(
-            &rootfs,
-            &mut mounts,
-            source,
-            crate::exec::native::io::KNOWLEDGE_MOUNT,
-            false,
-        )?;
+        bind_knowledge(&rootfs, &mut mounts, source)?;
     }
     if let Some(source) = config.agent.agents_dir.as_deref() {
         bind(

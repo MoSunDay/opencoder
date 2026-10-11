@@ -10,6 +10,7 @@ struct Entry {
     source: PathBuf,
     target: PathBuf,
     resource: bool,
+    metadata: Option<Vec<u8>>,
 }
 
 pub(super) fn all(source: &Path, staging: &Path) -> Result<usize> {
@@ -38,6 +39,7 @@ pub(super) fn all(source: &Path, staging: &Path) -> Result<usize> {
                         source: resource.path(),
                         target: target.join(resource.file_name()),
                         resource: true,
+                        metadata: None,
                     });
                 }
             }
@@ -46,9 +48,15 @@ pub(super) fn all(source: &Path, staging: &Path) -> Result<usize> {
                 source: item.path(),
                 target: staging.join(name),
                 resource: false,
+                metadata: None,
             });
         }
     }
+    copy_entries(source, &entries)?;
+    Ok(entries.len())
+}
+
+fn copy_entries(source: &Path, entries: &[Entry]) -> Result<()> {
     let next = AtomicUsize::new(0);
     std::thread::scope(|scope| -> Result<()> {
         let handles: Vec<_> = (0..entries.len().min(16))
@@ -67,8 +75,7 @@ pub(super) fn all(source: &Path, staging: &Path) -> Result<usize> {
             result.map_err(|_| anyhow::anyhow!("resource snapshot copy worker panicked"))??;
         }
         Ok(())
-    })?;
-    Ok(entries.len())
+    })
 }
 
 fn entry_type(entry: &std::fs::DirEntry) -> Result<std::fs::FileType> {
@@ -87,9 +94,27 @@ fn entry_type(entry: &std::fs::DirEntry) -> Result<std::fs::FileType> {
     Ok(kind)
 }
 
+pub(super) fn catalog(source: &Path, staging: &Path) -> Result<usize> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if AGENT_CATEGORIES.contains(&name.to_string_lossy().as_ref()) {
+            continue;
+        }
+        if entry_type(&entry)?.is_dir() {
+            names.push(
+                name.into_string()
+                    .map_err(|_| anyhow::anyhow!("agent name must be UTF-8"))?,
+            );
+        }
+    }
+    selected(source, staging, &names)
+}
+
 pub(super) fn selected(source: &Path, staging: &Path, names: &[String]) -> Result<usize> {
     let mut resources = std::collections::BTreeSet::new();
-    let mut count = 0;
+    let mut entries = Vec::new();
     for name in names.iter().collect::<std::collections::BTreeSet<_>>() {
         opencoder_core::agent::validate_agent_name(name).map_err(anyhow::Error::msg)?;
         let path = source.join(name);
@@ -106,8 +131,8 @@ pub(super) fn selected(source: &Path, staging: &Path, names: &[String]) -> Resul
             }
             _ => bail!("selected agent card unavailable: {name}"),
         }
-        let meta: AgentMeta =
-            serde_json::from_slice(&super::files::read(&path.join("meta.json"))?)?;
+        let metadata = super::files::read(&path.join("meta.json"))?;
+        let meta: AgentMeta = serde_json::from_slice(&metadata)?;
         for (category, resource) in [
             ("prompts", meta.current.prompt),
             ("skills", meta.current.skills),
@@ -120,15 +145,12 @@ pub(super) fn selected(source: &Path, staging: &Path, names: &[String]) -> Resul
                 resources.insert((category, resource));
             }
         }
-        copy_entry(
-            source,
-            &Entry {
-                source: path,
-                target: staging.join(name),
-                resource: false,
-            },
-        )?;
-        count += 1;
+        entries.push(Entry {
+            source: path,
+            target: staging.join(name),
+            resource: false,
+            metadata: Some(metadata),
+        });
     }
     for (category, name) in resources {
         let path = source.join(category).join(&name);
@@ -136,22 +158,24 @@ pub(super) fn selected(source: &Path, staging: &Path, names: &[String]) -> Resul
         if !metadata.is_dir() || opencoder_core::platform::fs::is_link(&metadata) {
             bail!("selected Agent resource must be a real directory");
         }
-        copy_entry(
-            source,
-            &Entry {
-                source: path,
-                target: staging.join(category).join(name),
-                resource: true,
-            },
-        )?;
-        count += 1;
+        std::fs::create_dir_all(staging.join(category))?;
+        entries.push(Entry {
+            source: path,
+            target: staging.join(category).join(name),
+            resource: true,
+            metadata: None,
+        });
     }
-    Ok(count)
+    copy_entries(source, &entries)?;
+    Ok(entries.len())
 }
 
 fn copy_entry(root: &Path, entry: &Entry) -> Result<()> {
     let meta_path = entry.source.join("meta.json");
-    let raw = super::files::read(&meta_path)?;
+    let raw = match &entry.metadata {
+        Some(raw) => raw.clone(),
+        None => super::files::read(&meta_path)?,
+    };
     let version = if entry.resource {
         let meta: ResourceMeta = serde_json::from_slice(&raw)?;
         if meta.current == 0 {

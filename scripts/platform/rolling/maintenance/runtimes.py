@@ -14,8 +14,11 @@ def idle(identifier, node, inventory):
     snapshot = inventory.get('snapshot', {})
     if any(snapshot.get(key) != 0 for key in ('active_runs', 'pending_runs', 'active_agent_loops')):
         raise ValueError(f'Runtime still has admitted work: {identifier}')
+    # Idle and interrupted conversations both await a future user turn. Keep
+    # their status and history; the quiescence checks above remain mandatory.
     if any(index.get('status') not in ('done', 'error', 'cancelled')
-           and not (index.get('status') == 'idle' and index.get('kind') in ('agent', 'operator'))
+           and not (index.get('status') in ('idle', 'interrupted')
+                    and index.get('kind') in ('agent', 'operator'))
            for index in inventory.get('indexes', [])):
         raise ValueError(f'Runtime has nonterminal executions: {identifier}')
     return inventory

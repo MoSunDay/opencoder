@@ -155,11 +155,18 @@ async fn recover(seed: usize) {
             .iter()
             .any(|arg| arg == "server-model"));
     }
-    assert!(records[0]["prompt"]
-        .as_str()
-        .unwrap()
-        .contains("inspect @notes.md"));
-    assert_eq!(records[1]["prompt"], "follow up @notes.md");
+    let initial = records[0]["prompt"].as_str().unwrap();
+    assert!(initial.ends_with("# User requirement\ninspect @notes.md"));
+    let (rules, _) = initial.split_once("\n\n# Agent instructions\n").unwrap();
+    assert!(rules.starts_with("## Operator 默认规则\n"));
+    assert!(rules.contains(&format!(
+        "- `{}`\n",
+        home.join(".opencoder/skills").display()
+    )));
+    assert_eq!(
+        records[1]["prompt"],
+        format!("{rules}\n\nfollow up @notes.md")
+    );
     assert_eq!(records[1]["args"][1], "resume");
     let store = LibsqlStore::open(root.join("node/runtime.db"))
         .await

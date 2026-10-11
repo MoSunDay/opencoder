@@ -1,8 +1,8 @@
 //! All mutations in this suite target freshly-created temporary databases.
 use opencoder_store::project::ProjectAssignment;
 use opencoder_store::{
-    LibsqlStore, ProjectInitiativePatch, ProjectInitiativeRecord, ProjectInitiativeStatus,
-    ProjectStore, ProjectTodoPatch, ProjectTodoRecord,
+    LibsqlStore, ProjectInitiativePatch, ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch,
+    ProjectTodoRecord,
 };
 
 fn assignment(todo_id: &str, execution_id: &str, kind: &str) -> ProjectAssignment {
@@ -29,11 +29,12 @@ fn todo(id: &str) -> ProjectTodoRecord {
 async fn initiatives_are_the_only_containers_and_nonempty_ones_reject_deletion() {
     let store = LibsqlStore::open_memory().await.unwrap();
     let group = ProjectInitiativeRecord {
+        summary: Default::default(),
+        people: Default::default(),
         id: "i1".into(),
         goal_id: None,
         title: "专项".into(),
         detail_md: None,
-        status: ProjectInitiativeStatus::Planned,
         sort: 0,
         created_at: 1,
         updated_at: 1,
@@ -41,6 +42,7 @@ async fn initiatives_are_the_only_containers_and_nonempty_ones_reject_deletion()
     store.create_initiative(&group).await.unwrap();
     store
         .create_todo(&ProjectTodoRecord {
+            people: Default::default(),
             initiative_id: Some("i1".into()),
             ..todo("t1")
         })
@@ -61,11 +63,12 @@ async fn initiatives_are_the_only_containers_and_nonempty_ones_reject_deletion()
 async fn standalone_initiative_and_optional_todo_association_roundtrip() {
     let store = LibsqlStore::open_memory().await.unwrap();
     let initiative = ProjectInitiativeRecord {
+        summary: Default::default(),
+        people: Default::default(),
         id: "m".into(),
         goal_id: None,
         title: "专项".into(),
         detail_md: Some("正文".into()),
-        status: ProjectInitiativeStatus::Planned,
         sort: 0,
         created_at: 1,
         updated_at: 1,
@@ -76,6 +79,7 @@ async fn standalone_initiative_and_optional_todo_association_roundtrip() {
         .patch_todo(
             "t",
             &ProjectTodoPatch {
+                people: Default::default(),
                 initiative_id: Some(Some("m".into())),
                 ..Default::default()
             },
@@ -89,6 +93,7 @@ async fn standalone_initiative_and_optional_todo_association_roundtrip() {
         .patch_initiative(
             "m",
             &ProjectInitiativePatch {
+                people: Default::default(),
                 goal_id: Some(None),
                 ..Default::default()
             },
@@ -110,6 +115,7 @@ async fn standalone_initiative_and_optional_todo_association_roundtrip() {
         .patch_todo(
             "t",
             &ProjectTodoPatch {
+                people: Default::default(),
                 initiative_id: Some(None),
                 ..Default::default()
             },

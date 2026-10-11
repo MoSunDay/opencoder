@@ -219,39 +219,6 @@ Both are **SQLite under the hood**, persisting as standard `.db` + `.db-wal` + `
 
 > Note: end-to-end task performance is LLM-dominated (first-token latency is the provider RTT); under the same model both projects are essentially neck-and-neck in actual task throughput. The comparison above isolates the **runtime baseline** — the cost the runtime itself imposes regardless of the LLM.
 
-Using "implement a terminal Snake game in Rust + crossterm" as a control task, both invoked the same way:
-
-```bash
-# opencode (Node SEA)
-opencode run --model zhipuai-coding-plan/glm-5.2 "Implement terminal Snake..."
-
-# opencoder (Rust native)
-opencoder run "Implement terminal Snake..."
-```
-
-**Measured comparison (2026-07-19, same machine, same model glm-5.2, isolated workdirs, 0.5 s sampling throughout):**
-**Scope: only "non-compilation periods" are counted — the agent main process itself, with no cargo/rustc child process running (samples where `npids<=1`). Fully symmetric on both sides, completely excluding compilation contributions.**
-
-| Metric | opencode `1.17.8` | opencoder `0.1.0` | Difference |
-| --- | --- | --- | --- |
-| Task completion time (wall) | 172.3 s | 112.2 s | LLM sampling noise is large; reference only |
-| Non-compilation sample share | 313 / 321 (97.5%) | 199 / 209 (95.2%) | Compilation share is small for both |
-| **Avg CPU utilization** | **55.3%** (sustained high) | **0.13%** (event-driven, idle while waiting on LLM) | opencode **~425×** higher |
-| CPU median (p50) | **44.6%** (≥44% half the time) | **0.0%** (fully 0 half the time) | Fundamental difference |
-| CPU p95 | 115.2% | 1.9% | opencode **~61×** higher |
-| CPU peak | 2631.6% (V8 GC/JIT, transient ≈26 cores) | 3.7% | — |
-| **Agent process RSS avg** | **451.7 MB** | **11.8 MB** | opencode **~38×** higher |
-| Agent process RSS peak | 557.5 MB | 12.1 MB | opencode **~47×** higher |
-| Result | compiles, 242 lines | compiles, 351 lines | — |
-
-> **Key: opencode's high CPU is unrelated to compilation (self-proven by the data).** The opencode 2631.6% CPU-peak sample was verified to have `npids=1` (no cargo child running at that instant) — it is a pure V8 GC/JIT burst. Moreover, after stripping all compilation periods, opencode's average CPU did not drop but rose slightly (full-run 54.4% → non-compilation 55.3%). In other words, during "waiting for LLM reply" / "orchestrating tools" periods that have nothing to do with compilation, opencode's own V8 runtime still sustains ~55% continuous high CPU. opencoder is the opposite — non-compilation CPU averages 0.13%, median 0; the agent is essentially silent while waiting.
-
-> **Scope & credibility notes:**
-> - All numbers in the table come from **non-compilation-period samples** (`npids<=1`, agent main process with no cargo/rustc child), fully symmetric on both sides. Compilation periods (opencode 2.5%, opencoder 4.8%) are all excluded.
-> - **Wall-time is affected by LLM sampling randomness**: this run opencode 172.3 s / opencoder 112.2 s; the previous run was 125.7 s / 79.0 s in the opposite direction, so treat it as reference only, **not a steady-state conclusion**; CPU utilization and RSS are the stable differences in the runtime baseline.
-> - opencode `run` bundles a V8 runtime and sustains resident high CPU/RSS; opencoder compiles to a native async runtime and drops CPU to ~0 while waiting for replies.
-> - opencode also has a resident server daemon (≈285 MB) not counted here; in long-running server mode its resident overhead is even higher.
-> - Raw CSV evidence (including the six `root_*` / `tree_*` / `npids` columns) is at [`docs/bench/opencode-vs-opencoder-2026-07-19/`](docs/bench/opencode-vs-opencoder-2026-07-19/).
 
 ---
 

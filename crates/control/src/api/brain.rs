@@ -38,6 +38,10 @@ pub async fn bind(
         target: target.target.trim().to_string(),
         ..target
     };
+    let _lock = match state.fleet.request_lock("capability", &id).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
     match state.store.get_brain_capability(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404("capability not found"),
@@ -128,5 +132,58 @@ pub async fn agents(State(state): State<Arc<AppState>>) -> Response {
                 .collect::<Vec<_>>()
         }))),
         Err(error) => error_500(error.to_string()),
+    }
+}
+
+/// Fleet cleanup belongs to the Server; the standalone Web has no Fleet store.
+pub async fn delete_capability(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let _catalog = match state.fleet.request_lock("brain-catalog", "registry").await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let _lock = match state.fleet.request_lock("capability", &id).await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    let result = async {
+        let references = super::brain_runs::maintenance::references(
+            &state,
+            super::brain_runs::maintenance::Removing::Capability(&id),
+        )
+        .await?;
+        if !references.is_empty() {
+            return Ok(response(RpcReply::error(
+                409,
+                format!("capability is referenced by: {}", references.join(", ")),
+            )));
+        }
+        let exists = state.brain.get_capability(&id).await?.is_some()
+            || state
+                .fleet
+                .definition("capability_target", &id)
+                .await?
+                .is_some()
+            || state
+                .fleet
+                .definition("brain_capability_meta", &id)
+                .await?
+                .is_some();
+        if !exists {
+            return Ok(error_404(&format!("brain capability not found: {id}")));
+        }
+        // Retry also clears metadata left behind by a prior partial failure.
+        state.brain.delete_capability(&id).await?;
+        for kind in ["capability_target", "brain_capability_meta"] {
+            state.fleet.delete_definition(kind, &id).await?;
+        }
+        Ok::<_, anyhow::Error>(response(RpcReply::ok(json!({"ok":true,"deleted":id}))))
+    }
+    .await;
+    match result {
+        Ok(reply) => reply,
+        Err(error) => error_500(format!("delete brain capability: {error:#}")),
     }
 }

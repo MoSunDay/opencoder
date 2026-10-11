@@ -46,6 +46,7 @@ async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<LibsqlStore>) {
 async fn seed_todo(p: &Arc<LibsqlStore>, id: &str, status: ProjectTodoStatus) {
     let now = 1000;
     p.create_todo(&ProjectTodoRecord {
+        people: Default::default(),
         id: id.into(),
         initiative_id: None,
         title: format!("待办 {id}"),

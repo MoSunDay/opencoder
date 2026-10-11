@@ -30,18 +30,22 @@ import time
 from . import lib
 from .lib import Counter
 
-# Distinctive prompts (kept identical to the prior bash suite for continuity).
-SNAKE_PROMPT = (
-    "用 python3 写一个终端贪吃蛇游戏，保存为 snake.py。方向键控制、吃食物变长、"
-    "撞墙/撞自己结束。写完运行 'python3 -m py_compile snake.py' 验证语法（不要运行游戏循环）。"
+# Distinctive infrastructure prompts identify persisted conversation context.
+DIAGNOSTICS_PROMPT = (
+    "用 python3 编写终端诊断工具，保存为 diagnostics.py。使用标准库 argparse，"
+    "提供版本、平台、Python 路径、工作目录、磁盘容量和指定目录的文件统计；"
+    "支持文本与 JSON 输出，包含参数校验和清晰的错误信息，不修改被检查的文件。"
+    "写完运行 'python3 -m py_compile diagnostics.py' 验证语法。"
 )
 RESUME_PROMPT = (
-    "给贪吃蛇加计分板，屏幕顶部显示当前分数和最高分(high score)。修改 snake.py。"
+    "给诊断工具增加统计项 summary_count，输出本次完成的检查数量。修改 diagnostics.py。"
 )
-FORK_PROMPT = "给贪吃蛇加暂停功能，按 P 键暂停/继续。"
-THUNDER_PROMPT = (
-    "用 python3 写一个雷霆战机(飞机射击)游戏，保存为 thunder.py。方向键移动、空格射击、"
-    "敌机下落、击中得分、被撞结束。写完运行 'python3 -m py_compile thunder.py' 验证语法（不要运行游戏循环）。"
+FORK_PROMPT = "给诊断工具增加 --timeout 参数，限制单次检查时间。"
+MANIFEST_PROMPT = (
+    "用 python3 编写文件摘要工具，保存为 manifest.py。使用标准库 argparse，"
+    "递归读取指定目录，输出相对路径、大小与 SHA-256；按路径排序，支持 JSON 输出、"
+    "扩展名过滤和清晰的错误信息，不跟随软链接或修改输入文件。"
+    "写完运行 'python3 -m py_compile manifest.py' 验证语法。"
 )
 
 AP_PROMPT = (
@@ -66,7 +70,7 @@ def _has_tool_use(log: str) -> bool:
     return lib.TOOL_START in log
 
 
-def _assert_game_artifact(c: Counter, sid: str | None, log: str, path: str, label: str) -> None:
+def _assert_program_artifact(c: Counter, sid: str | None, log: str, path: str, label: str) -> None:
     """Shared E1/E6 contract: the model wrote a substantial, compiling program
     via tools. If the live run itself errored (no session marker — transient
     model/network failure), soft-skip the dependent checks rather than emit a
@@ -96,8 +100,8 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     plan_cfg = lib.make_config(api_key=api_key, reasoning_effort="low", max_tokens=8192)
     plan_cfg["agent"] = {"default": "plan"}  # headless resolves agent from config, not a CLI flag
 
-    snake = lib.seed_workdir(base_cfg)
-    thunder = lib.seed_workdir(base_cfg)
+    diagnostics = lib.seed_workdir(base_cfg)
+    manifest = lib.seed_workdir(base_cfg)
     compact = lib.seed_workdir(compact_cfg)
     probe = lib.seed_workdir(base_cfg)
     plan = lib.seed_workdir(plan_cfg)
@@ -105,25 +109,25 @@ def run_all(bin_path: str, api_key: str) -> Counter:
 
     # ---- E7/E9: cheap display-path checks (no model call) ----
     print("== E7/E9: reasoning_effort + interleaved_thinking config -> models display ==")
-    models = lib.models_text(bin_path, snake)
+    models = lib.models_text(bin_path, diagnostics)
     c.check("models shows thinking line", "thinking" in models and ":" in models)
     c.check("reasoning_effort resolved to medium", "medium" in models)
     c.check("models shows interleave line", "interleave" in models and ":" in models)
     c.check("interleaved_thinking defaults on", "on" in models)
 
-    # ---- E1: write+bash a real snake game ----
-    print("== E1: glm writes a runnable snake game (write+bash tools) ==")
-    rc, e1_log = lib.run_prompt(bin_path, snake, SNAKE_PROMPT)
-    snake_py = os.path.join(snake, "snake.py")
+    # ---- E1: write+bash a real diagnostic tool ----
+    print("== E1: glm writes a runnable diagnostic tool (write+bash tools) ==")
+    rc, e1_log = lib.run_prompt(bin_path, diagnostics, DIAGNOSTICS_PROMPT)
+    diagnostics_py = os.path.join(diagnostics, "diagnostics.py")
     sid = lib.extract_session_id(e1_log)
-    _assert_game_artifact(c, sid, e1_log, snake_py, "snake.py")
+    _assert_program_artifact(c, sid, e1_log, diagnostics_py, "diagnostics.py")
     # sid is consumed by E2/E5/E8; capture whether the run produced a usable session.
-    c.check("captured SNAKE session id", sid is not None)
+    c.check("captured DIAGNOSTICS session id", sid is not None)
     c.soft("resume hint printed", "opencoder -s" in e1_log, "no resume hint in log")
 
     # ---- E2: --continue resumes SAME session AND loads prior context ----
     print("== E2: --continue resumes same session and loads prior context ==")
-    rc, e2_log = lib.run_prompt(bin_path, snake, RESUME_PROMPT, "--continue")
+    rc, e2_log = lib.run_prompt(bin_path, diagnostics, RESUME_PROMPT, "--continue")
     rsid = lib.extract_session_id(e2_log)
     # The live run must complete before we can assert resume contracts. A missing
     # session marker means run_headless errored (transient model/network failure);
@@ -133,41 +137,41 @@ def run_all(bin_path: str, api_key: str) -> Counter:
                "no [session] marker in log (run errored — transient)")
     else:
         c.check("resume reuses same session id", sid == rsid, f"{sid} vs {rsid}")
-        sjson = lib.show_json(bin_path, snake, sid)
+        sjson = lib.show_json(bin_path, diagnostics, sid)
         roles = lib.message_roles(sjson)
         # Deep: resumed history must contain the turn-1 user prompt (context loaded,
         # not a fresh session). The user prompt text is the strongest evidence.
         c.check("resumed history contains turn-1 prompt (context loaded)",
-                "贪吃蛇" in lib.all_text(sjson))
+                "诊断工具" in lib.all_text(sjson))
         c.check("resume appended a turn (>= 2 user messages)",
                 roles.count("user") >= 2, f"roles={roles}")
-        # scoreboard added to the artifact
+        # summary count added to the artifact
         sc = 0
         try:
-            with open(snake_py, encoding="utf-8") as f:
-                sc = sum(1 for ln in f if any(k in ln.lower() for k in ("high", "score")))
+            with open(diagnostics_py, encoding="utf-8") as f:
+                sc = sum(1 for ln in f if any(k in ln.lower() for k in ("summary_count",)))
         except FileNotFoundError:
             pass
-        c.soft("scoreboard added to snake.py", sc > 0, f"{sc} score-related lines")
+        c.soft("summary count added to diagnostics.py", sc > 0, f"{sc} summary-related lines")
 
     # ---- E5: --fork copies messages AND leaves original untouched ----
     print("== E5: --fork copies messages and leaves original untouched ==")
     if sid:
-        before = lib.show_json(bin_path, snake, sid)
+        before = lib.show_json(bin_path, diagnostics, sid)
         before_roles = lib.message_roles(before)
         before_count = len(before["messages"])
-        rc, e5_log = lib.run_prompt(bin_path, snake, FORK_PROMPT, "--session", sid, "--fork")
+        rc, e5_log = lib.run_prompt(bin_path, diagnostics, FORK_PROMPT, "--session", sid, "--fork")
         fsid = lib.extract_fork_id(e5_log)
         c.check("fork creates a new session id", fsid is not None and fsid != sid,
                 f"orig={sid} fork={fsid}")
-        after = lib.show_json(bin_path, snake, sid)
+        after = lib.show_json(bin_path, diagnostics, sid)
         c.check("original session message count unchanged by fork",
                 len(after["messages"]) == before_count,
                 f"{before_count} -> {len(after['messages'])}")
         c.check("original session role sequence unchanged by fork",
                 lib.message_roles(after) == before_roles)
         if fsid:
-            fjson = lib.show_json(bin_path, snake, fsid)
+            fjson = lib.show_json(bin_path, diagnostics, fsid)
             f_roles = lib.message_roles(fjson)
             c.check("fork copied the original message history",
                     len(fjson["messages"]) >= before_count,
@@ -252,29 +256,29 @@ def run_all(bin_path: str, api_key: str) -> Counter:
                "hello" in lib.assistant_text(pjson).lower() or "greet" in lib.assistant_text(pjson).lower(),
                "parent text did not mention hello.py")
 
-    # ---- E6: cross-game-type regression (write+bash) ----
-    print("== E6: glm writes a runnable thunder-fighter game (cross-game regression) ==")
-    rc, e6_log = lib.run_prompt(bin_path, thunder, THUNDER_PROMPT)
-    thunder_py = os.path.join(thunder, "thunder.py")
-    _assert_game_artifact(c, lib.extract_session_id(e6_log), e6_log, thunder_py, "thunder.py")
+    # ---- E6: cross-tool regression (write+bash) ----
+    print("== E6: glm writes a runnable manifest tool (cross-tool regression) ==")
+    rc, e6_log = lib.run_prompt(bin_path, manifest, MANIFEST_PROMPT)
+    manifest_py = os.path.join(manifest, "manifest.py")
+    _assert_program_artifact(c, lib.extract_session_id(e6_log), e6_log, manifest_py, "manifest.py")
 
     # ---- E8: bundle export/import roundtrip INTEGRITY ----
     print("== E8: bundle export/import roundtrip integrity ==")
     if sid:
         # Unique per run (a fixed /tmp path collides across runs) and removed
         # in a finally so a failed roundtrip never leaks the bundle.
-        fd, bundle = tempfile.mkstemp(prefix="snake-", suffix=".opencoder")
+        fd, bundle = tempfile.mkstemp(prefix="diagnostics-", suffix=".opencoder")
         os.close(fd)
         try:
-            rc, _ = lib.run(bin_path, ["--workdir", snake, "session", "export", sid, "--out", bundle])
+            rc, _ = lib.run(bin_path, ["--workdir", diagnostics, "session", "export", sid, "--out", bundle])
             c.check("bundle exported", os.path.isfile(bundle))
-            rc, imp_out = lib.run(bin_path, ["--workdir", snake, "session", "import", bundle])
+            rc, imp_out = lib.run(bin_path, ["--workdir", diagnostics, "session", "import", bundle])
             c.check("bundle imported", "imported session" in imp_out)
             # Extract the imported id from the import output / list.
             isid = _extract_imported_id(imp_out)
             if isid:
-                orig = lib.show_json(bin_path, snake, sid)
-                imp = lib.show_json(bin_path, snake, isid)
+                orig = lib.show_json(bin_path, diagnostics, sid)
+                imp = lib.show_json(bin_path, diagnostics, isid)
                 oc, ic = len(orig["messages"]), len(imp["messages"])
                 c.check("roundtrip message count equal", oc == ic, f"orig={oc} imported={ic}")
                 # Deep: content integrity — every original text block survives the roundtrip.
@@ -325,11 +329,11 @@ def run_all(bin_path: str, api_key: str) -> Counter:
 
     # ---- E13: interleaved thinking reasoning_content persisted (soft) ----
     print("== E13: interleaved thinking reasoning_content persisted (soft) ==")
-    # Reuse the E1 snake session — a tool-using turn should persist Reasoning
+    # Reuse the E1 diagnostics session — a tool-using turn should persist Reasoning
     # blocks when interleaved_thinking is on (default) and the model emits
     # reasoning_content.  Model-dependent: skip (not fail) when absent.
     if sid:
-        sjson = lib.show_json(bin_path, snake, sid)
+        sjson = lib.show_json(bin_path, diagnostics, sid)
         c.soft("reasoning_content persisted as Reasoning block (interleaved thinking)",
                lib.has_reasoning_blocks(sjson),
                "model may not emit reasoning_content on this turn")
@@ -338,7 +342,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
 
     # ---- E14: config show emits valid merged JSON ----
     print("== E14: config show emits valid merged JSON ==")
-    cfg_out = lib.config_show(bin_path, snake)
+    cfg_out = lib.config_show(bin_path, diagnostics)
     cfg_valid = False
     cfg_fields = False
     try:
@@ -355,7 +359,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     # generate_title runs after the first round (best-effort, 30s, small_model).
     # Verify the session has a non-empty, non-default title.
     if sid:
-        tjson = lib.show_json(bin_path, snake, sid)
+        tjson = lib.show_json(bin_path, diagnostics, sid)
         title = (tjson.get("meta") or {}).get("title") or ""
         # The default (pre-generation) title is the first ~80 chars of the
         # prompt; a generated title is typically much shorter and descriptive.
@@ -376,8 +380,8 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     # integration tests with MockChatClient cannot verify across processes.
     crash_wd = lib.seed_workdir(lib.make_config(api_key=api_key))
     crash_prompt = (
-        "用 python3 写一个终端俄罗斯方块游戏 tetris.py。"
-        "包含 7 种方块、旋转、消行、计分。写完运行 'python3 -m py_compile tetris.py'。"
+        "用 python3 编写目录校验工具 verify.py，包含递归摘要、JSON 清单、并发读取、"
+        "差异报告、错误处理和命令行帮助。写完运行 'python3 -m py_compile verify.py'。"
     )
     crash_proc = subprocess.Popen(
         [bin_path, "--workdir", crash_wd, crash_prompt],

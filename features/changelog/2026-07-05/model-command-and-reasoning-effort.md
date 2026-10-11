@@ -24,5 +24,5 @@ Commit: (working-tree, pre-initial-commit)
 - `/model` 编辑 api_key 为掩码不回显，规避 TUI 明文泄露；落盘值由 `looks_like_env_var` 决定明文或 `{ENV}` 引用。
 - `Config::save_target` 的候选顺序与 `config_candidates` 一致（project-first）；创建新文件固定落到 `<workdir>/opencode.json`。
 - 测试需隔离 `HOME`+`XDG_CONFIG_HOME`，否则 `Config::load` 会拾取开发者真实全局配置（`reasoning_effort_defaults_to_none` 测试已加 `isolated_home` guard）。
-- **e2e（`scripts/e2e-glm.sh`）**：`reasoning_effort` 用 `medium`（非 high）以降低 live turn 内存/时长，避免被 sandbox reap；E7（`opencode models` 显示检查）**前置到 E1 之前**（廉价、无模型调用），故即使重型 live 步骤被杀，显示路径仍先验证。E1 的 run.log 重定向已补（修复 E2 session-id 比对的预存脆弱性）。**全量 e2e 已通过：10 passed / 0 failed**（E7 显示 → E1 snake → E2 resume+scoreboard → E6 thunder-fighter）。
+- **e2e（`scripts/e2e-glm.sh`）**：`reasoning_effort` 用 `medium`（非 high）以降低 live turn 内存/时长，避免被 sandbox reap；E7（`opencode models` 显示检查）**前置到 E1 之前**（廉价、无模型调用），故即使重型 live 步骤被杀，显示路径仍先验证。E1 的 run.log 重定向已补（修复 E2 session-id 比对的预存脆弱性）。**全量 e2e 已通过：10 passed / 0 failed**（E7 显示 → E1 diagnostics → E2 resume+summary → E6 manifest）。
 - **CLI 显示路径单测**：`models_dispatch` 抽出 `models_summary(&Config) -> String`，新增 2 测试（reasoning_effort set/unset），不再依赖 smoke 或真模型即可覆盖。

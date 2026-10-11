@@ -1,6 +1,7 @@
 """SQLite online backups; independent files are never labelled one snapshot."""
 from pathlib import Path
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import shutil
@@ -44,6 +45,18 @@ def roots(settings, runtime_data=True):
     return result
 
 
+def databases(root, output):
+    """Visit every directory once; do not follow resource symlinks."""
+    def failed(error):
+        raise error
+
+    for directory, _, files in os.walk(root, onerror=failed, followlinks=False):
+        for name in files:
+            source = Path(directory) / name
+            if name.endswith('.db') and not source.is_symlink():
+                database(source, output / source.relative_to(root))
+
+
 def snapshot(settings, output, stopped=False, runtime_data=True):
     if not runtime_data and not stopped:
         raise ValueError("shared-data maintenance backup requires stopped writers")
@@ -61,9 +74,14 @@ def snapshot(settings, output, stopped=False, runtime_data=True):
         if stopped:
             tree.copy_tree(root, output / name,
                 ignore=shutil.ignore_patterns("*.db", "*.db-wal", "*.db-shm", "*.lock"))
-        for source in root.rglob("*.db"):
-            if not source.is_symlink():
-                database(source, output / name / source.relative_to(root))
+    # Each database still has its own pinned read transaction and quick_check.
+    # Bound parallel roots so cold historical directories cannot serialize the
+    # entire backup; finish every copy before verifying or publishing output.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        pending = [executor.submit(databases, root, output / name)
+                   for name, root in selected.items()]
+        for future in pending:
+            future.result()
     # Copy files after the pinned DB snapshot: immutable versions referenced by
     # that snapshot already exist. NFS path bindings must match their hashes too.
     ontology_root = ontology.files_root(output / 'server')

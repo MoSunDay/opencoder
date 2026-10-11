@@ -25,23 +25,25 @@ pub enum TagError {
     InvalidScope,
 }
 
+fn in_scope(tag: &ProjectTag, initiative: Option<&ProjectInitiativeRecord>) -> bool {
+    match tag.scope_type.as_str() {
+        "global" => tag.scope_id.is_empty(),
+        "project" => {
+            initiative.is_some_and(|i| i.goal_id.as_deref() == Some(tag.scope_id.as_str()))
+        }
+        "initiative" => initiative.is_some_and(|i| i.id == tag.scope_id),
+        _ => false,
+    }
+}
+
 pub fn available_tags<'a>(
     tags: &'a [ProjectTag],
     initiative: Option<&ProjectInitiativeRecord>,
 ) -> Vec<&'a ProjectTag> {
-    let Some(initiative) = initiative else {
-        return vec![];
-    };
     let mut names = BTreeMap::new();
-    for scope in ["project", "initiative"] {
+    for scope in ["global", "project", "initiative"] {
         for tag in tags {
-            if tag.scope_type == scope
-                && if scope == "project" {
-                    initiative.goal_id.as_deref() == Some(tag.scope_id.as_str())
-                } else {
-                    tag.scope_id == initiative.id
-                }
-            {
+            if tag.scope_type == scope && in_scope(tag, initiative) {
                 names.insert(tag.name.as_str(), tag);
             }
         }
@@ -91,13 +93,8 @@ pub fn validate_selection(
             .iter()
             .find(|tag| &tag.id == id)
             .ok_or(TagError::InvalidScope)?;
-        let in_scope = initiative.is_some_and(|i| {
-            (tag.scope_type == "initiative" && tag.scope_id == i.id)
-                || (tag.scope_type == "project"
-                    && i.goal_id.as_deref() == Some(tag.scope_id.as_str()))
-        });
         anyhow::ensure!(
-            in_scope && allowed.iter().any(|item| item.name == tag.name),
+            in_scope(tag, initiative) && allowed.iter().any(|item| item.name == tag.name),
             TagError::InvalidScope
         );
     }
@@ -108,8 +105,23 @@ pub fn validate_selection(
 mod tests {
     use super::*;
     #[test]
-    fn no_initiative_has_no_available_tags() {
+    fn empty_catalog_rejects_unknown_selections() {
         assert!(available_tags(&[], None).is_empty());
         assert!(validate_selection(&[], None, &["missing".into()]).is_err());
+    }
+
+    #[test]
+    fn unassigned_todos_can_only_select_well_formed_global_tags() {
+        let tags: Vec<ProjectTag> = serde_json::from_value(serde_json::json!([
+            {"id":"global","scope_type":"global","scope_id":"","name":"通用"},
+            {"id":"bad","scope_type":"global","scope_id":"owner","name":"错误"},
+            {"id":"project","scope_type":"project","scope_id":"p","name":"项目"}
+        ]))
+        .unwrap();
+        assert_eq!(available_tags(&tags, None), vec![&tags[0]]);
+        assert!(validate_selection(&tags, None, &["global".into()]).is_ok());
+        for id in ["bad", "project", "missing"] {
+            assert!(validate_selection(&tags, None, &[id.into()]).is_err());
+        }
     }
 }

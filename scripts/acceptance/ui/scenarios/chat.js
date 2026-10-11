@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-async function conversation({ page, api, root, until }, mode) {
+async function conversation({ page, api, root, until, holdResponses }, mode) {
   await page.getByRole('menuitem', { name: /全部执行$/ }).click();
   await page.getByRole('menuitem', { name: /Agent$/ }).click();
   await page.getByText(mode === 'agent' ? 'Agent 模式' : 'Operator 模式', { exact: true }).click();
@@ -14,6 +14,9 @@ async function conversation({ page, api, root, until }, mode) {
   if (mode === 'agent') {
     await page.getByRole('combobox', { name: '执行 Agent', exact: true }).click();
     await page.locator('.ant-select-item-option-content').filter({ hasText: 'ui-chat-agent' }).click();
+  } else {
+    await sender.fill('@ui-chat-agent');
+    await page.locator('[data-cmd="@ui-chat-agent"]').click();
   }
   const replies = page.locator('.ant-bubble-start').getByText('browser node-owned answer', { exact: true });
   const before = (await api('GET', '/api/executions')).executions.length;
@@ -24,7 +27,7 @@ async function conversation({ page, api, root, until }, mode) {
   assert(response.ok(), `${mode} session must be accepted`);
   const request = response.request().postDataJSON();
   assert.equal(request.kind || 'operator', mode);
-  if (mode === 'agent') assert.equal(request.agent, 'ui-chat-agent');
+  assert.equal(request.agent, 'ui-chat-agent');
   const run = await response.json();
   assert(run.id);
   await replies.first().waitFor();
@@ -63,7 +66,30 @@ async function conversation({ page, api, root, until }, mode) {
     assert.equal((await api('GET', '/api/executions')).executions.length, count);
     await page.screenshot({ path: path.join(root, `chat-${mode}-empty-stream.png`), animations: 'disabled' });
   } finally { await page.unroute(eventRoute); }
-  return { mode, id: run.id, continuation_reused_execution: true, empty_stream_restores_answer: true };
+  const release = holdResponses();
+  try {
+    await sender.fill(`ui-${mode}-reopen-running`);
+    const continued = page.waitForResponse((response) => response.url().endsWith(`/api/sessions/${run.id}/prompt`) && response.request().method() === 'POST');
+    await page.locator('.ant-sender button:has(.anticon-arrow-up)').click();
+    assert((await continued).ok());
+    await page.getByRole('menuitem', { name: /全部执行$/ }).click();
+    await page.getByRole('menuitem', { name: /Agent$/ }).click();
+    const listed = page.waitForResponse((response) => response.url().includes(`/api/nodes/${request.node_id}/dialogs?kind=${mode}`));
+    await page.getByRole('combobox', { name: '执行节点', exact: true }).click();
+    await page.locator('.ant-select-item-option-content').filter({ hasText: 'node-a' }).click();
+    const dialogs = (await (await listed).json()).dialogs;
+    const index = dialogs.findIndex((dialog) => dialog.session_id === run.id);
+    assert(index >= 0, `${mode} running conversation remains in its node list`);
+    const reopened = page.waitForResponse((response) => response.url().endsWith(`/api/sessions/${run.id}`) && response.request().method() === 'GET');
+    await page.locator('.oc-chat-sidebar .ant-conversations-item').nth(index).click();
+    assert.equal((await (await reopened).json()).draining, true);
+    release();
+    await until(async () => await replies.count() === 4, `${mode} reopened conversation receives the fourth reply`);
+    await page.locator('.ant-sender-actions-btn-loading-button').waitFor({ state: 'hidden' });
+    assert.equal((await api('GET', '/api/executions')).executions.length, count);
+    await page.screenshot({ path: path.join(root, `chat-${mode}-reopened.png`), animations: 'disabled' });
+  } finally { release(); }
+  return { mode, id: run.id, continuation_reused_execution: true, empty_stream_restores_answer: true, reopened_running_session: true };
 }
 
 async function chat(context) {

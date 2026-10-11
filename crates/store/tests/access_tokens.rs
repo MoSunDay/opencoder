@@ -2,6 +2,31 @@ use opencoder_core::identity::{token_hash, Role};
 use opencoder_store::{AccessToken, LibsqlStore, Store};
 
 #[tokio::test]
+async fn initial_token_failure_rolls_back_user_creation() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    let digest = token_hash("temporary-initial-token");
+    store
+        .create_user("alice", &digest, Role::Viewer, 1)
+        .await
+        .unwrap();
+    assert!(store
+        .create_user("bob", &digest, Role::Editor, 2)
+        .await
+        .is_err());
+    assert!(store.find_user_by_name("bob").await.unwrap().is_none());
+    assert_eq!(store.list_access_tokens().await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .find_user_by_token_hash(&digest)
+            .await
+            .unwrap()
+            .unwrap()
+            .name,
+        "alice"
+    );
+}
+
+#[tokio::test]
 async fn tokens_expire_individually_and_roles_are_read_live() {
     let store = LibsqlStore::open_memory().await.unwrap();
     store

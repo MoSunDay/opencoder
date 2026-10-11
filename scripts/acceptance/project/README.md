@@ -69,7 +69,23 @@ node scripts/acceptance/project/capabilities/main.js \
 node scripts/acceptance/project_workbench_ui.js
 ```
 
-该脚本使用当前 SPA 构建产物，检查项目、专项、TODO、Tag 四个表格及 Tag 编辑表单在 1920、1280、768 和 390 像素宽度下的展示，项目详情与专项看板抽屉，筛选后拖动的完整顺序，Tag 分组中的同一 TODO 同步，保存失败回退，以及项目与 Tag 增删改。Tag 验收覆盖独立专项归属、改名并移动至项目、重名失败保留填写内容。默认在 `/tmp/opencoder-project-ui` 保存 `receipt.json` 和截图，可用 `PROJECT_UI_ARTIFACTS` 指定输出目录。浏览器需要 SPA 的 `playwright-core` 依赖及其配套的 Chromium，也可通过 `CHROME_PATH` 指定路径。此验收使用临时 HTTP 服务与夹具凭证，不访问生产数据；存储迁移与真实接口由 Rust 测试验证。
+概述历史按钮、项目内专项排序及名称列布局使用独立真实 Server 验收：
+
+```sh
+node scripts/acceptance/project_order_ui.js /path/to/opencoder-server /path/to/spa/dist /path/to/evidence
+```
+
+该入口核对 Server 内嵌 SPA 摘要，创建临时项目数据，覆盖四种屏宽的列表、项目详情和历史抽屉，以及筛选拖拽、保存失败恢复、刷新持久化和键盘排序。只在故障分支拦截排序响应；不连接生产服务，也不需要执行节点。
+
+TODO 表单布局与保存链路可单独验收：
+
+```sh
+node scripts/acceptance/project/forms.js /path/to/opencoder-server /path/to/spa/dist /path/to/evidence
+```
+
+该入口使用独立真实 Server 验证列表与专项内新建、修改、刷新持久化，以及 1920、1280、768、390 像素宽度下的字段标签、间距、长内容、多人和多标签展示、底部操作区。仅执行能力目录的显示和保存错误分支使用夹具；不派发执行。失败保存截图与 HTML，全部通过才写入回执。
+
+该脚本使用当前 SPA 构建产物，检查项目分类下的 Overview、Tag 两个菜单：Overview 保留项目、专项、TODO 三个页签，Tag 独立展示。覆盖四个表格及 Tag 编辑表单在 1920、1280、768 和 390 像素宽度下的展示，菜单切换与刷新后的选择保留，项目详情与专项看板抽屉，筛选后拖动的完整顺序，Tag 分组中的同一 TODO 同步，保存失败回退，以及项目与 Tag 增删改。Tag 验收覆盖独立专项归属、转为全局后隐藏归属选择、改名并移动至项目、重名失败保留填写内容。默认在 `/tmp/opencoder-project-ui` 保存 `receipt.json` 和截图，可用 `PROJECT_UI_ARTIFACTS` 指定输出目录。浏览器需要 SPA 的 `playwright-core` 依赖及其配套的 Chromium，也可通过 `CHROME_PATH` 指定路径。此验收使用临时 HTTP 服务与夹具凭证，不访问生产数据；存储迁移与真实接口由 Rust 测试验证。
 
 在独立临时目录中启动构建后的 Server、两个 Node、只读 NFSv3 Agent 资源池、HTTP 模型夹具和 Chromium，覆盖项目、关联项目与独立专项、分组 TODO 与 backlog 的真实浏览器创建，以及通过原生能力界面发起执行、关联指派记录和查看结论。模型响应由本地夹具确定性提供，不调用外部 LLM。
 

@@ -126,6 +126,7 @@ async fn sync_snapshot(worker: &Worker, snapshot: &Value, action: &str) -> Resul
                     .patch_goal(
                         &goal.id,
                         &ProjectGoalPatch {
+                            people: Default::default(),
                             title: Some(goal.title),
                             detail_md: goal.detail_md,
                             ..Default::default()
@@ -150,6 +151,7 @@ async fn sync_snapshot(worker: &Worker, snapshot: &Value, action: &str) -> Resul
                     .patch_initiative(
                         &m.id,
                         &ProjectInitiativePatch {
+                            people: Default::default(),
                             title: Some(m.title),
                             goal_id: Some(m.goal_id),
                             detail_md: m.detail_md,
@@ -167,6 +169,7 @@ async fn sync_snapshot(worker: &Worker, snapshot: &Value, action: &str) -> Resul
         projects.create_todo(&todo).await?;
     } else {
         let mut patch = ProjectTodoPatch {
+            people: Default::default(),
             agent: Some(todo.agent),
             executor_kind: Some(todo.executor_kind),
             executor_ref: Some(todo.executor_ref),

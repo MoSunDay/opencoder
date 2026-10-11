@@ -1,4 +1,4 @@
-Commit: c854143bd187656f4d74be6cca0f153176e44a21
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # OpenCoder 逻辑地图
 
@@ -38,7 +38,7 @@ OpenCoder 能力入口见 [features/index.md](features/index.md)。
 ## 仓库规则
 
 - [rules/01-mandatory-tests.md](rules/01-mandatory-tests.md) — 每个功能必须有测试
-- [rules/02-regression-gate.md](rules/02-regression-gate.md) — 迭代结束全量回归 + changelog 附测试清单
+- [rules/02-regression-gate.md](rules/02-regression-gate.md) — 改动及直接影响链路定向回归 + changelog 附测试清单
 - [rules/03-test-pyramid.md](rules/03-test-pyramid.md) — 测试分层（unit/integration/e2e）
 - [rules/04-dag-execution-contract.md](rules/04-dag-execution-contract.md) — DAG 单节点单容器与原生步骤执行约定
 - [rules/06-brain-scheduling-contract.md](rules/06-brain-scheduling-contract.md) — 大脑整层调度、结果评估、返工与恢复约定

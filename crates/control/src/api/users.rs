@@ -1,13 +1,13 @@
-//! Administrator-managed identities. Startup admin is protected; token issuance
-//! is a separate operation so each user can own several credentials.
+//! Administrator-managed identities. Creation atomically saves an initial token
+//! digest and returns its plaintext once. Startup admin is protected.
 use crate::AppState;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     Extension, Json,
 };
-use opencoder_core::identity::{parse_role, Identity, Role};
+use opencoder_core::identity::{parse_role, token_hash, Identity, Role};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -87,12 +87,22 @@ pub async fn create(
             "role must be editor or viewer; admin uses the startup token",
         );
     };
+    let token = format!("oc_{}{}", ulid::Ulid::new(), ulid::Ulid::new());
     match state
         .store
-        .create_user(name, "", role, chrono::Utc::now().timestamp_millis())
+        .create_user(
+            name,
+            &token_hash(&token),
+            role,
+            chrono::Utc::now().timestamp_millis(),
+        )
         .await
     {
-        Ok(user) => Json(json!({"user":user})).into_response(),
+        Ok(user) => (
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(json!({"user":user,"token":token})),
+        )
+            .into_response(),
         Err(error) => {
             let status = if matches!(state.store.find_user_by_name(name).await, Ok(Some(_))) {
                 409

@@ -9,7 +9,7 @@ import { ProjectPanel } from '../project.jsx';
 import { RelationSelect } from './relationSelect.jsx';
 import { flattenTodos, flattenInitiatives, groupOptions, initiativeOptions } from '../model/relations.js';
 
-const snapshot = { goals: [], standalone_initiatives: [{ id: 'm1', goal_id: null, title: '独立专项', status: 'planned', todos: [
+const snapshot = { goals: [], standalone_initiatives: [{ id: 'm1', goal_id: null, title: '独立专项', todos: [
   { id: 't1', title: '专项任务', draft: 'd', status: 'draft', initiative_id: 'm1' },
 ] }], backlog: [{ id: 't2', title: '独立任务', draft: 'd', status: 'draft' }] };
 const button = (label) => [...document.querySelectorAll('button')].find((b) => b.textContent.replace(/\s/g, '') === label);

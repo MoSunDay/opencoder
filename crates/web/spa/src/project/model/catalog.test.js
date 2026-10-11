@@ -10,6 +10,21 @@ it('resolves same-name initiative tags while preserving other project tags', () 
   expect(effectiveTags(overview, null)).toEqual([]);
   expect(remapTagIds(overview, ['p1', 'p2', 'x'], 'i').sort()).toEqual(['i1', 'p2']);
 });
+it('shares global tags with every scope and applies initiative then project overrides', () => {
+  const data = { ...overview, standalone_initiatives: [{ id: 'solo' }], tags: [
+    ...overview.tags,
+    { id: 'global-module', scope_type: 'global', scope_id: '', name: '模块' },
+    { id: 'global-focus', scope_type: 'global', scope_id: '', name: '重点' },
+    { id: 'global', scope_type: 'global', scope_id: '', name: '通用' },
+  ] };
+  expect(effectiveTags(data, 'i').map((tag) => tag.id).sort()).toEqual(['global', 'i1', 'p2']);
+  for (const owner of ['solo', null, 'missing']) {
+    expect(effectiveTags(data, owner).map((tag) => tag.id).sort()).toEqual(['global', 'global-focus', 'global-module']);
+  }
+  expect(remapTagIds(data, ['i1', 'p2'], null).sort()).toEqual(['global-focus', 'global-module']);
+  expect(remapTagIds(data, ['global-module', 'global-focus'], 'i').sort()).toEqual(['i1', 'p2']);
+  expect(remapTagIds(data, [], 'i')).toEqual([]);
+});
 it('groups multi-tag TODOs without duplicating progress and retains untagged work', () => {
   const rows = [{ id: 'a', board_status: 'done', tag_ids: ['i1', 'p2'] }, { id: 'b', board_status: 'todo', tag_ids: [] }];
   const groups = tagGroups(rows, effectiveTags(overview, 'i'), true);

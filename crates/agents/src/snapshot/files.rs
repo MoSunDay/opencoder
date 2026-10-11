@@ -30,8 +30,16 @@ pub(super) fn read(path: &Path) -> Result<Vec<u8>> {
 
 pub(super) fn copy(source: &Path, destination: &Path) -> Result<u64> {
     let mut input = open(source)?;
+    let permissions = input.metadata()?.permissions();
+    #[cfg(unix)]
+    let permissions = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::Permissions::from_mode(permissions.mode() & 0o777)
+    };
     let mut output = File::create(destination)?;
-    Ok(std::io::copy(&mut input, &mut output)?)
+    let bytes = std::io::copy(&mut input, &mut output)?;
+    output.set_permissions(permissions)?;
+    Ok(bytes)
 }
 
 pub fn digest(root: &Path) -> Result<String> {

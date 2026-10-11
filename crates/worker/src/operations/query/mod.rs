@@ -5,6 +5,7 @@ mod dag_steps;
 mod inspect;
 mod pages;
 pub(in crate::operations) mod project;
+pub(super) mod session;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -271,8 +272,17 @@ pub(super) async fn events(
         .await
         .get(id)
         .is_some_and(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst));
-    let finished = finished_override
-        .unwrap_or(!draining && !worker.inner.active.lock().await.contains_key(id));
+    // A continuation can have a saved transcript while it waits for a host
+    // slot. No active drain exists yet, but its accepted input is unfinished.
+    let queued_session = record.as_ref().is_some_and(|r| {
+        matches!(
+            r.assignment.index.kind,
+            ExecutionKind::Agent | ExecutionKind::Operator | ExecutionKind::Maintenance
+        ) && r.assignment.index.status == ExecutionStatus::Pending
+    });
+    let finished = finished_override.unwrap_or(
+        !draining && !queued_session && !worker.inner.active.lock().await.contains_key(id),
+    );
     let mut body = json!({"events":frames,"more":more,"finished":finished});
     if let Some(seq) = head_seq {
         body["head_seq"] = json!(seq);

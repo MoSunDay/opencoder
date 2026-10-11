@@ -77,6 +77,7 @@ async fn reopening_libsql_preserves_catalog_board_and_execution_results() {
         .patch_todo_tagged(
             "task",
             &ProjectTodoPatch {
+                people: Default::default(),
                 title: Some("must roll back".into()),
                 ..Default::default()
             },

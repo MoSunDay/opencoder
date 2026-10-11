@@ -18,7 +18,6 @@ const attributes = [{ ...metadata, id: 'source', entity_type_id: 'service', attr
 
 const ONTOLOGY_FIXTURES = {
   [`${base}/nfs`]: { root: '/fixture/ontology', status: { running: true, host: '127.0.0.1', port: 2052, read_only: true, export_root: '/fixture/ontology' } },
-  [`${base}/environments`]: { items: [{ ...metadata, env_key: 'debug', name: '调试环境', initialization_status: 'ready' }] },
   [`${env}/entity-types`]: { items: types },
   [`${env}/entities`]: { items: entities },
   [`${env}/directories/tree`]: { root_id: 'directory-root', items: [{ ...metadata, id: 'directory-root', name: '根目录' }] },

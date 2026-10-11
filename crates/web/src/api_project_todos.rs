@@ -107,6 +107,8 @@ pub async fn list_todos(
 
 #[derive(Deserialize)]
 pub struct CreateTodoBody {
+    #[serde(flatten)]
+    pub people: opencoder_store::project::people::ProjectPeople,
     #[serde(default)]
     pub tag_ids: Vec<String>,
     pub board_status: Option<String>,
@@ -172,6 +174,7 @@ pub async fn create_todo(
             Err(r) => return r,
         };
     let rec = ProjectTodoRecord {
+        people: body.people.normalized(),
         id: format!("pt-{}", ulid::Ulid::new()),
         initiative_id: body.initiative_id,
         title,
@@ -197,6 +200,9 @@ pub async fn create_todo(
 
 #[derive(Deserialize)]
 pub struct PatchTodoBody {
+    pub acceptance: Option<opencoder_store::project::acceptance::TodoAcceptance>,
+    #[serde(flatten)]
+    pub people: opencoder_store::project::people::ProjectPeoplePatch,
     pub tag_ids: Option<Vec<String>>,
     /// `Option<Option<String>>` + [`double_option`] distinguishes the three
     /// PATCH cases: absent ⇒ unchanged, JSON `null` ⇒ clear to the backlog,
@@ -322,6 +328,7 @@ pub async fn patch_todo(
         }
     }
     let patch = ProjectTodoPatch {
+        people: body.people,
         title,
         draft: body.draft,
         // Old project-run snapshots are not writable through TODO CRUD.
@@ -337,13 +344,28 @@ pub async fn patch_todo(
         initiative_id: body.initiative_id,
         active_session_id: None,
     };
-    match deps
-        .projects
-        .patch_todo_tagged(&id, &patch, body.tag_ids.as_deref(), now_ms())
-        .await
-    {
+    let result = if let Some(expected) = body.acceptance {
+        if !expected.permits_patch(&patch) {
+            return error_400(
+                "acceptance requires board_status=done and unchanged task requirements",
+            );
+        }
+        deps.projects
+            .patch_todo_accepted(&id, &patch, body.tag_ids.as_deref(), &expected, now_ms())
+            .await
+    } else {
+        deps.projects
+            .patch_todo_tagged(&id, &patch, body.tag_ids.as_deref(), now_ms())
+            .await
+    };
+    match result {
         Ok(true) => Json(json!({ "ok": true })).into_response(),
         Ok(false) => error_404(format!("todo not found: {id}")),
+        Err(e) if e.is::<opencoder_store::project::acceptance::AcceptanceConflict>() => (
+            axum::http::StatusCode::CONFLICT,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
         Err(e) => crate::api_project_tags::tag_error(e),
     }
 }

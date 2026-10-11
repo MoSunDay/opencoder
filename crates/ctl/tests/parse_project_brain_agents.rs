@@ -428,3 +428,23 @@ fn project_details_tags_order_and_conversation_commands_parse() {
     ]);
     rejects(&["project", "todos", "prompt", "t"]);
 }
+
+#[test]
+fn project_people_directory_and_assignment_fields_use_public_routes() {
+    let plan = plan_project(&project(&["people"])).unwrap();
+    assert_eq!(plan.path, "/api/project/people");
+    assert_eq!(plan.method, reqwest::Method::GET);
+    let plan = plan_project(&project(&[
+        "todos",
+        "patch",
+        "t",
+        "--json",
+        r#"{"owner_user_name":null,"follower_user_names":["alice"]}"#,
+    ]))
+    .unwrap();
+    assert_eq!(plan.path, "/api/project/todos/t");
+    assert_eq!(
+        plan.body.unwrap()["follower_user_names"],
+        serde_json::json!(["alice"])
+    );
+}

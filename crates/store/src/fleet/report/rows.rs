@@ -1,4 +1,4 @@
-//! One atomic report uses two SQL statements, independent of inventory size.
+//! One atomic report uses three SQL statements, independent of inventory size.
 use anyhow::{bail, Result};
 use libsql::Connection;
 
@@ -17,6 +17,18 @@ pub(super) async fn apply(conn: &Connection, encoded: &str) -> Result<()> {
             [encoded],
         )
         .await?;
+    if let Some(row) = conflicts.next().await? {
+        bail!("execution ownership conflict: {}", row.get::<String>(0)?);
+    }
+    drop(conflicts);
+    let mut conflicts = conn.query(
+        "SELECT a.id FROM json_each(?1) AS incoming
+         JOIN execution_assignments AS a ON a.id=json_extract(incoming.value,'$.id')
+         WHERE json_extract(a.assignment,'$.index.created_at')<>json_extract(incoming.value,'$.created_at')
+            OR json_extract(a.assignment,'$.index.kind')<>json_extract(incoming.value,'$.kind')
+            OR json_extract(a.assignment,'$.index.node_id')<>json_extract(incoming.value,'$.node_id')
+         LIMIT 1", [encoded],
+    ).await?;
     if let Some(row) = conflicts.next().await? {
         bail!("execution ownership conflict: {}", row.get::<String>(0)?);
     }

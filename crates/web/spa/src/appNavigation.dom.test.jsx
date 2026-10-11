@@ -150,7 +150,7 @@ describe('App shell navigation and layout', () => {
     expect(await screen.findByText('工作台')).toBeTruthy();
   });
 
-  it('scopes the project category to its workbench', async () => {
+  it('scopes the project category to Overview and the standalone Tag page', async () => {
     setCredentials('smoke-token', '');
     await mountApp();
     await screen.findByText('smoke · 管理员');
@@ -159,7 +159,8 @@ describe('App shell navigation and layout', () => {
     expect(getState().page).toBe('project');
     // Menuitem names carry the icon glyph's own aria-label → match by regex
     // (same convention as the surrounding landmark assertions).
-    expect(await screen.findByRole('menuitem', { name: /项目/ })).toBeTruthy();
+    expect(await screen.findByRole('menuitem', { name: /Overview$/ })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /Tag$/ })).toBeTruthy();
     expect(screen.queryByRole('menuitem', { name: /大脑调度/ })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /节点列表/ })).toBeNull();
   });

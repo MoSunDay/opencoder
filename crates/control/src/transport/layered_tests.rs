@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
 mod cancellation;
+mod placement_tests;
 
 const NODE: &str = "layered-node";
 const CONNECTION: &str = "layered";

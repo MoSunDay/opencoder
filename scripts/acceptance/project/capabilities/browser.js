@@ -34,7 +34,7 @@ async function closeTodo(page, todo) {
 async function openTodo(page, todo) {
   await projectPage(page);
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();
-  await page.getByLabel('筛选TODO', { exact: true }).click();
+  await page.getByRole('img', { name: '筛选TODO', exact: true }).click();
   const search = page.getByRole('textbox', { name: '搜索TODO', exact: true });
   await search.fill(todo.title);
   await search.press('Enter');
@@ -193,7 +193,7 @@ async function progress(page, hierarchy, count, root) {
   await projectPage(page);
   for (const [tab, entity] of [['项目', hierarchy.goal], ['专项', hierarchy.initiative]]) {
     await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: tab, exact: true }).click();
-    await page.getByLabel('筛选' + tab, { exact: true }).click();
+    await page.getByRole('img', { name: '筛选' + tab, exact: true }).click();
     const search = page.getByRole('textbox', { name: '搜索' + tab, exact: true });
     await search.fill(entity.title); await search.press('Enter');
     const indicator = page.getByRole('row').filter({ hasText: entity.title }).locator('.project-progress');

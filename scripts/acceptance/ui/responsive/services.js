@@ -126,8 +126,14 @@ async function serve(port) {
       return send(200, await readFile(file), TYPES[path.extname(file)] || 'application/octet-stream');
     } catch (_) { return send(404, JSON.stringify({ error: 'missing asset' })); }
   });
-  await new Promise((r) => server.listen(port, '127.0.0.1', r));
-  return { fixtureMisses, close: () => new Promise((r) => server.close(r)) };
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      server.removeListener('error', reject);
+      resolve();
+    });
+  });
+  return { port: server.address().port, fixtureMisses, close: () => new Promise((r) => server.close(r)) };
 }
 
 // ---------------------------------------------------------------------------

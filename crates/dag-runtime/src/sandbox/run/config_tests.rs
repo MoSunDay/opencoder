@@ -65,7 +65,7 @@ fn codex_steps_share_one_home_at_the_original_node_path() {
 }
 
 #[test]
-fn run_binds_only_declared_directories_without_inheriting_host_submounts() {
+fn run_uses_shallow_binds_when_knowledge_has_no_submounts() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     for name in [
@@ -96,6 +96,29 @@ fn run_binds_only_declared_directories_without_inheriting_host_submounts() {
         .iter()
         .filter(|mount| mount["type"] == "bind")
         .collect();
+    let devices: Vec<_> = spec["mounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|mount| mount["destination"].as_str().unwrap().starts_with("/dev"))
+        .collect();
+    assert_eq!(devices[0]["destination"], "/dev");
+    assert_eq!(devices[1]["destination"], "/dev/pts");
+    assert_eq!(devices[1]["type"], "devpts");
+    let options = devices[1]["options"].as_array().unwrap();
+    for required in [
+        "newinstance",
+        "ptmxmode=0666",
+        "mode=0620",
+        "nosuid",
+        "noexec",
+    ] {
+        assert!(options.contains(&json!(required)));
+    }
+    assert!(!spec["process"]["capabilities"]["effective"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("CAP_SYS_ADMIN")));
     assert_eq!(binds.len(), 6);
     for mount in binds {
         let options = mount["options"].as_array().unwrap();

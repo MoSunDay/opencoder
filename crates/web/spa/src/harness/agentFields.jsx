@@ -1,10 +1,9 @@
-import { Alert, Button, Select, Space, Typography, Segmented, Tooltip } from 'antd';
+import { Alert, Button, Select, Space, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet, apiPut } from '../api.js';
 import { err } from '../notice.js';
 import { useMessage } from '../ui/appMessage.js';
 import { HARNESS_OPTIONS } from './fields.jsx';
-import { RUN_MODE_HINT, RUN_MODE_OPTIONS, normalizeRunMode } from '../agents/runMode.js';
 
 export function AgentHarnessFields({ meta, onNotice, onSaved }) {
   const msg = useMessage();
@@ -48,12 +47,6 @@ export function AgentHarnessFields({ meta, onNotice, onSaved }) {
           options={[{ value: '', label: '默认 Codex 配置' }, ...profiles.map((p) => ({ value: p.name, label: `${p.name} · v${p.revision}` }))]}
           onChange={(profile) => save({ harness_profile: profile || null })} />
       </>}
-      <Typography.Text>运行模式</Typography.Text>
-      <Tooltip title={RUN_MODE_HINT}>
-        <Segmented aria-label="agent-run-mode" value={normalizeRunMode(meta.run_mode)}
-          options={RUN_MODE_OPTIONS} disabled={saving}
-          onChange={(run_mode) => save({ run_mode }, 'Agent 运行模式已更新，仅影响新任务')} />
-      </Tooltip>
     </Space>
     {meta.harness === 'codex' && error && <Alert type="error" showIcon title={error}
       action={<Button size="small" onClick={() => setRetry((v) => v + 1)}>重试</Button>} />}

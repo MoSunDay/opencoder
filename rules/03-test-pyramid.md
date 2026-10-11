@@ -59,7 +59,7 @@ async fn steer_promotes_at_turn_boundary_and_resets_step() {
 - **位置**：`scripts/e2e-glm.sh`（典型形态）
 - **对象**：真 LLM、真文件系统、完整用户流程
 - **要求**：需要 API key；标记为手动 / CI 专属；不在常规 `cargo test` 中运行
-- **示例**：glm5.2 写贪吃蛇 / 雷霆战机、resume 跨进程；反例：`crates/control/tests/e2e/`（Mock 驱动、随 `cargo test` 运行 → 判第 2 层）
+- **示例**：glm5.2 编写诊断工具、resume 跨进程；反例：`crates/control/tests/e2e/`（Mock 驱动、随 `cargo test` 运行 → 判第 2 层）
 
 ## 放置决策树
 

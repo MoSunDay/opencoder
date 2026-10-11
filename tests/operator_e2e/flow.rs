@@ -16,7 +16,7 @@ const SESSION: &str = "operator-e2e-flow-1";
 
 #[test]
 fn operator_session_runs_prompt_to_idle() {
-    let stub = LlmStub::spawn_text(&[REPLY]);
+    let stub = LlmStub::spawn_text(&[REPLY, "follow-up reply"]);
     let tmp = tempfile::tempdir().unwrap();
     let fleet = Fleet::spawn_with_config(tmp.path(), stub.port(), json!({}), "op-flow-node");
 
@@ -46,7 +46,7 @@ fn operator_session_runs_prompt_to_idle() {
     assert_eq!(doc["session"]["meta"]["title"], "Operator");
 
     // The decoded transcript (native session GET through the relay) has
-    // the preamble-wrapped user prompt and the stub's reply.
+    // the unchanged user prompt and the stub's reply.
     let (status, detail) = fleet.http("GET", &format!("/api/sessions/{SESSION}"), &json!({}));
     assert_eq!(status, 200, "session detail: {detail}");
     assert_eq!(detail["id"], SESSION);
@@ -57,15 +57,28 @@ fn operator_session_runs_prompt_to_idle() {
         transcript.contains(REPLY),
         "reply must land in the transcript"
     );
-    assert!(transcript.contains("Operator agent"), "preamble present");
+    assert!(!transcript.contains("Operator 默认规则"));
 
-    // Exactly one model call: the initial prompt (with the preamble).
+    // Mode defaults belong in the system message, outside the transcript.
     let requests = stub.wait_for_requests(1);
     assert!(
         requests[0].contains(PROMPT),
         "prompt hit the LLM: {}",
         requests[0]
     );
+    let request: serde_json::Value = serde_json::from_str(&requests[0]).unwrap();
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("Operator 默认规则"));
+    assert!(system.contains("每次调用聚焦一个可验证的结果"));
+    let skills = fleet
+        .node_data
+        .join("operator")
+        .join(SESSION)
+        .join("home/.opencoder/skills")
+        .canonicalize()
+        .unwrap();
+    assert!(skills.join("task-plan/SKILL.md").is_file());
+    assert!(system.contains(skills.to_str().unwrap()));
 
     // The completed stream replays: text_delta frames carry the reply and
     // the stream ends with the terminal `stream_end` marker.
@@ -85,4 +98,20 @@ fn operator_session_runs_prompt_to_idle() {
     assert!(deltas.contains(REPLY), "deltas: {deltas}");
     assert_eq!(frames.last().unwrap().event, "stream_end");
     assert_eq!(frames.last().unwrap().data["finished"], json!(true));
+
+    let (status, body) = fleet.http(
+        "POST",
+        &format!("/api/sessions/{SESSION}/prompt"),
+        &json!({"prompt":"verify again", "input_id":"operator-followup"}),
+    );
+    assert!(status < 300, "{body}");
+    let requests = stub.wait_for_requests(2);
+    let request: serde_json::Value = serde_json::from_str(&requests[1]).unwrap();
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    assert_eq!(system.matches("## Operator 默认规则").count(), 1);
+    assert!(system.contains(skills.to_str().unwrap()));
+    assert_eq!(
+        fleet.wait_idle(SESSION)["result"]["output_text"],
+        "follow-up reply"
+    );
 }

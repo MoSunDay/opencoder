@@ -34,13 +34,10 @@ fn relative(path: &Path) -> io::Result<CString> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))
 }
 
-fn open(anchor: &File, path: &Path, directory: bool) -> io::Result<File> {
+fn open(anchor: &File, path: &Path, flags: i32) -> io::Result<File> {
     let name = relative(path)?;
     let how = OpenHow {
-        flags: (libc::O_RDONLY
-            | libc::O_CLOEXEC
-            | libc::O_NONBLOCK
-            | if directory { libc::O_DIRECTORY } else { 0 }) as u64,
+        flags: (flags | libc::O_CLOEXEC | libc::O_NONBLOCK) as u64,
         mode: 0,
         resolve: RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS,
     };
@@ -60,7 +57,7 @@ fn open(anchor: &File, path: &Path, directory: bool) -> io::Result<File> {
 }
 
 pub(crate) fn read(root: &Path, path: &Path) -> io::Result<File> {
-    let file = open(&File::open(root)?, path, false)?;
+    let file = open(&File::open(root)?, path, libc::O_RDONLY)?;
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -68,6 +65,23 @@ pub(crate) fn read(root: &Path, path: &Path) -> io::Result<File> {
         ));
     }
     Ok(file)
+}
+
+/// Clear a previous stream before starting its producer and live reader.
+/// Open without truncation first so symlinks and non-files cannot be mutated.
+pub(crate) fn reset_stream(root: &Path, path: &Path) -> io::Result<()> {
+    let file = match open(&File::open(root)?, path, libc::O_WRONLY) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "workspace event stream must be a regular file",
+        ));
+    }
+    file.set_len(0)
 }
 
 pub(crate) fn read_bounded(root: &Path, path: &Path, limit: usize) -> Result<Vec<u8>> {
@@ -93,7 +107,7 @@ pub(crate) fn create_directory(root: &Path, path: &Path) -> Result<()> {
             unreachable!()
         };
         let path = Path::new(name);
-        anchor = match open(&anchor, path, true) {
+        anchor = match open(&anchor, path, libc::O_RDONLY | libc::O_DIRECTORY) {
             Ok(directory) => directory,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let name = relative(path)?;
@@ -101,7 +115,7 @@ pub(crate) fn create_directory(root: &Path, path: &Path) -> Result<()> {
                 if result < 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EEXIST) {
                     return Err(io::Error::last_os_error().into());
                 }
-                open(&anchor, path, true)?
+                open(&anchor, path, libc::O_RDONLY | libc::O_DIRECTORY)?
             }
             Err(error) => return Err(error.into()),
         };

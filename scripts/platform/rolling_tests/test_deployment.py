@@ -53,6 +53,9 @@ class Operations:
     def wait(self, check, seconds=90):
         return check()
 
+    def output(self, *args):
+        return 'loaded\n'
+
     def ingress_workers(self):
         return []
 
@@ -108,6 +111,18 @@ class DeploymentTests(unittest.TestCase):
         with _deferred_disable(operations):
             pass
         self.assertEqual(operations.calls, [])
+
+    def test_migrated_absent_units_do_not_break_retirement(self):
+        operations = Operations()
+        operations.output = lambda *args: 'not-found\n' if args[2] == 'missing.service' else 'loaded\n'
+        with _deferred_disable(operations) as disable:
+            disable('missing.service')
+        self.assertEqual(operations.calls, [])
+        with _deferred_disable(operations) as disable:
+            disable('missing.service', 'present.service')
+        self.assertEqual(operations.calls, [
+            ('systemctl', '--no-reload', 'disable', 'present.service'),
+            ('systemctl', 'daemon-reload')])
 
     def test_continuous_release_does_not_stop_active_server_or_runtime(self):
         result = deploy(self.settings, Path("bundle"), self.operations)

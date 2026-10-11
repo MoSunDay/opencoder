@@ -1,8 +1,9 @@
 //! `project` domain: user-curated goal → initiative → todo tracking with
-//! per-todo plan/execute runs. Pure `plan()` mapping only; execution goes
-//! through the shared `exec_plan` transport.
+//! per-todo plan/execute runs. CRUD uses pure `plan()` mappings; summary
+//! collection reads the native evidence through the shared HTTP transport.
 
 pub mod conversation;
+pub mod summary;
 pub mod tags;
 
 use anyhow::Result;
@@ -21,6 +22,8 @@ fn required_body(raw: &str) -> Result<serde_json::Value> {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCmd {
+    /// Minimal directory of users available as project owners or followers.
+    People,
     /// GET /api/project/overview — nested goals→initiatives→todos snapshot.
     Overview,
     /// Project and initiative tag definitions.
@@ -39,6 +42,12 @@ pub enum ProjectCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum GoalsCmd {
+    /// Read the latest ten summary versions.
+    SummaryVersions { id: String },
+    /// Restore a retained summary as a new version.
+    SummaryRestore { id: String, version: i64 },
+    /// Read all progress and evidence needed to author the current summary.
+    SummaryContext { id: String },
     /// Fetch one record.
     Get { id: String },
     /// GET /api/project/goals — all goals, sort then created_at order.
@@ -62,6 +71,12 @@ pub enum GoalsCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum InitiativesCmd {
+    /// Read the latest ten summary versions.
+    SummaryVersions { id: String },
+    /// Restore a retained summary as a new version.
+    SummaryRestore { id: String, version: i64 },
+    /// Read all progress and evidence needed to author the current summary.
+    SummaryContext { id: String },
     /// Fetch one record.
     Get { id: String },
     /// GET /api/project/initiatives — one goal's initiatives via --goal,
@@ -177,6 +192,7 @@ pub enum TodosCmd {
 
 pub fn plan(sub: &ProjectCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        ProjectCmd::People => RequestPlan::get("/api/project/people"),
         ProjectCmd::Tags(sub) => tags::plan(sub)?,
         ProjectCmd::Overview => RequestPlan::get("/api/project/overview"),
         ProjectCmd::Goals(sub) => plan_goals(sub)?,
@@ -187,6 +203,11 @@ pub fn plan(sub: &ProjectCmd) -> Result<RequestPlan> {
 
 fn plan_goals(sub: &GoalsCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        GoalsCmd::SummaryVersions { id } => summary::versions_plan("goals", id),
+        GoalsCmd::SummaryRestore { id, version } => summary::restore_plan("goals", id, *version)?,
+        GoalsCmd::SummaryContext { .. } => {
+            anyhow::bail!("summary-context uses multiple read requests")
+        }
         GoalsCmd::Get { id } => {
             RequestPlan::get(format!("/api/project/goals/{}", crate::http::urlencode(id)))
         }
@@ -203,6 +224,13 @@ fn plan_goals(sub: &GoalsCmd) -> Result<RequestPlan> {
 
 fn plan_initiatives(sub: &InitiativesCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        InitiativesCmd::SummaryVersions { id } => summary::versions_plan("initiatives", id),
+        InitiativesCmd::SummaryRestore { id, version } => {
+            summary::restore_plan("initiatives", id, *version)?
+        }
+        InitiativesCmd::SummaryContext { .. } => {
+            anyhow::bail!("summary-context uses multiple read requests")
+        }
         InitiativesCmd::Get { id } => RequestPlan::get(format!(
             "/api/project/initiatives/{}",
             crate::http::urlencode(id)
@@ -288,6 +316,15 @@ fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
 }
 
 pub async fn run(ctx: &Ctx, sub: ProjectCmd) -> Result<i32> {
+    match &sub {
+        ProjectCmd::Goals(GoalsCmd::SummaryContext { id }) => {
+            return summary::run(ctx, "project", id).await
+        }
+        ProjectCmd::Initiatives(InitiativesCmd::SummaryContext { id }) => {
+            return summary::run(ctx, "initiative", id).await
+        }
+        _ => {}
+    }
     if let ProjectCmd::Todos(command) = &sub {
         match command {
             TodosCmd::Prompt(args) => {

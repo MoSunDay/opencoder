@@ -1,0 +1,30 @@
+.project-todo-workspace { width: 100%; max-width: 1120px; min-width: 0; margin-inline: auto; display: grid; gap: 24px; }
+.project-todo-form { display: grid; gap: 24px; min-width: 0; }
+.project-todo-section { min-width: 0; padding: 20px; border: 1px solid var(--oc-border); border-radius: 10px; background: var(--oc-bg-container); }
+.project-todo-section > h3 { margin: 0 0 20px; font-size: 15px; font-weight: 600; line-height: 1.5; }
+.project-todo-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 24px; align-items: start; min-width: 0; }
+.project-todo-field-grid > * { min-width: 0; }
+.project-todo-field-grid .ant-form-item { margin-bottom: 0; }
+.project-todo-field-grid .ant-form-item-control-input-content > .ant-select { width: 100%; }
+.project-todo-field-grid .ant-form-item-label { white-space: normal; }
+.project-todo-field-grid .ant-input, .project-todo-field-grid .ant-select { min-width: 0; max-width: 100%; }
+.project-todo-field-grid .ant-select-multiple .ant-select-content .ant-select-selection-item-content { min-width: 0; overflow-wrap: anywhere; white-space: normal; text-overflow: clip; }
+.project-todo-field-full { grid-column: 1 / -1; }
+.project-todo-actions { width: 100%; max-width: 1120px; min-width: 0; margin-inline: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; padding-block: 4px; }
+.project-todo-actions > .ant-alert { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+.project-todo-link { display: flex; gap: 12px; min-width: 0; }
+.project-todo-link > .ant-input { flex: 1; min-width: 0; }
+.project-todo-link > .ant-btn { flex-shrink: 0; }
+.project-todo-retry { height: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; margin-bottom: 16px; }
+@media (min-width: 1200px) {
+  .project-todo-form--edit { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .project-todo-section--task, .project-todo-section--execution { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .project-todo-workspace, .project-todo-form { gap: 16px; }
+  .project-todo-section { padding: 16px; }
+  .project-todo-section > h3 { margin-bottom: 16px; }
+  .project-todo-field-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .project-todo-actions { gap: 8px; }
+  .project-todo-actions > .ant-btn { flex: 1; }
+}

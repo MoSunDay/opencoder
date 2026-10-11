@@ -29,9 +29,9 @@ use std::sync::Arc;
 
 use opencoder_store::{
     LibsqlStore, ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
-    ProjectInitiativePatch, ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectStore,
-    ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
-    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
+    ProjectInitiativePatch, ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch,
+    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
+    ProjectTodoRunStatus, ProjectTodoStatus,
 };
 
 async fn fresh() -> (tempfile::TempDir, Arc<LibsqlStore>, Arc<dyn ProjectStore>) {
@@ -43,6 +43,8 @@ async fn fresh() -> (tempfile::TempDir, Arc<LibsqlStore>, Arc<dyn ProjectStore>)
 
 fn goal(id: &str, sort: i64, created_at: i64) -> ProjectGoalRecord {
     ProjectGoalRecord {
+        summary: Default::default(),
+        people: Default::default(),
         id: id.to_string(),
         title: format!("goal {id}"),
         detail_md: None,
@@ -55,11 +57,12 @@ fn goal(id: &str, sort: i64, created_at: i64) -> ProjectGoalRecord {
 
 fn initiative(id: &str, goal_id: &str, sort: i64, created_at: i64) -> ProjectInitiativeRecord {
     ProjectInitiativeRecord {
+        summary: Default::default(),
+        people: Default::default(),
         id: id.to_string(),
         goal_id: Some(goal_id.to_string()),
         title: format!("initiative {id}"),
         detail_md: None,
-        status: ProjectInitiativeStatus::Planned,
         sort,
         created_at,
         updated_at: created_at,
@@ -68,6 +71,7 @@ fn initiative(id: &str, goal_id: &str, sort: i64, created_at: i64) -> ProjectIni
 
 fn todo(id: &str, initiative_id: Option<&str>, created_at: i64) -> ProjectTodoRecord {
     ProjectTodoRecord {
+        people: Default::default(),
         id: id.to_string(),
         initiative_id: initiative_id.map(str::to_string),
         title: format!("todo {id}"),

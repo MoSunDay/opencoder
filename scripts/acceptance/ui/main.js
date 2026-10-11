@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const net = require('node:net');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { CASES, verifyCoverage } = require('./scope');
@@ -12,13 +11,6 @@ function argument(name) {
   const index = process.argv.indexOf(`--${name}`);
   if (index < 0 || !process.argv[index + 1]) throw new Error(`required: --${name}`);
   return path.resolve(process.argv[index + 1]);
-}
-async function availablePort() {
-  const listener = net.createServer();
-  await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
-  const port = listener.address().port;
-  await new Promise((resolve) => listener.close(resolve));
-  return port;
 }
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -95,7 +87,7 @@ async function main() {
     assert.equal(build.spa_sha256, digest.digest('hex'), 'Server build does not match current SPA');
     await check('spa-drift', 'bash', ['scripts/check-spa-drift.sh']);
     for (const width of [1920, 1280, 768, 390]) {
-      await check(`responsive-${width}`, process.execPath, ['scripts/acceptance/spa_responsive.js', '--width', String(width), '--port', String(await availablePort()), '--shots', path.join(output, `responsive-${width}`)], 600000);
+      await check(`responsive-${width}`, process.execPath, ['scripts/acceptance/spa_responsive.js', '--width', String(width), '--port', '0', '--shots', path.join(output, `responsive-${width}`)], 600000);
     }
     for (const item of CASES) {
       if (item.cargo && brainTest) await check(item.name, brainTest, ['schema_seven_canvas_parallel_return_and_execution_detail', '--exact', '--ignored', '--nocapture'], 900000);

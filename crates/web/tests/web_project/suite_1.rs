@@ -127,7 +127,7 @@ async fn goal_initiative_todo_crud_contract() {
     assert_eq!(v["ok"], false);
     assert!(v["error"].as_str().unwrap().contains("pg-bogus"));
 
-    // Initiative create + status patch + goal filter.
+    // Initiative create + sort patch + goal filter.
     let (status, ms) = call(
         &h.app,
         "POST",
@@ -142,7 +142,7 @@ async fn goal_initiative_todo_crud_contract() {
         &h.app,
         "PATCH",
         &format!("/api/project/initiatives/{mid}"),
-        Some(json!({ "status": "in_progress" })),
+        Some(json!({ "sort": 3 })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
@@ -154,7 +154,8 @@ async fn goal_initiative_todo_crud_contract() {
     )
     .await;
     assert_eq!(list["initiatives"].as_array().unwrap().len(), 1);
-    assert_eq!(list["initiatives"][0]["status"], "in_progress");
+    assert!(list["initiatives"][0].get("status").is_none());
+    assert_eq!(list["initiatives"][0]["sort"], 3);
     let (_, unfiltered) = call(&h.app, "GET", "/api/project/initiatives", None).await;
     assert_eq!(unfiltered["initiatives"].as_array().unwrap().len(), 1);
     let (_, other) = call(

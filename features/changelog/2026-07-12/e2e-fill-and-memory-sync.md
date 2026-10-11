@@ -13,7 +13,7 @@ e2e 契约套件（`scripts/e2e/`）覆盖 E1–E11，但 CLI 可达的 `session
 | ID | 场景 | 契约 | hard/soft |
 |----|------|------|-----------|
 | E12 | `session list` + `session delete` 生命周期 | 空 workdir 显示无 session → 创建后 list 出现 → delete 成功 → list 中消失 | HARD |
-| E13 | 交错思考 reasoning_content 持久化 | 复用 E1 snake session 的 `show --json`，检查 assistant 消息含 `kind: reasoning` block | SOFT |
+| E13 | 交错思考 reasoning_content 持久化 | 复用 E1 diagnostics session 的 `show --json`，检查 assistant 消息含 `kind: reasoning` block | SOFT |
 | E14 | `config show` 输出合法 merged JSON | `opencode config show` 可 `json.loads`，含 `model`/`provider`/`compaction` 字段 | HARD |
 
 - `lib.py` 新增 `session_list`/`session_delete`/`config_show`/`has_reasoning_blocks` 辅助函数。
@@ -33,7 +33,7 @@ e2e 契约套件（`scripts/e2e/`）覆盖 E1–E11，但 CLI 可达的 `session
 - 不影响任何运行时代码——仅 Python 测试 + Markdown 记忆。
 
 ## Related Docs
-- [agents/tui](../../agents/tui/index.md)
-- [agents/llm](../../agents/llm/index.md)
-- [agents/cli](../../agents/cli/index.md)
+- [agents/tui](../../../agents/tui/index.md)
+- [agents/llm](../../../agents/llm/index.md)
+- [agents/cli](../../../agents/local/index.md)
 - [e2e 深度契约 + session show --json](./e2e-deep-contracts-and-session-show-json.md)

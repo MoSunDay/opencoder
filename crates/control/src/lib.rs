@@ -31,6 +31,10 @@ pub mod api_dag_workspace_nfs;
 pub mod api_project;
 #[path = "../../web/src/api_project_initiatives.rs"]
 pub mod api_project_initiatives;
+#[path = "../../web/src/api_project_people.rs"]
+pub mod api_project_people;
+#[path = "../../web/src/api_project/summary.rs"]
+pub mod api_project_summary;
 #[path = "../../web/src/api_project_tags.rs"]
 pub mod api_project_tags;
 #[path = "../../web/src/api_project_todos.rs"]

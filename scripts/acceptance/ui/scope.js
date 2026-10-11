@@ -1,14 +1,15 @@
 const CASES = [
-  { name: 'platform', script: 'platform.js', native: true, pages: ['nodes', 'users', 'tokens', 'topics', 'schedules', 'dag', 'team', 'chat', 'agents'] },
+  { name: 'platform', script: 'platform.js', native: true, pages: ['nodes', 'users', 'topics', 'schedules', 'dag', 'team', 'chat', 'agents'] },
   { name: 'project', script: 'project/main.js', args: ['--workbench-only'], pages: ['project'] },
   { name: 'project-capabilities', script: 'project/capabilities/main.js', native: true, pages: ['project', 'chat', 'dag', 'brain', 'topics'] },
-  { name: 'project-board', script: 'project_workbench_ui.js', pages: ['project'] },
+  { name: 'project-board', script: 'project_workbench_ui.js', pages: ['project', 'projectTags'] },
   { name: 'dag-results', script: 'dag_results.js', native: true, pages: ['dag', 'topics'] },
   { name: 'dag-dynamic', script: 'dag_dynamic.js', native: true, pages: ['dag'] },
   { name: 'todo', script: 'todo_workbench/main.js', pages: ['todos', 'topics'] },
   { name: 'todo-initialization', script: 'todo_initialization_ui.js', pages: ['todos'] },
   { name: 'brain', cargo: true, pages: ['brain', 'topics'] },
-  { name: 'ontology', python: 'ontology/main.py', pages: ['ontologyGraph', 'ontologyEntities', 'ontologyTypes', 'ontologyRelationships', 'ontologyEnvironments'] },
+  { name: 'brain-editor', script: 'brain/ui/editor.js', pages: ['brain'] },
+  { name: 'ontology', python: 'ontology/main.py', pages: ['ontologyGraph', 'ontologyEntities', 'ontologyTypes', 'ontologyRelationships'] },
   { name: 'tui', terminal: true, pages: [] },
 ];
 

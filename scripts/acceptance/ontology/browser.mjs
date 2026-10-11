@@ -11,7 +11,8 @@ const dialog = page.locator('.ant-modal[role="dialog"]:visible');
 const headerless = async (ready) => {
   await ready.waitFor();
   assert.equal(await page.locator('.oc-page-title, .oc-page-desc').count(), 0);
-  await page.getByRole('combobox', { name: 'Ontology 环境', exact: true }).waitFor();
+  assert.equal(await page.getByRole('combobox', { name: 'Ontology 环境', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('menuitem', { name: /环境管理$/ }).count(), 0);
 };
 const choose = async (scope, label, text, multiple = false) => {
   await scope.getByLabel(label, { exact: true }).click();
@@ -25,6 +26,7 @@ const submit = async () => {
   await dialog.waitFor({ state: 'hidden' });
 };
 try {
+  await page.addInitScript(() => localStorage.setItem('oc_ontology_env', JSON.stringify('browser_env')));
   await page.goto(`${base}/?token=ontology-fixture`);
   const tabs = page.locator('.fleet-sidebar [role=tablist]');
   await tabs.getByRole('tab', { name: 'Ontology', exact: true }).click();
@@ -110,17 +112,8 @@ try {
   await choose(page, '切面选择', '浏览器切面');
   await page.locator('canvas:visible').first().waitFor();
   await page.screenshot({ path: `${output}/desktop.png` });
-  await page.getByRole('menuitem', { name: /环境管理$/ }).click();
-  await headerless(page.getByRole('button', { name: /新增 ENV$/ }));
-  await page.getByRole('button', { name: /新增 ENV$/ }).click();
-  await dialog.getByLabel('ENV Key').fill('browser_env');
-  await dialog.getByLabel('名称', { exact: true }).fill('浏览器环境');
-  await submit();
-  await page.getByRole('cell', { name: '浏览器环境', exact: true }).waitFor();
-  await choose(page, 'Ontology 环境', '浏览器环境');
   await page.getByRole('menuitem', { name: /实体类型$/ }).click();
-  await page.getByRole('cell', { name: '目录', exact: true }).waitFor();
-  assert.equal(await page.getByRole('cell', { name: '浏览器类型', exact: true }).count(), 0);
+  await headerless(page.getByRole('cell', { name: '浏览器类型', exact: true }));
   await page.setViewportSize({ width: 240, height: 740 });
   const mobile = page.locator('.fleet-mobile-nav[role=tablist]');
   await mobile.getByRole('tab', { name: 'Ontology', exact: true }).click();
@@ -133,8 +126,8 @@ try {
   assert(narrow.labels.every(Boolean));
   await page.screenshot({ path: `${output}/mobile.png` });
   assert.deepEqual(failures, []);
-  console.log(JSON.stringify({ passed: true, pages: 5, attribute_action_config: true, entity_created: true,
-    relationship_created: true, aspect_saved: true, draft_guard: true, detail_tabs: true, graph_controls: true, observation_restored: true, environment_isolation: true, desktop: category, mobile: narrow }));
+  console.log(JSON.stringify({ passed: true, pages: 4, attribute_action_config: true, entity_created: true,
+    relationship_created: true, aspect_saved: true, draft_guard: true, detail_tabs: true, graph_controls: true, observation_restored: true, server_environment: true, desktop: category, mobile: narrow }));
 } catch (error) {
   await page.screenshot({ path: `${output}/browser-failure.png` });
   console.error(JSON.stringify({ error: error.message, failures }));

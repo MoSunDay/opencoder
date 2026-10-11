@@ -41,22 +41,36 @@ pub fn copy_rootfs(target: &Path) {
 
 impl NativeMounts {
     pub fn prepare(workdir: &Path, extra: Value) -> Self {
-        let rootfs = std::env::var_os("DAG_TEST_ROOTFS")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                super::sibling_bin(super::SERVER_BIN)
-                    .parent()
-                    .unwrap()
-                    .join("dag-rootfs")
-            });
-        assert!(rootfs.is_absolute(), "DAG_TEST_ROOTFS must be absolute");
-        for name in ["dag-runner", "agent-step-runner"] {
-            assert!(
-                rootfs.join("usr/bin").join(name).is_file(),
-                "prepare native test rootfs: scripts/prepare-dag-rootfs.sh {}",
-                rootfs.display()
-            );
-        }
+        Self::prepare_for(workdir, extra, true)
+    }
+
+    /// Server-managed host conversations require resources but no runc image.
+    pub fn conversations(workdir: &Path, extra: Value) -> Self {
+        Self::prepare_for(workdir, extra, false)
+    }
+
+    fn prepare_for(workdir: &Path, extra: Value, dag: bool) -> Self {
+        let rootfs = if dag {
+            let rootfs = std::env::var_os("DAG_TEST_ROOTFS")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    super::sibling_bin(super::SERVER_BIN)
+                        .parent()
+                        .unwrap()
+                        .join("dag-rootfs")
+                });
+            assert!(rootfs.is_absolute(), "DAG_TEST_ROOTFS must be absolute");
+            for name in ["dag-runner", "agent-step-runner"] {
+                assert!(
+                    rootfs.join("usr/bin").join(name).is_file(),
+                    "prepare native test rootfs: scripts/prepare-dag-rootfs.sh {}",
+                    rootfs.display()
+                );
+            }
+            Some(rootfs)
+        } else {
+            None
+        };
         let mut server = extra.clone();
         if !server.is_object() {
             server = json!({});
@@ -71,6 +85,9 @@ impl NativeMounts {
             ("dag", "workspace_dir", "workspace"),
             ("agent", "agents_dir", "agents"),
         ] {
+            if !dag && section == "dag" {
+                continue;
+            }
             let source = server[section][key]
                 .as_str()
                 .map(PathBuf::from)
@@ -104,8 +121,10 @@ impl NativeMounts {
             };
             mounts.push((mount, endpoint));
         }
-        node["dag"]["rootfs_dir"] = json!(rootfs);
-        node["dag"]["data_dir"] = json!(workdir.join("node-state/dag/runs"));
+        if let Some(rootfs) = rootfs {
+            node["dag"]["rootfs_dir"] = json!(rootfs);
+            node["dag"]["data_dir"] = json!(workdir.join("node-state/dag/runs"));
+        }
         Self {
             mounts,
             node_config: node,

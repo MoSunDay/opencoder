@@ -118,7 +118,7 @@ const edge = {
 function pageElement(canManage = true, env = "debug") {
   return (
     <ConfigProvider theme={{ token: { motion: false } }}><AntdApp>
-      <EnvContext.Provider value={{ env, environments: [], setEnv: vi.fn(), refreshEnvironments: vi.fn(), canManage }}>
+      <EnvContext.Provider value={{ env, canManage }}>
         <GraphPage />
       </EnvContext.Provider>
     </AntdApp></ConfigProvider>

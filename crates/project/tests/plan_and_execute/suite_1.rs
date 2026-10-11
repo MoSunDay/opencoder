@@ -31,11 +31,12 @@ async fn standalone_initiative_can_plan_and_execute_without_a_project() {
     let now = 1000;
     h.projects
         .create_initiative(&ProjectInitiativeRecord {
+            summary: Default::default(),
+            people: Default::default(),
             id: "initiative".into(),
             goal_id: None,
             title: "专项治理".into(),
             detail_md: Some("专项背景".into()),
-            status: ProjectInitiativeStatus::Planned,
             sort: 0,
             created_at: now,
             updated_at: now,
@@ -130,6 +131,7 @@ async fn cancel_midflight_reverts_todo_to_planned() {
         .patch_todo(
             &todo_id,
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("# 方案".into())),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()
@@ -163,6 +165,7 @@ async fn start_execute_rejects_unplanned_and_running_todos() {
         .patch_todo(
             &running,
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("# 方案".into())),
                 status: Some(ProjectTodoStatus::Running),
                 ..Default::default()
@@ -188,6 +191,7 @@ async fn execute_run_snapshots_plan_md_at_start() {
         .patch_todo(
             &todo_id,
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("# 方案快照\n1. 步骤一".into())),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()
@@ -237,6 +241,7 @@ async fn execute_proceeds_after_stale_plan_run_is_converged() {
         .patch_todo(
             &todo_id,
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("# 方案".into())),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()
@@ -313,6 +318,7 @@ async fn atomic_claim_failure_leaves_todo_and_runs_untouched() {
         .patch_todo(
             &todo_id,
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("# 方案".into())),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()

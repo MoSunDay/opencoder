@@ -54,14 +54,14 @@ async fn overview_full_projection_contract() {
     assert_eq!(goals[0]["status"], "archived", "归档状态原样带入投影");
     assert_eq!(goals[0]["initiatives"].as_array().unwrap().len(), 0);
 
-    // g1：两个专项，m1a planned / m1b in_progress。
+    // g1：两个专项，无专项自身状态。
     assert_eq!(goals[1]["id"], ds.g1);
     let g1_ms = goals[1]["initiatives"].as_array().unwrap();
     assert_eq!(g1_ms.len(), 2);
     assert_eq!(g1_ms[0]["id"], ds.m1a);
-    assert_eq!(g1_ms[0]["status"], "planned");
+    assert!(g1_ms[0].get("status").is_none());
     assert_eq!(g1_ms[1]["id"], ds.m1b);
-    assert_eq!(g1_ms[1]["status"], "in_progress");
+    assert!(g1_ms[1].get("status").is_none());
     // 同一毫秒创建的两条 todo：库内顺序未定义，只做集合断言。
     let m1a_todos = ids_of(&g1_ms[0]["todos"]);
     assert_eq!(m1a_todos.len(), 2, "{m1a_todos:?}");
@@ -69,12 +69,12 @@ async fn overview_full_projection_contract() {
     assert!(m1a_todos.contains(&ds.t_planned.as_str()), "{m1a_todos:?}");
     assert_eq!(ids_of(&g1_ms[1]["todos"]), [ds.t_running.as_str()]);
 
-    // g2：done 专项挂完成任务。
+    // g2：专项挂完成任务。
     assert_eq!(goals[2]["id"], ds.g2);
     let g2_ms = goals[2]["initiatives"].as_array().unwrap();
     assert_eq!(g2_ms.len(), 1);
     assert_eq!(g2_ms[0]["id"], ds.m2);
-    assert_eq!(g2_ms[0]["status"], "done");
+    assert!(g2_ms[0].get("status").is_none());
     assert_eq!(ids_of(&g2_ms[0]["todos"]), [ds.t_done.as_str()]);
 
     // 独立专项不带 goal；brain todo 挂在它下面。

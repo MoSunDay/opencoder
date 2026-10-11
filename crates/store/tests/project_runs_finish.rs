@@ -19,6 +19,7 @@ async fn fresh() -> Arc<dyn ProjectStore> {
 
 fn todo(id: &str, created_at: i64) -> ProjectTodoRecord {
     ProjectTodoRecord {
+        people: Default::default(),
         id: id.to_string(),
         initiative_id: None,
         title: format!("todo {id}"),
@@ -82,6 +83,7 @@ async fn plan_finish_writes_back_planned_and_plan_md() {
     p.patch_todo(
         "t1",
         &ProjectTodoPatch {
+            people: Default::default(),
             status: Some(ProjectTodoStatus::Planned),
             ..Default::default()
         },
@@ -117,6 +119,7 @@ async fn execute_finish_owns_the_todo_terminal_status() {
     p.patch_todo(
         "t2",
         &ProjectTodoPatch {
+            people: Default::default(),
             status: Some(ProjectTodoStatus::Planned),
             ..Default::default()
         },
@@ -150,6 +153,7 @@ async fn step_finish_never_touches_the_todo() {
     p.patch_todo(
         "t3",
         &ProjectTodoPatch {
+            people: Default::default(),
             status: Some(ProjectTodoStatus::Planned),
             ..Default::default()
         },

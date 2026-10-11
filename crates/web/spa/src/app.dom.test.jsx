@@ -187,7 +187,7 @@ describe('App shell landmarks (antd 6 under jsdom)', () => {
     expect(screen.queryByRole('menuitem')).toBeNull();
     expect(screen.queryByRole('tab', { name: '后台管理' })).toBeNull();
     await act(async () => { reply({ ok: true, status: 200, json: async () => ({ name: 'reader', role: 'viewer' }) }); });
-    expect(await screen.findByRole('menuitem', { name: /项目$/ })).toBeTruthy();
+    expect(await screen.findByRole('menuitem', { name: /Overview$/ })).toBeTruthy();
     expect(screen.queryByRole('menuitem', { name: /节点列表$/ })).toBeNull();
   });
 

@@ -80,7 +80,7 @@ export default function EntityDetailDrawer({ env, entity, entityType, canManage,
     return { ...tab, label: <Space size={4}>{tab.label}{changed ? <Tag color="gold" style={{ margin: 0 }}>编辑中</Tag> : null}</Space> };
   });
   return <Drawer title={<Tooltip title={entity?.name}><Typography.Text strong ellipsis style={{ maxWidth: "100%" }}>{entity?.name}</Typography.Text></Tooltip>}
-    width={screens.md ? 640 : "100%"} open={Boolean(entity)} onClose={close} destroyOnHidden
+    size={screens.md ? 640 : "100%"} open={Boolean(entity)} onClose={close} destroyOnHidden
     styles={{ body: { display: "flex", flexDirection: "column", minHeight: 0, paddingTop: 12, overflow: "hidden" } }}
     extra={canManage && currentEntity && !currentEntity.is_deleted ? <EntityActions key={`${currentEntity.id}/${currentEntity.revision}`} env={env} entity={currentEntity}
       onDone={async (item) => { await reload(item); await onEntityChanged(item); }} /> : null}>

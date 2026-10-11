@@ -107,6 +107,7 @@ async fn delete_terminal_indexes_only_removes_droppable_rows() {
             definition: None,
         };
         fleet.prepare_assignment(&assignment, "fp").await.unwrap();
+        fleet.accept_execution(&assignment.index).await.unwrap();
     }
 
     let ids: Vec<String> = (0..statuses.len())
@@ -177,6 +178,7 @@ async fn delete_terminal_indexes_is_ownership_guarded() {
         .await
         .unwrap();
     fleet.prepare_assignment(&assignment, "fp").await.unwrap();
+    fleet.accept_execution(&assignment.index).await.unwrap();
 
     // Wrong node or wrong kind must not touch the row.
     assert_eq!(

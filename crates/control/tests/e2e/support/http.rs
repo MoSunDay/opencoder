@@ -152,6 +152,22 @@ impl Harness {
         format!("{}{}", self.base, path)
     }
 
+    /// Report a real mock-node transition; editing only the Server index
+    /// would race the node's next report of its original accepted status.
+    pub async fn report_status(&self, id: &str, status: ExecutionStatus) {
+        self.node.set_execution_status(id, status);
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if self.state.fleet.index(id).await.unwrap().unwrap().status == status {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("node execution status report");
+    }
+
     /// JSON request with the valid bearer; returns (status, parsed body).
     pub async fn req(
         &self,

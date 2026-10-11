@@ -90,18 +90,20 @@ pub(super) async fn write(conn: &Connection, tag: &ProjectTag) -> Result<()> {
     super::super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let previous = list(conn).await?;
         let table = match tag.scope_type.as_str() {
-            "project" => "project_goals",
-            "initiative" => "project_initiatives",
+            "global" if tag.scope_id.is_empty() => None,
+            "project" => Some("project_goals"),
+            "initiative" => Some("project_initiatives"),
             _ => anyhow::bail!(TagError::InvalidScope),
         };
-        let mut owner = conn
-            .query(
-                &format!("SELECT id FROM {table} WHERE id=?"),
-                params![tag.scope_id.as_str()],
-            )
-            .await?;
-        anyhow::ensure!(owner.next().await?.is_some(), TagError::InvalidScope);
-        drop(owner);
+        if let Some(table) = table {
+            let mut owner = conn
+                .query(
+                    &format!("SELECT id FROM {table} WHERE id=?"),
+                    params![tag.scope_id.as_str()],
+                )
+                .await?;
+            anyhow::ensure!(owner.next().await?.is_some(), TagError::InvalidScope);
+        }
         anyhow::ensure!(
             !previous.iter().any(|t| t.id != tag.id
                 && t.scope_type == tag.scope_type
@@ -167,9 +169,17 @@ pub(super) async fn patch_todo(
     id: &str,
     patch: &ProjectTodoPatch,
     ids: Option<&[String]>,
+    expected: Option<&crate::project::acceptance::TodoAcceptance>,
     now: i64,
 ) -> Result<bool> {
     super::super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        if let Some(expected) = expected {
+            anyhow::ensure!(
+                expected.permits_patch(patch),
+                "acceptance cannot change task requirements"
+            );
+            super::acceptance::check(conn, id, expected).await?;
+        }
         let changed = super::super::project_runs::patch_todo(conn, id, patch, now).await?;
         if changed && (patch.initiative_id.is_some() || ids.is_some()) {
             reconcile(conn, &[], ids.map(|ids| (id, ids))).await?;

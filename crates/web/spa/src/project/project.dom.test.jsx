@@ -8,21 +8,21 @@ vi.mock('../fleet/detail.jsx', () => ({ ExecutionView: () => null }));
 import { ProjectPanel } from './project.jsx';
 const snapshot = {
   tags: [{ id: 'tag1', scope_type: 'project', scope_id: 'p1', name: '前端' }],
-  goals: [{ id: 'p1', title: '项目甲', status: 'active', updated_at: 1000, initiatives: [{ id: 's1', title: '专项甲', goal_id: 'p1', status: 'planned', todos: [
+  goals: [{ id: 'p1', title: '项目甲', status: 'active', updated_at: 1000, initiatives: [{ id: 's1', title: '专项甲', goal_id: 'p1', todos: [
     { id: 't1', title: '专项任务', draft: '说明', board_status: 'todo', initiative_id: 's1', tag_ids: ['tag1'] },
     { id: 't2', title: '完成任务', board_status: 'done', initiative_id: 's1', tag_ids: [] },
-  ] }] }], standalone_initiatives: [{ id: 's2', title: '独立专项', status: 'planned', todos: [] }],
+  ] }] }], standalone_initiatives: [{ id: 's2', title: '独立专项', todos: [] }],
   backlog: [{ id: 't3', title: '未归属任务', draft: '', board_status: 'backlog', tag_ids: [] }],
 };
 beforeEach(() => {
   Object.values(api).forEach((method) => method.mockReset());
-  api.apiGet.mockImplementation((path) => Promise.resolve(path === '/api/project/overview' ? snapshot : { assignments: [] }));
+  api.apiGet.mockImplementation((path) => Promise.resolve(path === '/api/project/overview' ? snapshot : path === '/api/project/people' ? { people: [] } : { assignments: [] }));
   api.apiPost.mockResolvedValue({ id: 'created' }); api.apiPatch.mockResolvedValue({ ok: true }); api.apiDel.mockResolvedValue({ deleted: true });
 });
-it('has four table tabs and a global TODO table including unassigned work', async () => {
+it('has three Overview table tabs and a global TODO table including unassigned work', async () => {
   render(<ProjectPanel onNotice={vi.fn()} />);
   expect(await screen.findByText('项目甲')).toBeTruthy();
-  expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['项目', '专项', 'TODO', 'Tag']);
+  expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['项目', '专项', 'TODO']);
   fireEvent.click(screen.getByRole('tab', { name: 'TODO' }));
   const table = await screen.findByLabelText('TODO 表格');
   expect(within(table).getByText('专项任务')).toBeTruthy();
@@ -54,7 +54,7 @@ it('filters a table by its title column and preserves the filter after a refresh
   render(<ProjectPanel onNotice={vi.fn()} />);
   fireEvent.click(screen.getByRole('tab', { name: 'TODO' }));
   const table = await screen.findByLabelText('TODO 表格');
-  fireEvent.click(within(table).getByLabelText('筛选TODO'));
+  fireEvent.click(within(table).getByRole('img', { name: '筛选TODO' }));
   const search = await screen.findByLabelText('搜索TODO');
   fireEvent.change(search, { target: { value: '未归属' } }); fireEvent.keyDown(search, { key: 'Enter', code: 'Enter' });
   await waitFor(() => expect(within(table).queryByText('专项任务')).toBeNull());

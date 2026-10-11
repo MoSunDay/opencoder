@@ -71,7 +71,11 @@ pub(super) async fn run_without_memory(
     let root = session.config.agent.agents_dir.clone();
     opencoder_core::agent::scope::with_root(
         root,
-        run_with_registry_scoped(session, user_text, images, registry, on_event),
+        // Keep the session state machine out of each enclosing task-local
+        // future. Debug builds otherwise overflow a normal Tokio worker stack.
+        Box::pin(run_with_registry_scoped(
+            session, user_text, images, registry, on_event,
+        )),
     )
     .await
 }
@@ -195,11 +199,17 @@ async fn run_with_registry_scoped(
     // Queue/steer rows stay pending (or are unpromoted in place by the
     // P1-3/F2 guards) and are consumed by the NEXT successful run —
     // a failed attempt never fires additional LLM requests for them.
-    run_loop_one_shot(session, registry, &mut on_event, drain_mode).await?;
+    Box::pin(run_loop_one_shot(
+        session,
+        registry,
+        &mut on_event,
+        drain_mode,
+    ))
+    .await?;
 
     // P1-4: bounded re-absorb of steers/queues admitted during run_loop's
     // idle window (see drain::reabsorb_tail).
-    reabsorb_tail(session, registry, &mut on_event).await?;
+    Box::pin(reabsorb_tail(session, registry, &mut on_event)).await?;
     if session.harness.harness == opencoder_core::harness::Harness::Codex {
         return Ok(());
     }
@@ -212,10 +222,15 @@ async fn run_with_registry_scoped(
     // fold), so it is equally valid after an act run or a plan run.
     match session.effective_ap_mode() {
         opencoder_core::ApMode::Ap => {
-            crate::autopilot::drive(session, registry, &mut on_event).await?;
+            Box::pin(crate::autopilot::drive(session, registry, &mut on_event)).await?;
         }
         opencoder_core::ApMode::Review => {
-            crate::autopilot::review_pass(session, registry, &mut on_event).await?;
+            Box::pin(crate::autopilot::review_pass(
+                session,
+                registry,
+                &mut on_event,
+            ))
+            .await?;
         }
         opencoder_core::ApMode::Off => {}
     }

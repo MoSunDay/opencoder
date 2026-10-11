@@ -1,3 +1,4 @@
+import { peopleColumns } from './people/fields.jsx';
 import { EditButton, useCanEdit } from '../ui/permissions.jsx';
 import { Button, Popconfirm, Select, Space, Tag } from 'antd';
 import { useState } from 'react';
@@ -24,17 +25,18 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
     catch (error) { onNotice(err(error.message)); } finally { setBusyId(null); }
   };
   const columns = [
-    { title: 'TODO', key: 'title', searchValue: (r) => r.title, render: (_, r) => <Button type="link" className="project-name" onClick={(e) => { e.stopPropagation(); openTodo(r.id); }}><TableText>{r.title}</TableText></Button> },
-    { title: '所属专项', key: 'initiative', width: '15%', kind: 'enum', searchValue: (r) => r.group_title || '未关联', render: (_, r) => <TableText>{r.group_title}</TableText> },
-    { title: '所属项目', key: 'project', width: '15%', kind: 'enum', searchValue: (r) => r.goal_title || '未关联', render: (_, r) => <TableText>{r.goal_title}</TableText> },
-    { title: '状态', key: 'status', width: '15%', kind: 'enum', searchValue: (r) => LANES.find(([id]) => id === laneOf(r))?.[1], render: (_, r) => <div onClick={(e) => e.stopPropagation()}><Select size="small" aria-label={`${r.title}状态`} value={laneOf(r)} disabled={!canEdit || busyId === r.id} loading={busyId === r.id} onChange={(v) => setStatus(r, v)} style={{ width: '100%' }} options={LANES.map(([value, label]) => ({ value, label }))} /></div> },
-    { title: 'Tag', key: 'tags', width: '16%', kind: 'enum', searchValue: (r) => todoTags(overview, r).map((tag) => tag.name), render: (_, r) => <Space wrap size={[0, 4]}>{todoTags(overview, r).map((tag) => <Tag key={tag.id}>{tag.name}</Tag>)}</Space> },
-    dateColumn,
-    { title: '操作', key: 'actions', width: '11%', render: (_, r) => <div onClick={(e) => e.stopPropagation()}><Popconfirm title="删除该 TODO？" onConfirm={() => remove(r)}><EditButton type="link" danger size="small">删除</EditButton></Popconfirm></div> },
+    { title: 'TODO', key: 'title', width: 220, searchValue: (r) => r.title, render: (_, r) => <Button type="link" className="project-name" onClick={(e) => { e.stopPropagation(); openTodo(r.id); }}><TableText>{r.title}</TableText></Button> },
+    { title: '所属专项', key: 'initiative', width: 170, kind: 'enum', searchValue: (r) => r.group_title || '未关联', render: (_, r) => <TableText>{r.group_title}</TableText> },
+    { title: '所属项目', key: 'project', width: 170, kind: 'enum', searchValue: (r) => r.goal_title || '未关联', render: (_, r) => <TableText>{r.goal_title}</TableText> },
+    { title: '状态', key: 'status', width: 130, kind: 'enum', searchValue: (r) => LANES.find(([id]) => id === laneOf(r))?.[1], render: (_, r) => <div onClick={(e) => e.stopPropagation()}><Select size="small" aria-label={`${r.title}状态`} value={laneOf(r)} disabled={!canEdit || busyId === r.id} loading={busyId === r.id} onChange={(v) => setStatus(r, v)} style={{ width: '100%' }} options={LANES.map(([value, label]) => ({ value, label }))} /></div> },
+    { title: 'Tag', key: 'tags', width: 180, kind: 'enum', searchValue: (r) => todoTags(overview, r).map((tag) => tag.name), render: (_, r) => <Space wrap size={[0, 4]}>{todoTags(overview, r).map((tag) => <Tag key={tag.id}>{tag.name}</Tag>)}</Space> },
+    ...peopleColumns(),
+    { ...dateColumn, width: 170 },
+    { title: '操作', key: 'actions', width: 90, render: (_, r) => <div onClick={(e) => e.stopPropagation()}><Popconfirm title="删除该 TODO？" onConfirm={() => remove(r)}><EditButton type="link" danger size="small">删除</EditButton></Popconfirm></div> },
   ];
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
     <EditButton type="primary" onClick={() => setCreateOpen(true)}>新建 TODO</EditButton>
-    <ProjectTable label="TODO 表格" columns={columns} rows={rows} onRowClick={(r) => openTodo(r.id)} locale={{ emptyText: '还没有 TODO' }} />
+    <ProjectTable scroll={{ x: 1530 }} label="TODO 表格" columns={columns} rows={rows} onRowClick={(r) => openTodo(r.id)} locale={{ emptyText: '还没有 TODO' }} />
     <CreateTodo key={createOpen ? 'open' : 'closed'} open={createOpen} overview={overview} onNotice={onNotice} onClose={() => setCreateOpen(false)} onCreated={async (id) => { setCreateOpen(false); await refresh(); openTodo(id); }} />
   </Space>;
 }

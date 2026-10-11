@@ -1,5 +1,4 @@
 export type Session = { principal: { external_id: string; display_name: string; kind: string }; capabilities: string[] };
-export type Environment = { env_num: number; env_key: string; name: string; description: string; initialization_status: "initializing" | "ready" | "failed"; revision: number; is_deleted: boolean };
 export type EntityType = { id: string; env_num: number; type_key: string; name: string; description: string; is_system: boolean; revision: number; is_deleted: boolean };
 export type AttributeKind = "string" | "integer" | "float" | "boolean" | "datetime" | "json" | "vector" | "text";
 export type AttributeRole = "custom" | "source" | "ext";

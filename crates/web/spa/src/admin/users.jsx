@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Popconfirm, Select, Space, Typography } from 'antd';
+import { Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Typography } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import { apiDel, apiPatch, apiPost } from '../api.js';
@@ -12,6 +12,7 @@ import { matchesSearch, readUsers, ROLE_LABELS, ROLE_OPTIONS } from './model.js'
 export function UsersPanel() {
   const { data, loading, error, reload } = useJsonQuery('/api/users', readUsers);
   const [editor, setEditor] = useState(null);
+  const [issuedToken, setIssuedToken] = useState(null);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState();
   const [deleting, setDeleting] = useState('');
@@ -19,7 +20,10 @@ export function UsersPanel() {
   const rows = (data || []).filter((user) => (!role || user.role === role) && matchesSearch(search, user.name));
   const save = async (body) => {
     if (editor.name) await apiPatch(`/api/users/${encodeURIComponent(editor.name)}`, { role: body.role });
-    else await apiPost('/api/users', body);
+    else {
+      const result = await apiPost('/api/users', body);
+      setIssuedToken(result.token);
+    }
     setEditor(null); setActionError(''); await reload();
   };
   const remove = async (name) => {
@@ -50,15 +54,20 @@ export function UsersPanel() {
             </Popconfirm>
           </Space> },
       ]} />
-    <AdminHint>管理员由启动配置管理；可编辑用户能修改平台资源，只读用户仅能查看。角色变更对该用户的全部 Token 生效。</AdminHint>
+    <AdminHint>创建用户后自动生成 Token，明文仅显示一次。管理员由启动配置管理；角色变更对该用户的全部 Token 生效。</AdminHint>
     {editor && <AdminFormModal title={editor.name ? `编辑权限 · ${editor.name}` : '创建用户'} initialValues={editor}
       submitLabel={editor.name ? '保存权限' : '创建用户'} onSubmit={save} onClose={() => setEditor(null)}>
       <Form.Item name="name" label="用户名" rules={[{ required: true, whitespace: true, message: '请输入用户名' }]}>
         <Input aria-label="用户名" placeholder="输入用户名" autoComplete="off" disabled={editor.name ? true : undefined} autoFocus />
       </Form.Item>
-      <Form.Item name="role" label="用户角色" extra="新用户默认为只读，可按需要授予编辑权限。" rules={[{ required: true }]}>
+      <Form.Item name="role" label="用户角色" extra={editor.name ? '权限变更立即生效。' : '新用户默认为只读。创建后请保存自动生成的 Token。'} rules={[{ required: true }]}>
         <Select aria-label="用户角色" options={ROLE_OPTIONS} />
       </Form.Item>
     </AdminFormModal>}
+    {issuedToken && <Modal title="Token 仅此一次显示" open closable={false} keyboard={false} mask={{ closable: false }}
+      footer={<Button type="primary" onClick={() => setIssuedToken(null)}>我已保存</Button>} destroyOnHidden>
+      <Alert type="warning" showIcon title="用户已创建。关闭后无法找回 Token，请保存到安全位置。" />
+      <Typography.Paragraph copyable={{ text: issuedToken }} style={{ wordBreak: 'break-all', marginTop: 16 }}>{issuedToken}</Typography.Paragraph>
+    </Modal>}
   </PageShell>;
 }

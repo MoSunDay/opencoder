@@ -27,7 +27,6 @@ import { QuestionModal } from './questionModal.jsx';
 import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
 import { BUILTIN_AGENT_HEADS, mergeBuiltinPrimaryAgentCards } from './agents/builtins.js';
-import { RUN_MODE_HINT, runModeBadge } from './agents/runMode.js';
 import { parseEnvs } from './harness/fields.jsx';
 import { clearPreselect, useStore } from './store.js';
 import { err, ok, warn } from './notice.js';
@@ -218,7 +217,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       // agent；Operator 模式维持现状（newId('operator')，body 不带 kind）。
       // A changed launch configuration needs a fresh ID; identical retries
       // retain their ID for the server's idempotent create path.
-      const attemptKey = JSON.stringify([nodeSel, modeKind, sessionAgent, operatorHarness, operatorEnvs]);
+      const attemptKey = JSON.stringify([nodeSel, modeKind, sessionAgent, operatorHarness, operatorEnvs, prompt]);
       if (createAttempt.current?.key !== attemptKey) createAttempt.current = { key: attemptKey, id: newId(modeKind) };
       // Admit the first instruction with creation for both conversation kinds.
       // A launcher can leave this panel as soon as onCreated runs; a later
@@ -363,6 +362,9 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       return;
     }
     try {
+      let cursorError;
+      const q = await apiGet('/api/sessions/' + encodeURIComponent(sid) + '/seq')
+        .catch((error) => { cursorError = error; return null; });
       const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
       const msgs = (j && j.messages) || [];
       const agent = j && j.meta && j.meta.agent;
@@ -370,6 +372,12 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
         const agentLane = modeKind === 'agent' ? registeredAgents : agentCatalog;
         setSessionAgent(agentLane.some((item) => item.name === agent) ? agent : agentLane[0]?.name || '');
         setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) });
+        if (j.initializing || j.draining) {
+          if (cursorError) throw cursorError;
+          setBusy(true);
+          setConnecting(true);
+          await openSessionStream(sid, j.initializing ? 0 : q?.seq || 0, turnsFromMessages(msgs));
+        }
       }
     } catch (e) {
       if (current()) {
@@ -671,9 +679,9 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
                   disabled={!canEdit} onChange={switchAgent}
                 /> : null}
               {modeKind === 'agent' && selectedAgent ? (
-                <Tooltip title={RUN_MODE_HINT}>
+                <Tooltip title="在远端节点上加载所选 Agent 的描述、技能和工具执行">
                   <Tag aria-label="selected-agent-run-mode" style={{ marginInlineEnd: 0 }}>
-                    {runModeBadge(selectedAgent.run_mode)}
+                    远端宿主机
                   </Tag>
                 </Tooltip>
               ) : null}

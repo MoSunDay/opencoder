@@ -128,7 +128,10 @@ pub(super) async fn command(
         }
         "summary" => match worker.inner.state.store.get_session(id).await? {
             Some(meta) => Ok(RpcReply::ok(json!(meta))),
-            None => Ok(RpcReply::error(404, "session not found")),
+            None => Ok(record.as_ref().map_or_else(
+                || RpcReply::error(404, "session not found"),
+                |record| RpcReply::ok(super::query::session::summary(record)),
+            )),
         },
         "artifact" => super::artifacts::read(worker, id, command.input).await,
         "cancel" | "interrupt" => {
@@ -318,6 +321,13 @@ async fn http(
             "managed child sessions are controlled through their owning execution",
         ));
     }
+    if method == "GET" {
+        if let Some(reply) =
+            super::query::session::before_ready(worker, id, tail_path(tail)).await?
+        {
+            return Ok(reply);
+        }
+    }
     if requires_admission(method, tail) {
         if let Some(error) = worker.admission_error() {
             return Ok(RpcReply::error(503, error));
@@ -338,68 +348,14 @@ async fn http(
             .resources_dir(ExecutionKind::Agent, id)?,
     };
     let scope = root.exists().then_some(root);
-    // `run_mode: agent` sessions execute every turn as a runc sandbox round
-    // (`workloads::agent_runc`), so the host web app has no session state
-    // for them: POSTs that would shape or start a host turn are intercepted
-    // below. GETs (messages/events/...) stay native — they read the store.
-    let sandbox = record
-        .as_ref()
-        .is_some_and(|r| crate::workloads::agent_runc::sandbox_session(r, scope.as_deref()));
     let path = format!(
         "/api/sessions/{id}{}{}",
         if tail.is_empty() { "" } else { "/" },
         tail
     );
-    let mut needs_monitor = method == "POST"
+    let needs_monitor = method == "POST"
         && matches!(tail_path(tail), "prompt" | "compact" | "handoff")
         && !worker.inner.active.lock().await.contains_key(id);
-    let mut sandbox_receipt = None;
-    #[cfg(not(windows))]
-    if sandbox {
-        use crate::workloads::agent_runc::inputs;
-        let sandbox_record = record.as_ref().expect("sandbox record");
-        if tail_path(tail).starts_with("inputs") {
-            let store = inputs::open(worker, sandbox_record, legacy).await?;
-            return inputs::handle(store.as_ref(), id, method, tail, &body).await;
-        }
-        if method == "POST" && tail_path(tail) == "prompt" {
-            let lifecycle = worker.lifecycle_gate(id).await;
-            let _guard = lifecycle.lock().await;
-            let status = worker.inner.journal.lock().await.records[id]
-                .assignment
-                .index
-                .status;
-            let active = worker.inner.active.lock().await.get(id).cloned();
-            if active.as_ref().is_some_and(|cancel| cancel.is_cancelled())
-                || active.is_none()
-                    && status != ExecutionStatus::Pending
-                    && !crate::lifecycle::can_start(status)
-            {
-                return Ok(RpcReply::error(409, "execution is not continuable"));
-            }
-            let store = inputs::open(worker, sandbox_record, legacy).await?;
-            let reply = inputs::admit(store.as_ref(), id, &body).await?;
-            if reply.status >= 300
-                || status == ExecutionStatus::Pending
-                || active.is_some()
-                || !inputs::pending(store.as_ref(), id).await?
-            {
-                return Ok(reply);
-            }
-            sandbox_receipt = Some(reply);
-            needs_monitor = true;
-        }
-    }
-    if sandbox
-        && method == "POST"
-        && matches!(tail_path(tail), "steer" | "queue" | "compact" | "handoff")
-    {
-        return Ok(RpcReply::error(
-            409,
-            "use prompt with delivery steer or queue for sandbox conversations",
-        ));
-    }
-    let mut sandbox_turn = false;
     let permit = if needs_monitor {
         let queued = super::queue::QueuedCommand {
             tail: tail.into(),
@@ -421,11 +377,6 @@ async fn http(
         // newest follow-up has priority, just like a freshly enqueued task.
         if worker.inner.scheduling.get().queue_order == QueueOrder::Fifo {
             _gate = super::queue::dispatch_owned(worker, _gate).await?;
-        }
-        if sandbox {
-            // Native input admission already persisted the continuation. Keep
-            // the original request unchanged when a capacity slot is queued.
-            sandbox_turn = true;
         }
         match worker
             .inner
@@ -514,16 +465,19 @@ async fn http(
     } else {
         None
     };
-    let result = if sandbox_turn {
-        // The turn is the launch below (`run_round`); the reply mirrors the
-        // web layer's async-acceptance surface.
-        Ok(
-            sandbox_receipt
-                .unwrap_or_else(|| RpcReply::ok(json!({"id": id, "status": "accepted"}))),
-        )
-    } else {
-        opencoder_core::agent::scope::with_root(scope, native(worker, method, &path, body)).await
-    };
+    let result =
+        opencoder_core::agent::scope::with_root(scope, native(worker, method, &path, body)).await;
+    let result = result.map(|reply| {
+        if method == "GET" && matches!(tail_path(tail), "" | "messages") {
+            if let Some(record) = record.as_ref() {
+                return super::query::session::with_pending_work(
+                    reply,
+                    record.assignment.index.status,
+                );
+            }
+        }
+        reply
+    });
     if result
         .as_ref()
         .is_ok_and(|reply| (200..300).contains(&reply.status))

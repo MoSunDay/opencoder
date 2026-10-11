@@ -7,7 +7,7 @@ export default function FilterSection({ summary, children }: { summary: string; 
   if (!screens.md) return <div className="graph-filters graph-filter-summary">
     <Typography.Text type="secondary" ellipsis={{ tooltip: summary }}>{summary}</Typography.Text>
     <Button onClick={() => setOpen(true)}>调整范围</Button>
-    <Drawer title="调整观测范围" open={open} onClose={() => setOpen(false)} width="100%"
+    <Drawer title="调整观测范围" open={open} onClose={() => setOpen(false)} size="100%"
       extra={<Button type="primary" onClick={() => setOpen(false)}>完成</Button>}>{children}</Drawer>
   </div>;
   return <div className="graph-filters graph-filter-summary">

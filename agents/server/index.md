@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # server 模块
 
@@ -10,6 +10,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 - [control/release/resources.rs](../../crates/control/src/release/resources.rs) — 独立资源服务持有 Agent、Linux 二进制、源工作区与 Ontology 正文的只读 NFS 导出；经认证的资源管理接口与版本 Server 使用同一配置。资源进程不打开 Ontology 数据库，版本 Server 持有域状态并在退休前排空写入。
 - 资源服务的 `GET /api/health` 返回 `role=resources` 与完整构建信息；兼容发布在预热前核对生产资源的版本。旧服务缺少元数据时要求维护升级。
 - [rolling/maintenance](../../scripts/platform/rolling/maintenance/__init__.py) — 不兼容升级的持久阶段：冻结接入、排空、停服、备份、升级资源与挂载、启动迁移、私有验证、复开。迁移启动意图先落盘；复开写入意图持久化前可恢复旧库，此后禁止旧备份恢复，只允许同候选续跑或新格式版本修复。
+- [maintenance/runtimes.py](../../scripts/platform/rolling/maintenance/runtimes.py) — 排空检查保留 idle、interrupted 的 Agent/Operator 会话；必须同时确认可休眠、运行数、队列和所属进程均为空，不改写原会话状态或历史。
 - [maintenance/flow.py](../../scripts/platform/rolling/maintenance/flow.py) — 资源 HTTP 就绪后，按发布等待时限轮询导出状态和节点挂载的实际目录读取；成功后才准备候选进程。临时 NFS 读取错误可重试，超时保留 `installing` 阶段、关闭的写入口和原备份，同候选续跑继续核验这份备份。
 - [maintenance/preflight.py](../../scripts/platform/rolling/maintenance/preflight.py)、[services.py](../../scripts/platform/rolling/maintenance/services.py) — 检查源工作区已存在且实际 Server 用户可读、可遍历；拒绝与可写管理路径重叠及软链接别名。资源升级仅置备应用目录，不创建或改动源目录。
 - [maintenance/archive.py](../../scripts/platform/rolling/maintenance/archive.py)、[restore.py](../../scripts/platform/rolling/maintenance/restore.py) — 已停止写入并验证的 SQLite 备份使用只读 immutable URI，检查和恢复不会向备份添加 WAL/SHM 文件；活动数据库仍使用普通只读连接。

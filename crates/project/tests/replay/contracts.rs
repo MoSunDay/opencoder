@@ -18,6 +18,7 @@ async fn retries_pin_input_and_agent_changes_start_new_sessions() {
         .patch_todo(
             &todo,
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("original plan".into())),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()
@@ -57,6 +58,7 @@ async fn retries_pin_input_and_agent_changes_start_new_sessions() {
         .patch_todo(
             &todo,
             &ProjectTodoPatch {
+                people: Default::default(),
                 draft: Some("changed draft".into()),
                 ..Default::default()
             },
@@ -109,6 +111,7 @@ async fn retries_pin_input_and_agent_changes_start_new_sessions() {
         .patch_todo(
             &todo,
             &ProjectTodoPatch {
+                people: Default::default(),
                 agent: Some("explore".into()),
                 ..Default::default()
             },
@@ -177,6 +180,7 @@ async fn plan_and_execute_admission_is_atomic_and_versions_are_unique() {
         .patch_todo(
             &todo,
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("plan".into())),
                 ..Default::default()
             },
@@ -307,6 +311,7 @@ async fn cancellation_after_a_tool_step_retains_partial_output_without_marking_d
             .patch_todo(
                 &todo,
                 &ProjectTodoPatch {
+                    people: Default::default(),
                     plan_md: Some(Some("original plan".into())),
                     status: Some(ProjectTodoStatus::Planned),
                     ..Default::default()

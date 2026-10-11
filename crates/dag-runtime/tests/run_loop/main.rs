@@ -31,6 +31,7 @@ mod helpers;
 use helpers::*;
 mod concurrency;
 mod coordination;
+mod event_stream;
 mod flow;
 mod native_session;
 mod policies;

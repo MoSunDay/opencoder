@@ -17,9 +17,9 @@ use axum::http::StatusCode;
 use axum::Router;
 use opencoder_core::message::now_ms;
 use opencoder_store::{
-    ProjectExecutorKind, ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectStore,
-    ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus,
+    ProjectExecutorKind, ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch,
+    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus,
+    ProjectTodoStatus,
 };
 use serde_json::{json, Value};
 
@@ -121,6 +121,7 @@ async fn direct_todo(
 ) {
     projects
         .create_todo(&ProjectTodoRecord {
+            people: Default::default(),
             id: id.into(), initiative_id, title: title.into(), draft: draft.into(),
             plan_md: None, status: ProjectTodoStatus::Draft, agent: "act".into(),
             executor_kind: ProjectExecutorKind::Agent, executor_ref: None, executor_spec: None,
@@ -143,6 +144,7 @@ async fn advance(
         .patch_todo(
             id,
             &ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(status),
                 plan_md: plan_md.map(|p| Some(p.to_string())),
                 active_session_id: session.map(|s| Some(s.to_string())),
@@ -174,21 +176,21 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     assert_eq!(v["status"], "active", "archived goal starts active");
     patch_ok(app, &format!("/api/project/goals/{g0}"), json!({ "status": "archived" })).await;
 
-    // ── initiatives：create 默认 planned；无 goal_id 即独立专项 ────────
+    // ── initiatives：没有自身状态；无 goal_id 即独立专项 ────────
     let (m1a, v) = post_id(
         app,
         "/api/project/initiatives",
         json!({ "goal_id": g1, "title": "专项一甲", "sort": 1 }),
     )
     .await;
-    assert_eq!(v["status"], "planned", "initiative create default");
+    assert!(v.get("status").is_none(), "initiative has no lifecycle state");
     let (m1b, _) = post_id(
         app,
         "/api/project/initiatives",
         json!({ "goal_id": g1, "title": "专项一乙", "sort": 2 }),
     )
     .await;
-    patch_ok(app, &format!("/api/project/initiatives/{m1b}"), json!({ "status": "in_progress" }))
+    patch_ok(app, &format!("/api/project/initiatives/{m1b}"), json!({ "sort": 2 }))
         .await;
     let (m2, _) = post_id(
         app,
@@ -196,7 +198,7 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
         json!({ "goal_id": g2, "title": "专项二", "sort": 1 }),
     )
     .await;
-    patch_ok(app, &format!("/api/project/initiatives/{m2}"), json!({ "status": "done" })).await;
+    patch_ok(app, &format!("/api/project/initiatives/{m2}"), json!({ "sort": 1 })).await;
     let (ms, v) =
         post_id(app, "/api/project/initiatives", json!({ "title": "独立专项", "sort": 1 })).await;
     assert!(v["goal_id"].is_null(), "standalone create keeps goal_id null");
@@ -254,9 +256,10 @@ pub async fn seed(app: &Router, projects: &Arc<dyn ProjectStore>) -> Dataset {
     // 悬空专项：goal_id 指向不存在的 pg-gone（表结构刻意无外键）。
     projects
         .create_initiative(&ProjectInitiativeRecord {
+            summary: Default::default(),
+            people: Default::default(),
             id: DANGLING_INITIATIVE.into(), goal_id: Some("pg-gone".into()),
-            title: "悬空专项".into(), detail_md: None,
-            status: ProjectInitiativeStatus::Planned, sort: 99,
+            title: "悬空专项".into(), detail_md: None, sort: 99,
             created_at: base, updated_at: base,
         })
         .await

@@ -1,6 +1,98 @@
 use super::*;
 
 #[tokio::test]
+async fn deleting_capability_preserves_legacy_saved_plan_references() {
+    let h = Harness::new().await;
+    let id = seed_cap(&h, "legacy plan source").await;
+    let saved = serde_json::from_value(json!({
+        "id":"legacy-consumer", "version":1, "changelog":"original", "created_at":1,
+        "plan":{"schema_version":6,"title":"Legacy consumer",
+            "nodes":[{"node_id":"old-node","capability_ids":[id]}]}
+    }))
+    .unwrap();
+    h.state
+        .fleet
+        .save_brain_plan_document(&saved)
+        .await
+        .unwrap();
+    let endpoint = format!("/api/brain/capabilities/{id}");
+    let (status, body) = h.req(Method::DELETE, &endpoint, None).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("plan:legacy-consumer@1"));
+    assert_eq!(h.req(Method::GET, &endpoint, None).await.0, 200);
+}
+
+#[tokio::test]
+async fn deleting_capability_preserves_saved_and_active_consumers() {
+    let h = Harness::with_brain_kind().await;
+    super::super::layered_api::advertise_v4(&h);
+    let id = seed_cap(&h, "retained capability").await;
+    let (status, body) = h
+        .req(
+            Method::PUT,
+            &format!("/api/brain/capabilities/{id}/target"),
+            Some(json!({"kind":"agent","target":"act"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let mut plan = super::super::layered_api::plan();
+    plan["nodes"][0]["capability_id"] = json!(id);
+    // The oldest version must still protect its source beyond the first page.
+    for version in 1..=21 {
+        let saved = json!({"id":"consumer","version":version,"plan":plan,
+            "changelog":"consumer","created_at":1});
+        let (status, body) = h
+            .req(Method::POST, "/api/brain/plan-defs", Some(saved))
+            .await;
+        assert_eq!(status, 200, "{body}");
+        plan["nodes"][0]["capability_id"] = json!("builtin-agent-act");
+    }
+    let endpoint = format!("/api/brain/capabilities/{id}");
+    let (status, body) = h.req(Method::DELETE, &endpoint, None).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("plan:consumer@1"));
+    assert_eq!(
+        h.req(Method::DELETE, "/api/brain/plan-defs/consumer", None)
+            .await
+            .0,
+        200
+    );
+    plan["nodes"][0]["capability_id"] = json!(id);
+    let (status, body) = h
+        .req(
+            Method::POST,
+            "/api/brain/runs",
+            Some(json!({"id":"brain-cap-consumer","schema_version":7,"plan":plan,"inputs":{}})),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+    let (status, body) = h.req(Method::DELETE, &endpoint, None).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("run:brain-cap-consumer"));
+    assert_eq!(h.req(Method::GET, &endpoint, None).await.0, 200);
+    h.report_status(
+        "brain-cap-consumer",
+        opencoder_core::fleet::ExecutionStatus::Done,
+    )
+    .await;
+    let (status, body) = h.req(Method::DELETE, &endpoint, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(h
+        .state
+        .fleet
+        .assignment("brain-cap-consumer")
+        .await
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
 async fn capability_crud_search_and_target_binding() {
     let h = Harness::new().await;
     let id = seed_cap(&h, TOPIC_A).await;
@@ -100,6 +192,11 @@ async fn capability_crud_search_and_target_binding() {
         .await;
     assert_eq!(status, 404, "{body}");
 
+    h.state
+        .fleet
+        .put_definition("brain_capability_meta", &id, &json!({"maturity":"stable"}))
+        .await
+        .unwrap();
     let (status, body) = h
         .req(
             Method::DELETE,
@@ -109,6 +206,22 @@ async fn capability_crud_search_and_target_binding() {
         .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["deleted"], json!(id));
+    let (status, body) = h
+        .req(
+            Method::GET,
+            &format!("/api/brain/capabilities/{id}/target"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["target"], json!(null));
+    assert!(h
+        .state
+        .fleet
+        .definition("brain_capability_meta", &id)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]
@@ -297,4 +410,35 @@ async fn target_guard_rebind_and_unknown_id_is_null() {
         .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["target"], json!(null), "unknown id is null, not 404");
+}
+
+#[tokio::test]
+async fn deleting_capability_clears_orphan_metadata_on_retry() {
+    let h = Harness::new().await;
+    let id = seed_cap(&h, "retry deletion").await;
+    h.state
+        .fleet
+        .put_definition(
+            "capability_target",
+            &id,
+            &json!({"kind":"agent","target":"act"}),
+        )
+        .await
+        .unwrap();
+    h.state.store.delete_brain_capability(&id).await.unwrap();
+    let (status, body) = h
+        .req(
+            Method::DELETE,
+            &format!("/api/brain/capabilities/{id}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(h
+        .state
+        .fleet
+        .definition("capability_target", &id)
+        .await
+        .unwrap()
+        .is_none());
 }

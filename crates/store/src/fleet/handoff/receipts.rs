@@ -130,8 +130,8 @@ impl FleetStore {
         Ok(out)
     }
 
-    /// Atomic dispatch outbox: ownership, frozen input and dispatch phase exist
-    /// before the first RPC. A lost reply never leads to a new assignment.
+    /// Freeze ownership and input before the RPC. Conversation indexes are
+    /// published only after the node confirms durable acceptance.
     pub async fn prepare_assignment(
         &self,
         assignment: &Assignment,
@@ -185,21 +185,23 @@ impl FleetStore {
             );
         }
         drop(rows);
-        tx.execute("INSERT INTO execution_index(id,created_at,kind,node_id,status) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO NOTHING",
-            params![i.id.clone(),i.created_at,i.kind.prefix(),i.node_id.clone(),i.status.as_str()]).await?;
+        if !matches!(i.kind, ExecutionKind::Agent | ExecutionKind::Operator) {
+            super::acceptance::insert(&tx, i, None).await?;
+        }
         let mut rows = tx
             .query(
                 "SELECT node_id,kind,created_at FROM execution_index WHERE id=?1",
                 [i.id.as_str()],
             )
             .await?;
-        let row = rows.next().await?.unwrap();
-        ensure!(
-            row.get::<String>(0)? == i.node_id
-                && row.get::<String>(1)? == i.kind.prefix()
-                && row.get::<i64>(2)? == i.created_at,
-            "execution ownership conflict"
-        );
+        if let Some(row) = rows.next().await? {
+            ensure!(
+                row.get::<String>(0)? == i.node_id
+                    && row.get::<String>(1)? == i.kind.prefix()
+                    && row.get::<i64>(2)? == i.created_at,
+                "execution ownership conflict"
+            );
+        }
         drop(rows);
         tx.execute(
             "INSERT INTO execution_assignments VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET assignment=excluded.assignment",
@@ -218,16 +220,24 @@ impl FleetStore {
         fingerprint: &str,
         reply: &RpcReply,
     ) -> Result<()> {
-        self.save_receipt(
-            "execution",
-            id,
-            &Receipt {
-                fingerprint: fingerprint.into(),
-                phase: "accepted".into(),
-                payload: serde_json::to_value(reply)?,
-            },
-        )
-        .await
+        ensure!(
+            (200..300).contains(&reply.status),
+            "node acceptance required"
+        );
+        let accepted = serde_json::from_value(reply.body.clone())?;
+        let _guard = self.gate.lock().await;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await?;
+        super::acceptance::insert(&tx, &accepted, Some(id)).await?;
+        let changed = tx.execute(
+            "UPDATE dispatch_receipts SET phase='accepted',payload=?3 WHERE scope='execution' AND id=?1 AND fingerprint=?2",
+            params![id, fingerprint, serde_json::to_string(reply)?],
+        ).await?;
+        ensure!(changed == 1, "request receipt ownership conflict");
+        tx.commit().await?;
+        Ok(())
     }
 }
 

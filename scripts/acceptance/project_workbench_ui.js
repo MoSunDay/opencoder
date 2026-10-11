@@ -8,11 +8,22 @@ const assert = require('node:assert/strict');
 const spa = path.resolve(__dirname, '../../crates/web/spa/dist');
 const out = process.env.PROJECT_UI_ARTIFACTS || '/tmp/opencoder-project-ui';
 const todo = (id, title, status, position, tags = []) => ({ id, title, draft: `${title}说明`, board_status: status, position, initiative_id: 'i', tag_ids: tags, created_at: 1000, updated_at: 2000 });
-const overview = { goals: [{ id: 'p', title: '项目浏览器验收', status: 'active', updated_at: 2000, initiatives: [{ id: 'i', title: '专项浏览器验收', goal_id: 'p', status: 'in_progress', todos: [todo('a', '可拖动任务', 'todo', 1000, ['local', 'focus']), todo('hidden', '隐藏任务', 'done', 1000), todo('b', '目标任务', 'done', 2000, ['local'])] }] }], standalone_initiatives: [{ id: 'solo', title: '独立专项验收', status: 'planned', todos: [] }], backlog: [todo('free', '未归属任务', 'backlog', 1000)], tags: [
+const overview = { goals: [{ id: 'p', title: '项目浏览器验收', status: 'active', updated_at: 2000, initiatives: [{ id: 'i', title: '专项浏览器验收', goal_id: 'p', todos: [todo('a', '可拖动任务', 'todo', 1000, ['local', 'focus']), todo('hidden', '隐藏任务', 'done', 1000), todo('b', '目标任务', 'done', 2000, ['local'])] }] }], standalone_initiatives: [{ id: 'solo', title: '独立专项验收', todos: [] }], backlog: [todo('free', '未归属任务', 'backlog', 1000)], tags: [
   { id: 'parent', scope_type: 'project', scope_id: 'p', name: '模块' }, { id: 'local', scope_type: 'initiative', scope_id: 'i', name: '模块' }, { id: 'focus', scope_type: 'project', scope_id: 'p', name: '重点' },
 ] };
+overview.goals[0].current_summary = '关键进展：全部专项已建立，核心工作：任务拆分完成，剩余卡点：等待专项验收';
+overview.goals[0].summary_updated_at = 1700000000000;
+overview.goals[0].initiatives[0].current_summary = '关键进展：接口联调完成，核心工作：修复分页读取，剩余卡点：等待设备';
+overview.goals[0].initiatives[0].summary_updated_at = 1700000000000;
 overview.backlog[0].initiative_id = null;
 const requests = []; let failOrder = false;
+const summaryHistory = new Map();
+for (const [collection, row] of [['goals', overview.goals[0]], ['initiatives', overview.goals[0].initiatives[0]]]) {
+  summaryHistory.set(`${collection}/${row.id}`, [
+    { version: 2, current_summary: row.current_summary, created_at: row.summary_updated_at },
+    { version: 1, current_summary: '初版概述：正在梳理任务', created_at: 1699999900000 },
+  ]);
+}
 async function main() {
   await mkdir(out, { recursive: true });
   const server = createServer(async (req, res) => {
@@ -20,6 +31,22 @@ async function main() {
     const send = (status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
     try {
       if (url.pathname.startsWith('/api/')) {
+        const history = url.pathname.match(/^\/api\/project\/(goals|initiatives)\/([^/]+)\/summary-versions(?:\/(\d+)\/restore)?$/);
+        if (history) {
+          const [, collection, id, version] = history;
+          const key = `${collection}/${id}`; const versions = summaryHistory.get(key);
+          if (!versions) return send(404, { error: '对象不存在' });
+          if (req.method === 'GET') return send(200, { versions, limit: 10 });
+          assert.equal(req.method, 'POST');
+          const source = versions.find((item) => item.version === Number(version));
+          if (!source) return send(404, { error: '版本不存在' });
+          const restored = { version: versions[0].version + 1, current_summary: source.current_summary, created_at: Date.now(), restored_from: Number(version) };
+          summaryHistory.set(key, [restored, ...versions].slice(0, 10));
+          const row = collection === 'goals' ? overview.goals.find((row) => row.id === id) : overview.goals.flatMap((goal) => goal.initiatives).find((row) => row.id === id);
+          Object.assign(row, { current_summary: restored.current_summary, summary_updated_at: restored.created_at });
+          requests.push({ method: req.method, path: url.pathname, body: {} });
+          return send(200, restored);
+        }
         if (req.method !== 'GET') {
           let raw = ''; for await (const chunk of req) raw += chunk;
           const body = JSON.parse(raw || '{}'); requests.push({ method: req.method, path: url.pathname, body });
@@ -56,6 +83,14 @@ async function main() {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  async function navigate(label) {
+    const item = page.locator('#fleet-page-menu').getByText(label, { exact: true });
+    if (await item.isVisible()) await item.click();
+    else {
+      await page.getByRole('combobox', { name: '页面导航' }).click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(label, { exact: true }).click();
+    }
+  }
   async function drag(source, destination) {
     const from = await source.boundingBox(); const target = await destination.boundingBox();
     const response = page.waitForResponse((r) => r.url().endsWith('/api/project/todos/order'));
@@ -71,13 +106,22 @@ async function main() {
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: 'networkidle' });
     await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
     await page.getByRole('button', { name: '项目浏览器验收', exact: true }).waitFor();
-    assert.deepEqual(await page.locator('.fleet-content .ant-tabs').getByRole('tab').allTextContents(), ['项目', '专项', 'TODO', 'Tag']);
+    assert.deepEqual(await page.locator('#fleet-page-menu').getByRole('menuitem').allTextContents(), ['Overview', 'Tag']);
+    assert.deepEqual(await page.locator('.fleet-content .ant-tabs').getByRole('tab').allTextContents(), ['项目', '专项', 'TODO']);
     for (const width of [1920, 1280, 768, 390]) {
       await page.setViewportSize({ width, height: 1000 });
+      await navigate('Overview');
       for (const tab of ['项目', '专项', 'TODO', 'Tag']) {
-        await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: tab, exact: true }).click();
-        const table = page.getByRole('tabpanel', { name: tab, exact: true }).locator('.project-table');
+        if (tab === 'Tag') await navigate('Tag');
+        else await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: tab, exact: true }).click();
+        const table = tab === 'Tag' ? page.getByLabel('Tag 表格', { exact: true }) : page.getByRole('tabpanel', { name: tab, exact: true }).locator('.project-table');
         await table.waitFor();
+        if (tab === '项目' || tab === '专项') {
+          await table.locator('thead').getByText('当前概述', { exact: true }).waitFor();
+          await table.locator('thead').getByText('概述更新时间', { exact: true }).waitFor();
+          const summary = tab === '项目' ? overview.goals[0].current_summary : overview.goals[0].initiatives[0].current_summary;
+          assert.equal(await table.getByText(summary, { exact: true }).count(), 1);
+        }
         const bounds = await table.evaluate((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, content: el.scrollWidth, width: el.clientWidth }));
         assert(bounds.left >= -1 && bounds.right <= width + 1 && bounds.content <= bounds.width + 1, `${tab} width ${width}: ${JSON.stringify(bounds)}`);
         await page.screenshot({ path: path.join(out, `${tab}-${width}.png`), fullPage: true, animations: 'disabled' });
@@ -85,13 +129,26 @@ async function main() {
     }
     console.log('PASS responsive tables');
     await page.setViewportSize({ width: 1440, height: 1000 });
+    await navigate('Overview');
     await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
     await page.getByRole('button', { name: '项目浏览器验收', exact: true }).click();
     const project = page.getByRole('dialog', { name: '项目 · 项目浏览器验收' });
     await project.getByText('专项进度', { exact: true }).waitFor();
+    await project.getByLabel('当前概述', { exact: true }).getByText(overview.goals[0].current_summary, { exact: true }).waitFor();
+    await project.getByRole('button', { name: '修改记录', exact: true }).click();
+    const projectHistory = page.getByRole('dialog', { name: '概述修改记录', exact: true });
+    await projectHistory.getByText('版本 2（当前）', { exact: true }).waitFor();
+    await projectHistory.getByRole('button', { name: '恢复此版本', exact: true }).click();
+    await page.getByRole('button', { name: '确认恢复', exact: true }).click();
+    await projectHistory.getByText('版本 3（当前）', { exact: true }).waitFor();
+    await projectHistory.getByText('恢复自版本 1', { exact: true }).waitFor();
+    await projectHistory.locator('.ant-drawer-close').click();
+    await projectHistory.waitFor({ state: 'hidden' });
+    await project.getByLabel('当前概述', { exact: true }).getByText('初版概述：正在梳理任务', { exact: true }).waitFor();
     await project.getByRole('button', { name: '专项浏览器验收' }).click();
     const board = page.getByRole('dialog', { name: '专项 · 专项浏览器验收' });
     await board.getByRole('button', { name: '拖动 可拖动任务', exact: true }).waitFor();
+    await board.getByLabel('当前概述', { exact: true }).getByText(overview.goals[0].initiatives[0].current_summary, { exact: true }).waitFor();
     async function verifyFullscreen(drawer, kind, width) {
       await page.waitForFunction((title) => {
         const dialog = [...document.querySelectorAll('[role="dialog"]')].find((item) => item.getAttribute('aria-labelledby') && document.getElementById(item.getAttribute('aria-labelledby'))?.textContent === title);
@@ -110,6 +167,13 @@ async function main() {
     for (const width of [1920, 1280, 768, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       await verifyFullscreen(board, 'initiative', width);
+      await board.getByRole('button', { name: '修改记录', exact: true }).click();
+      const history = page.getByRole('dialog', { name: '概述修改记录', exact: true });
+      await history.getByText('版本 2（当前）', { exact: true }).waitFor();
+      assert(await history.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), `history overflow ${width}`);
+      await page.screenshot({ path: path.join(out, `summary-history-${width}.png`), animations: 'disabled' });
+      await history.locator('.ant-drawer-close').click();
+      await history.waitFor({ state: 'hidden' });
       await board.getByRole('button', { name: '可拖动任务', exact: true }).click();
       const todoDetail = page.getByRole('dialog', { name: 'TODO · 可拖动任务' });
       await verifyFullscreen(todoDetail, 'todo', width);
@@ -117,7 +181,7 @@ async function main() {
       await todoDetail.waitFor({ state: 'hidden' });
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
-    console.log('PASS fullscreen initiative and TODO drawers');
+    console.log('PASS fullscreen initiative and TODO drawers, summary history and restore');
     await board.getByLabel('搜索专项 TODO', { exact: true }).fill('任务');
     await board.getByRole('combobox', { name: '筛选 Tag', exact: true }).click();
     await page.locator('.ant-select-item-option-content').getByText('模块', { exact: true }).click();
@@ -158,8 +222,9 @@ async function main() {
     await board.getByText('按 Tag 分组', { exact: true }).waitFor();
     assert.equal(await board.getByRole('button', { name: '可拖动任务', exact: true }).count(), 2);
     await board.locator('.ant-drawer-close').click();
-    await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: 'Tag', exact: true }).click();
+    await navigate('Tag');
     const tags = page.getByLabel('Tag 表格', { exact: true });
+    await tags.getByText('模块', { exact: true }).first().waitFor();
     assert.equal(await tags.getByText('模块', { exact: true }).count(), 2);
     await page.getByRole('button', { name: '新建 Tag', exact: true }).click();
     let tagEditor = page.getByRole('dialog', { name: '新建 Tag', exact: true });
@@ -190,6 +255,20 @@ async function main() {
     assert.deepEqual(requests.find((r) => r.path === '/api/project/tags').body, { name: '验收标签', scope_type: 'initiative', scope_id: 'solo' });
     await tags.getByLabel('编辑 Tag 验收标签', { exact: true }).click();
     tagEditor = page.getByRole('dialog', { name: '编辑 Tag', exact: true });
+    await tagEditor.getByRole('combobox', { name: 'Tag 归属类型', exact: true }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText('全局', { exact: true }).click();
+    assert.equal(await tagEditor.getByRole('combobox', { name: 'Tag 归属', exact: true }).count(), 0);
+    await tagEditor.getByRole('button', { name: /保存 Tag/ }).click();
+    await tagEditor.waitFor({ state: 'hidden' });
+    await tags.locator('.ant-table-row').filter({ hasText: '验收标签' }).getByText('全局', { exact: true }).waitFor();
+    assert.deepEqual(requests.filter((r) => r.path === '/api/project/tags/created-tag' && r.method === 'PATCH').at(-1).body, { name: '验收标签', scope_type: 'global', scope_id: '' });
+    await tags.getByLabel('编辑 Tag 验收标签', { exact: true }).click();
+    for (const width of [1920, 1280, 768, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth + 1);
+      await page.screenshot({ path: path.join(out, `global-tag-editor-${width}.png`), animations: 'disabled' });
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await chooseTagOwner('项目', '项目浏览器验收');
     await tagEditor.getByLabel('Tag 名称', { exact: true }).fill('模块');
     await tagEditor.getByRole('button', { name: /保存 Tag/ }).click();
@@ -205,25 +284,43 @@ async function main() {
     await page.getByRole('tooltip').getByRole('button', { name: /删.*除/ }).click();
     await tags.getByLabel('删除 Tag 已改名标签', { exact: true }).waitFor({ state: 'hidden' });
     console.log('PASS tag CRUD, owner changes and failed-save draft');
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByLabel('Tag 表格', { exact: true }).waitFor();
+    await navigate('Overview');
     await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
     await page.getByRole('button', { name: '新建项目', exact: true }).click();
     const editor = page.getByRole('dialog', { name: '新建项目', exact: true });
     await editor.getByPlaceholder('一句话标题').fill('CRUD 验收项目');
+    await editor.getByLabel('负责人', { exact: true }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText('alice', { exact: true }).click();
+    await page.locator('.ant-select-dropdown:visible').waitFor({ state: 'hidden' });
+    await editor.getByLabel('关注人', { exact: true }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText('bob', { exact: true }).click();
+    await editor.getByLabel('关注人', { exact: true }).press('Escape');
+    await page.locator('.ant-select-dropdown:visible').waitFor({ state: 'hidden' });
+    await editor.getByPlaceholder('一句话标题').click();
     await editor.getByRole('button', { name: /保.*存/ }).click();
     await page.getByRole('button', { name: 'CRUD 验收项目', exact: true }).waitFor();
     const row = page.locator('.ant-table-row').filter({ hasText: 'CRUD 验收项目' });
+    await row.getByText('alice', { exact: true }).waitFor();
+    await row.getByText('bob', { exact: true }).waitFor();
+    assert.equal(overview.goals.find((goal) => goal.id === 'new-project').owner_user_name, 'alice');
+    assert.deepEqual(overview.goals.find((goal) => goal.id === 'new-project').follower_user_names, ['bob']);
     await row.getByRole('button', { name: /操.*作/ }).click();
     await page.getByRole('menuitem', { name: '编辑', exact: true }).click();
     const editing = page.getByRole('dialog', { name: '编辑项目', exact: true });
+    await editing.locator('.ant-form-item').filter({ has: page.getByLabel('负责人', { exact: true }) }).locator('.ant-select-clear').click();
     await editing.getByPlaceholder('一句话标题').fill('CRUD 已修改项目');
     await editing.getByRole('button', { name: /保.*存/ }).click();
     const updatedRow = page.locator('.ant-table-row').filter({ hasText: 'CRUD 已修改项目' });
+    await updatedRow.getByText('未指定', { exact: true }).waitFor();
+    await updatedRow.getByText('bob', { exact: true }).waitFor();
     await updatedRow.getByRole('button', { name: /操.*作/ }).click();
     await page.getByRole('menuitem', { name: '删除', exact: true }).click();
     await page.getByRole('dialog', { name: '删除该项目？' }).getByRole('button', { name: /确.*定/ }).click();
     await page.getByRole('button', { name: 'CRUD 已修改项目', exact: true }).waitFor({ state: 'hidden' });
     assert.deepEqual(errors, []);
-    const receipt = { result: 'PASS', screenshots: out, widths: [1920, 1280, 768, 390], fullscreen_drawers: fullscreenDrawers, filtered_drag: move.body, grouped_cards: true, grouped_move_sync: true, failed_save_rollback: true, scope_precedence: true, tag_crud: true, tag_owner_changes: true, tag_failed_save_draft: true, project_crud: true, page_errors: errors };
+    const receipt = { result: 'PASS', screenshots: out, widths: [1920, 1280, 768, 390], fullscreen_drawers: fullscreenDrawers, filtered_drag: move.body, grouped_cards: true, grouped_move_sync: true, failed_save_rollback: true, scope_precedence: true, tag_crud: true, tag_global_scope: true, tag_owner_changes: true, tag_failed_save_draft: true, project_crud: true, page_errors: errors };
     await writeFile(path.join(out, 'receipt.json'), JSON.stringify(receipt, null, 2));
     console.log(JSON.stringify(receipt));
   } catch (error) {

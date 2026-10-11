@@ -2,17 +2,17 @@
 use opencoder_store::project::ProjectTag;
 use opencoder_store::{
     LibsqlStore, ProjectGoalRecord, ProjectGoalStatus, ProjectInitiativePatch,
-    ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectStore, ProjectTodoPatch,
-    ProjectTodoRecord,
+    ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch, ProjectTodoRecord,
 };
 
 fn initiative(id: &str, goal: Option<&str>) -> ProjectInitiativeRecord {
     ProjectInitiativeRecord {
+        summary: Default::default(),
+        people: Default::default(),
         id: id.into(),
         goal_id: goal.map(str::to_owned),
         title: id.into(),
         detail_md: None,
-        status: ProjectInitiativeStatus::Planned,
         sort: 0,
         created_at: 1,
         updated_at: 1,
@@ -33,6 +33,8 @@ async fn setup() -> LibsqlStore {
     let s = LibsqlStore::open_memory().await.unwrap();
     for id in ["p", "q"] {
         s.create_goal(&ProjectGoalRecord {
+            summary: Default::default(),
+            people: Default::default(),
             id: id.into(),
             title: id.into(),
             detail_md: None,
@@ -103,6 +105,7 @@ async fn invalid_selection_rolls_back_todo_creation_and_edits() {
         .patch_todo_tagged(
             "t",
             &ProjectTodoPatch {
+                people: Default::default(),
                 title: Some("不能保存".into()),
                 ..Default::default()
             },
@@ -134,6 +137,7 @@ async fn rename_duplicate_and_scope_changes_keep_catalog_consistent() {
     s.patch_initiative(
         "i",
         &ProjectInitiativePatch {
+            people: Default::default(),
             goal_id: Some(Some("q".into())),
             ..Default::default()
         },
@@ -171,6 +175,7 @@ async fn todo_unlink_and_deletion_remove_tag_links() {
     s.patch_todo(
         "t",
         &ProjectTodoPatch {
+            people: Default::default(),
             initiative_id: Some(None),
             ..Default::default()
         },
@@ -291,3 +296,6 @@ async fn tag_scope_rejects_missing_owner_and_allows_moving_existing_definition()
 
 #[path = "project_tags/moves.rs"]
 mod moves;
+
+#[path = "project_tags/global.rs"]
+mod global;

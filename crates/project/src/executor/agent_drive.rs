@@ -108,6 +108,7 @@ async fn new_or_resume_session(
     .mark_session_created();
     let now = opencoder_core::message::now_ms();
     let patch = ProjectTodoPatch {
+        people: Default::default(),
         title: None,
         draft: None,
         plan_md: None,

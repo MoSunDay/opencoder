@@ -240,6 +240,9 @@ pub(super) fn classify_todo_workflow(
 }
 
 async fn session_detail(worker: &Worker, id: &str) -> Result<RpcReply> {
+    if let Some(reply) = super::session::before_ready(worker, id, "").await? {
+        return Ok(reply);
+    }
     let Some(meta) = worker.inner.state.store.get_session(id).await? else {
         return Ok(RpcReply::error(404, "session not found"));
     };

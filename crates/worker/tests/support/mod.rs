@@ -231,6 +231,7 @@ pub async fn seed_project_run(
     opencoder_session::loop_registry::notify_change();
 }
 pub async fn settled(worker: &Worker, id: &str) -> Value {
+    let mut last = String::new();
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
         loop {
             let reply = worker
@@ -238,6 +239,7 @@ pub async fn settled(worker: &Worker, id: &str) -> Value {
                     execution: execution_ref(worker, id).await,
                 })
                 .await;
+            last = format!("{reply:?}");
             if !matches!(
                 reply.body["execution"]["status"].as_str(),
                 Some("pending" | "running" | "cancelling")
@@ -249,7 +251,7 @@ pub async fn settled(worker: &Worker, id: &str) -> Value {
         }
     })
     .await
-    .unwrap()
+    .unwrap_or_else(|error| panic!("execution {id} did not settle: {error}; last inspect: {last}"))
 }
 pub async fn prompt(worker: &Worker, id: &str, text: &str) -> RpcReply {
     worker

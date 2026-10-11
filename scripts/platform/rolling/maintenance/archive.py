@@ -181,7 +181,7 @@ def identity_tables(conn, before, saved):
         raise ValueError('non-project data changed; refusing backup restoration')
     def columns(schema, table):
         return [row[1] for row in conn.execute(f'PRAGMA {schema}.table_info({quote(table)})')]
-    if (conn.execute('SELECT version FROM main.schema_version').fetchone() != (35,)
+    if (conn.execute('SELECT version FROM main.schema_version').fetchone() not in ((35,), (36,), (37,), (38,))
             or conn.execute('SELECT version FROM saved.schema_version').fetchone()[0] > 34
             or columns('saved', 'platform_users') != ['name', 'token_hash', 'role', 'created_at']
             or columns('saved', 'platform_tokens')

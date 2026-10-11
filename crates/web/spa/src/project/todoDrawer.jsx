@@ -1,24 +1,20 @@
 import { EditButton } from '../ui/permissions.jsx';
 import { useCanEdit } from '../ui/permissions.jsx';
-import { Alert, Button, ConfigProvider, Drawer, Input, Select, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Drawer, Form, Input, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { ExecutionView } from '../fleet/detail.jsx';
 import { KIND_LABELS, newId } from '../fleet/model.js';
 import { err, ok } from '../notice.js';
-import { flattenTodos, groupOptions, searchSelect } from './model/relations.js';
+import { flattenTodos } from './model/relations.js';
 import { CapabilityLauncher } from './execute/launcher.jsx';
-import { useCapabilities, capabilityOptions } from './execute/catalog.js';
+import { useCapabilities } from './execute/catalog.js';
 import { ExecutionResult } from './execute/result.jsx';
-import { effectiveTags, remapTagIds } from './model/catalog.js';
+import { remapTagIds } from './model/catalog.js';
 import { ProjectTable, TableText } from './views/projectTable.jsx';
+import { TodoEditor } from './forms/editor.jsx';
+import { TodoActions, TodoSection } from './forms/section.jsx';
 
-const STATUS_OPTIONS = [
-  { value: 'backlog', label: '待整理' },
-  { value: 'todo', label: '待办' },
-  { value: 'in_progress', label: '进行中' },
-  { value: 'done', label: '已完成' },
-];
 const linkPath = (todoId) => `/api/project/todos/${encodeURIComponent(todoId)}/executions`;
 
 function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice }) {
@@ -28,7 +24,8 @@ function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice 
   const [groupId, setGroupId] = useState(todo?.initiative_id || null);
   const [status, setStatus] = useState(todo?.board_status || 'backlog');
   const [tagIds, setTagIds] = useState(todo?.tag_ids || []);
-  const availableTags = effectiveTags(overview, groupId);
+  const [owner, setOwner] = useState(todo?.owner_user_name ?? null);
+  const [followers, setFollowers] = useState(todo?.follower_user_names || []);
   const selectedTags = remapTagIds(overview, tagIds, groupId);
   const [mode, setMode] = useState('overview');
   const catalog = useCapabilities();
@@ -90,12 +87,14 @@ function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice 
   }, [loadLinks]);
 
   const save = async () => {
+    if (!canEdit || busy) return false;
     navigation.current += 1;
     if (!title.trim()) { setError('TODO 标题不能为空'); return; }
     setBusy(true);
     try {
       await apiPatch(`/api/project/todos/${encodeURIComponent(todoId)}`, {
         title: title.trim(), draft, initiative_id: groupId, board_status: status, capability_id: capabilityId, tag_ids: selectedTags,
+        owner_user_name: owner, follower_user_names: followers,
       });
       await refresh();
       setError('');
@@ -147,35 +146,43 @@ function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice 
       <EditButton danger type="link" disabled={!canEdit || busy} onClick={() => unlink(row.id)}>解除关联</EditButton>
     </Space> },
   ];
-  return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" destroyOnHidden>
-    <Space style={{ marginBottom: 16 }}>
-      {mode !== 'overview' && <Button onClick={() => navigate('overview')}>返回 TODO</Button>}
-      {mode === 'overview' && <EditButton type="primary" disabled={!canEdit || !capabilityId || catalog.loading || !!catalog.error} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</EditButton>}
-    </Space>
-    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
-    {pendingId && <Button loading={busy} onClick={() => link(pendingId)}>重试关联 {pendingId}</Button>}
-    {mode === 'overview' && <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-      <ConfigProvider componentDisabled={!canEdit}>
-      <Input aria-label="TODO 标题" value={title} onChange={(event) => setTitle(event.target.value)} />
-      <Select {...searchSelect} aria-label="所属专项" placeholder="未归属专项" value={groupId} onChange={(value) => { setTagIds(remapTagIds(overview, tagIds, value || null)); setGroupId(value || null); }} options={groupOptions(overview)} style={{ width: '100%' }} />
-      <Select mode="multiple" aria-label="TODO Tag" value={selectedTags} onChange={setTagIds} disabled={!groupId} showSearch optionFilterProp="label" placeholder={groupId ? "选择 Tag" : "关联专项后可选择 Tag"} options={availableTags.map((tag) => ({ value: tag.id, label: tag.name }))} style={{ width: '100%' }} />
-      <Select aria-label="TODO 看板列" value={status} onChange={setStatus} options={STATUS_OPTIONS} style={{ width: 180 }} />
-      {catalog.error && <Alert type="error" title={catalog.error} action={<Button onClick={catalog.reload}>重试能力列表</Button>} />}
-      <Select aria-label="执行能力" placeholder="选择能力库中的能力" value={capabilityId} onChange={(value) => setCapabilityId(value || null)} allowClear loading={catalog.loading} options={capabilityOptions(catalog.capabilities)} style={{ width: '100%' }} showSearch optionFilterProp="label" />
-      <Input.TextArea aria-label="任务说明" value={draft} onChange={(event) => setDraft(event.target.value)} rows={6} placeholder="写下任务要求，指派时会带入执行界面" />
+  const changeField = (key, value) => {
+    if (key === 'title' && value.trim() && error === 'TODO 标题不能为空') setError('');
+    if (key === 'groupId') {
+      setTagIds(remapTagIds(overview, tagIds, value)); setGroupId(value);
+    } else ({ title: setTitle, draft: setDraft, status: setStatus, tagIds: setTagIds,
+      owner: setOwner, followers: setFollowers, capabilityId: setCapabilityId })[key](value);
+  };
+  return <Drawer open title={`TODO · ${todo?.title || todoId}`} onClose={onClose} placement="right" size="100vw" destroyOnHidden
+    footer={mode === 'overview' && <TodoActions>
+      {error && error !== 'TODO 标题不能为空' && <Alert type="error" showIcon title={error} />}
       <EditButton type="primary" loading={busy} onClick={save}>保存 TODO</EditButton>
-      </ConfigProvider>
-      <Typography.Title level={5}>指派记录</Typography.Title>
-      {links[0]?.execution_id && <ExecutionResult key={links[0].execution_id} id={links[0].execution_id} />}
-      <Space.Compact style={{ width: '100%' }}>
-        <Input aria-label="已有执行 ID" placeholder="粘贴已有执行 ID" value={linkInput} onChange={(event) => setLinkInput(event.target.value)} />
-        <EditButton disabled={!canEdit || !linkInput.trim()} loading={busy} onClick={() => link(linkInput)}>关联</EditButton>
-      </Space.Compact>
-      <ProjectTable label="TODO 指派记录" viewKey={`assignments:${todoId}`} pagination={false} rows={links.map((record) => ({ ...indexes[record.execution_id], ...record, id: record.execution_id, kind: record.kind || indexes[record.execution_id]?.kind, name: record.name || indexes[record.execution_id]?.name, status: indexes[record.execution_id]?.status, missing: indexes[record.execution_id]?.missing, readError: indexes[record.execution_id]?.readError }))} columns={columns} />
-    </Space>}
+      <EditButton disabled={!canEdit || !capabilityId || catalog.loading || !!catalog.error} loading={busy} onClick={async () => { if (await save()) navigate('launch'); }}>指派所选能力</EditButton>
+    </TodoActions>}>
+    {mode !== 'overview' && <Button style={{ marginBottom: 16 }} onClick={() => navigate('overview')}>返回 TODO</Button>}
+    {mode !== 'overview' && error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
+    {pendingId && <Button className="project-todo-retry" loading={busy} onClick={() => link(pendingId)}>重试关联 {pendingId}</Button>}
+    {mode === 'overview' && <div className="project-todo-workspace">
+      <TodoEditor value={{ title, draft, groupId, status, tagIds: selectedTags, owner, followers, capabilityId }}
+        onChange={changeField} overview={overview} catalog={catalog} disabled={!canEdit || busy} onSave={save} titleError={error === 'TODO 标题不能为空' ? error : ''} />
+      <TodoSection title="指派记录">
+        {links[0]?.execution_id && <div className="project-todo-field-full"><ExecutionResult key={links[0].execution_id} id={links[0].execution_id} /></div>}
+        <Form layout="vertical" component="div" className="project-todo-field-full">
+          <Form.Item label="已有执行 ID" htmlFor={`todo-link-${todoId}`}>
+            <div className="project-todo-link">
+              <Input id={`todo-link-${todoId}`} aria-label="已有执行 ID" placeholder="粘贴已有执行 ID" value={linkInput} onChange={(event) => setLinkInput(event.target.value)} disabled={!canEdit || busy} />
+              <EditButton disabled={!canEdit || !linkInput.trim()} loading={busy} onClick={() => link(linkInput)}>关联</EditButton>
+            </div>
+          </Form.Item>
+        </Form>
+        <div className="project-todo-field-full">
+          <ProjectTable scroll={{ x: 900 }} label="TODO 指派记录" viewKey={`assignments:${todoId}`} pagination={false} rows={links.map((record) => ({ ...indexes[record.execution_id], ...record, id: record.execution_id, kind: record.kind || indexes[record.execution_id]?.kind, name: record.name || indexes[record.execution_id]?.name, status: indexes[record.execution_id]?.status, missing: indexes[record.execution_id]?.missing, readError: indexes[record.execution_id]?.readError }))} columns={columns} />
+        </div>
+      </TodoSection>
+    </div>}
     {mode === 'launch' && catalog.loading && <Spin />}
-    {mode === 'launch' && !catalog.loading && <CapabilityLauncher key={capabilityId} capability={catalog.capabilities.find((cap) => cap.id === capabilityId)} todoId={todoId} onNotice={onNotice}
-      prompt={[title, draft].filter(Boolean).join('\n\n')} onCreated={(id) => link(id, true)} />}
+    {mode === 'launch' && !catalog.loading && <div className="project-todo-workspace"><CapabilityLauncher key={capabilityId} capability={catalog.capabilities.find((cap) => cap.id === capabilityId)} todoId={todoId} onNotice={onNotice}
+      prompt={[title, draft].filter(Boolean).join('\n\n')} onCreated={(id) => link(id, true)} /></div>}
     {mode === 'execution' && (indexes[executionId]
       ? <ExecutionView key={executionId} executionRef={{ id: executionId, kind: indexes[executionId].kind || links.find((link) => link.execution_id === executionId)?.kind }} summary={indexes[executionId]} onNotice={onNotice} mode={["agent", "operator"].includes(indexes[executionId].kind) ? "conversation" : "full"}
         allowGuidance={canEdit && indexes[executionId].kind === 'team' && indexes[executionId].status === 'running'}

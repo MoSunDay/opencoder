@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # Ontology 前端
 
@@ -6,8 +6,8 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 
 ## 入口与共享状态
 
-- [panels.tsx](../../crates/web/spa/src/ontology/panels.tsx)、[env.tsx](../../crates/web/spa/src/ontology/env.tsx)、[api.ts](../../crates/web/spa/src/ontology/api.ts) 连接五个导航页面、环境和平台身份。写权限来自服务端能力，正文保存回执提供新 revision。
-- [DraftGuard.tsx](../../crates/web/spa/src/ontology/navigation/DraftGuard.tsx) 在 Shell 内登记草稿和保存状态，供关闭、导航、环境切换、退出及浏览器离开检查使用。[ModalForm.tsx](../../crates/web/spa/src/ontology/ui/ModalForm.tsx) 统一表单提交、错误保留与放弃确认。
+- [panels.tsx](../../crates/web/spa/src/ontology/panels.tsx)、[env.tsx](../../crates/web/spa/src/ontology/env.tsx)、[api.ts](../../crates/web/spa/src/ontology/api.ts) 连接四个导航页面与平台身份。页面固定使用 Server 初始化的 `debug` 数据空间，由平台请求地址确定 Server；不读取旧环境选择、不查询环境列表，也不暴露环境管理。写权限来自登录身份的角色，正文保存回执提供新 revision。
+- [DraftGuard.tsx](../../crates/web/spa/src/ontology/navigation/DraftGuard.tsx) 在 Shell 内登记草稿和保存状态，供关闭、导航、退出及浏览器离开检查使用。[ModalForm.tsx](../../crates/web/spa/src/ontology/ui/ModalForm.tsx) 统一表单提交、错误保留与放弃确认。
 - [admin/](../../crates/web/spa/src/ontology/pages/admin/) 提供列表筛选、资源读取状态和危险操作菜单；[DirectoryActions.tsx](../../crates/web/spa/src/ontology/pages/DirectoryActions.tsx) 根据目录类型标记连接目录接口。
 
 ## 图谱

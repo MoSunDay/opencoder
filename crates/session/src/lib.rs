@@ -137,6 +137,8 @@ pub fn fire_turn_cancel(token: &SharedCancel) {
 pub struct SessionState {
     pub harness: opencoder_core::harness::HarnessRuntime,
     pub id: String,
+    /// Persisted execution kind; independent of the selected agent or mode.
+    pub(crate) session_kind: Option<String>,
     pub messages: Vec<Message>,
     pub agent: Agent,
     pub model: String,
@@ -281,6 +283,7 @@ impl SessionState {
             harness,
             env_passthrough: Vec::new(),
             id: id.into(),
+            session_kind: None,
             messages: Vec::new(),
             agent,
             model,
@@ -471,7 +474,7 @@ impl SessionState {
         if !self.session_created {
             let now = now_ms();
             let meta = SessionMeta {
-                kind: None,
+                kind: self.session_kind.clone(),
                 id: self.id.clone(),
                 title: first_user_text(self.messages.as_slice()),
                 agent: if self.ts_origin {

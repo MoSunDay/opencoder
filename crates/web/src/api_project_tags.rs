@@ -1,6 +1,6 @@
-//! Project and initiative tag catalog; same handlers on both HTTP surfaces.
+//! Global, project and initiative tag catalog; same handlers on both HTTP surfaces.
 use crate::{
-    api_project_util::{error_400, error_404, error_409, error_500, require_deps},
+    api_project_util::{error_400, error_404, error_409, require_deps},
     AppState,
 };
 use axum::{
@@ -21,6 +21,7 @@ pub struct TagQuery {
 #[derive(Deserialize)]
 pub struct TagBody {
     pub scope_type: String,
+    #[serde(default)]
     pub scope_id: String,
     pub name: String,
 }
@@ -29,7 +30,7 @@ pub fn tag_error(error: anyhow::Error) -> Response {
     match error.downcast_ref::<TagError>() {
         Some(TagError::Duplicate) => error_409(error.to_string()),
         Some(TagError::InvalidScope) => error_400(error.to_string()),
-        None => error_500(format!("project tags: {error:#}")),
+        None => crate::api_project_people::write_error(error),
     }
 }
 
@@ -55,6 +56,14 @@ async fn validate_body(
         )));
     }
     let exists = match body.scope_type.as_str() {
+        "global" => {
+            if !body.scope_id.is_empty() {
+                return Err(Box::new(error_400(
+                    "global tags must have an empty scope_id",
+                )));
+            }
+            Ok(true)
+        }
         "project" => projects
             .list_goals()
             .await
@@ -65,7 +74,7 @@ async fn validate_body(
             .map(|rows| rows.iter().any(|r| r.id == body.scope_id)),
         _ => {
             return Err(Box::new(error_400(
-                "tag scope must be project or initiative",
+                "tag scope must be global, project or initiative",
             )))
         }
     };

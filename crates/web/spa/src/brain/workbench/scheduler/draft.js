@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { convertPlan, inputRows, newVersion } from './model.js';
 export const draftKey = (owner, version) => `oc:brain:scheduler-draft:v7:${encodeURIComponent(owner)}:${version ? `${version.id}@${version.version + 1}` : 'new'}`;
 export function createDraft(version) {
@@ -29,10 +29,16 @@ export function readDraft(key, version, storage = localStorage) {
 }
 export function useDraft(key, version) {
   const [initial] = useState(() => { try { return { draft: readDraft(key, version), error: '' }; } catch (error) { return { draft: null, error: error.message }; } });
-  const [draft, setDraft] = useState(initial.draft); const [error, setError] = useState(initial.error); const cleared = useRef(false);
+  const [draft, renderDraft] = useState(initial.draft); const [error, setError] = useState(initial.error); const cleared = useRef(false);
+  const latest = useRef(initial.draft);
+  const setDraft = useCallback((update) => {
+    const next = typeof update === 'function' ? update(latest.current) : update;
+    latest.current = next;
+    renderDraft(next);
+  }, []);
   const persist = () => {
-    if (!draft) return false;
-    try { localStorage.setItem(key, JSON.stringify(draft)); setError(''); return true; }
+    if (!latest.current) return false;
+    try { localStorage.setItem(key, JSON.stringify(latest.current)); setError(''); return true; }
     catch (error) { setError(`草稿未写入浏览器：${error.message}`); return false; }
   };
   useLayoutEffect(() => { if (!cleared.current && draft) persist(); }, [key, draft]);

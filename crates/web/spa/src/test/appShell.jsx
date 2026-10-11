@@ -16,6 +16,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 // keeps working; its roots are created later, inside the tests, and never end
 // up in the list below.
 const { strayRoots } = vi.hoisted(() => ({ strayRoots: [] }));
+// Keep real Ontology panels and controls; jsdom has no canvas renderer.
+vi.mock('@ant-design/graphs', () => ({ FlowDirectionGraph: () => null }));
 vi.mock('react-dom/client', async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -80,6 +82,9 @@ const installFetchRouter = ({ rejectToken, failNodes, withGoal } = {}) => {
     }
     if (url.includes('/api/me')) {
       return jsonResponse({ name: 'smoke', role: 'admin' });
+    }
+    if (url.includes('/api/ontology/envs/debug/')) {
+      return jsonResponse({ items: [], root_id: 'root' });
     }
     if (withGoal && url.includes('/api/project/overview')) {
       // Seed one active goal: GoalsTab's EMPTY branch carries no MdEditModal,

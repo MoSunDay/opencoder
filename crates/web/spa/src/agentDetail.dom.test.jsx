@@ -144,44 +144,18 @@ describe('AgentDetail direct resources',() => {
   // 全局激活已移除：详情不再提供「设为生效」（会话级 agent 切换走会话接口）。
 });
 
-// run_mode（卡片运行模式）：Meta tab 展示 + 编辑面 Segmented 即时保存。
-// 缺失/陌生值一律收敛为 operator 展示；PUT 仅携带用户改动的 run_mode。
-describe('agent run mode',() => {
-  const metaFixture = (extra={}) => ({meta:{name:'coder',current:{prompt:'shared'},history:[],references:{},...extra}});
-  it('tags the agent run mode on the Meta tab (runc 沙箱)',async () => {
+describe('agent identity resources', () => {
+  it.each([undefined, 'agent', 'operator'])('does not offer runtime placement for mode %s', async (run_mode) => {
     api.apiGet.mockImplementation(async path => {
-      if (path.endsWith('/meta')) return metaFixture({run_mode:'agent'});
-      const cat = path.split('/').at(-1);
-      if (views[cat]) return views[cat];
-      throw new Error(`unexpected GET ${path}`);
-    });
-    await mount(); tab('Meta');
-    expect(await screen.findByText('agent · 沙箱')).toBeTruthy();
-    expect(screen.getByText(/runc 只读沙箱/)).toBeTruthy();
-    expect(screen.queryByText('operator · 宿主机')).toBeNull();
-  });
-  it('falls back to the operator tag when the card carries no run_mode',async () => {
-    await mount(); tab('Meta');
-    expect(await screen.findByText('operator · 宿主机')).toBeTruthy();
-    expect(screen.queryByText('agent · 沙箱')).toBeNull();
-  });
-  it('PUTs the changed run mode through the edit surface Segmented',async () => {
-    await mount();
-    fireEvent.click(await screen.findByText('Agent · runc 沙箱'));
-    await waitFor(()=>expect(api.apiPut).toHaveBeenCalledWith('/api/agents/coder',{run_mode:'agent'}));
-    expect(await screen.findByText('Agent 运行模式已更新，仅影响新任务')).toBeTruthy();
-  });
-  it('keeps the agent run mode Segmented in sync with a reloaded card',async () => {
-    api.apiGet.mockImplementation(async path => {
-      if (path.endsWith('/meta')) return metaFixture({run_mode:'agent'});
+      if (path.endsWith('/meta')) return { meta: { name:'coder', current:{prompt:'shared'}, history:[], references:{}, run_mode } };
       const cat = path.split('/').at(-1);
       if (views[cat]) return views[cat];
       throw new Error(`unexpected GET ${path}`);
     });
     await mount();
-    expect(screen.getByLabelText('agent-run-mode').closest('.ant-segmented')
-      .querySelector('.ant-segmented-item-selected').textContent).toBe('Agent · runc 沙箱');
-    fireEvent.click(screen.getByText('Operator · 宿主机'));
-    await waitFor(()=>expect(api.apiPut).toHaveBeenCalledWith('/api/agents/coder',{run_mode:'operator'}));
+    expect(screen.queryByLabelText('agent-run-mode')).toBeNull();
+    tab('Meta');
+    expect(await screen.findByText('解析快照（references）')).toBeTruthy();
+    expect(screen.queryByText('运行模式')).toBeNull();
   });
 });

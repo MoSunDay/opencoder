@@ -32,7 +32,7 @@ export default function RelationshipDrawer({ env, relationship, entities, relati
       },
     });
   };
-  return <Drawer title="关系详情" width={screens.md ? 640 : "100%"} open={Boolean(relationship)} onClose={() => guard.run(onClose)} destroyOnHidden
+  return <Drawer title="关系详情" size={screens.md ? 640 : "100%"} open={Boolean(relationship)} onClose={() => guard.run(onClose)} destroyOnHidden
     extra={relationship && canManage ? <Space>
       <ModalForm key={`${relationship.id}/${relationship.revision}`} title="编辑关系描述" trigger={<Button icon={<EditOutlined />}>编辑</Button>}
         initialValues={{ description: relationship.description }} onFinish={async (values) => {

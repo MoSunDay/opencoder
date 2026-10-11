@@ -1,5 +1,5 @@
 import { apiJson } from "../api.js";
-import type { AttributeDefinition, DirectoryItem, Entity, EntityType, EntityTypeAction, Environment, GraphAspect, GraphResponse, Relationship, RelationshipType, RelationshipTypeCreate, RelationshipTypeUpdate, Session } from "./types";
+import type { AttributeDefinition, DirectoryItem, Entity, EntityType, EntityTypeAction, GraphAspect, GraphResponse, Relationship, RelationshipType, RelationshipTypeCreate, RelationshipTypeUpdate, Session } from "./types";
 
 const ROOT = "/api/ontology";
 export class ApiError extends Error { constructor(message: string, readonly status: number, readonly code: string) { super(message); } }
@@ -34,9 +34,6 @@ export const graphPath = (env: string, query: GraphQuery = {}) => {
 };
 export const api = {
   session: () => request<Session>("/session"),
-  environments: (includeDeleted = false) => request<{ items: Environment[] }>(`/environments?include_deleted=${includeDeleted}`),
-  createEnvironment: (value: object) => request<{ item: Environment }>("/environments", { method: "POST", body: JSON.stringify(value) }),
-  updateEnvironment: (env: string, value: object) => request<{ item: Environment }>(`/environments/${encodeURIComponent(env)}`, { method: "PATCH", body: JSON.stringify(value) }),
   entityTypes: (env: string, includeDeleted = false) => request<{ items: EntityType[] }>(`${envPath(env)}/entity-types?include_deleted=${includeDeleted}`),
   createEntityType: (env: string, value: object) => request<{ item: EntityType }>(`${envPath(env)}/entity-types`, { method: "POST", body: JSON.stringify(value) }),
   updateEntityType: (env: string, id: string, value: object) => request(`${envPath(env)}/entity-types/${id}`, { method: "PATCH", body: JSON.stringify(value) }),

@@ -14,8 +14,8 @@ const create = () => {
   fireEvent.click(screen.getByRole('button', { name: '创建用户' }));
   return within(screen.getByRole('dialog'));
 };
-it('keeps forms behind actions and protects the startup administrator', async () => {
-  api.apiPost.mockResolvedValue({ user: { name: 'bob', role: 'viewer' } });
+it('creates a user and shows its token once while protecting the startup administrator', async () => {
+  api.apiPost.mockResolvedValue({ user: { name: 'bob', role: 'viewer' }, token: 'oc_once_only' });
   render(<UsersPanel />);
   expect(await screen.findByText('admin · 启动管理员')).toBeTruthy();
   expect(screen.queryByLabelText('用户名')).toBeNull();
@@ -26,7 +26,17 @@ it('keeps forms behind actions and protects the startup administrator', async ()
   fireEvent.change(dialog.getByLabelText('用户名'), { target: { value: 'bob' } });
   fireEvent.click(dialog.getByRole('button', { name: '创建用户' }));
   await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/users', { name: 'bob', role: 'viewer' }));
+  expect(await screen.findByText('oc_once_only')).toBeTruthy();
+  expect(screen.queryByLabelText('用户名')).toBeNull();
+  expect(api.apiPost).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '我已保存' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(screen.queryByText('oc_once_only')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }));
+  await waitFor(() => expect(api.apiGet).toHaveBeenCalledTimes(3));
+  create();
+  expect(screen.queryByText('oc_once_only')).toBeNull();
+  expect(api.apiPost).toHaveBeenCalledTimes(1);
 });
 it('validates required fields and clears a cancelled creation form', async () => {
   render(<UsersPanel />);
@@ -40,7 +50,7 @@ it('validates required fields and clears a cancelled creation form', async () =>
   expect(create().getByLabelText('用户名').value).toBe('');
 });
 it('keeps failed creation inside the dialog with the draft available for retry', async () => {
-  api.apiPost.mockRejectedValueOnce(new Error('用户名已存在')).mockResolvedValueOnce({});
+  api.apiPost.mockRejectedValueOnce(new Error('用户名已存在')).mockResolvedValueOnce({ token: 'oc_retry' });
   render(<UsersPanel />);
   await screen.findByText('alice');
   const dialog = create();
@@ -48,7 +58,10 @@ it('keeps failed creation inside the dialog with the draft available for retry',
   fireEvent.click(dialog.getByRole('button', { name: '创建用户' }));
   expect(await dialog.findByText('用户名已存在')).toBeTruthy();
   expect(dialog.getByLabelText('用户名').value).toBe('bob');
+  expect(screen.queryByText('Token 仅此一次显示')).toBeNull();
   fireEvent.click(dialog.getByRole('button', { name: '创建用户' }));
+  expect(await screen.findByText('oc_retry')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '我已保存' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(api.apiPost).toHaveBeenCalledTimes(2);
 });
@@ -71,6 +84,39 @@ it('saves a role only after confirmation and prevents duplicate submission', asy
   expect(api.apiPatch).toHaveBeenCalledTimes(1);
   resolve({});
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(api.apiPost).not.toHaveBeenCalled();
+});
+it('prevents duplicate creation and forgets the token when leaving the page', async () => {
+  let resolve;
+  api.apiPost.mockImplementation(() => new Promise((done) => { resolve = done; }));
+  const view = render(<UsersPanel />);
+  await screen.findByText('alice');
+  const dialog = create();
+  fireEvent.change(dialog.getByLabelText('用户名'), { target: { value: 'bob' } });
+  fireEvent.click(dialog.getByRole('button', { name: '创建用户' }));
+  await waitFor(() => expect(api.apiPost).toHaveBeenCalledTimes(1));
+  expect(dialog.getByRole('button', { name: /取\s*消/ }).disabled).toBe(true);
+  fireEvent.submit(dialog.getByLabelText('用户名').closest('form'));
+  expect(api.apiPost).toHaveBeenCalledTimes(1);
+  resolve({ token: 'oc_unmounted' });
+  await screen.findByText('oc_unmounted');
+  view.unmount();
+  render(<UsersPanel />);
+  await screen.findByText('alice');
+  expect(screen.queryByText('oc_unmounted')).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('keeps the issued token visible if the following user list refresh fails', async () => {
+  api.apiPost.mockResolvedValue({ token: 'oc_saved_despite_list_error' });
+  render(<UsersPanel />);
+  await screen.findByText('alice');
+  api.apiGet.mockRejectedValueOnce(new Error('刷新失败'));
+  const dialog = create();
+  fireEvent.change(dialog.getByLabelText('用户名'), { target: { value: 'bob' } });
+  fireEvent.click(dialog.getByRole('button', { name: '创建用户' }));
+  await screen.findByText('刷新失败');
+  expect(screen.getByText('oc_saved_despite_list_error')).toBeTruthy();
+  expect(api.apiPost).toHaveBeenCalledTimes(1);
 });
 it('combines user search and role filtering and exposes no-match feedback', async () => {
   render(<UsersPanel />);

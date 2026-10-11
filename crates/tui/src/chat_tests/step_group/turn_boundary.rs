@@ -259,9 +259,9 @@ fn steer_consumed_echo_is_remembered_for_reset_restore() {
     v.begin_turn();
     v.apply(&SessionEvent::SteerConsumed {
         seq: 1,
-        text: "/act_clear_context 实现贪吃蛇".into(),
+        text: "/act_clear_context 实现诊断工具".into(),
     });
-    assert_eq!(v.pending_turn_echo.as_deref(), Some("实现贪吃蛇"));
+    assert_eq!(v.pending_turn_echo.as_deref(), Some("实现诊断工具"));
     // Done retires the memory: a later bare reset must not resurrect it.
     v.apply(&SessionEvent::Done);
     assert!(v.pending_turn_echo.is_none());

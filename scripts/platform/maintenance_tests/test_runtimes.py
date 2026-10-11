@@ -11,6 +11,27 @@ from rolling.maintenance import runtimes
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_interrupted_conversation_is_retained_only_after_all_work_has_stopped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            original = fixture.http('', '/inventory')
+            for kind in ('agent', 'operator'):
+                paused = {**copy.deepcopy(original), 'indexes': [
+                    {'id': 'awaiting-user', 'kind': kind, 'status': 'interrupted'}]}
+                expected = copy.deepcopy(paused)
+                self.assertEqual(runtimes.idle('old', 'node', paused), expected)
+                for patch in ({'can_hibernate': False}, {'owned_processes': 1},
+                              {'snapshot': {**paused['snapshot'], 'pending_runs': 1}},
+                              {'snapshot': {**paused['snapshot'], 'active_runs': 1}},
+                              {'snapshot': {**paused['snapshot'], 'active_agent_loops': 1}}):
+                    with self.subTest(kind=kind, patch=patch), self.assertRaises(ValueError):
+                        runtimes.idle('old', 'node', {**paused, **patch})
+                self.assertEqual(paused, expected)
+            for kind in ('brain', 'dag', 'todos', 'team', 'project'):
+                with self.subTest(kind=kind), self.assertRaises(ValueError):
+                    runtimes.idle('old', 'node', {**original, 'indexes': [
+                        {'id': 'unfinished', 'kind': kind, 'status': 'interrupted'}]})
+
     def test_final_inventory_retires_old_runtime_and_survives_repeated_install(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory))

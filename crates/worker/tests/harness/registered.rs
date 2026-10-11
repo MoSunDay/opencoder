@@ -1,5 +1,5 @@
 //! The six registered employee identities are Agent cards even when their
-//! standalone run_mode is operator. DAG placement must still use runc.
+//! ordinary sessions use the host. DAG placement must still use runc.
 use super::{dispatch, read, save, settled, support, Fleet};
 use serde_json::json;
 
@@ -21,7 +21,7 @@ pub async fn verify(fleet: &Fleet) {
             std::fs::write(
                 pool.join(&name).join("meta.json"),
                 json!({
-                    "name":name,"harness":"codex","harness_profile":"regression-test","run_mode":"operator",
+                    "name":name,"harness":"codex","harness_profile":"regression-test",
                     "current":{"prompt":"probe"}
                 })
                 .to_string(),

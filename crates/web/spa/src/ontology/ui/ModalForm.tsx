@@ -28,7 +28,7 @@ export function ModalForm<T extends object = Record<string, any>>({ title, trigg
   return <>{cloneElement(trigger, { onClick: (event: React.MouseEvent) => {
     trigger.props.onClick?.(event); setError(""); setDirty(false); form.resetFields(); setOpen(true); onOpenChange?.(true);
   } })}<Modal forceRender {...modalProps} title={title} open={open} confirmLoading={busy}
-    maskClosable={false} closable={!busy} keyboard={!busy}
+    mask={{ closable: false }} closable={!busy} keyboard={!busy}
     okButtonProps={submitter?.submitButtonProps} onOk={() => { if (!busy) form.submit(); }}
     onCancel={() => guard.runLocal(() => { setDirty(false); setOpen(false); onOpenChange?.(false); })}>
     {error && <Alert title={error} type="error" showIcon style={{ marginBottom: 16 }} />}

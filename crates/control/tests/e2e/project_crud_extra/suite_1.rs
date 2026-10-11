@@ -137,7 +137,7 @@ async fn initiative_create_validation_and_list_filters() {
     let first = post_initiative(&h, goal_id, "M1").await;
     post_initiative(&h, goal_id, "M2").await;
     assert!(first["id"].as_str().unwrap().starts_with("pi-"));
-    assert_eq!(first["status"], json!("planned"));
+    assert!(first.get("status").is_none());
 
     assert_eq!(initiatives(&h, None).await.len(), 2);
     assert_eq!(initiatives(&h, Some("pg-none")).await.len(), 0);
@@ -145,7 +145,7 @@ async fn initiative_create_validation_and_list_filters() {
 }
 
 #[tokio::test]
-async fn initiative_patch_status_sort_and_reparent() {
+async fn initiative_patch_sort_and_reparent_without_status() {
     let h = Harness::new().await;
     let g1 = post_goal(&h, "G1", None).await;
     let g2 = post_goal(&h, "G2", None).await;
@@ -158,13 +158,13 @@ async fn initiative_patch_status_sort_and_reparent() {
         .req(
             Method::PATCH,
             &format!("/api/project/initiatives/{m_id}"),
-            Some(json!({"status": "in_progress", "sort": 2})),
+            Some(json!({"sort": 2})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
     let rows = initiatives(&h, Some(&g1_id)).await;
     let patched = row(&rows, &m_id);
-    assert_eq!(patched["status"], json!("in_progress"));
+    assert!(patched.get("status").is_none());
     assert_eq!(patched["sort"], json!(2));
 
     // Re-parenting to another real goal moves the row.
@@ -340,4 +340,34 @@ async fn standalone_initiatives_appear_in_overview_and_guard_todos() {
         assert_eq!(status, 200, "{body}");
     }
     assert!(initiatives(&h, None).await[0]["goal_id"].is_null());
+}
+
+#[tokio::test]
+async fn initiative_status_is_rejected_without_partial_updates() {
+    let h = Harness::new().await;
+    let goal = post_goal(&h, "Project", None).await;
+    let item = post_initiative(&h, goal["id"].as_str().unwrap(), "Direction").await;
+    let path = format!("/api/project/initiatives/{}", item["id"].as_str().unwrap());
+    for value in [json!("done"), json!("planned"), json!(null)] {
+        let (status, _) = h
+            .req(
+                Method::PATCH,
+                &path,
+                Some(json!({"status":value,"title":"Invalid"})),
+            )
+            .await;
+        assert_eq!(status, 422);
+        let (status, _) = h
+            .req(
+                Method::POST,
+                "/api/project/initiatives",
+                Some(json!({"status":value,"title":"Invalid"})),
+            )
+            .await;
+        assert_eq!(status, 422);
+    }
+    let rows = initiatives(&h, None).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["title"], "Direction");
+    assert!(rows[0].get("status").is_none());
 }

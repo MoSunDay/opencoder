@@ -2,6 +2,13 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 37 {
+        for table in ["project_goals", "project_initiatives"] {
+            add_column_if_absent(conn, table, "current_summary", "TEXT NOT NULL DEFAULT ''")
+                .await?;
+            add_column_if_absent(conn, table, "summary_updated_at", "INTEGER").await?;
+        }
+    }
     if from < 33 {
         super::project_links::migrate(conn).await?;
     }

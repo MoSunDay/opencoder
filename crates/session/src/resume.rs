@@ -241,6 +241,7 @@ pub async fn resume(
             .collect(),
         harness,
         id: id.to_string(),
+        session_kind: meta.kind.clone(),
         messages,
         agent,
         model,

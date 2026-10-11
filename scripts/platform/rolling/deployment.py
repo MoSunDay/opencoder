@@ -153,6 +153,11 @@ def _deferred_disable(operations):
 
     def disable(*units):
         nonlocal changed
+        # A migrated journal can retain units absent from this machine.
+        units = tuple(unit for unit in units if operations.output(
+            'systemctl', 'show', unit, '-p', 'LoadState', '--value').strip() != 'not-found')
+        if not units:
+            return
         # A failed multi-unit disable can still have removed some links.
         changed = True
         operations.run("systemctl", "--no-reload", "disable", *units)

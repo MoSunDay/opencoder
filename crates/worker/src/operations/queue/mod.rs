@@ -196,30 +196,20 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                 worker.finish_slot(ticket.as_deref()).await?;
                 continue;
             }
-            // Sandbox inputs were admitted before capacity queuing. Launch the
-            // native store drain without admitting again or starting a host turn.
-            let reply = if command.tail == "prompt"
-                && crate::workloads::agent_runc::sandbox_session(
-                    &record,
-                    queued.config.agent.agents_dir.as_deref(),
-                ) {
-                RpcReply::ok(serde_json::json!({"status": "accepted"}))
-            } else {
-                opencoder_core::harness::scope::with_execution(
-                    queued.config.agent.codex.clone(),
-                    queued.config.agent.runtime.clone(),
-                    opencoder_core::agent::scope::with_root(
-                        queued.config.agent.agents_dir.clone(),
-                        super::native(
-                            worker,
-                            "POST",
-                            &format!("/api/sessions/{id}/{}", command.tail),
-                            command.body.clone(),
-                        ),
+            let reply = opencoder_core::harness::scope::with_execution(
+                queued.config.agent.codex.clone(),
+                queued.config.agent.runtime.clone(),
+                opencoder_core::agent::scope::with_root(
+                    queued.config.agent.agents_dir.clone(),
+                    super::native(
+                        worker,
+                        "POST",
+                        &format!("/api/sessions/{id}/{}", command.tail),
+                        command.body.clone(),
                     ),
-                )
-                .await?
-            };
+                ),
+            )
+            .await?;
             if reply.status >= 300 {
                 worker.inner.journal.lock().await.finalize(
                     &id,

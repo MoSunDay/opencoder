@@ -7,7 +7,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod acceptance;
 pub mod overview;
+pub mod people;
+pub mod summary;
 pub mod tags;
 pub use tags::{ProjectTag, ProjectTodoTag};
 
@@ -33,6 +36,15 @@ impl std::fmt::Display for InitiativeNotEmpty {
 
 impl std::error::Error for InitiativeNotEmpty {}
 
+#[derive(Debug)]
+pub struct InitiativeOrderConflict;
+impl std::fmt::Display for InitiativeOrderConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("专项列表或顺序已变化，请刷新后重试")
+    }
+}
+impl std::error::Error for InitiativeOrderConflict {}
+
 use crate::project_types::{
     ProjectGoalPatch, ProjectGoalRecord, ProjectInitiativePatch, ProjectInitiativeRecord,
     ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunPatch, ProjectTodoRunRecord,
@@ -55,6 +67,18 @@ use crate::project_types::{
 // async_trait annotates futures that are already must-use on Rust 1.99.
 #[allow(clippy::double_must_use)]
 pub trait ProjectStore: Send + Sync {
+    async fn summary_versions(
+        &self,
+        scope: summary::SummaryScope,
+        id: &str,
+    ) -> Result<Option<Vec<summary::SummaryVersion>>>;
+    async fn restore_summary(
+        &self,
+        scope: summary::SummaryScope,
+        id: &str,
+        version: i64,
+        now: i64,
+    ) -> Result<Option<summary::SummaryVersion>>;
     async fn list_tags(&self) -> Result<Vec<ProjectTag>> {
         Ok(vec![])
     }
@@ -88,6 +112,18 @@ pub trait ProjectStore: Send + Sync {
         self.patch_todo(id, patch, now).await
     }
 
+    /// Check the observed task, latest assignment and dependencies atomically.
+    async fn patch_todo_accepted(
+        &self,
+        _id: &str,
+        _patch: &ProjectTodoPatch,
+        _tags: Option<&[String]>,
+        _expected: &acceptance::TodoAcceptance,
+        _now: i64,
+    ) -> Result<bool> {
+        anyhow::bail!("atomic TODO acceptance is unsupported by this store")
+    }
+
     // ---- goals ----
 
     async fn create_goal(&self, rec: &ProjectGoalRecord) -> Result<()>;
@@ -110,6 +146,17 @@ pub trait ProjectStore: Send + Sync {
     async fn delete_initiative(&self, id: &str) -> Result<bool>;
     async fn list_initiatives(&self, goal_id: Option<&str>)
         -> Result<Vec<ProjectInitiativeRecord>>;
+    /// Replace a project's complete initiative order, only if the observed order still matches.
+    /// Returns false for a missing project; conflicts leave every row unchanged.
+    async fn reorder_initiatives(
+        &self,
+        _goal_id: &str,
+        _expected_ids: &[String],
+        _ids: &[String],
+        _now_ms: i64,
+    ) -> Result<bool> {
+        anyhow::bail!("atomic initiative reorder is unsupported by this store")
+    }
 
     // ---- todos ----
 

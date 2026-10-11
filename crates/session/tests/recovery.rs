@@ -222,14 +222,14 @@ async fn title_generation_writes_via_small_model() {
         store.clone(),
         "t",
         "main/glm",
-        "build me a snake game",
+        "build a diagnostic tool",
         mock.clone() as Arc<dyn ChatStream>,
     )
     .await;
 
     // small-model title call: capture request, return a short title
     let title_mock =
-        Arc::new(MockChatClient::new().push_script(vec![done_event("Snake Game Builder")]));
+        Arc::new(MockChatClient::new().push_script(vec![done_event("Diagnostic Tool Builder")]));
     s.client = title_mock.clone() as Arc<dyn ChatStream>;
     s.config.small_model = Some("cheap/mini".into());
     generate_title(&s).await;
@@ -242,7 +242,7 @@ async fn title_generation_writes_via_small_model() {
     let meta = store.get_session("t").await.unwrap().unwrap();
     assert_eq!(
         meta.title.as_deref(),
-        Some("Snake Game Builder"),
+        Some("Diagnostic Tool Builder"),
         "title persisted to store"
     );
 }

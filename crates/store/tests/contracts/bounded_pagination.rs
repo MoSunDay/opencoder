@@ -295,6 +295,7 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
 
     store
         .create_todo(&ProjectTodoRecord {
+            people: Default::default(),
             id: "project-item".into(),
             initiative_id: None,
             title: "project item".into(),

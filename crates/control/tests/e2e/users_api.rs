@@ -15,17 +15,20 @@ async fn auth(
     let status = response.status();
     (status, response.json().await.unwrap_or(json!({})))
 }
-async fn create_user(h: &Harness, name: &str, role: &str) {
-    let (status, body) = auth(
-        h,
-        Method::POST,
-        "/api/users",
-        TOKEN,
-        Some(json!({"name":name,"role":role})),
-    )
-    .await;
-    assert_eq!(status, 200, "{body}");
-    assert!(body.get("token").is_none());
+async fn create_user(h: &Harness, name: &str, role: &str) -> Value {
+    let response = h
+        .req_raw(
+            Method::POST,
+            "/api/users",
+            Some(json!({"name":name,"role":role})),
+            Some(TOKEN),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body: Value = response.json().await.unwrap();
+    assert!(body["token"].as_str().unwrap().starts_with("oc_"));
+    body
 }
 async fn issue(h: &Harness, name: &str) -> Value {
     let (status, body) = auth(
@@ -181,8 +184,7 @@ async fn viewer_reads_platform_editor_writes_and_both_cannot_administer() {
     h.put_index("team-public", ExecutionKind::Team, ExecutionStatus::Idle)
         .await;
     for role in ["viewer", "editor"] {
-        create_user(&h, role, role).await;
-        let issued = issue(&h, role).await;
+        let issued = create_user(&h, role, role).await;
         let token = issued["token"].as_str().unwrap();
         for path in [
             "/api/nodes",
@@ -291,4 +293,60 @@ async fn token_validation_rejects_expired_and_missing_owners() {
         .0,
         404
     );
+}
+
+#[tokio::test]
+async fn user_creation_issues_one_usable_token_without_later_disclosure() {
+    let h = Harness::new().await;
+    let created = create_user(&h, "alice", "viewer").await;
+    let token = created["token"].as_str().unwrap();
+    assert_eq!(created["user"]["name"], "alice");
+    assert_eq!(
+        auth(&h, Method::GET, "/api/me", token, None).await.1,
+        json!({"name":"alice","role":"viewer"})
+    );
+    let tokens = h.state.store.list_access_tokens().await.unwrap();
+    assert_eq!(tokens.iter().filter(|t| t.user_name == "alice").count(), 1);
+    let (status, duplicate) = auth(
+        &h,
+        Method::POST,
+        "/api/users",
+        TOKEN,
+        Some(json!({"name":"alice","role":"editor"})),
+    )
+    .await;
+    assert_eq!(status, 409);
+    assert!(duplicate.get("token").is_none());
+    assert_eq!(h.state.store.list_access_tokens().await.unwrap(), tokens);
+    assert_eq!(
+        auth(&h, Method::GET, "/api/me", token, None).await.1["role"],
+        "viewer"
+    );
+    let (status, updated) = auth(
+        &h,
+        Method::PATCH,
+        "/api/users/alice",
+        TOKEN,
+        Some(json!({"role":"editor"})),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(updated.get("token").is_none());
+    assert_eq!(
+        auth(&h, Method::GET, "/api/me", token, None).await.1["role"],
+        "editor"
+    );
+    for path in ["/api/users", "/api/tokens"] {
+        let (status, listed) = auth(&h, Method::GET, path, TOKEN, None).await;
+        assert_eq!(status, 200);
+        let text = listed.to_string();
+        assert!(!text.contains(token) && !text.contains("token_hash"));
+    }
+    assert_eq!(
+        auth(&h, Method::DELETE, "/api/users/alice", TOKEN, None)
+            .await
+            .0,
+        200
+    );
+    assert_eq!(auth(&h, Method::GET, "/api/me", token, None).await.0, 401);
 }

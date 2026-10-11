@@ -5,6 +5,7 @@ import errno
 import json
 import os
 from pathlib import Path
+import secrets
 import socket
 import subprocess
 import sys
@@ -13,10 +14,23 @@ import urllib.request
 import uuid
 
 
-def port():
-    with socket.socket() as listener:
-        listener.bind(('127.0.0.1', 0))
-        return listener.getsockname()[1]
+def port(excluded=()):
+    # A released bind(0) port can become an outgoing connection while the
+    # Server opens its stores. Keep listeners outside the client port range.
+    upper = min(10000, int(Path('/proc/sys/net/ipv4/ip_local_port_range').read_text().split()[0]))
+    if upper <= 2000:
+        raise RuntimeError('no unprivileged listener range below client ports')
+    for _ in range(500):
+        candidate = 2000 + secrets.randbelow(upper - 2000)
+        if candidate in excluded:
+            continue
+        with socket.socket() as listener:
+            try:
+                listener.bind(('0.0.0.0', candidate))
+            except OSError:
+                continue
+        return candidate
+    raise RuntimeError('no isolated listener port is available')
 
 
 def evidence_root(requested):
@@ -40,7 +54,8 @@ def main():
     root = evidence_root(args.root)
     work, data, files, mount = (root/name for name in ('work', 'server-data', 'files', 'mount'))
     for path in [work, files, mount]: path.mkdir(parents=True)
-    http_port, nfs_port = port(), port()
+    http_port = port()
+    nfs_port = port({http_port})
     (work/'opencoder.json').write_text(json.dumps({'storage':{'backend':'libsql'},
         'agent':{'agents_dir':str(root/'agents'),'nfs':{'enabled':False}},
         'dag':{'binary_dir':str(root/'binary'),'workspace_dir':str(root/'workspace'),

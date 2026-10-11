@@ -43,7 +43,7 @@ export function TagsTab({ overview, refresh, onNotice }) {
   ];
   return <Space orientation="vertical" size={12} style={{ width: '100%' }}>
     <Space wrap><EditButton type="primary" disabled={busy} onClick={() => { setEditing(null); setOpen(true); }}>新建 Tag</EditButton>
-      <Typography.Text type="secondary">专项继承项目 Tag，同名时专项优先。</Typography.Text></Space>
+      <Typography.Text type="secondary">全局 Tag 在所有项目、专项及未归属 TODO 中可用；同名时专项优先，其次项目，最后全局。</Typography.Text></Space>
     <ProjectTable label="Tag 表格" viewKey="tags" columns={columns} rows={tagRows(overview)} locale={{ emptyText: '还没有 Tag' }} />
     <TagEditor open={open} initial={editing} overview={overview} onCancel={() => setOpen(false)} onOk={save} />
   </Space>;

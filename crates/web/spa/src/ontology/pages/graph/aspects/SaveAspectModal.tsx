@@ -104,7 +104,7 @@ export default function SaveAspectModal({
       return item ? relationshipTypeLabel(item, typeNames) : id;
     }).join("、") || "全部关系"}；默认中心 ${centerIds.length ? `${centerIds.length} 个` : "整个切面"}；上游 ${upstreamDepth} 跳、下游 ${downstreamDepth} 跳`;
 
-  return <Modal title="保存切面" open={open} onCancel={close} destroyOnHidden maskClosable={false} closable={!saving && !deleting} keyboard={!saving && !deleting}
+  return <Modal title="保存切面" open={open} onCancel={close} destroyOnHidden mask={{ closable: false }} closable={!saving && !deleting} keyboard={!saving && !deleting}
     footer={<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
       {mode === "update" && target
         ? <Popconfirm title="确认删除该切面？" description="删除后切面观测将不再可选" okText="删除" cancelText="取消"

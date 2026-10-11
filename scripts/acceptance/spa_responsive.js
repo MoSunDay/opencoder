@@ -14,7 +14,7 @@ const HEADED = process.argv.includes('--headed');
 const KEEP = process.argv.includes('--keep');
 const REQUIRE_COMMITTED = process.argv.includes('--require-committed');
 const DRIFT = process.argv.includes('--drift');
-const PORT = Number(arg('port', '18099'));
+const PORT = Number(arg('port', '0'));
 const SHOTS = arg('shots', '/tmp/uitest/responsive');
 const ONLY = arg('only', '');
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,7 +37,7 @@ async function main() {
   if (DRIFT) runDriftCheck();
   const { chromium } = require(path.resolve(REPO, 'crates/web/spa/node_modules/playwright-core'));
   const srv = await serve(PORT);
-  const base = `http://127.0.0.1:${PORT}`;
+  const base = `http://127.0.0.1:${srv.port}`;
   const browser = await chromium.launch({
     headless: !HEADED, executablePath: process.env.CHROME_PATH || chromium.executablePath(),
     args: ['--no-sandbox', '--disable-dev-shm-usage'],

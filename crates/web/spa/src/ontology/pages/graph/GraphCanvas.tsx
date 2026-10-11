@@ -120,7 +120,7 @@ export default function GraphCanvas({ data, centerIds, entityTypeNames, relation
       shownIds={listOnly ? [] : projection.nodeIds} onNodeClick={onNodeClick} onEdgeClick={onEdgeClick} onLocate={locate} /> : null}
     <div ref={viewport} className="graph-viewport" style={{ display: currentView === "图" ? undefined : "none", background: token.colorFillQuaternary, border: `1px solid ${token.colorBorderSecondary}` }}>
       <div className="graph-renderer"><StableGraph {...options} /></div>
-      {loading ? <div className="graph-message" style={{ background: token.colorBgMask, zIndex: 2 }}><Spin tip="正在更新观测范围"><div style={{ width: 160, height: 80 }} /></Spin></div>
+      {loading ? <div className="graph-message" style={{ background: token.colorBgMask, zIndex: 2 }}><Spin description="正在更新观测范围"><div style={{ width: 160, height: 80 }} /></Spin></div>
         : !data.nodes.length ? <div className="graph-message"><Empty description={failure ? "请重试加载" : emptyMessage} /></div> : null}
     </div>
   </div>;

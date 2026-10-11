@@ -37,7 +37,7 @@ Commit: (working-tree)
 
 ### 7. e2e 脚本同步
 - `scripts/e2e/lib.py`：`AUTH_PATH` → `~/.local/share/opencoder/auth.json`；`seed_workdir` 写 `opencoder.json`。
-- `scripts/e2e/cli_scenarios.py`：bundle 文件 `snake.opencode` → `snake.opencoder`。
+- `scripts/e2e/cli_scenarios.py`：bundle 文件 `diagnostics.opencode` → `diagnostics.opencoder`。
 - `scripts/e2e-glm.sh`：注释 `opencoder auth.json`。
 
 ### 8. `.gitignore`

@@ -134,7 +134,7 @@ describe("RelationshipTypesPage", () => {
     vi.mocked(api.entities).mockResolvedValue({ items: entities });
     render(
       <ConfigProvider theme={{ token: { motion: false } }}><AntdApp>
-        <EnvContext.Provider value={{ env: "debug", environments: [], setEnv: vi.fn(), refreshEnvironments: vi.fn(), canManage: true }}>
+        <EnvContext.Provider value={{ env: "debug", canManage: true }}>
           <RelationshipTypesPage />
         </EnvContext.Provider>
       </AntdApp></ConfigProvider>,
@@ -148,7 +148,7 @@ describe("RelationshipTypesPage", () => {
     vi.mocked(api.entityTypes).mockResolvedValue({ items: [...entityTypes, { ...entityTypes[0]!, id: "gone", name: "已停用候选", is_deleted: true }] });
     vi.mocked(api.entities).mockResolvedValue({ items: entities });
     vi.mocked(api.createRelationshipType).mockResolvedValue({ item: normalType });
-    render(<ConfigProvider theme={{ token: { motion: false } }}><AntdApp><EnvContext.Provider value={{ env: "debug", environments: [], setEnv: vi.fn(), refreshEnvironments: vi.fn(), canManage: true }}><RelationshipTypesPage /></EnvContext.Provider></AntdApp></ConfigProvider>);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><AntdApp><EnvContext.Provider value={{ env: "debug", canManage: true }}><RelationshipTypesPage /></EnvContext.Provider></AntdApp></ConfigProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /新增/ }));
     const dialog = await screen.findByRole("dialog");
     const fields = within(dialog).getAllByRole("textbox");
@@ -177,7 +177,7 @@ describe("RelationshipTypesPage", () => {
     vi.mocked(api.relationshipTypes).mockResolvedValue({ items: [membershipType] });
     vi.mocked(api.entityTypes).mockResolvedValue({ items: entityTypes });
     vi.mocked(api.entities).mockResolvedValue({ items: entities });
-    render(<ConfigProvider theme={{ token: { motion: false } }}><AntdApp><EnvContext.Provider value={{ env: "debug", environments: [], setEnv: vi.fn(), refreshEnvironments: vi.fn(), canManage: true }}><RelationshipTypesPage /></EnvContext.Provider></AntdApp></ConfigProvider>);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><AntdApp><EnvContext.Provider value={{ env: "debug", canManage: true }}><RelationshipTypesPage /></EnvContext.Provider></AntdApp></ConfigProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "详情" }));
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
     const dialog = (await screen.findByText("编辑关系类型", { selector: ".ant-modal-title" })).closest<HTMLElement>(".ant-modal")!;
@@ -193,7 +193,7 @@ describe("RelationshipTypesPage", () => {
     vi.mocked(api.relationshipTypes).mockResolvedValue({ items: [normalType] });
     vi.mocked(api.entityTypes).mockResolvedValue({ items: entityTypes });
     vi.mocked(api.entities).mockResolvedValue({ items: entities });
-    render(<ConfigProvider theme={{ token: { motion: false } }}><AntdApp><EnvContext.Provider value={{ env: "debug", environments: [], setEnv: vi.fn(), refreshEnvironments: vi.fn(), canManage: true }}><RelationshipTypesPage /></EnvContext.Provider></AntdApp></ConfigProvider>);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><AntdApp><EnvContext.Provider value={{ env: "debug", canManage: true }}><RelationshipTypesPage /></EnvContext.Provider></AntdApp></ConfigProvider>);
     fireEvent.mouseEnter(await screen.findByRole("button", { name: "更多操作" }));
     fireEvent.click(await screen.findByText("停用类型"));
     const confirmation = await screen.findByText("已有关系保留，仅停用此类型。");

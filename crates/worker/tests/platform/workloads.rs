@@ -305,7 +305,7 @@ async fn operator_executions_run_the_host_process_agent_loop() {
     let detail = settled(&fleet.nodes[0], "operator-host-1").await;
     assert_eq!(detail["execution"]["status"], "idle", "{detail}");
     assert_eq!(detail["execution"]["kind"], "operator");
-    // The default title and the host-process preamble land in the session.
+    // Mode defaults reach the model without rewriting the user's transcript.
     assert_eq!(detail["session"]["meta"]["title"], "Operator");
     let first_user = String::from_utf8(
         base64::engine::general_purpose::STANDARD
@@ -317,7 +317,12 @@ async fn operator_executions_run_the_host_process_agent_loop() {
             .unwrap(),
     )
     .unwrap();
-    assert!(first_user.contains("Operator agent"), "{first_user}");
+    assert!(!first_user.contains("Operator agent"), "{first_user}");
     assert!(first_user.contains("check host"), "{first_user}");
+    assert!(client.requests().iter().any(|request| request
+        .messages
+        .iter()
+        .any(|message| message.role == opencoder_core::Role::System
+            && message.text().contains("Operator 默认规则"))));
     fleet.shutdown().await;
 }

@@ -1,6 +1,7 @@
 mod attachments;
 pub(crate) mod catalog;
 pub(crate) mod effects;
+pub(crate) mod maintenance;
 mod plan_capabilities;
 mod plans;
 pub(crate) mod runs;
@@ -8,7 +9,7 @@ mod tui;
 pub(crate) mod v4;
 use crate::AppState;
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/brain/attachments/:id", get(attachments::get))
         .route("/api/brain/plan-defs", get(plans::list).post(plans::save))
+        .route("/api/brain/plan-defs/:id", delete(plans::delete))
         .route("/api/brain/plan-defs/validate", post(plans::validate))
         .route("/api/brain/plan-defs/:id/versions", get(plans::versions))
         .route(

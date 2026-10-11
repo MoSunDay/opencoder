@@ -8,10 +8,11 @@ vi.mock('../../api.js', () => api);
 vi.mock('../../fleet/detail.jsx', () => ({ ExecutionView: () => null }));
 import { MdEditDrawer } from './mdDrawer.jsx';
 import { TodoDrawer } from '../todoDrawer.jsx';
+import { CreateTodo } from './todoForm.jsx';
 
 beforeEach(() => {
   Object.values(api).forEach((method) => method.mockReset());
-  api.apiGet.mockResolvedValue({ assignments: [] });
+  api.apiGet.mockImplementation(async (path) => path === '/api/project/people' ? { people: [] } : { assignments: [] });
   api.apiPatch.mockResolvedValue({ ok: true });
 });
 
@@ -31,8 +32,26 @@ it('saves TODO title, description, initiative and board column together', async 
   fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '新说明' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
   await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/t1', {
-    title: '新任务', draft: '新说明', initiative_id: null, board_status: 'backlog', capability_id: null, tag_ids: [],
+    title: '新任务', draft: '新说明', initiative_id: null, board_status: 'backlog', capability_id: null, tag_ids: [], owner_user_name: null, follower_user_names: [],
   }));
+});
+
+it('creates and edits unassigned TODOs with global tags', async () => {
+  const overview = { goals: [], standalone_initiatives: [], tags: [{ id: 'global', name: '通用', scope_type: 'global', scope_id: '' }],
+    backlog: [{ id: 't', title: '未归属任务', draft: '', tag_ids: [] }] };
+  api.apiPost.mockResolvedValue({ id: 'new' });
+  const create = render(<CreateTodo open overview={overview} onClose={vi.fn()} onCreated={vi.fn()} onNotice={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('标题'), { target: { value: '新任务' } });
+  fireEvent.mouseDown(screen.getByLabelText('Tag'));
+  fireEvent.click(await screen.findByText('通用', { selector: '.ant-select-item-option-content' }));
+  fireEvent.click(screen.getByRole('button', { name: /^创\s*建$/ }));
+  await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/project/todos', expect.objectContaining({ initiative_id: null, tag_ids: ['global'] })));
+  create.unmount();
+  render(<TodoDrawer todoId="t" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
+  fireEvent.mouseDown(screen.getByLabelText('TODO Tag'));
+  fireEvent.click(await screen.findByText('通用', { selector: '.ant-select-item-option-content' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
+  await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/t', expect.objectContaining({ initiative_id: null, tag_ids: ['global'] })));
 });
 
 it('waits for a newly created TODO before seeding its edit buffer and preserves later edits', async () => {
@@ -52,6 +71,6 @@ it('waits for a newly created TODO before seeding its edit buffer and preserves 
   expect(screen.getByLabelText('任务说明').value).toBe('未保存的说明');
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
   await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/new', {
-    title: '未保存的标题', draft: '未保存的说明', initiative_id: 'group', board_status: 'todo', capability_id: null, tag_ids: [],
+    title: '未保存的标题', draft: '未保存的说明', initiative_id: 'group', board_status: 'todo', capability_id: null, tag_ids: [], owner_user_name: null, follower_user_names: [],
   }));
 });

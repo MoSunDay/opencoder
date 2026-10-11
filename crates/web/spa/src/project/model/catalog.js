@@ -8,11 +8,12 @@ export function progressOf(todos = []) {
 }
 export function effectiveTags(overview, initiativeId) {
   const initiative = flattenInitiatives(overview).find((item) => item.id === initiativeId);
-  if (!initiative) return [];
   const names = new Map();
-  for (const scope of ['project', 'initiative']) {
+  for (const scope of ['global', 'project', 'initiative']) {
     for (const tag of overview?.tags || []) {
-      if (tag.scope_type === scope && tag.scope_id === (scope === 'project' ? initiative.goal_id : initiative.id)) names.set(tag.name, tag);
+      const inScope = scope === 'global' ? tag.scope_id === ''
+        : initiative && tag.scope_id === (scope === 'project' ? initiative.goal_id : initiative.id);
+      if (tag.scope_type === scope && inScope) names.set(tag.name, tag);
     }
   }
   return [...names.values()].sort((a, b) => a.name.localeCompare(b.name));

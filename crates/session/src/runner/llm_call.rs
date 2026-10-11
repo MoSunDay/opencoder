@@ -5,7 +5,7 @@ use opencoder_core::{AgentMode, Config, MessageUsage, ToolArc};
 use opencoder_llm::tool_call::CompletedToolCall;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, Usage};
 
-use crate::prompt::build_system;
+use crate::prompt::build_session_system;
 use crate::tools::schema_for;
 use crate::SessionState;
 
@@ -40,12 +40,7 @@ pub(super) async fn run_one_llm_call(
     let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
     let skill_body = session.skill_prompt_cloned();
     let hide_build = crate::tools::hide_build_subagent(session.agent.kind, skill_body.as_deref());
-    let system = build_system(
-        &session.agent,
-        &session.working_dir,
-        runtime.as_deref(),
-        skill_body.as_deref(),
-    );
+    let system = build_session_system(session, runtime.as_deref(), skill_body.as_deref());
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
     // Skill body rides the payload of the FIRST round of an activation ONLY

@@ -6,9 +6,9 @@
 // It is NOT "the header of every menu page". A `page` key with no PAGE_META
 // entry renders no header at all — only the bare `.oc-page` body (plus the
 // `extra` row when one is passed). The header-rendering mount points are
-// exactly the PAGE_META pages (project/project.jsx `project`);
-// the remaining mount points (authoritative list:
-// `grep -rn '<PageShell' src`) are titleless wrappers whose page name comes
+// exactly the PAGE_META pages (currently none);
+// the mount points (authoritative list:
+// `rg '<PageShell' src`) are titleless wrappers whose page name comes
 // from the panel's own antd Tabs ('body-title') or from the sidebar Menu /
 // mobile Select label ('menu-only') — nav.js HEADERLESS_REASONS records
 // which, and shell/headerContract.dom.test.jsx mounts every panel to keep
@@ -29,7 +29,7 @@ const { Title, Text } = Typography;
 ///   envs/todoPanel.jsx wants is that action row.
 /// - bare: skip the header entirely (sub-pages / special layouts). No
 ///   production caller today; kept as the escape hatch and pinned against a
-///   real PAGE_META page by pageShell.dom.test.jsx so it cannot rot into a
+///   real extra actions row by pageShell.dom.test.jsx so it cannot rot into a
 ///   green-but-vacuous prop.
 /// - desc is hidden when PAGE_META carries none.
 export function PageShell({ page, extra, bare, children }) {

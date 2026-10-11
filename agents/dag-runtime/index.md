@@ -1,4 +1,4 @@
-Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # dag-runtime 模块
 
@@ -22,14 +22,19 @@ Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
 - [exec/how_copy.rs](../../crates/dag-runtime/src/exec/how_copy.rs)：在运行副本上追加 `how_append` 与实例文本，不回写资源池。
 - [exec/native/artifacts.rs](../../crates/dag-runtime/src/exec/native/artifacts.rs)：只归档 `artifacts.json` 声明的文件，核对路径、大小和摘要；大文件流式复制。
 - [step_log.rs](../../crates/dag-runtime/src/step_log.rs)、[dag_events.rs](../../crates/dag-runtime/src/dag_events.rs)：有界输出落库与实例事件。二进制输出写 `step_output`，Agent 事件通过 [runc_events.rs](../../crates/dag-runtime/src/exec/runc_events.rs) 导入子会话。
+- [agent_runc.rs](../../crates/dag-runtime/src/exec/agent_runc.rs) 在启动 Agent 和事件读取器之前重置本次工作副本的事件流；[native/files.rs](../../crates/dag-runtime/src/exec/native/files.rs) 先拒绝软链接与非普通文件，再截断。事件持久化失败只停止内部执行进程，保留错误状态，不传播为用户取消。
 - [exec/private_files.rs](../../crates/dag-runtime/src/exec/private_files.rs)：私有任务文件只读挂载到 `/run/opencoder-task`，模型只接收目录路径；系统不自动归档私有目录，公开记录不返回私有内容。
 - Agent 资源与知识库分别使用容器内 `/run/opencoder/agents` 和 `/run/opencoder/knowledge`，不占用步骤名称。
+- [sandbox/run/config.rs](../../crates/dag-runtime/src/sandbox/run/config.rs) 为 `/dev/pts` 建立独立 devpts 实例。知识根保持只读 bind，并按 [mounts.rs](../../crates/dag-runtime/src/sandbox/run/mounts.rs) 解析的当前 mountinfo 将根内子挂载逐项只读挂载；其他资源根仍为单层 bind。
 
 ## 执行器与镜像
 
 - 原生 Agent 使用节点固定的模型配置；纯二进制和纯 Codex DAG 不额外要求原生模型凭证。
 - [sandbox/codex](../../crates/dag-runtime/src/sandbox/codex/mod.rs) 校验容器内 Codex CLI 与启动脚本入口、固定 Harness/profile，并挂载实际执行节点的登录目录以支持认证刷新。脚本在同一容器执行；Server 不分发自身登录文件，配置或认证失败不会退回宿主执行。
 - 镜像的 `dag-runner` 和 `agent-step-runner` 必须与节点完整构建信息一致，不能是软链接。[制备脚本](../../scripts/prepare-dag-rootfs.sh) 安装运行器、Shell、Git、TLS、NSS 与 Python 依赖。
+- [install-python.sh](../../scripts/dag-rootfs/install-python.sh) 要求 Python ≥ 3.11，保留解释器和随附动态库的目录布局，安装标准库、系统 CA 与时区数据；`prepare-dag-rootfs.sh --python` 可显式选择解释器。镜像校验在独立挂载命名空间提供只读设备，不把设备写入镜像。
+- [install-codex.sh](../../scripts/dag-rootfs/install-codex.sh) 在写镜像前核验同目录的 Codex 与 `codex-code-mode-host` 原生 ELF，安装两者及动态库并验证伴随程序入口；[install-tools.sh](../../scripts/dag-rootfs/install-tools.sh) 提供 `rg`、`printenv` 等 Shell 工具。登录仍来自执行节点的原授权目录。
+- [tests/sandbox_environment.rs](../../crates/dag-runtime/tests/sandbox_environment.rs) 通过真实 runc 验证 PTY 数据传输、嵌套知识目录及文件只读、其他根的挂载范围和资源回收。
 - [tests/preflight.rs](../../crates/dag-runtime/tests/preflight.rs)、[tests/run_loop](../../crates/dag-runtime/tests/run_loop/main.rs) 和 [两节点验收](../../scripts/acceptance/runc_scheduling/main.py) 覆盖版本拒绝、共享容器与实际恢复。
 
 ## 相关

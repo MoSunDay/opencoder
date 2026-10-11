@@ -60,7 +60,7 @@ function RelationshipTypesContent({ env, canManage }: { env: string; canManage: 
           }} /> : null}
         </Space> },
       ]} />
-    <Drawer title={selected?.name ?? "关系类型详情"} open={Boolean(selected)} width={screens.md ? 640 : "100%"} onClose={() => guard.run(() => setSelectedId(undefined))} destroyOnHidden
+    <Drawer title={selected?.name ?? "关系类型详情"} open={Boolean(selected)} size={screens.md ? 640 : "100%"} onClose={() => guard.run(() => setSelectedId(undefined))} destroyOnHidden
       extra={selected && canManage && !selected.is_deleted ? <RelationshipTypeForm key={`${env}:${selected.id}:${selected.revision}`} env={env} types={types} item={selected} onSaved={resource.reload} /> : null}>
       {selected ? <><Descriptions column={1} items={[
         { key: "source", label: "源类型", children: sourceName(selected) },

@@ -40,6 +40,9 @@ pub async fn run_turn(
     if session.harness.thread_id.is_none() && session.harness.fork_from.is_none() {
         prompt = format!("# Agent instructions\n{}\n\nUse your Codex tools to fulfill these instructions.\n\n# User requirement\n{prompt}", session.agent.prompt);
     }
+    if let Some(instructions) = crate::prompt::operator::instructions(session) {
+        prompt = format!("{instructions}\n\n{prompt}");
+    }
     if let Some(skill) = session.skill_prompt_cloned() {
         prompt = format!("# Active skill\n{skill}\n\n{prompt}");
     }

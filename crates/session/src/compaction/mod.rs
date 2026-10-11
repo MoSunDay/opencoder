@@ -5,7 +5,7 @@ use opencoder_core::{message::now_ms, ContentBlock, Message, Role, ToolArc};
 use opencoder_llm::{estimate_messages, ChatRequest, LlmEvent};
 use opencoder_store::SessionPatch;
 
-use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
+use crate::prompt::{compaction_system_prompt, compaction_user_prompt};
 use crate::runner::{await_cancel, SessionEvent};
 use crate::SessionState;
 
@@ -88,9 +88,8 @@ pub(crate) fn estimated_tokens(session: &SessionState) -> u64 {
     let agent = &session.agent;
     let cli = crate::prompt::cli_section(&session.config.enabled_cli_for(&agent.name, agent.mode));
     let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
-    let system = build_system(
-        &session.agent,
-        &session.working_dir,
+    let system = crate::prompt::build_session_system(
+        session,
         runtime.as_deref(),
         session.skill_prompt_cloned().as_deref(),
     );

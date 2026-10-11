@@ -5,7 +5,7 @@ import { ensurePendingEcho, turnsFromMessages, usageFromMessages } from '../../r
 // execution outcome as well as the persisted transcript before releasing it.
 export function completionState(previous, detail, snapshot) {
   const status = detail?.execution?.status;
-  const error = detail?.error || (status === 'error' ? '执行失败，未返回错误详情' : null);
+  const error = detail?.error || ({ error: '执行失败，未返回错误详情', cancelled: '执行已取消', interrupted: '执行已中断' }[status] || null);
   const messages = snapshot?.messages || [];
   return {
     ...previous,

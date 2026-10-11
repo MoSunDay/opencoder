@@ -1,4 +1,4 @@
-Commit: 9d82393d5ad376511b387d089199a4d845f22b08
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # ontology 模块
 
@@ -18,8 +18,8 @@ Commit: 9d82393d5ad376511b387d089199a4d845f22b08
 
 - [control](../control/index.md) 初始化与角色门禁、就绪和退休生命周期；[core](../core/index.md) 提供配置与平台身份。
 - [control/ontology.rs](../../crates/control/src/ontology.rs) 校验正文根、管理名为 `ontology` 的第四个只读 NFS 导出；正常切换保留独立资源进程和端口。
-- [Web 页面](../web/index.md) 通过平台请求与环境上下文调用接口，类型及表单位于 `spa/src/ontology/`，图谱使用 G6。
-- [Server 与备份](../server/index.md) 同时保存数据库和正文；数据契约为 3，旧格式升级进入维护流程。
+- [Web 页面](../web/index.md) 通过平台请求调用当前 Server 的默认 `debug` 数据空间，页面不提供环境选择与管理；类型及表单位于 `spa/src/ontology/`，图谱使用 G6。
+- [Server 与备份](../server/index.md) 同时保存数据库和正文；数据格式兼容性与维护升级入口见 [发布约定](../../docs/smooth-release.md)。
 
 ## 相关
 

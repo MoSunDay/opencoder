@@ -304,18 +304,14 @@ describe('creation lanes', () => {
     expect(createHits()).toHaveLength(0);
   });
 
-  // run_mode 徽标：卡片带 run_mode → 沙箱/宿主机小 Tag；缺失收敛为宿主机。
-  // 默认选中第一张注册卡 runner（run_mode: agent → 沙箱），切换 hoster
-  // （无 run_mode → 宿主机）。会话创建请求不带 run_mode —— worker 从目标
-  // Agent 卡片读取。
-  it('badges the selected agent run mode and keeps it out of the create body', async () => {
+  it('runs selected identities on the remote host regardless of old card metadata', async () => {
     apiGet.mockImplementation(async (path) => {
       if (path === '/api/nodes') return { nodes };
       if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs: [] };
       if (path === '/api/agents') {
         return {
           agents: [
-            { name: 'runner', description: 'runs each turn in a runc sandbox', primary: true, run_mode: 'agent' },
+            { name: 'runner', description: 'registered remote identity', primary: true, run_mode: 'agent' },
             { name: 'hoster', description: 'host process agent', primary: true },
           ],
         };
@@ -326,8 +322,7 @@ describe('creation lanes', () => {
     const { container } = render(<ChatPanel />);
     await pick('n1');
     await switchMode('Agent 模式');
-    // 默认选中第一张注册卡 runner（run_mode: agent）→ 沙箱徽标。
-    expect((await screen.findByLabelText('selected-agent-run-mode')).textContent).toBe('沙箱');
+    expect((await screen.findByLabelText('selected-agent-run-mode')).textContent).toBe('远端宿主机');
     const select = screen.getByLabelText('执行 Agent').closest('.ant-select');
     fireEvent.mouseDown(select);
     const hoster = await waitFor(() => {
@@ -337,7 +332,7 @@ describe('creation lanes', () => {
       return hit;
     });
     fireEvent.click(hoster);
-    expect(screen.getByLabelText('selected-agent-run-mode').textContent).toBe('宿主机');
+    expect(screen.getByLabelText('selected-agent-run-mode').textContent).toBe('远端宿主机');
     await send(container, 'host go');
     await waitFor(() => expect(createHits()).toHaveLength(1));
     expect(createHits()[0][1]).toMatchObject({ agent: 'hoster', kind: 'agent', prompt: 'host go' });

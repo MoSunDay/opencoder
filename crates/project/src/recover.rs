@@ -167,6 +167,7 @@ pub(crate) async fn converge_lost_run(deps: &Arc<Deps>, run_id: &str) -> bool {
 /// todo 已被别处收敛（非 Running）时不打花。写库失败只告警。
 async fn revert_todo_if_running(deps: &Arc<Deps>, todo_id: &str) {
     let patch = ProjectTodoPatch {
+        people: Default::default(),
         status: Some(ProjectTodoStatus::Planned),
         ..Default::default()
     };
@@ -185,6 +186,7 @@ async fn revert_todo_if_running(deps: &Arc<Deps>, todo_id: &str) {
 /// 已落地）时不打花终态；行缺失或已非 Running 静默跳过。
 async fn fail_todo_if_running(deps: &Arc<Deps>, todo_id: &str) {
     let patch = ProjectTodoPatch {
+        people: Default::default(),
         status: Some(ProjectTodoStatus::Failed),
         ..Default::default()
     };

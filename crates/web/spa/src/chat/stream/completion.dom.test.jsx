@@ -59,6 +59,18 @@ it('shows an initialization error even when no session transcript was created', 
   expect(result.current.busy).toBe(false);
 });
 
+it('shows cancellation before initialization without replacing it with a read error', async () => {
+  apiGet.mockImplementation(async (path) => {
+    if (path.includes('/executions/')) return { execution: { status: 'cancelled' } };
+    throw new Error('execution cancelled before session initialization');
+  });
+  const { result } = renderHook(useChatStream);
+  await act(() => result.current.openSessionStream('s1', 0, []));
+  await waitFor(() => expect(result.current.stream.error).toBe('执行已取消'));
+  expect(result.current.busy).toBe(false);
+  expect(result.current.connecting).toBe(false);
+});
+
 it('shows a result-read failure instead of leaving the composer busy', async () => {
   apiGet.mockRejectedValue(new Error('node offline'));
   const { result } = renderHook(useChatStream);

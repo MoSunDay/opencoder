@@ -301,6 +301,12 @@ impl MockNode {
         self.tables.lock().unwrap().create_reply = None;
     }
 
+    pub fn set_execution_status(&self, id: &str, status: opencoder_core::fleet::ExecutionStatus) {
+        self.tables.lock().unwrap().accepted.get_mut(id).unwrap()["status"] =
+            serde_json::json!(status);
+        self.revision.send_modify(|revision| *revision += 1);
+    }
+
     /// Journalled execution ids (sorted for deterministic assertions).
     pub fn journal_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = self

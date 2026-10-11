@@ -2,6 +2,24 @@ use crate::mcp::ConnStatus;
 use opencoder_core::{message::now_ms, AgentKind, CliConfig, Message};
 use std::path::{Path, PathBuf};
 
+pub(crate) mod operator;
+
+/// Shared by model requests and context budgeting so mode instructions survive
+/// compaction and count toward the same context limit as the agent prompt.
+pub(crate) fn build_session_system(
+    session: &crate::SessionState,
+    runtime: Option<&str>,
+    skill_body: Option<&str>,
+) -> Message {
+    let system = build_system(&session.agent, &session.working_dir, runtime, skill_body);
+    match operator::instructions(session) {
+        Some(instructions) => {
+            Message::system("system", format!("{}\n\n{instructions}", system.text()))
+        }
+        None => system,
+    }
+}
+
 pub fn build_system(
     agent: &opencoder_core::Agent,
     working_dir: &Path,

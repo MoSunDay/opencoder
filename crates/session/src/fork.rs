@@ -17,6 +17,16 @@ pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> 
 
 /// Embedders may assign a durable fleet ID before copying the session.
 pub async fn fork_session_with_id(store: &dyn Store, parent_id: &str, id: &str) -> Result<String> {
+    fork_session_in(store, parent_id, id, None).await
+}
+
+/// A fleet Operator fork may move into its own isolated workspace.
+pub async fn fork_session_in(
+    store: &dyn Store,
+    parent_id: &str,
+    id: &str,
+    workdir: Option<&std::path::Path>,
+) -> Result<String> {
     if !opencoder_core::fleet::valid_id(id) || store.get_session(id).await?.is_some() {
         return Err(anyhow!("invalid or existing fork id"));
     }
@@ -39,7 +49,9 @@ pub async fn fork_session_with_id(store: &dyn Store, parent_id: &str, id: &str) 
         agent: meta.agent.clone(),
         model: meta.model.clone(),
         autopilot_mode: meta.autopilot_mode.clone(),
-        workdir_hash: meta.workdir_hash.clone(),
+        workdir_hash: workdir
+            .map(opencoder_core::workdir_hash)
+            .or(meta.workdir_hash.clone()),
         created_at: now,
         updated_at: now,
         summary: meta.summary.clone(),
@@ -54,6 +66,9 @@ pub async fn fork_session_with_id(store: &dyn Store, parent_id: &str, id: &str) 
     store.create_session(&forked).await?;
     if let Some(mut runtime) = runtime {
         runtime.fork_from = runtime.thread_id.take();
+        if workdir.is_some() {
+            runtime.resource_root = None;
+        }
         store.set_harness_runtime(&new_id, &runtime).await?;
     }
     if !messages.is_empty() {

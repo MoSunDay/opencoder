@@ -40,8 +40,14 @@ async fn ordinary_submission_dispatches_while_resource_authority_is_unavailable(
             None,
         )
         .await;
-    assert_eq!(status, 200);
-    assert_eq!(index["status"], "pending");
+    assert_eq!(status, 404, "not accepted by a node: {index}");
+    assert!(h
+        .state
+        .fleet
+        .assignment("agent-managed-waiting")
+        .await
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
@@ -130,5 +136,71 @@ async fn resource_queue_waits_then_dispatches_in_order_without_duplicate_node_cr
         vec!["agent-z-first", "agent-a-second"]
     );
     assert_eq!(h.node.journal_ids().len(), 2);
+    provider.abort();
+}
+
+#[tokio::test]
+async fn cancellation_before_remote_acceptance_keeps_conversation_lists_empty() {
+    let h = Harness::new().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/resources", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/resources",
+        post(|| async { Json(json!({"status":"waiting","allocated":false})) }),
+    );
+    let provider = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let credentials = tempfile::tempdir().unwrap();
+    let token = credentials.path().join("provider.token");
+    std::fs::write(&token, "isolated-resource-fixture").unwrap();
+    assert_eq!(
+        h.req(
+            Method::PUT,
+            "/api/resource-admission-provider",
+            Some(json!({
+                "endpoint":endpoint,"token_file":token
+            }))
+        )
+        .await
+        .0,
+        200
+    );
+    for kind in ["agent", "operator"] {
+        let id = format!("{kind}-cancel-before-node");
+        let request = json!({"id":id,"kind":kind,"input":{
+            "prompt":"never run","_resource_request":{"units":1}
+        }});
+        assert_eq!(
+            h.req(Method::POST, "/api/executions", Some(request.clone()))
+                .await
+                .0,
+            202
+        );
+        for _ in 0..2 {
+            let (status, body) = h
+                .req(
+                    Method::POST,
+                    &format!("/api/executions/{id}/commands"),
+                    Some(json!({"action":"cancel"})),
+                )
+                .await;
+            assert_eq!(status, 202, "{body}");
+            assert_eq!(body["status"], "cancelled");
+        }
+        let (status, body) = h.req(Method::POST, "/api/executions", Some(request)).await;
+        assert_eq!(status, 409, "{body}");
+        assert_eq!(body["status"], "cancelled");
+        assert!(h.state.fleet.index(&id).await.unwrap().is_none());
+        assert_eq!(
+            h.state
+                .fleet
+                .receipt("execution", &id)
+                .await
+                .unwrap()
+                .unwrap()
+                .phase,
+            "rejected"
+        );
+    }
+    assert!(h.node.journal_ids().is_empty());
     provider.abort();
 }

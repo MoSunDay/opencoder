@@ -3,6 +3,7 @@ use opencoder_store::{ProjectExecutorKind, ProjectTodoStatus};
 
 fn todo(kind: ProjectExecutorKind, spec: Option<&str>) -> opencoder_store::ProjectTodoRecord {
     opencoder_store::ProjectTodoRecord {
+        people: Default::default(),
         id: "pt-1".into(),
         initiative_id: None,
         title: "t".into(),

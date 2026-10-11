@@ -1,4 +1,4 @@
-//! v32: one initiative hierarchy, preserving TODOs and immutable execution data.
+//! Project catalog migrations: one initiative hierarchy, preserving TODOs and immutable execution data.
 use super::{column_exists, table_exists};
 use anyhow::{ensure, Result};
 use libsql::Connection;
@@ -10,9 +10,14 @@ pub(super) async fn initialize_tags(conn: &Connection) -> Result<()> {
 }
 
 pub(super) async fn upgrade(conn: &Connection) -> Result<()> {
+    // v38: initiative progress comes exclusively from TODO board states.
+    if column_exists(conn, "project_initiatives", "status").await? {
+        conn.execute("ALTER TABLE project_initiatives DROP COLUMN status", ())
+            .await?;
+    }
     if table_exists(conn, "project_milestones").await? {
-        conn.execute("INSERT OR IGNORE INTO project_initiatives (id,goal_id,title,detail_md,status,sort_key,created_at,updated_at) SELECT id,goal_id,title,detail_md,status,sort_key,created_at,updated_at FROM project_milestones WHERE kind='initiative'", ()).await?;
-        let mut diff = conn.query("SELECT id,goal_id,title,detail_md,status,sort_key,created_at,updated_at FROM project_milestones WHERE kind='initiative' EXCEPT SELECT id,goal_id,title,detail_md,status,sort_key,created_at,updated_at FROM project_initiatives", ()).await?;
+        conn.execute("INSERT OR IGNORE INTO project_initiatives (id,goal_id,title,detail_md,sort_key,created_at,updated_at) SELECT id,goal_id,title,detail_md,sort_key,created_at,updated_at FROM project_milestones WHERE kind='initiative'", ()).await?;
+        let mut diff = conn.query("SELECT id,goal_id,title,detail_md,sort_key,created_at,updated_at FROM project_milestones WHERE kind='initiative' EXCEPT SELECT id,goal_id,title,detail_md,sort_key,created_at,updated_at FROM project_initiatives", ()).await?;
         ensure!(
             diff.next().await?.is_none(),
             "initiative migration would lose data"

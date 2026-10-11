@@ -56,7 +56,9 @@ pub async fn dispatch(
             kind: op.execution_kind,
             target: Some(cap.target.clone()),
             input,
-            node_id: None,
+            // Preserve only the caller's physical-node constraint. The root's
+            // selected index and the plan's logical node ID are not constraints.
+            node_id: root.request.node_id.clone(),
         },
     )
     .await)

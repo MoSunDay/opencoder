@@ -1,4 +1,5 @@
 //! Durable handoff state. All databases and advisory locks must be on local disk.
+mod acceptance;
 mod capacity;
 #[cfg(test)]
 mod capacity_tests;

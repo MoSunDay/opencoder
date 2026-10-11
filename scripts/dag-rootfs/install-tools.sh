@@ -6,7 +6,7 @@ out="$(cd "$out" && pwd)"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 install_binary "$out" /bin/sh /bin/sh
 install_binary "$out" /bin/bash /bin/bash
-for tool in env cat ls pwd mkdir cp mv rm head tail sed grep find sort wc sleep git; do
+for tool in env printenv cat ls pwd mkdir cp mv rm head tail sed grep rg find sort wc sleep git; do
   binary="$(type -P "$tool")" || { echo "required tool missing: $tool" >&2; exit 2; }
   install_binary "$out" "$binary" "/usr/bin/$tool"
 done

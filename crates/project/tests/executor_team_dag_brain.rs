@@ -121,6 +121,7 @@ async fn seed_todo(
     let now = 1000;
     projects
         .create_todo(&ProjectTodoRecord {
+            people: Default::default(),
             id: id.into(),
             initiative_id: None,
             title: format!("待办 {id}"),

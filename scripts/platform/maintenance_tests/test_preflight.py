@@ -43,7 +43,12 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(preflight.database_inventory(database)['schema_version'], 35)
             self.assertEqual(database.read_bytes(), original)
             with sqlite3.connect(database) as connection:
-                connection.execute('UPDATE schema_version SET version=36')
+                connection.execute('UPDATE schema_version SET version=38')
+            original = database.read_bytes()
+            self.assertEqual(preflight.database_inventory(database)['schema_version'], 38)
+            self.assertEqual(database.read_bytes(), original)
+            with sqlite3.connect(database) as connection:
+                connection.execute('UPDATE schema_version SET version=39')
             with self.assertRaisesRegex(ValueError, 'unsupported definitions database schema'):
                 preflight.database_inventory(database)
 

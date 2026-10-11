@@ -9,18 +9,27 @@ async function access({ page, browser, base, api, root }) {
   await page.getByLabel('用户名', { exact: true }).fill('accept-viewer');
   await page.getByRole('dialog', { name: '创建用户' }).getByRole('button', { name: '创建用户' }).click();
   await page.getByRole('cell', { name: 'accept-viewer', exact: true }).waitFor();
-  await page.getByRole('menuitem', { name: 'Token 管理' }).click();
-  await page.getByRole('button', { name: '创建 Token', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Token 所属用户' }).click();
-  await page.getByText('accept-viewer · viewer', { exact: true }).click();
-  await page.getByLabel('Token 名称', { exact: true }).fill('acceptance');
-  await page.getByRole('dialog', { name: '创建 Token' }).getByRole('button', { name: '创建 Token', exact: true }).click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Token 管理' }).count(), 0);
   const modal = page.getByRole('dialog', { name: 'Token 仅此一次显示' });
   await modal.waitFor();
   const token = (await modal.innerText()).match(/oc_[0-9A-Z]+/)[0];
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await modal.locator('.ant-typography-copy').click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), token);
+  const viewport = page.viewportSize();
+  for (const width of [1920, 1280, 768, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const bounds = await modal.boundingBox();
+    assert(bounds.x >= 0 && bounds.x + bounds.width <= width, `token dialog overflows at ${width}px`);
+    await page.screenshot({ path: path.join(root, `access-created-${width}.png`), mask: [modal.locator('.ant-typography')] });
+  }
+  await page.setViewportSize(viewport);
   await modal.getByRole('button', { name: '我已保存' }).click();
   await modal.waitFor({ state: 'detached' });
-  await page.screenshot({ path: path.join(root, 'access-tokens.png') });
+  await page.reload();
+  await page.getByRole('cell', { name: 'accept-viewer', exact: true }).waitFor();
+  assert.equal(await page.getByText(token, { exact: true }).count(), 0);
+  await page.screenshot({ path: path.join(root, 'access-users.png') });
   const request = (method, route, body) => fetch(base + route, { method,
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
   assert.equal((await request('GET', '/api/project/overview')).status, 200);
@@ -35,7 +44,7 @@ async function access({ page, browser, base, api, root }) {
     await reader.getByText('accept-viewer · 只读', { exact: true }).waitFor();
     await reader.locator('.fleet-nav-category').getByRole('tab', { name: '项目', exact: true }).click();
     await reader.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
-    await reader.getByRole('menuitem', { name: /项目$/ }).waitFor();
+    await reader.getByRole('menuitem', { name: /Overview$/ }).waitFor();
     assert.equal(await reader.getByRole('tab', { name: '后台管理' }).count(), 0);
     assert(await reader.getByRole('button', { name: '新建项目' }).isDisabled());
     await reader.screenshot({ path: path.join(root, 'access-viewer.png') });
@@ -47,8 +56,7 @@ async function access({ page, browser, base, api, root }) {
     await page.locator('.ant-select-item-option-content').getByText('editor · 可编辑', { exact: true }).click();
     await editor.getByRole('button', { name: '保存权限' }).click();
     await editor.waitFor({ state: 'detached' });
-    await page.getByRole('menuitem', { name: 'Token 管理' }).click();
-    await page.getByText('acceptance', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('dialog', { name: 'Token 仅此一次显示' }).count(), 0);
     const allowed = await request('POST', '/api/project/goals', { title: 'editor project' });
     assert.equal(allowed.status, 200);
     const goal = await allowed.json();
@@ -57,10 +65,10 @@ async function access({ page, browser, base, api, root }) {
     assert(!(await reader.getByRole('button', { name: '新建项目' }).isDisabled()));
     assert.equal((await request('POST', '/api/tokens', {})).status, 403);
     await api('DELETE', `/api/project/goals/${goal.id}`);
-    const row = page.getByRole('row').filter({ has: page.getByText('acceptance', { exact: true }) });
-    await row.getByRole('button', { name: /撤\s*销/ }).click();
-    await page.getByRole('button', { name: '确认撤销' }).click();
-    await row.getByText('已撤销', { exact: true }).waitFor();
+    const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'accept-viewer', exact: true }) });
+    await row.getByRole('button', { name: '删除用户' }).click();
+    await page.getByRole('button', { name: '确认删除' }).click();
+    await row.waitFor({ state: 'detached' });
     assert.equal((await request('GET', '/api/me')).status, 401);
     assert.deepEqual(errors, []);
   } catch (error) {
@@ -68,9 +76,5 @@ async function access({ page, browser, base, api, root }) {
     await reader.screenshot({ path: path.join(root, 'access-reader-failure.png') });
     throw error;
   } finally { await context.close(); }
-  await page.getByRole('menuitem', { name: '用户权限' }).click();
-  await page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'accept-viewer', exact: true }) }).getByRole('button', { name: '删除用户' }).click();
-  await page.getByRole('button', { name: '确认删除' }).click();
-  await page.getByRole('cell', { name: 'accept-viewer', exact: true }).waitFor({ state: 'detached' });
 }
 module.exports = { access };

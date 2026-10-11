@@ -1,5 +1,5 @@
 use crate::{
-    api::{error_400, error_500, response},
+    api::{error_400, error_404, error_500, response},
     AppState,
 };
 use axum::{
@@ -21,6 +21,10 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -
         Ok(body) => body,
         Err(error) => return error_400(error.to_string()),
     };
+    let _lock = match state.fleet.request_lock("brain-catalog", "registry").await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
     match validate_layered(&state, body.plan.clone()).await {
         Ok(plan) => {
             body.plan = json!(plan.with_rollback_paths());
@@ -32,6 +36,39 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -
             json!({"definition":definition,"version":body}),
         )),
         Err(error) => response(RpcReply::error(409, error.to_string())),
+    }
+}
+
+/// Delete a saved plan and all of its immutable versions. A plan remains
+/// present in finished run snapshots. Active runs and saved parent plans
+/// keep the source version available and therefore block deletion.
+pub async fn delete(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    if !valid_id(&id) {
+        return error_400("invalid plan identity".into());
+    }
+    let _lock = match state.fleet.request_lock("brain-catalog", "registry").await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
+    match state.fleet.definition("brain_plan", &id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404(&format!("brain plan not found: {id}")),
+        Err(error) => return error_500(error.to_string()),
+    }
+    match super::maintenance::references(&state, super::maintenance::Removing::Plan(&id)).await {
+        Ok(runs) if !runs.is_empty() => {
+            return response(RpcReply::error(
+                409,
+                format!("brain plan is referenced by: {}", runs.join(", ")),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) => return error_500(error.to_string()),
+    }
+    match state.fleet.delete_brain_plan(&id).await {
+        Ok(true) => response(RpcReply::ok(json!({"ok":true,"deleted":id}))),
+        Ok(false) => error_404(&format!("brain plan not found: {id}")),
+        Err(error) => error_500(error.to_string()),
     }
 }
 
@@ -116,6 +153,10 @@ pub async fn stable(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
+    let _lock = match state.fleet.request_lock("brain-catalog", "registry").await {
+        Ok(lock) => lock,
+        Err(error) => return error_500(error.to_string()),
+    };
     let Some(version) = body["version"].as_u64() else {
         return error_400("version is required".into());
     };

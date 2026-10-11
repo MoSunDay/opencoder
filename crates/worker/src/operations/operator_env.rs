@@ -26,6 +26,9 @@ use opencoder_core::fleet::ExecutionKind;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod fork;
+pub(crate) use fork::fork_environment;
+
 fn snapshot_path(home: &Path) -> PathBuf {
     home.join(".opencoder").join("config.json")
 }
@@ -43,6 +46,21 @@ pub(crate) fn materialize(
     if kind != ExecutionKind::Operator {
         return Ok(None);
     }
+    let (home, workspace) = create_directories(layout, kind, id)?;
+    let snapshot = snapshot_path(&home);
+    if !snapshot.is_file() {
+        write_snapshot(&snapshot, &serde_json::to_string_pretty(config)?)?;
+    }
+    validate_snapshot(&snapshot)?;
+    crate::operations::operator_config::freeze_skills(layout, &home)?;
+    Ok(Some((home, workspace)))
+}
+
+fn create_directories(
+    layout: &DirectoryLayout,
+    kind: ExecutionKind,
+    id: &str,
+) -> Result<(PathBuf, PathBuf)> {
     let home = layout.home_dir(kind, id)?;
     let workspace = layout.workspace_dir(kind, id)?;
     #[cfg(not(windows))]
@@ -54,24 +72,12 @@ pub(crate) fn materialize(
     for directory in [home.join("AppData/Roaming"), home.join("AppData/Local")] {
         opencoder_core::platform::fs::ensure_private_directory(&directory)?;
     }
-    let snapshot = snapshot_path(&home);
-    if !snapshot.is_file() {
-        let parent = snapshot
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("snapshot path has no parent"))?;
-        #[cfg(not(windows))]
-        opencoder_core::share_fs::durable_create_dir_all(parent)?;
-        #[cfg(windows)]
-        opencoder_core::platform::fs::ensure_private_directory(parent)?;
-        write_snapshot(&snapshot, &serde_json::to_string_pretty(config)?)?;
-    }
-    validate_snapshot(&snapshot)?;
-    // Freeze the execution's own skill pool: operator-plane packs plus this
-    // binary's embedded built-ins. The interactive user's global skill pool
-    // (`~/.opencoder/skills`, mirrored by the node-level snapshot) is
-    // deliberately NOT a source — an operator execution never sees it.
-    crate::operations::operator_config::freeze_skills(layout, &home)?;
-    Ok(Some((home, workspace)))
+    let config_dir = home.join(".opencoder");
+    #[cfg(not(windows))]
+    opencoder_core::share_fs::durable_create_dir_all(&config_dir)?;
+    #[cfg(windows)]
+    opencoder_core::platform::fs::ensure_private_directory(&config_dir)?;
+    Ok((home, workspace))
 }
 
 /// Atomically create `path` (0600, plain text) without ever replacing a

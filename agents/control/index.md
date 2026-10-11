@@ -1,15 +1,17 @@
-Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # control 模块
 
 平台控制面：节点接入、全局定义、执行索引与调度。
 
 ## 索引
-- [api/users.rs](../../crates/control/src/api/users.rs)、[api/users/tokens.rs](../../crates/control/src/api/users/tokens.rs) — 用户与 Token 分开管理；仅管理员可管理，启动管理员凭据只读，角色变更对同一 Token 的后续请求立即生效。
+- [api/users.rs](../../crates/control/src/api/users.rs) — 创建用户时原子保存用户与初始 Token 摘要，成功返回 `{user,token}` 并设置 `Cache-Control: no-store`；明文只在创建响应返回。仅管理员可管理，启动管理员凭据只读，角色变更立即生效；[api/users/tokens.rs](../../crates/control/src/api/users/tokens.rs) 保留独立 Token 的管理 API。
 - [api/project/details.rs](../../crates/control/src/api/project/details.rs) — 项目、专项和 TODO 详情复用已有关系投影；TODO 对话按当前关联定位同一原生执行。
+- [共享人员 API](../../crates/web/src/api_project_people.rs) — `/api/project/people` 仅向已认证用户提供用户名；三层人员写入沿用项目权限，非法人员返回 400，完整修改在 Store 事务内回滚。
 - `src/bootstrap.rs` — control.db、definitions.db 与独立 ontology.db 装配；就绪检查包含 Ontology 数据库和正文根，Server 退休等待已接纳的 Ontology 写事务排空。
 - `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）
-- `src/api/session.rs` — 会话执行面（`?kind=operator|agent` 泳道）
+- [api/session.rs](../../crates/control/src/api/session.rs) — 会话执行面（`?kind=operator|agent` 泳道）；历史列表先排除内部 Agent 索引，再有界并发读取节点详情，保持索引顺序与错误行。
+- [api/executions/submit.rs](../../crates/control/src/api/executions/submit.rs)、[transport/socket.rs](../../crates/control/src/transport/socket.rs) — 会话首轮提交转发所选节点，及时或迟到的接收确认发布 Server 索引；拒绝不生成占位会话。资源等待中的取消通过原派发回执持久化并去重，见 [resource_admission](../../crates/control/src/api/resource_admission/mod.rs)。
 - `src/api/executions/`、`src/role_gate.rs` — 派发去重、选点冻结、回执与角色门禁；执行索引五字段协议
 - [resource_admission](../../crates/control/src/api/resource_admission/mod.rs) — 通过既有 Fleet 定义保存外部资源提供方；核验冻结的 `_resource_request`，提供按执行 ID 查询、状态确认和释放接口。批次释放先检查 Server 终态；等待取消与派发共用执行锁。
 - `src/api/settings/` — Harness 配置与节点调度配置（Maintenance RPC 转发）
@@ -18,6 +20,7 @@ Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
 - [api/executions/results/](../../crates/control/src/api/executions/results/) — `GET /api/executions/:id/result` 从所属节点即时读取有界结论，不在 Server 缓存；失败、离线与内容省略显式返回。
 - `src/api/compat/dag_instances.rs`、`src/api/stream.rs`、`src/api/streaming/` — 实例中继与 SSE（v4 运行沿用同一 `/events` 通道，负载由节点按运行版本给出）
 - `src/api/brain_runs/` — schema 7 计划与运行；`plan_capabilities.rs` 注册保存计划版本能力，`v4/` 实现目录负责准入、派发、读取和事件确认。
+- [brain_runs/maintenance.rs](../../crates/control/src/api/brain_runs/maintenance.rs) — 删除计划或能力前分页检查全部保存版本与未结束 Brain 运行的冻结引用；保存、删除持有目录独占锁，运行准入持有共享锁至冻结请求提交。计划版本及元数据在 Store 事务内删除；[brain.rs](../../crates/control/src/api/brain.rs) 清理能力及目标绑定，重试可收尾残留元数据。
 - [api/brain_runs/tui.rs](../../crates/control/src/api/brain_runs/tui.rs) — `GET /api/tui/agent-capabilities` 复用能力库目录，仅投影可用 Agent/Operator 的 ID、种类、目标和摘要；editor 与 viewer 可读，不返回定义与 Harness 私有设置。
 - `src/transport/layered_tests.rs` — 分层 wake 的 generation 栅栏（只确认本次激活准入的那一轮）
 - `src/scheduler.rs`、`src/scheduler/telemetry.rs`、`src/api/schedules/`、`src/api/scheduler_metrics.rs`、`src/seed_schedules.rs` — cron 调度、进程内计数、定义 CRUD、调度总览与遗留导入；[scheduler/timing.rs](../../crates/control/src/scheduler/timing.rs) 以定义生效时间和最近触发记录计算补跑、跳过与重试，纯函数不执行 I/O。定义 CRUD 的相同内容写入保留原生效时间。
@@ -28,6 +31,7 @@ Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
 - `tests/e2e/` — 集成测试（含 `layered_api` 家族：锁定读面、命令门禁、嵌套准入）
 
 ## 接缝
+- [brain_runs/v4/gateway.rs](../../crates/control/src/api/brain_runs/v4/gateway.rs) 将根请求中显式给出的物理 `request.node_id` 传给普通托管子执行；未指定时仍交由统一调度选择节点，不使用根执行选中的 `index.node_id` 或计划逻辑节点 ID 代替。两类合同及重复投递保全见 [placement_tests.rs](../../crates/control/src/transport/layered_tests/placement_tests.rs)。嵌套 Brain 的父节点合同单独保留。
 - Brain 根运行另要求 `brain_context_budget_v1`：`api/executions/capabilities.rs` 用实际请求探测模型容量，`submit.rs` 保留容量拒绝的 413；创建和唤醒均检查帧大小。超限唤醒明确阻塞，避免不断重试无法传输的上下文。先升级节点再启用 Server，预算实现见 [brain](../brain/index.md)。
 - Brain 里程碑计划：根运行及托管子执行的节点须同时广告 `brain_scheduler_v7`、`brain_contracts_v1`；保存版本和直接运行准入均规范化内部层间路径，旧版本显式路径保持原样。普通能力走统一执行提交，子计划走相同 Brain 准入并核验父 operation，且沿用父运行的节点。节点持有运行与操作投影；视图按轮次和激活提供执行索引，详情由执行 ID 查询。Control 为每次激活解析冻结能力与完整有界结果；受理拒绝从根事件读取具体原因，不等待不存在的子执行。Worker 执行模型决策；子计划固定版本并验证父 operation、深度和终态。目录解析失败只标记对应能力不可用，计划引用它时返回原因，不阻断其他计划。字段约定与回执入口见 [brain](../brain/index.md)。
 - [api/executions/submit.rs](../../crates/control/src/api/executions/submit.rs) 接收用户注册的工作流定义，受理时原样固定定义与输入；找不到目标时拒绝提交，不按能力名称改写工作流。

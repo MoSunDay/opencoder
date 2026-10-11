@@ -6,7 +6,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use opencoder_core::fleet::{Assignment, ExecutionStatus, RpcReply};
+use opencoder_core::fleet::{Assignment, ExecutionKind, ExecutionStatus, RpcReply};
+use opencoder_store::fleet::handoff::Receipt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -167,12 +168,40 @@ pub(crate) async fn cancel_waiting(
     let Some(receipt) = state.fleet.receipt("execution", id).await? else {
         return Ok(None);
     };
+    if receipt.phase == "rejected" && receipt.payload["body"]["status"] == "cancelled" {
+        return Ok(Some(RpcReply {
+            status: 202,
+            body: receipt.payload["body"].clone(),
+        }));
+    }
     if receipt.phase != "prepared" {
         return Ok(None);
     }
     let value = call(state, json!({"action":"inspect","execution_id":id})).await?;
     if value["allocated"] != false {
         return Ok(None);
+    }
+    if matches!(
+        assignment.index.kind,
+        ExecutionKind::Agent | ExecutionKind::Operator
+    ) {
+        let body = json!({"id":id,"status":"cancelled","error":"dispatch cancelled before node acceptance"});
+        state
+            .fleet
+            .save_receipt(
+                "execution",
+                id,
+                &Receipt {
+                    fingerprint: receipt.fingerprint,
+                    phase: "rejected".into(),
+                    payload: json!(RpcReply {
+                        status: 409,
+                        body: body.clone()
+                    }),
+                },
+            )
+            .await?;
+        return Ok(Some(RpcReply { status: 202, body }));
     }
     let mut index = assignment.index;
     index.status = ExecutionStatus::Cancelled;

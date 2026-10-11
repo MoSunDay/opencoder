@@ -6,6 +6,7 @@ use axum::{
     response::Response,
     Json,
 };
+use futures::StreamExt;
 use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 use std::{collections::HashSet, sync::Arc};
@@ -89,8 +90,15 @@ pub async fn summaries(
     // Operator and Agent are separate conversation lanes. The caller chooses
     // one kind; no other execution family can leak into either lane.
     let indexes = state.fleet.indexes(node, Some(kind), 500).await?;
-    let mut rows = Vec::with_capacity(indexes.len());
-    for index in indexes {
+    // Filter internal indexes before waking historical runtimes. Bound detail
+    // reads while preserving index order, so hundreds of dialogs do not add
+    // their round-trip latency serially on every sidebar refresh.
+    let rows = futures::stream::iter(
+        indexes
+            .into_iter()
+            .filter(|index| index.kind != ExecutionKind::Agent || index.id.starts_with("agent-")),
+    )
+    .map(|index| async move {
         let reply = state
             .hub
             .call(
@@ -114,13 +122,17 @@ pub async fn summaries(
             });
         }
         if !visible_chat_session(index.kind, &meta) {
-            continue;
+            return None;
         }
         meta["kind"] = json!(index.kind);
         meta["execution_ref"] = json!({"id":index.id,"kind":index.kind});
         meta["node_id"] = json!(index.node_id);
-        rows.push(meta);
-    }
+        Some(meta)
+    })
+    .buffered(16)
+    .filter_map(futures::future::ready)
+    .collect()
+    .await;
     Ok(rows)
 }
 

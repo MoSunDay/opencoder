@@ -11,13 +11,14 @@ mod access;
 mod catalog;
 mod migrations;
 mod project_links;
+mod project_people;
 mod project_relations;
 use migrations::migrate;
 use project_relations::CREATE_PROJECT_MILESTONES;
 
 // Scheduler tables bootstrap additively. Project v33 removes result caches;
 // the release data-format gate excludes older Servers before this migration.
-pub(crate) const SCHEMA_VERSION: i64 = 35;
+pub(crate) const SCHEMA_VERSION: i64 = 38;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -135,6 +136,8 @@ CREATE TABLE IF NOT EXISTS project_goals (
   status TEXT NOT NULL,
   sort_key INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
+  current_summary TEXT NOT NULL DEFAULT '',
+  summary_updated_at INTEGER,
   updated_at INTEGER NOT NULL
 )";
 const CREATE_PROJECT_INITIATIVES: &str = "\
@@ -143,9 +146,10 @@ CREATE TABLE IF NOT EXISTS project_initiatives (
   goal_id TEXT,
   title TEXT NOT NULL,
   detail_md TEXT,
-  status TEXT NOT NULL,
   sort_key INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
+  current_summary TEXT NOT NULL DEFAULT '',
+  summary_updated_at INTEGER,
   updated_at INTEGER NOT NULL
 )";
 const CREATE_PROJECT_TODOS: &str = "\
@@ -438,6 +442,8 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     // Historical v32 catalogs can retain milestone columns despite their
     // watermark. Converge the actual shape before creating current indexes.
     catalog::upgrade(conn).await?;
+    project_people::initialize(conn).await?;
+    super::project::summaries::initialize(conn).await?;
     // The task_type index depends on a column that only physically exists in
     // fresh databases (via CREATE TABLE) or after the v5 migration adds it for
     // older databases, so it must run AFTER `migrate` rather than in the

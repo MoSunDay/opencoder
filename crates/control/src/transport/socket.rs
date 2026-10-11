@@ -216,7 +216,9 @@ async fn settle_create_index(
         {
             anyhow::bail!("invalid late node acceptance");
         }
-    } else if reject_pending
+        fleet.accept_execution(&accepted).await?;
+    } else if !matches!(index.kind, ExecutionKind::Agent | ExecutionKind::Operator)
+        && reject_pending
         && rejection_proves_not_accepted(reply.status)
         && fleet
             .index(&index.id)
@@ -260,9 +262,9 @@ mod tests {
     async fn definitive_failed_create_reply_converges_pending_index() {
         let fleet = FleetStore::open_memory().await.unwrap();
         let index = ExecutionIndex {
-            id: "agent-late-failure".into(),
+            id: "dag-late-failure".into(),
             created_at: 9,
-            kind: ExecutionKind::Agent,
+            kind: ExecutionKind::Dag,
             node_id: "node-a".into(),
             status: ExecutionStatus::Pending,
         };

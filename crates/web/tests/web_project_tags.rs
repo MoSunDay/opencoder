@@ -3,6 +3,79 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::json;
 use support::project_app::{call, harness};
+
+#[tokio::test]
+async fn global_tags_allow_no_owner_and_validate_updates_and_duplicates() {
+    let h = harness().await;
+    let (status, tag) = call(
+        &h.app,
+        "POST",
+        "/api/project/tags",
+        Some(json!({"scope_type":"global","name":" 通用 "})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tag}");
+    assert_eq!(tag["scope_id"], "");
+    assert_eq!(tag["name"], "通用");
+    let path = format!("/api/project/tags/{}", tag["id"].as_str().unwrap());
+    let (status, todo) = call(
+        &h.app,
+        "POST",
+        "/api/project/todos",
+        Some(json!({"title":"未归属","draft":"","tag_ids":[tag["id"]]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{todo}");
+    let (_, listed) = call(&h.app, "GET", "/api/project/tags?scope_type=global", None).await;
+    assert_eq!(listed["tags"], json!([tag]));
+    for (body, expected) in [
+        (
+            json!({"scope_type":"global","scope_id":"unexpected","name":"改名"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"scope_type":"global","name":" "}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"scope_type":"unknown","name":"标签"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"scope_type":"global","scope_id":"","name":"通用"}),
+            StatusCode::CONFLICT,
+        ),
+    ] {
+        let (status, _) = call(&h.app, "POST", "/api/project/tags", Some(body)).await;
+        assert_eq!(status, expected);
+    }
+    let (status, _) = call(
+        &h.app,
+        "PATCH",
+        &path,
+        Some(json!({"scope_type":"global","scope_id":"bad","name":"改名"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, unchanged) = call(&h.app, "GET", "/api/project/tags?scope_type=global", None).await;
+    assert_eq!(unchanged, listed);
+    let (status, renamed) = call(
+        &h.app,
+        "PATCH",
+        &path,
+        Some(json!({"scope_type":"global","name":"新通用"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(renamed["id"], tag["id"]);
+    let (_, overview) = call(&h.app, "GET", "/api/project/overview", None).await;
+    assert_eq!(overview["backlog"][0]["tag_ids"], json!([tag["id"]]));
+    let (status, _) = call(&h.app, "DELETE", &path, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, overview) = call(&h.app, "GET", "/api/project/overview", None).await;
+    assert_eq!(overview["backlog"][0]["tag_ids"], json!([]));
+}
+
 #[tokio::test]
 async fn tags_validate_scope_override_names_and_round_trip_in_overview() {
     let h = harness().await;

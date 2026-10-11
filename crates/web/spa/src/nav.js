@@ -18,8 +18,8 @@ import {
   ApartmentOutlined,
   DatabaseOutlined,
   LinkOutlined,
-  SettingOutlined,
   TeamOutlined,
+  TagsOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 
@@ -31,7 +31,8 @@ export const NAV_CATEGORIES = [
     key: 'project',
     label: '项目',
     items: [
-      { page: 'project', menu: '项目', icon: ProjectOutlined },
+      { page: 'project', menu: 'Overview', icon: ProjectOutlined },
+      { page: 'projectTags', menu: 'Tag', icon: TagsOutlined },
     ],
   },
   {
@@ -56,7 +57,6 @@ export const NAV_CATEGORIES = [
       { page: 'ontologyEntities', menu: '实体', icon: DatabaseOutlined },
       { page: 'ontologyTypes', menu: '实体类型', icon: ProfileOutlined },
       { page: 'ontologyRelationships', menu: '关系类型', icon: LinkOutlined },
-      { page: 'ontologyEnvironments', menu: '环境管理', icon: SettingOutlined },
     ],
   },
   {
@@ -65,7 +65,6 @@ export const NAV_CATEGORIES = [
     items: [
       { page: 'nodes', menu: '节点列表', icon: ClusterOutlined },
       { page: 'users', menu: '用户权限', icon: TeamOutlined },
-      { page: 'tokens', menu: 'Token 管理', icon: SettingOutlined },
     ],
   },
 ];
@@ -101,6 +100,8 @@ export const NAV_STORAGE_KEY = 'oc_nav_page';
 ///                    mobile Select label are deliberately the only title (a
 ///                    page header would just repeat them, see fe00626e).
 export const HEADERLESS_REASONS = {
+  project: 'body-title',
+  projectTags: 'menu-only',
   brain: 'body-title',
   topics: 'menu-only',
   schedules: 'menu-only',
@@ -111,12 +112,10 @@ export const HEADERLESS_REASONS = {
   agents: 'body-title',
   nodes: 'menu-only',
   users: 'menu-only',
-  tokens: 'menu-only',
   ontologyGraph: 'menu-only',
   ontologyEntities: 'menu-only',
   ontologyTypes: 'menu-only',
   ontologyRelationships: 'menu-only',
-  ontologyEnvironments: 'menu-only',
 };
 
 /// Derived from the reasons registry so the two lists can never drift.
@@ -127,9 +126,7 @@ export const HEADERLESS_PAGES = Object.keys(HEADERLESS_REASONS);
 /// title + desc from here. An entry no panel renders is dead copy — the
 /// header contract test mounts every panel and fails on it, so this map
 /// stays truthful.
-export const PAGE_META = {
-  project: { title: '项目', desc: '项目、专项与 TODO 工作台' },
-};
+export const PAGE_META = {};
 
 /// Category lookup with the default as the safety net (unknown keys never
 /// crash a renderer — they just show the default category).

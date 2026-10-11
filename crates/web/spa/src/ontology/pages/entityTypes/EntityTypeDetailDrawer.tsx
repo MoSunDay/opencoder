@@ -96,7 +96,7 @@ export default function EntityTypeDetailDrawer({ env, entityType, canManage, onC
   );
 
   return (
-    <Drawer title={entityType?.name} width={screens.md ? "75%" : "100%"} open={Boolean(entityType)} onClose={() => guard.run(onClose)} destroyOnHidden>
+    <Drawer title={entityType?.name} size={screens.md ? "75%" : "100%"} open={Boolean(entityType)} onClose={() => guard.run(onClose)} destroyOnHidden>
       {resource.error ? <Alert type="error" showIcon message={resource.error} action={<Button onClick={() => void resource.reload()}>重试</Button>} /> : null}
       {entityType ? (
         <>

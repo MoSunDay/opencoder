@@ -148,6 +148,40 @@ async fn dialogs_rows_are_happy_degraded_and_node_scoped() {
 }
 
 #[tokio::test]
+async fn agent_dialogs_skip_internal_indexes_before_querying_nodes() {
+    let h = Harness::new().await;
+    for id in ["01INTERNAL", "agent-public", "agent-child"] {
+        h.put_index(id, ExecutionKind::Agent, ExecutionStatus::Idle)
+            .await;
+        h.node.set_command(
+            id,
+            "summary",
+            200,
+            json!({
+                "id": id,
+                "task_type": if id == "agent-child" { "subagent" } else { "parent" },
+            }),
+        );
+    }
+    let (status, body) = h
+        .req(Method::GET, "/api/nodes/node-e2e/dialogs?kind=agent", None)
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let rows = body["dialogs"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{body}");
+    assert_eq!(rows[0]["session_id"], "agent-public");
+    let queried: Vec<_> = h
+        .node
+        .seen_commands()
+        .into_iter()
+        .filter(|(_, action, _)| action == "summary")
+        .map(|(id, _, _)| id)
+        .collect();
+    assert_eq!(queried.len(), 2, "{queried:?}");
+    assert!(!queried.iter().any(|id| id == "01INTERNAL"));
+}
+
+#[tokio::test]
 async fn task_cancel_errors_are_control_or_node_owned() {
     let h = Harness::new().await;
     // Unknown execution: control-plane owned 409, no node roundtrip.

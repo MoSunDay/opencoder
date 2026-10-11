@@ -28,7 +28,7 @@ async fn six_registered_codex_employees_are_reusable_by_agent_dag_and_brain() {
     for domain in ["harness", "client", "server"] {
         for action in ["root-cause", "code-repair"] {
             let name = format!("{domain}-{action}-operator");
-            save(&h, "/api/agents", json!({"name":name,"harness":"codex","harness_profile":"regression-test","run_mode":"operator","current":{"prompt":"employee"}})).await;
+            save(&h, "/api/agents", json!({"name":name,"harness":"codex","harness_profile":"regression-test","current":{"prompt":"employee"}})).await;
             let (_, catalog) = h.req(Method::GET, "/api/brain/library", None).await;
             let cap_id = format!("agent-{name}");
             let cap = catalog["capabilities"]
@@ -89,7 +89,7 @@ async fn six_registered_codex_employees_are_reusable_by_agent_dag_and_brain() {
                 .req(Method::GET, &format!("/api/agents/{name}/meta"), None)
                 .await;
             assert_eq!(meta["meta"]["harness"], "codex");
-            assert_eq!(meta["meta"]["run_mode"], "operator");
+            assert!(meta["meta"].get("run_mode").is_none());
         }
     }
     assert_eq!(h.node.journal_ids().len(), 18);

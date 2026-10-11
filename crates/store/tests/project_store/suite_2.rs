@@ -12,6 +12,7 @@ async fn conditional_patch_cas_applies_only_in_expected_state() {
             "t1",
             ProjectTodoStatus::Planned,
             &ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(ProjectTodoStatus::Failed),
                 ..Default::default()
             },
@@ -29,6 +30,7 @@ async fn conditional_patch_cas_applies_only_in_expected_state() {
             "t1",
             ProjectTodoStatus::Draft,
             &ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()
             },
@@ -49,6 +51,7 @@ async fn conditional_patch_cas_applies_only_in_expected_state() {
             "t1",
             ProjectTodoStatus::Running,
             &ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()
             },
@@ -63,6 +66,7 @@ async fn conditional_patch_cas_applies_only_in_expected_state() {
             "missing",
             ProjectTodoStatus::Running,
             &ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(ProjectTodoStatus::Failed),
                 ..Default::default()
             },
@@ -80,6 +84,7 @@ async fn conditional_patch_cas_applies_only_in_expected_state() {
             "t1",
             ProjectTodoStatus::Planned,
             &ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(ProjectTodoStatus::Planned),
                 plan_md: Some(Some("# new".to_string())),
                 ..Default::default()
@@ -228,6 +233,7 @@ async fn delete_initiative_requires_explicit_unlink_and_preserves_runs() {
     p.patch_todo(
         "t1",
         &ProjectTodoPatch {
+            people: Default::default(),
             initiative_id: Some(None),
             ..Default::default()
         },
@@ -261,7 +267,7 @@ async fn reopen_is_idempotent_and_serves_v15() {
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let v: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(v, 35, "schema_version must be latest (35) after reopen");
+    assert_eq!(v, 38, "schema_version must be latest (38) after reopen");
 
     let iface: Arc<dyn ProjectStore> = Arc::new(store);
     iface.create_goal(&goal("g1", 0, 1)).await.unwrap();

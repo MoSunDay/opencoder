@@ -9,10 +9,12 @@ it('keeps same-name definitions separate and resolves project and standalone own
       { id: 'parent', name: '模块', scope_type: 'project', scope_id: 'p' },
       { id: 'local', name: '模块', scope_type: 'initiative', scope_id: 'i' },
       { id: 'solo', name: '独立', scope_type: 'initiative', scope_id: 's' },
+      { id: 'global', name: '模块', scope_type: 'global', scope_id: '' },
     ],
   };
   const rows = tagRows(overview);
-  expect(rows).toHaveLength(3);
+  expect(rows).toHaveLength(4);
+  expect(rows.find((row) => row.id === 'global')).toMatchObject({ scope_label: '全局', project_title: '所有项目 / 专项', initiative_title: '—' });
   expect(rows.find((row) => row.id === 'parent')).toMatchObject({ scope_label: '项目', project_title: '项目甲', initiative_title: '—' });
   expect(rows.find((row) => row.id === 'local')).toMatchObject({ scope_label: '专项', project_title: '项目甲', initiative_title: '专项甲' });
   expect(rows.find((row) => row.id === 'solo')).toMatchObject({ project_title: '独立专项', initiative_title: '独立专项甲' });

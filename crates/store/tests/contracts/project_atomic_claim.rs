@@ -8,6 +8,7 @@ use tokio::sync::Barrier;
 
 fn todo(id: &str, status: ProjectTodoStatus, now: i64) -> ProjectTodoRecord {
     ProjectTodoRecord {
+        people: Default::default(),
         id: id.into(),
         initiative_id: None,
         title: id.into(),
@@ -156,6 +157,7 @@ async fn existing_running_and_terminal_run_replay_do_not_duplicate() {
         .patch_todo(
             "todo",
             &opencoder_store::ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(ProjectTodoStatus::Done),
                 ..Default::default()
             },

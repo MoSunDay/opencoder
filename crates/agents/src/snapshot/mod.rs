@@ -13,10 +13,27 @@ pub fn pin(source: Option<&Path>, destination: &Path) -> Result<Option<PathBuf>>
     pin_selected(source, destination, None)
 }
 
+/// Conversations can switch identities, but do not need unreferenced resource
+/// pools. Freeze the registered catalog and only the dependencies it uses.
+pub fn pin_catalog(source: Option<&Path>, destination: &Path) -> Result<Option<PathBuf>> {
+    pin_with(source, destination, copy::catalog)
+}
+
 pub fn pin_selected(
     source: Option<&Path>,
     destination: &Path,
     names: Option<&[String]>,
+) -> Result<Option<PathBuf>> {
+    pin_with(source, destination, |source, staging| match names {
+        Some(names) => copy::selected(source, staging, names),
+        None => copy::all(source, staging),
+    })
+}
+
+fn pin_with(
+    source: Option<&Path>,
+    destination: &Path,
+    copy: impl FnOnce(&Path, &Path) -> Result<usize>,
 ) -> Result<Option<PathBuf>> {
     if destination.exists() {
         if std::fs::symlink_metadata(destination)?
@@ -49,10 +66,7 @@ pub fn pin_selected(
     opencoder_core::share_fs::durable_create_dir_all(&staging)?;
     let _cleanup = Staging(staging.clone());
     let started = std::time::Instant::now();
-    let entries = match names {
-        Some(names) => copy::selected(&source, &staging, names)?,
-        None => copy::all(&source, &staging)?,
-    };
+    let entries = copy(&source, &staging)?;
     for entry in std::fs::read_dir(&staging)? {
         let path = entry?.path();
         let name = path.file_name().unwrap().to_string_lossy();

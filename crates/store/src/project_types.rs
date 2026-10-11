@@ -37,39 +37,6 @@ impl ProjectGoalStatus {
     }
 }
 
-/// Lifecycle of a initiative within a goal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProjectInitiativeStatus {
-    Planned,
-    InProgress,
-    Done,
-}
-
-impl ProjectInitiativeStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ProjectInitiativeStatus::Planned => "planned",
-            ProjectInitiativeStatus::InProgress => "in_progress",
-            ProjectInitiativeStatus::Done => "done",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "planned" => Some(ProjectInitiativeStatus::Planned),
-            "in_progress" => Some(ProjectInitiativeStatus::InProgress),
-            "done" => Some(ProjectInitiativeStatus::Done),
-            _ => None,
-        }
-    }
-
-    /// Terminal states accept no further transitions.
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, ProjectInitiativeStatus::Done)
-    }
-}
-
 /// Lifecycle of a project todo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -183,6 +150,10 @@ impl ProjectTodoRunStatus {
 /// A long-lived project goal (`project_goals` row).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectGoalRecord {
+    #[serde(flatten)]
+    pub summary: crate::project::summary::ProjectSummary,
+    #[serde(flatten)]
+    pub people: crate::project::people::ProjectPeople,
     pub id: String,
     pub title: String,
     pub detail_md: Option<String>,
@@ -195,6 +166,9 @@ pub struct ProjectGoalRecord {
 /// Partial update for [`ProjectGoalRecord`]; `None` fields stay unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectGoalPatch {
+    pub current_summary: Option<String>,
+    #[serde(flatten)]
+    pub people: crate::project::people::ProjectPeoplePatch,
     pub title: Option<String>,
     pub detail_md: Option<String>,
     pub status: Option<ProjectGoalStatus>,
@@ -204,11 +178,14 @@ pub struct ProjectGoalPatch {
 /// An initiative, optionally belonging to a project.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectInitiativeRecord {
+    #[serde(flatten)]
+    pub summary: crate::project::summary::ProjectSummary,
+    #[serde(flatten)]
+    pub people: crate::project::people::ProjectPeople,
     pub id: String,
     pub goal_id: Option<String>,
     pub title: String,
     pub detail_md: Option<String>,
-    pub status: ProjectInitiativeStatus,
     pub sort: i64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -218,10 +195,12 @@ pub struct ProjectInitiativeRecord {
 /// unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectInitiativePatch {
+    pub current_summary: Option<String>,
+    #[serde(flatten)]
+    pub people: crate::project::people::ProjectPeoplePatch,
     pub goal_id: Option<Option<String>>,
     pub title: Option<String>,
     pub detail_md: Option<String>,
-    pub status: Option<ProjectInitiativeStatus>,
     pub sort: Option<i64>,
 }
 
@@ -270,6 +249,8 @@ impl ProjectExecutorKind {
 /// `executor_spec`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectTodoRecord {
+    #[serde(flatten)]
+    pub people: crate::project::people::ProjectPeople,
     pub id: String,
     pub initiative_id: Option<String>,
     pub title: String,
@@ -300,6 +281,8 @@ pub struct ProjectTodoRecord {
 /// `Some(None)` = clear to NULL, `Some(Some(v))` = set to `v`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectTodoPatch {
+    #[serde(flatten)]
+    pub people: crate::project::people::ProjectPeoplePatch,
     pub title: Option<String>,
     pub draft: Option<String>,
     pub plan_md: Option<Option<String>>,
@@ -460,13 +443,6 @@ mod tests {
             assert_eq!(ProjectGoalStatus::parse(v.as_str()), Some(v));
         }
         for v in [
-            ProjectInitiativeStatus::Planned,
-            ProjectInitiativeStatus::InProgress,
-            ProjectInitiativeStatus::Done,
-        ] {
-            assert_eq!(ProjectInitiativeStatus::parse(v.as_str()), Some(v));
-        }
-        for v in [
             ProjectTodoStatus::Draft,
             ProjectTodoStatus::Planned,
             ProjectTodoStatus::Running,
@@ -506,7 +482,6 @@ mod tests {
         // Forward-compat: a status string written by a newer version must
         // surface as None, never silently coerce.
         assert_eq!(ProjectGoalStatus::parse("deleted"), None);
-        assert_eq!(ProjectInitiativeStatus::parse("active"), None);
         assert_eq!(ProjectTodoStatus::parse("in_progress"), None);
         assert_eq!(ProjectTodoRunKind::parse("review"), None);
         assert_eq!(ProjectTodoRunStatus::parse("paused"), None);
@@ -519,10 +494,6 @@ mod tests {
     fn serde_snake_case_round_trips_match_db_strings() {
         // JSON wire form must equal the DB column strings exactly.
         assert_eq!(
-            serde_json::to_string(&ProjectInitiativeStatus::InProgress).unwrap(),
-            "\"in_progress\""
-        );
-        assert_eq!(
             serde_json::to_string(&ProjectTodoStatus::Running).unwrap(),
             "\"running\""
         );
@@ -534,8 +505,6 @@ mod tests {
             serde_json::to_string(&ProjectExecutorKind::Team).unwrap(),
             "\"team\""
         );
-        let back: ProjectInitiativeStatus = serde_json::from_str("\"in_progress\"").unwrap();
-        assert_eq!(back, ProjectInitiativeStatus::InProgress);
         let back: ProjectExecutorKind = serde_json::from_str("\"dag\"").unwrap();
         assert_eq!(back, ProjectExecutorKind::Dag);
     }
@@ -571,8 +540,6 @@ mod tests {
     fn terminal_states() {
         assert!(!ProjectGoalStatus::Active.is_terminal());
         assert!(ProjectGoalStatus::Archived.is_terminal());
-        assert!(!ProjectInitiativeStatus::InProgress.is_terminal());
-        assert!(ProjectInitiativeStatus::Done.is_terminal());
         assert!(!ProjectTodoStatus::Running.is_terminal());
         assert!(ProjectTodoStatus::Done.is_terminal());
         assert!(ProjectTodoStatus::Failed.is_terminal());

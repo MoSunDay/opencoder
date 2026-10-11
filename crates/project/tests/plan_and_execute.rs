@@ -12,9 +12,9 @@ use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
     LibsqlStore, ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
-    ProjectInitiativePatch, ProjectInitiativeRecord, ProjectInitiativeStatus, ProjectStore,
-    ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
-    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
+    ProjectInitiativePatch, ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch,
+    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
+    ProjectTodoRunStatus, ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
 };
 
 fn done(text: &str) -> Vec<LlmEvent> {
@@ -86,6 +86,8 @@ async fn seed_goal(projects: &Arc<dyn ProjectStore>, id: &str) {
     let now = 1000;
     projects
         .create_goal(&ProjectGoalRecord {
+            summary: Default::default(),
+            people: Default::default(),
             id: id.into(),
             title: format!("目标 {id}"),
             detail_md: Some("目标说明".into()),
@@ -102,11 +104,12 @@ async fn seed_initiative(projects: &Arc<dyn ProjectStore>, id: &str, goal_id: &s
     let now = 1000;
     projects
         .create_initiative(&ProjectInitiativeRecord {
+            summary: Default::default(),
+            people: Default::default(),
             id: id.into(),
             goal_id: Some(goal_id.into()),
             title: format!("专项 {id}"),
             detail_md: None,
-            status: ProjectInitiativeStatus::Planned,
             sort: 0,
             created_at: now,
             updated_at: now,
@@ -123,6 +126,7 @@ async fn seed_todo(
     let now = 1000;
     projects
         .create_todo(&ProjectTodoRecord {
+            people: Default::default(),
             id: id.into(),
             initiative_id: initiative_id.map(Into::into),
             title: format!("待办 {id}"),
@@ -184,6 +188,23 @@ struct CreateRunFailingStore {
 
 #[async_trait::async_trait]
 impl ProjectStore for CreateRunFailingStore {
+    async fn summary_versions(
+        &self,
+        scope: opencoder_store::project::summary::SummaryScope,
+        id: &str,
+    ) -> anyhow::Result<Option<Vec<opencoder_store::project::summary::SummaryVersion>>> {
+        self.inner.summary_versions(scope, id).await
+    }
+    async fn restore_summary(
+        &self,
+        scope: opencoder_store::project::summary::SummaryScope,
+        id: &str,
+        version: i64,
+        now: i64,
+    ) -> anyhow::Result<Option<opencoder_store::project::summary::SummaryVersion>> {
+        self.inner.restore_summary(scope, id, version, now).await
+    }
+
     async fn list_todo_assignments(
         &self,
         todo_id: &str,

@@ -135,42 +135,32 @@ fn delete_agent_is_idempotent() {
     assert!(delete_agent("never-there").is_ok());
 }
 
-/// Run mode: create pins it on the fresh card, update appends exactly one
-/// `run_mode` history entry when the value changes, and `None` (or an
-/// identical value) leaves the card untouched, mirroring harness.
 #[test]
-fn run_mode_persists_and_tracks_history() {
+fn profile_updates_preserve_resources_without_runtime_selection() {
     let (_tmp, _g) = scoped();
-    // The plain wrapper keeps the default: host-process operator mode.
-    create_agent("plain", Default::default()).unwrap();
-    assert_eq!(
-        read_agent_meta("plain").unwrap().run_mode,
-        RunMode::Operator
-    );
-    // Create with `Agent` -> the card on disk carries it, no history entry.
     create_agent_with_profile(
-        "sandboxed",
+        "reviewer",
         Default::default(),
-        Default::default(),
-        None,
-        RunMode::Agent,
+        opencoder_core::harness::Harness::Codex,
+        Some("first".into()),
     )
     .unwrap();
-    let card = read_agent_meta("sandboxed").unwrap();
-    assert_eq!(card.run_mode, RunMode::Agent);
-    assert!(card.history.is_empty());
-    // Flip run mode -> one `run_mode` entry from "agent" to "operator".
-    update_agent_with_profile("sandboxed", None, None, None, Some(RunMode::Operator)).unwrap();
-    let card = read_agent_meta("sandboxed").unwrap();
-    assert_eq!(card.run_mode, RunMode::Operator);
+    let card = read_agent_meta("reviewer").unwrap();
+    assert_eq!(card.harness_profile.as_deref(), Some("first"));
+    update_agent_with_profile("reviewer", None, None, Some(Some("second".into()))).unwrap();
+    let card = read_agent_meta("reviewer").unwrap();
+    assert_eq!(card.harness_profile.as_deref(), Some("second"));
     assert_eq!(card.history.len(), 1);
-    assert_eq!(card.history[0].field, "run_mode");
-    assert_eq!(card.history[0].from.as_deref(), Some("agent"));
-    assert_eq!(card.history[0].to.as_deref(), Some("operator"));
-    // `None` = leave unchanged; an identical value writes no entry either.
-    update_agent_with_profile("sandboxed", None, None, None, None).unwrap();
-    update_agent_with_profile("sandboxed", None, None, None, Some(RunMode::Operator)).unwrap();
-    let card = read_agent_meta("sandboxed").unwrap();
-    assert_eq!(card.run_mode, RunMode::Operator);
-    assert_eq!(card.history.len(), 1);
+    assert_eq!(card.history[0].field, "harness_profile");
+    assert!(serde_json::to_value(card)
+        .unwrap()
+        .get("run_mode")
+        .is_none());
+    assert!(create_agent_with_profile(
+        "invalid",
+        Default::default(),
+        Default::default(),
+        Some("codex-profile".into())
+    )
+    .is_err());
 }

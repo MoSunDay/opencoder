@@ -2,9 +2,7 @@
 // Header contract for the fleet IA — this file mounts the REAL panel of every
 // menu page, so both regression classes fail here instead of shipping:
 //   1. dead config: a PAGE_META entry no panel renders (e.g. a PageShell
-//      import that never got wired up) — only the project panel mounts
-//      PageShell with its own key, so PAGE_META holds exactly
-//      those;
+//      import that never got wired up);
 //   2. silently lost title: a page moved into HEADERLESS_REASONS without its
 //      declared reason actually holding in the DOM.
 // The reasons registry in nav.js:
@@ -24,6 +22,7 @@ const { apiGetMock, apiPostMock } = vi.hoisted(() => ({
   apiPostMock: vi.fn(),
 }));
 vi.mock('../api.js', () => ({
+  apiJson: vi.fn().mockResolvedValue({ items: [], root_id: 'root' }),
   apiGet: apiGetMock,
   apiPost: apiPostMock,
   apiPatch: vi.fn(),
@@ -34,6 +33,8 @@ vi.mock('../api.js', () => ({
 // Panels may open the live event stream; keep it a no-op so no fetch-retry
 // timer outlives the assertions.
 vi.mock('../sse.js', () => ({ openStream: vi.fn(() => ({ abort: vi.fn() })) }));
+// jsdom has no graphics renderer; keep the real graph panel and its controls.
+vi.mock('@ant-design/graphs', () => ({ FlowDirectionGraph: () => null }));
 
 import '../test/setup-dom.js';
 import {
@@ -43,7 +44,6 @@ import {
   PAGE_META,
 } from '../nav.js';
 import { PANELS } from './panels.jsx';
-import { PageShell } from './pageShell.jsx';
 
 /// Every menu page of the full IA, in menu order — the same projection
 /// nav.test.js derives (nav.js exports the categories, not a flat list).
@@ -55,7 +55,9 @@ const KNOWN_REASONS = ['body-title', 'menu-only'];
 /// Deliberately broader than the 'antd Tabs' wording in HEADERLESS_REASONS —
 /// a panel that starts rendering any heading owes the registry a reason
 /// update, and the failure messages below say so explicitly.
-const bodyTitleOf = (container) => container.querySelector('.ant-tabs-nav, [role="tablist"], h1, h2, h3, h4, h5, h6');
+const bodyTitleOf = (container) => [...container.querySelectorAll('.ant-tabs-nav, [role="tablist"], h1, h2, h3, h4, h5, h6')]
+  // Graph tabs select observation modes. They do not repeat the page title.
+  .find((element) => !(element.matches('.ant-tabs-nav, [role="tablist"]') && element.closest('.graph-workspace'))) ?? null;
 
 /// The sidebar Menu / mobile Select label — the only title a 'menu-only' page
 /// has. Both surfaces read nav.js `item.menu` (menuItemsOf / selectItemsOf), so
@@ -117,13 +119,13 @@ describe('headerless reason registry', () => {
     }
   });
 
-  it('renders the PAGE_META header for a header-bearing page', () => {
-    // Key-agnostic on purpose: whichever pages PAGE_META keeps, PageShell must
-    // render their title — the per-page loop below proves a real panel mounts it.
-    const [page] = Object.keys(PAGE_META);
-    const { container } = render(<PageShell page={page}>body</PageShell>);
-    expect(container.querySelector('.oc-page-header')).toBeTruthy();
-    expect(container.querySelector('.oc-page-title')?.textContent).toBe(PAGE_META[page].title);
+  it('starts the project workspace with its table tabs and no repeated page header', async () => {
+    const { container, getByRole, queryByText } = await renderPanel('project');
+    expect(container.querySelector('.oc-page-header')).toBeNull();
+    expect(queryByText('项目、专项与 TODO 工作台')).toBeNull();
+    for (const name of ['项目', '专项', 'TODO']) {
+      expect(getByRole('tab', { name })).toBeTruthy();
+    }
   });
 });
 
@@ -142,6 +144,10 @@ describe('every page keeps exactly one title source', () => {
       const { container } = await renderPanel(page);
       const meta = PAGE_META[page];
       const title = container.querySelector('.oc-page-title');
+      if (page === 'ontologyGraph') {
+        expect([...container.querySelectorAll('.graph-workspace [role="tab"]')].map((tab) => tab.textContent))
+          .toEqual(['切面观测', '自定义观测']);
+      }
       if (meta) {
         // PAGE_META page: PageShell must really render title + desc.
         expect(title?.textContent).toBe(meta.title);

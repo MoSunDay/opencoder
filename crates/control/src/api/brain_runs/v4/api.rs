@@ -91,6 +91,15 @@ pub(crate) async fn submit(state: Arc<AppState>, value: Value) -> RpcReply {
         Ok(None) => {}
         Err(error) => return RpcReply::error(500, error.to_string()),
     }
+    // Keep source plans and capabilities available until the frozen assignment exists.
+    let _catalog = match state
+        .fleet
+        .shared_request_lock("brain-catalog", "registry")
+        .await
+    {
+        Ok(lock) => lock,
+        Err(error) => return RpcReply::error(500, error.to_string()),
+    };
     let (request, capabilities) = match super::request::resolve(&state, &value).await {
         Ok(request) => request,
         Err(error) => return RpcReply::error(400, error.to_string()),

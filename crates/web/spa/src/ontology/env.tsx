@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
-import type { Environment } from "./types";
-export type EnvContextValue = { env: string; environments: Environment[]; setEnv: (env: string) => void; refreshEnvironments: () => Promise<void>; canManage: boolean };
-export const EnvContext = createContext<EnvContextValue>({ env: "debug", environments: [], setEnv: () => undefined, refreshEnvironments: async () => undefined, canManage: false });
+// Each Server initializes this default namespace; the Server connection selects the environment.
+export const SERVER_ENV = "debug";
+export type EnvContextValue = { env: string; canManage: boolean };
+export const EnvContext = createContext<EnvContextValue>({ env: SERVER_ENV, canManage: false });
 export function useEnv() { return useContext(EnvContext); }

@@ -29,6 +29,7 @@ let page;
 let mock;
 let base;
 let llmDelay = 0;
+let responseGate;
 let timedOut = false;
 const errors = [];
 const llmRequests = [];
@@ -88,6 +89,7 @@ async function main() {
       return;
     }
     if (llmDelay) await pause(llmDelay);
+    if (responseGate) await responseGate;
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     for (const chunk of [
       { choices: [{ index: 0, delta: { role: 'assistant', content: teamAnswer(request) }, finish_reason: null }] },
@@ -206,7 +208,11 @@ async function main() {
   await page.getByRole('button', { name: '新建计划', exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, 'brain.png') });
   console.log('CASE chat continuation');
-  await chat({ page, api, root, until });
+  await chat({ page, api, root, until, holdResponses: () => {
+    let release;
+    responseGate = new Promise((resolve) => { release = resolve; });
+    return () => { responseGate = undefined; release(); };
+  } });
   console.log('CASE roles and token administration');
   await access({ page, browser, base, api, root });
   // An offline owner must expose an error without creating a replacement run.

@@ -79,7 +79,7 @@ export function useTranscriptStream({ streamRef, aliveRef, setStream, setBusy, s
             snapshot = await apiGet('/api/sessions/' + encodeURIComponent(sessionId), { signal });
           } catch (error) {
             // Startup failures can have an execution receipt but no session.
-            if (!detail.error && detail.execution?.status !== 'error') throw error;
+            if (!detail.error && !['error', 'cancelled', 'interrupted'].includes(detail.execution?.status)) throw error;
           }
           if (current()) setStream((s) => completionState(s, detail, snapshot));
         } catch (error) {

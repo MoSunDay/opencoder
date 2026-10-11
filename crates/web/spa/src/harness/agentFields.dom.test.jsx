@@ -58,26 +58,9 @@ it('blocks profile changes after a failed read and retries without changing the 
   expect(screen.getByLabelText('agent-harness-profile').disabled).toBe(false);
 });
 
-// run_mode（卡片运行模式）：缺失收敛 operator；切换即时 PUT，载荷只含
-// run_mode，成功提示按运行模式措辞。
-describe('run mode segmented', () => {
-  it('defaults a missing run_mode to operator and PUTs only the picked run_mode', async () => {
-    const onSaved = vi.fn();
-    render(<AgentHarnessFields meta={{ name: 'act', harness: 'opencoder' }} onNotice={vi.fn()} onSaved={onSaved} />);
-    const seg = screen.getByLabelText('agent-run-mode').closest('.ant-segmented');
-    expect(seg.querySelector('.ant-segmented-item-selected').textContent).toBe('Operator · 宿主机');
-    expect(apiPut).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Agent · runc 沙箱'));
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/agents/act', { run_mode: 'agent' }));
-    expect(onSaved).toHaveBeenCalledOnce();
-    expect(await screen.findByText('Agent 运行模式已更新，仅影响新任务')).toBeTruthy();
-  });
-
-  it('binds an agent-mode card and can switch back to the host process mode', async () => {
-    render(<AgentHarnessFields meta={{ name: 'reviewer', harness: 'opencoder', run_mode: 'agent' }} onNotice={vi.fn()} onSaved={vi.fn()} />);
-    expect(screen.getByLabelText('agent-run-mode').closest('.ant-segmented')
-      .querySelector('.ant-segmented-item-selected').textContent).toBe('Agent · runc 沙箱');
-    fireEvent.click(screen.getByText('Operator · 宿主机'));
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/api/agents/reviewer', { run_mode: 'operator' }));
-  });
+it.each([undefined, 'agent'])('edits the harness without a runtime switch (%s)', (run_mode) => {
+  render(<AgentHarnessFields meta={{ name: 'reviewer', harness: 'opencoder', run_mode }} onNotice={vi.fn()} onSaved={vi.fn()} />);
+  expect(screen.getByLabelText('agent-default-harness')).toBeTruthy();
+  expect(screen.queryByLabelText('agent-run-mode')).toBeNull();
+  expect(apiPut).not.toHaveBeenCalled();
 });

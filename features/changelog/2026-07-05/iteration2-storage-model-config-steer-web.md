@@ -12,10 +12,10 @@ OpenCoder 迭代一已建立 7-crate workspace 与基础 agent 运行时，但�
 - **steer/followup（P2）**：run_loop 改造为 drain 语义——turn 边界 `claim_steers`（重置 step=1）、idle `claim_next_queue`（恰好一条）；新增 `claim_next_queue` 原子操作；空 prompt = drain 模式。
 - **Web SSE（P4）**：axum 路由重构——`POST /prompt` admit 即返回（非阻塞）、`GET /events` replay+live（BroadcastStream）、`POST /agent|/model|/interrupt`；`SessionHandle` + `HandleMap` + 后台 drain 任务。
 - **可中断**：SessionState 增 `cancel: Option<CancellationToken>`，run_loop 每轮顶部检查（web interrupt）。
-- **性能（P5）**：release 启动 ~6ms；store 0.031ms/append、2.4ms/load1000、0.95ms/list200。见 [docs/perf.md](../../../../docs/perf.md)。
+- **性能（P5）**：release 启动 ~6ms；store 0.031ms/append、2.4ms/load1000、0.95ms/list200。见 [docs/perf.md](../../../docs/perf.md)。
 - **配置发现**：`Config::load` 由「首个存在即用」改为「全部候选深度合并」（global base → project override），新增 `~/.opencoder/config.json` 作为二进制自有配置主目录——`opencoder` 从任意目录直接执行，全局提供 provider+key、项目仅覆盖 model。
 - **测试基建**：`ChatStream` trait + `MockChatClient`（FIFO 脚本回放 + 请求录制）使 session/web 测试零 token 确定性。
-- **e2e**：`scripts/e2e-glm.sh` 真 glm5.2 写贪吃蛇/雷霆战机，捕获并修复 `max_tokens` 过小导致 `finish_reason=length` 截断工具调用的真实 bug。
+- **e2e**：`scripts/e2e-glm.sh` 真 glm5.2 编写诊断工具，捕获并修复 `max_tokens` 过小导致 `finish_reason=length` 截断工具调用的真实 bug。
 
 ## Impact Surface
 - 新增 crate 依赖：libsql、tokio-util（CancellationToken）、tokio-stream sync feature（web BroadcastStream）。
@@ -34,4 +34,4 @@ OpenCoder 迭代一已建立 7-crate workspace 与基础 agent 运行时，但�
 - [agents/store](../../../agents/store/index.md)
 - [agents/session](../../../agents/session/index.md)
 - [agents/web](../../../agents/web/index.md)
-- [docs/perf.md](../../../../docs/perf.md)
+- [docs/perf.md](../../../docs/perf.md)

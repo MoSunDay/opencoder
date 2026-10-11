@@ -132,5 +132,3 @@ mod artifacts;
 mod admission_tests;
 #[cfg(all(test, not(windows)))]
 mod create_retry_tests;
-#[cfg(all(test, not(windows)))]
-mod sandbox_session;

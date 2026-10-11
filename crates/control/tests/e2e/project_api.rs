@@ -25,7 +25,15 @@ async fn seed_todo_with_kind(h: &Harness, executor_kind: Option<&str>) -> String
 // The overview reads saved TODOs even when a linked node loses its journal.
 // Inspect failures stay on the execution endpoint and do not rewrite TODOs.
 
+#[path = "project_api/acceptance.rs"]
+mod acceptance;
+#[path = "project_api/order.rs"]
+mod order;
+#[path = "project_api/people.rs"]
+mod people;
 #[path = "project_api/suite_1.rs"]
 mod suite_1;
 #[path = "project_api/suite_2.rs"]
 mod suite_2;
+#[path = "project_api/summary.rs"]
+mod summary;

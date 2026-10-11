@@ -37,9 +37,12 @@ pub async fn list_goals(State(state): State<Arc<AppState>>) -> Response {
 
 #[derive(Deserialize)]
 pub struct CreateGoalBody {
+    #[serde(flatten)]
+    pub people: opencoder_store::project::people::ProjectPeople,
     pub title: String,
     #[serde(default)]
     pub detail_md: Option<String>,
+    pub current_summary: Option<String>,
     #[serde(default)]
     pub sort: Option<i64>,
 }
@@ -60,6 +63,8 @@ pub async fn create_goal(
     };
     let now = now_ms();
     let rec = ProjectGoalRecord {
+        summary: opencoder_store::project::summary::ProjectSummary::new(body.current_summary, now),
+        people: body.people.normalized(),
         id: format!("pg-{}", ulid::Ulid::new()),
         title,
         detail_md: body.detail_md,
@@ -70,16 +75,19 @@ pub async fn create_goal(
     };
     match deps.projects.create_goal(&rec).await {
         Ok(()) => Json(to_json(&rec)).into_response(),
-        Err(e) => error_500(format!("create goal: {e:#}")),
+        Err(e) => crate::api_project_people::write_error(e),
     }
 }
 
 #[derive(Deserialize)]
 pub struct PatchGoalBody {
+    #[serde(flatten)]
+    pub people: opencoder_store::project::people::ProjectPeoplePatch,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
     pub detail_md: Option<String>,
+    pub current_summary: Option<String>,
     #[serde(default)]
     pub status: Option<ProjectGoalStatus>,
     #[serde(default)]
@@ -103,6 +111,8 @@ pub async fn patch_goal(
         Some(Err(())) => return error_400("goal title must not be empty"),
     };
     let patch = ProjectGoalPatch {
+        current_summary: body.current_summary,
+        people: body.people,
         title,
         detail_md: body.detail_md,
         status: body.status,
@@ -111,7 +121,7 @@ pub async fn patch_goal(
     match deps.projects.patch_goal(&id, &patch, now_ms()).await {
         Ok(true) => Json(json!({ "ok": true })).into_response(),
         Ok(false) => error_404(format!("goal not found: {id}")),
-        Err(e) => error_500(format!("patch goal: {e:#}")),
+        Err(e) => crate::api_project_people::write_error(e),
     }
 }
 

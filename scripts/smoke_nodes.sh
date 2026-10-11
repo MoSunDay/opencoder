@@ -2,7 +2,7 @@
 # Two-process distributed-nodes smoke: one real `opencoder-server`
 # plus one real `opencoder-agent` worker. Exercises the fleet
 # surface over plain curl (no test harness, no LLM round-trip assumed):
-#   ✅ 1  worker registers and reports idle
+#   ✅ 1  worker registers online, ready and idle for Agent execution
 #   ✅ 2  dispatch durably accepts an execution with its five-field index
 #   ✅ 3  execution reaches an interactive/terminal state (idle/error/cancelled;
 #         the worker runs against a seeded loopback LLM stub, so the outcome
@@ -115,7 +115,7 @@ EOF
 XDG_DATA_HOME="${TMP}/xdg" "${AGENT_BIN}" --workdir "${TMP}/work" --remote "${BASE}" --token "${TOKEN}" --name "${NODE_NAME}" --workflow-root "${TMP}/workflow" >"${TMP}/node.log" 2>&1 &
 NODE_PID=$!
 
-# ✅ checkpoint 1: registration — node visible AND idle. NOTE: every probing
+# ✅ checkpoint 1: registration — node online, ready AND idle. NOTE: every probing
 # curl runs under `|| true`; with `set -e` a failed connection inside a poll
 # assignment would otherwise kill the whole script instead of retrying.
 CK1=""
@@ -125,19 +125,22 @@ for _ in $(seq 1 180); do
   CK1="$(printf '%s' "${OUT}" | python3 -c '
 import json,sys
 v=json.load(sys.stdin)
-ns=[n for n in v.get("nodes",[]) if n.get("name")==sys.argv[1]]
-print(ns[0]["id"] if ns and ns[0].get("status")=="idle" else "")
+ns=[n for n in v.get("nodes",[]) if n.get("name")==sys.argv[1]
+    and n.get("online") is True and n.get("status")=="idle"
+    and (n.get("snapshot") or {}).get("ready") is True
+    and "agent" in n.get("kinds",[])]
+print(ns[0]["id"] if ns else "")
 ' "${NODE_NAME}" 2>/dev/null || true)"
   [ -n "${CK1}" ] && break
   sleep 0.5
 done
 if [ -z "${CK1}" ]; then
-  echo "❌ checkpoint 1 FAILED: ${NODE_NAME} never registered idle"
+  echo "❌ checkpoint 1 FAILED: ${NODE_NAME} never became online, ready and idle"
   echo "--- server.log ---"; tail -20 "${TMP}/server.log"
   echo "--- node.log ---"; tail -20 "${TMP}/node.log"
   exit 1
 fi
-echo "✅ checkpoint 1: ${NODE_NAME} registered idle (id=${CK1})"
+echo "✅ checkpoint 1: ${NODE_NAME} registered online, ready and idle (id=${CK1})"
 
 # Durable acceptance and ID-based routing on the v2 control plane.
 OUT="$(req POST /api/executions "{\"id\":\"agent-smoke\",\"kind\":\"agent\",\"node_id\":\"${CK1}\",\"input\":{\"prompt\":\"reply with exactly: ok\"}}")"

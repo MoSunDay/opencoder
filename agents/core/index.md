@@ -1,4 +1,4 @@
-Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # core 模块
 
@@ -16,7 +16,7 @@ Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
 - `src/harness/` — `Harness::{Opencoder,Codex}` 与私有运行态；`fresh_runtime` 统一前端新会话的执行器、env、model 选择，`matches_requested_env` 校验续会话显式 env，托管配置可补充其他变量
 - [harness/settings.rs](../../crates/core/src/harness/settings.rs) — Codex `startup_script` 保存外部启动命令数组，随私有 Harness 设置固定；校验入口和参数，不解释账号策略。接入约定见 [启动脚本](../../docs/codex-startup-script.md)。
 - [harness/remote.rs](../../crates/core/src/harness/remote.rs) — `ServerConnection` 仅含默认关闭的 `enabled` 与 `url`；`ServerCapability` 表示能力 ID、种类、目标和摘要，`RemoteSession` 保存执行绑定与可重试首轮输入。已有 Harness JSON 保存 `remote` 与 `literal_mentions`，不新增表结构。
-- `src/agent/`、`src/skill.rs` — agent 引用卡（`meta.json` `run_mode`）、memory 池聚合（`agent/memory.rs`）与技能发现。技能根优先级：执行任务本地根（`skill::with_execution`/`execution_root`）→ 节点 pinned 根 → 真实 `~/.opencoder/skills`
+- `src/agent/`、`src/skill.rs` — Agent 引用卡（资源引用与 Harness，不包含宿主机/容器开关）、memory 池聚合（`agent/memory.rs`）与技能发现。技能根优先级：执行任务本地根（`skill::with_execution`/`execution_root`）→ 节点 pinned 根 → 真实 `~/.opencoder/skills`
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed
 - [内置记忆模板](../../crates/core/assets/skills/repo-local-memory/TEMPLATES.md) — 默认索引为 `repo-memory.md`；沿用仓库明确指定且与 `AGENTS.md` 大小写折叠后不同的索引，保持仓库指令文件不变。种子文件与实际文件分离约束见 [seeding.rs](../../crates/core/tests/skill_contract/seeding.rs)。
 - [技能契约测试](../../crates/core/tests/skill_contract/main.rs) — 按发现、种子写入、规划与工作流分模块；首次安装核对准确的技能和资源集合，升级备份内置文件的用户修改，清单之外的用户资源保持原样。
@@ -25,7 +25,7 @@ Commit: 5c3c1801a4dd9e2d9ef584fd4bd545ca6b25572e
 - [net.rs](../../crates/core/src/net.rs) — HTTP 客户端统一解析显式代理及大小写环境变量；读取 `NO_PROXY`（未设置时读取 `no_proxy`），并保留固定的回环地址例外。容器沿用配置中的代理，额外传入这两项排除变量；纯规则构造入口供测试与调用方避免读进程环境。
 - `src/data_dir.rs` — 按工作目录隔离的数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
-- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 6；schema v35 将用户与 Token 分开保存，旧格式 1–5 升级须走维护发布。
+- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 8；schema v37 保存项目与专项概述，旧格式 1–7 升级须走维护发布，不能与新格式重叠运行。
 - `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
 
 ## 私有任务文件

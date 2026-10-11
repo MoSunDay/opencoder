@@ -32,6 +32,8 @@ mod project_tags;
 mod resource_admission;
 mod schedule_api;
 mod scheduler_metrics;
+#[path = "sessions/acceptance.rs"]
+mod session_acceptance;
 mod sessions_agent;
 mod sessions_compat_extra;
 mod sessions_relay;

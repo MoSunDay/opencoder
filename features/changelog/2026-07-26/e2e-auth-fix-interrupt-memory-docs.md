@@ -82,7 +82,7 @@ review 发现两类阻塞问题：
 - **session-id 提取修复**：原从 `session list`（TSV 格式 `<ULID>\t<title>`）
   用 `\[session (ULID)\]` 正则提取 → 永远 None。改为从 resume 日志 `log2`
   提取（含 `[session <ULID>]`）。
-- **超时修复**：resume 续跑复杂任务（俄罗斯方块）120s 超时（rc=124）→ 提至 240s。
+- **超时修复**：resume 续跑复杂任务120s 超时（rc=124）→ 提至 240s。
   契约是「不死锁」，超时是 LLM 慢而非死锁，240s 足够宽裕。
 
 ### E.3 e2e 实跑结果（真 glm-5.2，当次取证）
@@ -92,8 +92,8 @@ review 发现两类阻塞问题：
 | Web（E11 steer+queue / E15 interrupt） | **13 passed / 0 failed / 0 skipped** |
 | CLI（E1-E17 全场景） | **50 passed / 0 failed / 1 skipped**（仅 E16 标题长度 SOFT） |
 
-关键场景真模型验证：E1 写 snake+编译、E2 resume 复用上下文、E3 压缩+摘要引用实际工作、
-E3b 压缩后续跑、E4 subagent DB 追踪、E5 fork 完整性、E6 第二游戏交叉回归、
+关键场景真模型验证：E1 写 diagnostics+编译、E2 resume 复用上下文、E3 压缩+摘要引用实际工作、
+E3b 压缩后续跑、E4 subagent DB 追踪、E5 fork 完整性、E6 第二场景交叉回归、
 E8 bundle roundtrip、**E10 plan 只读（config 修复后真阻断）**、E12 CRUD、
 E13 interleaved thinking 持久化、E14 config JSON、E16 title 生成、
 **E17 crash 恢复 + orphan-check 真断言通过**。

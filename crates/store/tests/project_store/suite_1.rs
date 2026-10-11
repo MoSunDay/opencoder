@@ -16,6 +16,8 @@ async fn goal_crud_patch_and_missing_id() {
         .patch_goal(
             "g1",
             &ProjectGoalPatch {
+                current_summary: None,
+                people: Default::default(),
                 title: Some("renamed".to_string()),
                 detail_md: Some("details".to_string()),
                 status: Some(ProjectGoalStatus::Archived),
@@ -69,8 +71,9 @@ async fn initiative_crud_and_goal_filter() {
         .patch_initiative(
             "m1",
             &ProjectInitiativePatch {
+                people: Default::default(),
                 title: Some("renamed".to_string()),
-                status: Some(ProjectInitiativeStatus::InProgress),
+                sort: Some(7),
                 ..Default::default()
             },
             77,
@@ -78,10 +81,10 @@ async fn initiative_crud_and_goal_filter() {
         .await
         .unwrap());
     let m1 = p.list_initiatives(Some("g1")).await.unwrap()[1].clone();
+    assert_eq!(m1.sort, 7);
     assert_eq!(m1.title, "renamed");
-    assert_eq!(m1.status, ProjectInitiativeStatus::InProgress);
     assert_eq!(m1.updated_at, 77);
-    assert!(!m1.status.is_terminal());
+    assert!(serde_json::to_value(&m1).unwrap().get("status").is_none());
 }
 
 #[tokio::test]
@@ -105,6 +108,7 @@ async fn todo_patch_semantics_including_clear_to_null() {
         .patch_todo(
             "t1",
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(Some("plan v1".to_string())),
                 active_session_id: Some(Some("sess-1".to_string())),
                 status: Some(ProjectTodoStatus::Running),
@@ -123,6 +127,7 @@ async fn todo_patch_semantics_including_clear_to_null() {
         .patch_todo(
             "t1",
             &ProjectTodoPatch {
+                people: Default::default(),
                 plan_md: Some(None),
                 active_session_id: Some(None),
                 initiative_id: Some(None), // back to the backlog
@@ -193,6 +198,7 @@ async fn claim_todo_running_cas_and_running_run_listing() {
         .patch_todo(
             "t1",
             &ProjectTodoPatch {
+                people: Default::default(),
                 status: Some(ProjectTodoStatus::Planned),
                 ..Default::default()
             },

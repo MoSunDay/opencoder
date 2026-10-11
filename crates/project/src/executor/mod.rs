@@ -186,6 +186,7 @@ mod tests {
         spec: Option<&str>,
     ) -> ProjectTodoRecord {
         ProjectTodoRecord {
+            people: Default::default(),
             id: "t1".into(),
             initiative_id: None,
             title: "待办".into(),

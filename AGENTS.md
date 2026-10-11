@@ -7,4 +7,9 @@ Before changing projects, initiatives, TODO boards, tags, execution links, resul
 
 Repository logic indexes live in [repo-memory.md](repo-memory.md); code remains the source of implementation detail.
 
-Develop in the canonical repository on `main`. Do not create additional worktrees, source copies, or dated delivery directories unless the user explicitly requests isolation. Integrate existing worktree changes before removing their directories.
+## 测试范围
+
+- 改到哪里测哪里：只运行本次改动及其直接影响链路的定向测试，发布时也遵循此规则。
+- 不默认运行全量测试，包括 `cargo test --workspace`、SPA 全量测试和全站 UI 验收；只有用户明确要求全量测试时才执行。
+- 根据改动选择相关模块、测试文件或用例；只有具体失败或明确的依赖影响需要时，才扩大到相关范围。已通过且代码未再变化的检查不重复运行。
+- 记录实际测试范围和结果，不把局部通过写成全量通过。文档改动只检查内容和链接；构建、发布产物核验及线上健康检查按实际需要执行。

@@ -380,7 +380,8 @@ async fn submit_inner(
         return Ok(reply);
     }
     // The socket settles actual replies and complete reports own status. A
-    // timeout/disconnect retains Pending because the node may have accepted it.
+    // timeout/disconnect retains the prepared dispatch because the node may
+    // have accepted it. Conversation indexes wait for a reply or node report.
     if (400..500).contains(&reply.status) && !matches!(reply.status, 408 | 425 | 428 | 429) {
         state
             .fleet

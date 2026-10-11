@@ -1763,6 +1763,7 @@ name = "opencoder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "opencoder-core",
  "opencoder-local",

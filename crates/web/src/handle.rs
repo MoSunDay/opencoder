@@ -510,20 +510,27 @@ pub(crate) async fn start_drain_locked(
         config.agent.agents_dir =
             opencoder_core::agent::scope::current_root().or(config.agent.agents_dir);
         let resource_root = config.agent.agents_dir.clone();
+        let skills_root = config_home
+            .as_ref()
+            .map(|home| home.join(".opencoder/skills"))
+            .or_else(opencoder_core::skill::execution_root);
         tokio::spawn(async move {
             opencoder_core::agent::scope::with_root(
                 resource_root,
-                drain_to_completion(
-                    handles,
-                    store,
-                    &sid,
-                    client,
-                    DrainContext {
-                        workdir,
-                        config_home,
-                        config,
-                    },
-                    handle_clone,
+                opencoder_core::skill::with_execution(
+                    skills_root,
+                    Box::pin(drain_to_completion(
+                        handles,
+                        store,
+                        &sid,
+                        client,
+                        DrainContext {
+                            workdir,
+                            config_home,
+                            config,
+                        },
+                        handle_clone,
+                    )),
                 ),
             )
             .await;

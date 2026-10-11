@@ -31,8 +31,8 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
         &mut chat,
         &mut Vec::new(),
         &mut None,
-        "写个贪吃蛇",
-        "写个贪吃蛇",
+        "编写诊断工具",
+        "编写诊断工具",
     );
     chat.begin_turn();
     chat.apply(&SessionEvent::LlmRoundStart {
@@ -59,14 +59,14 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
     chat.apply(&SessionEvent::LlmRoundEnd);
     chat.apply(&SessionEvent::Done);
 
-    // --- Submit `/act_clear_context 实现贪吃蛇` while idle: local echo +
+    // --- Submit `/act_clear_context 实现诊断工具` while idle: local echo +
     // begin_turn (mirrors app_submit / fire_clear_confirm).
     crate::app_helpers::push_user(
         &mut chat,
         &mut Vec::new(),
         &mut None,
-        "实现贪吃蛇",
-        "/act_clear_context 实现贪吃蛇",
+        "实现诊断工具",
+        "/act_clear_context 实现诊断工具",
     );
     chat.begin_turn();
 
@@ -135,7 +135,7 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
     chat.apply(&SessionEvent::ToolStart {
         id: "call-2".into(),
         name: "bash".into(),
-        input: serde_json::json!({"command": "cat > snake.html"}),
+        input: serde_json::json!({"command": "cat > diagnostics.html"}),
     });
     chat.apply(&SessionEvent::ToolEnd {
         id: "call-2".into(),

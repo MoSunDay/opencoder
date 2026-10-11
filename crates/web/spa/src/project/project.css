@@ -67,6 +67,9 @@
 .project-table-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-name { display: flex; justify-content: flex-start; padding-inline: 0; max-width: 100%; min-width: 0; height: auto; text-align: start; }
 .project-name > span { min-width: 0; }
+.project-name-full { white-space: normal; overflow-wrap: anywhere; }
+.project-row-drag { cursor: grab; touch-action: none; }
+.project-row-drag:active { cursor: grabbing; }
 .project-table-row { cursor: pointer; }
 .project-column-filter { width: 280px; max-width: calc(100vw - 32px); padding: 12px; }
 .project-column-filter .ant-input-number { width: 115px; }
@@ -81,6 +84,8 @@
 .project-todo-card .ant-card-head { padding-inline: 10px; }
 .project-todo-card .ant-card-body { padding: 10px; }
 @media (max-width: 800px) {
+  .project-table .ant-table-cell-fix-end { position: static !important; }
+  .project-table .ant-table-cell-fix-end::after { display: none; }
   .project-table .ant-table-content { overflow-x: auto; }
   .project-table table { min-width: 760px; }
   .project-table .ant-table-cell { padding: 8px 4px; font-size: 12px; }

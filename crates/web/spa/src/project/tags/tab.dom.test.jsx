@@ -31,6 +31,30 @@ it('lists both same-name definitions and creates a tag on a standalone initiativ
   expect(p.refresh).toHaveBeenCalledOnce();
 });
 
+it('creates a global tag without projects or initiatives and omits the owner picker', async () => {
+  render(<TagsTab {...props()} overview={{ tags: [], goals: [], standalone_initiatives: [] }} />);
+  fireEvent.click(screen.getByRole('button', { name: '新建 Tag' }));
+  fireEvent.change(screen.getByLabelText('Tag 名称'), { target: { value: ' 通用 ' } });
+  await select('Tag 归属类型', '全局');
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Tag 归属' })).toBeNull());
+  save();
+  await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/project/tags', { name: '通用', scope_type: 'global', scope_id: '' }));
+});
+
+it('converts project tags to global and requires a fresh owner when changing back', async () => {
+  render(<TagsTab {...props()} />);
+  fireEvent.click(screen.getAllByRole('button', { name: '编辑 Tag 前端' })[1]);
+  await select('Tag 归属类型', '全局');
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Tag 归属' })).toBeNull());
+  await select('Tag 归属类型', '项目');
+  await screen.findByRole('combobox', { name: 'Tag 归属' }); save();
+  await screen.findByText('请选择具体项目或专项');
+  expect(api.apiPatch).not.toHaveBeenCalled();
+  await select('Tag 归属类型', '全局');
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Tag 归属' })).toBeNull()); save();
+  await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/tags/parent', { name: '前端', scope_type: 'global', scope_id: '' }));
+});
+
 it('clears the old owner on type change and saves name and scope using the original ID', async () => {
   render(<TagsTab {...props()} />);
   fireEvent.click(screen.getAllByRole('button', { name: '编辑 Tag 前端' })[1]);

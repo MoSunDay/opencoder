@@ -11,16 +11,17 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '../test/setup-dom.js';
 import { Button } from 'antd';
-import { HEADERLESS_PAGES, PAGE_META, pagesOf } from '../nav.js';
+import { ALL_PAGES, HEADERLESS_PAGES, PAGE_META, pagesOf } from '../nav.js';
 import { PageShell } from './pageShell.jsx';
 
 afterEach(() => cleanup());
 
 describe('PageShell', () => {
-  it('renders the PAGE_META title, description and children', () => {
-    render(<PageShell page="project">body-content</PageShell>);
-    expect(screen.getByRole('heading', { name: '项目' })).toBeTruthy();
-    expect(screen.getByText('项目、专项与 TODO 工作台')).toBeTruthy();
+  it('renders project content without the redundant title, description or header gap', () => {
+    const { container } = render(<PageShell page="project">body-content</PageShell>);
+    expect(container.querySelector('.oc-page-header')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '项目' })).toBeNull();
+    expect(screen.queryByText('项目、专项与 TODO 工作台')).toBeNull();
     expect(screen.getByText('body-content')).toBeTruthy();
   });
 
@@ -42,15 +43,16 @@ describe('PageShell', () => {
     expect(screen.getByText('envs-body')).toBeTruthy();
   });
 
-  it('bare skips a header the same PAGE_META page would otherwise render', () => {
-    // Anchored on a PAGE_META key on purpose: against a headerless key (the
-    // old `page="nodes"`) this case passed even if `bare` was ignored, i.e. it
-    // proved nothing. Assert both sides so the prop cannot rot silently.
-    const withHeader = render(<PageShell page="project">x</PageShell>);
-    expect(withHeader.container.querySelector('.oc-page-title')?.textContent).toBe('项目');
+  it('bare skips an extra actions row the same page would otherwise render', () => {
+    const extra = <Button>刷新项目</Button>;
+    const withHeader = render(<PageShell page="project" extra={extra}>x</PageShell>);
+    expect(withHeader.container.querySelector('.oc-page-header')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '刷新项目' })).toBeTruthy();
     withHeader.unmount();
 
-    render(<PageShell page="project" bare>bare-content</PageShell>);
+    const { container } = render(<PageShell page="project" extra={extra} bare>bare-content</PageShell>);
+    expect(container.querySelector('.oc-page-header')).toBeNull();
+    expect(screen.queryByRole('button', { name: '刷新项目' })).toBeNull();
     expect(screen.queryByRole('heading')).toBeNull();
     expect(screen.queryByText('项目')).toBeNull();
     expect(screen.getByText('bare-content')).toBeTruthy();
@@ -85,11 +87,8 @@ describe('PageShell', () => {
     }
   });
 
-  it('every PAGE_META page can mount with a heading', () => {
-    Object.keys(PAGE_META).forEach((page) => {
-      cleanup();
-      render(<PageShell page={page}>x</PageShell>);
-      expect(screen.getByRole('heading', { name: PAGE_META[page].title })).toBeTruthy();
-    });
+  it.each(ALL_PAGES)('%s renders only its configured heading', (page) => {
+    render(<PageShell page={page}>x</PageShell>);
+    expect(screen.queryByRole('heading')?.textContent).toBe(PAGE_META[page]?.title);
   });
 });

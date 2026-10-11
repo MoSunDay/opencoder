@@ -27,7 +27,7 @@ pub use compose::compose_prompt;
 pub use meta::{
     agent_description, agent_dir, agents_dir, list_agents, read_agent_meta,
     set_agents_dir_override, validate_agent_name, AgentHistoryEntry, AgentMeta, AgentReferences,
-    AgentRefs, RunMode,
+    AgentRefs,
 };
 pub use resource::{
     agent_skill_roots, agent_tools_dirs, all_tools_dirs, category_dir, list_resources,

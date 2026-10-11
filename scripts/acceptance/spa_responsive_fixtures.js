@@ -76,7 +76,6 @@ const FIXTURES = {
   // main.jsx re-probes /api/me per token; `name` unlocks IdentityBadge and
   // role=admin unlocks the admin entries (store.js setIdentity).
   '/api/users': { users: [{ name: 'admin', role: 'admin', created_at: NOW }, { name: 'readonly-user', role: 'viewer', created_at: NOW }] },
-  '/api/tokens': { tokens: [{ id: 'token-display-example', name: '自动化访问', user_name: 'readonly-user', created_at: NOW, expires_at: null, revoked_at: null }] },
   '/api/me': { name: 'root', role: 'admin', username: 'root' },
   '/api/agents/nfs': { status: { running: true, host: '127.0.0.1', port: 2049, read_only: true, export_root: '/fixture/agents' } },
   '/api/dag/binaries/nfs': { root: '/fixture/binaries', status: { running: true, host: '127.0.0.1', port: 2050, read_only: true, export_root: '/fixture/binaries' } },
@@ -122,6 +121,7 @@ const FIXTURES = {
   '/api/dag/defs': L(2, DAG_DEF),
   '/api/dag/runs': L(3, DAG_RUN),
   '/api/dag/runs/drun-0': DAG_RUN(0),
+  '/api/project/people': { people: [{ name: 'alice' }, { name: 'bob' }] },
   '/api/project/overview': { goals: [GOAL('g1', '发布 1.0'), GOAL('g2', '站点改版')],
     backlog: [TODO('b1', '整理测试脚本', 'planned', null)], standalone_milestones: [] },
 };

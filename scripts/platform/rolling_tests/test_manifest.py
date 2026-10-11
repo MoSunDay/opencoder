@@ -13,6 +13,25 @@ import json
 
 
 class ResourceTests(unittest.TestCase):
+    def test_initiative_format_requires_maintenance_before_any_candidate_can_overlap(self):
+        candidate = {'release_id': 'initiative-without-status', 'protocol_version': 10,
+                     'brain_schema_version': 7, 'compatibility': {
+                         'protocol': {'min': 1, 'max': 1},
+                         'data_format': {'min': 9, 'max': 9}}}
+        from rolling.manifest import _installer
+        with patch.object(_installer, 'verify_bundle', return_value=candidate), \
+                patch.object(_installer, 'bundle_names', return_value=_installer.NAMES), \
+                patch.object(_installer, 'build_info', return_value={
+                    'brain_schema_version': 7, 'release_compatibility': candidate['compatibility']}):
+            self.assertEqual(verify(Path('bundle')), candidate)
+        compatible(candidate, [candidate])
+        for version in range(1, 9):
+            previous = {**candidate, 'release_id': 'previous', 'compatibility': {
+                **candidate['compatibility'], 'data_format': {'min': version, 'max': version}}}
+            for new, old in [(candidate, previous), (previous, candidate)]:
+                with self.subTest(version=version), self.assertRaisesRegex(ValueError, '--maintenance'):
+                    compatible(new, [old])
+
     def test_identity_format_verifies_but_cannot_overlap_legacy_identity_servers(self):
         candidate = {'release_id': 'identity-index', 'protocol_version': 10,
                      'brain_schema_version': 7, 'compatibility': {

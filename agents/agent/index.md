@@ -1,4 +1,4 @@
-Commit: 1374d7ed231300bd2d00e13790c6f94da3ac9812
+Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 # agent 模块
 
@@ -23,7 +23,7 @@ Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点，启动前�
 - [host/mod.rs](../../crates/agent/src/host/mod.rs)：关闭信号 future 在主循环外固定，库存和通道变化不会丢弃已到达的 SIGTERM。
 - [rolling/deployment.py](../../scripts/platform/rolling/deployment.py)：历史 Server/Host 批量停用后统一重载 systemd；不停止保留 Runtime。
 - [rolling/probes.py](../../scripts/platform/rolling/probes.py)：切换前优先检查候选 Server 上的就绪节点；旧 Host 因退休 Runtime 状态不就绪时，改为核验已完成执行探针的候选 Runtime、候选 Host 与候选 Server 身份，切换后仍执行公共入口探针。
-- [rolling/backup.py](../../scripts/platform/rolling/backup.py)、[network/ports.py](../../scripts/platform/rolling/network/ports.py)：在线备份固定各数据库的 WAL 读取快照，端口分配探测整组可绑定性。
+- [rolling/backup.py](../../scripts/platform/rolling/backup.py)：单次遍历各根目录，最多并行处理四个根，包含嵌套数据库且不跟随资源符号链接；逐库固定 WAL 读取快照并核验完整性，全部成功后原子发布。[network/ports.py](../../scripts/platform/rolling/network/ports.py) 探测整组端口可绑定性。
 - [rolling/native](../../scripts/platform/rolling/native/__init__.py)：每个 Runtime 使用本版本私有镜像与固定配置，校验已发布副本后才复用。Runtime unit 通过 `unshare --mount --propagation private` 运行，防止 DAG 挂载传播到其他服务；不依赖会遮蔽资源服务进程的 systemd `PrivateMounts`。
 
 原生 DAG 约定见 [规则 04](../../rules/04-dag-execution-contract.md)，发布与维护边界见 [平滑发布](../../docs/smooth-release.md)。

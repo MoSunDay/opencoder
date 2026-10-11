@@ -59,6 +59,7 @@ async fn seed_todo(h: &Harness, id: &str, executor_ref: &str) {
     let now = 1000;
     h.projects
         .create_todo(&ProjectTodoRecord {
+            people: Default::default(),
             id: id.into(),
             initiative_id: None,
             title: format!("待办 {id}"),

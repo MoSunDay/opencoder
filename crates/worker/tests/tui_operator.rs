@@ -80,11 +80,13 @@ async fn registered_codex_operator_uses_server_settings_auto_placement_and_same_
             .any(|arg| arg == "server-codex")),
         "Codex must use the model configured by Server: {runs:?}"
     );
-    assert!(runs[0]["prompt"]
-        .as_str()
-        .unwrap()
-        .contains("inspect @notes.md"));
-    assert_eq!(runs[1]["prompt"], "follow up @notes.md");
+    let initial = runs[0]["prompt"].as_str().unwrap();
+    assert!(initial.ends_with("# User requirement\ninspect @notes.md"));
+    let (rules, _) = initial.split_once("\n\n# Agent instructions\n").unwrap();
+    assert!(rules.starts_with("## Operator 默认规则\n"));
+    let skills = std::path::Path::new(runs[0]["home"].as_str().unwrap()).join(".opencoder/skills");
+    assert!(rules.contains(&format!("- `{}`\n", skills.display())));
+    assert_eq!(runs[1]["prompt"], format!("{rules}\n\nfollow up @notes.md"));
     assert_eq!(runs[1]["args"][1], "resume");
     let events = fleet
         .call(

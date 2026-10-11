@@ -154,12 +154,16 @@ async fn execute_session(
         cwd,
         timeout_secs: ctx.step.timeout_secs,
     };
-    let execution =
-        crate::sandbox::run::execute(&root, process, cancel.clone(), Some(output.clone()));
-    tokio::pin!(execution);
-    let mut offset = 0;
     let events = std::path::Path::new(&ctx.relative_dir()).join("events.ndjson");
     let workspace = root.join("workspace");
+    super::native::files::reset_stream(&workspace, &events).context("reset Agent event stream")?;
+    // Persistence failure stops this producer, without cancelling the caller
+    // and misclassifying an execution error as a user cancellation.
+    let process_cancel = cancel.child_token();
+    let execution =
+        crate::sandbox::run::execute(&root, process, process_cancel.clone(), Some(output.clone()));
+    tokio::pin!(execution);
+    let mut offset = 0;
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
     let mut event_error = None;
     let streamed = loop {
@@ -168,7 +172,7 @@ async fn execute_session(
             _ = tick.tick() => {
                 if let Err(error) = super::runc_events::drain(&workspace, &events, &mut offset, deps.store.as_ref(), session_id, ctx.log.as_ref()).await {
                     event_error = Some(error);
-                    cancel.cancel();
+                    process_cancel.cancel();
                     break execution.await;
                 }
             }

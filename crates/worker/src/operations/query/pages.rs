@@ -25,6 +25,9 @@ pub(in crate::operations) async fn messages(
     ) {
         return Ok(RpcReply::error(400, "messages require a session execution"));
     }
+    if let Some(reply) = super::session::before_ready(worker, &execution.id, "transcript").await? {
+        return Ok(reply);
+    }
     if worker
         .inner
         .state

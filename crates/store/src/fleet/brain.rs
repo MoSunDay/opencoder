@@ -10,6 +10,54 @@ pub(super) async fn initialize(conn: &libsql::Connection) -> Result<()> {
 }
 
 impl FleetStore {
+    /// Remove a saved plan and every immutable version in one fleet-store
+    /// transaction. Plan capability metadata is derived from the saved
+    /// versions, so it is removed with the plan to avoid orphaned catalog
+    /// entries. Returns `false` when the plan metadata does not exist.
+    pub async fn delete_brain_plan(&self, id: &str) -> Result<bool> {
+        ensure!(valid_id(id), "invalid plan identity");
+        let _guard = self.gate.lock().await;
+        self.conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let result = async {
+            if self.definition_locked("brain_plan", id).await?.is_none() {
+                return Ok(false);
+            }
+            self.conn
+                .execute(
+                    "DELETE FROM brain_plan_versions WHERE id=?1",
+                    [id],
+                )
+                .await?;
+            self.conn
+                .execute(
+                    "DELETE FROM fleet_definitions WHERE kind='brain_plan' AND id=?1",
+                    [id],
+                )
+                .await?;
+            self.conn
+                .execute(
+                    "DELETE FROM fleet_definitions WHERE kind='brain_capability_meta' AND substr(id,1,length(?1))=?1",
+                    [format!("plan-{id}@")],
+                )
+                .await?;
+            Ok::<_, anyhow::Error>(true)
+        }
+        .await;
+        match result {
+            Ok(deleted) => {
+                if let Err(error) = self.conn.execute("COMMIT", ()).await {
+                    self.conn.execute("ROLLBACK", ()).await?;
+                    return Err(error.into());
+                }
+                Ok(deleted)
+            }
+            Err(error) => {
+                self.conn.execute("ROLLBACK", ()).await?;
+                Err(error)
+            }
+        }
+    }
+
     /// Append-only, compare-and-swap version publication. Retrying the same
     /// exact version is idempotent; an existing version is never overwritten.
     pub async fn save_brain_plan(&self, version: &PlanVersion) -> Result<PlanDefinition> {

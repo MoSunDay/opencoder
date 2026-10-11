@@ -96,10 +96,7 @@ const renderPage = () =>
       <EnvContext.Provider
         value={{
           env: "debug",
-          environments: [],
           canManage: true,
-          setEnv: () => undefined,
-          refreshEnvironments: async () => undefined,
         }}
       >
         <EntityTypesPage />

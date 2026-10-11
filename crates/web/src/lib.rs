@@ -17,7 +17,10 @@ pub mod api_nodes_ops;
 pub mod api_ops;
 pub mod api_project;
 pub mod api_project_initiatives;
+pub mod api_project_people;
 pub mod api_project_runs;
+#[path = "api_project/summary.rs"]
+pub mod api_project_summary;
 pub mod api_project_tags;
 pub mod api_project_todos;
 pub mod api_project_util;
@@ -401,6 +404,15 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/bg/stop", post(api_ops::stop_bg))
         // ── project 模块（goals → milestones → todos → plan/execute runs）──
         .route("/api/project/overview", get(api_project_runs::get_overview))
+        .route("/api/project/people", get(api_project_people::list))
+        .route(
+            "/api/project/:collection/:id/summary-versions",
+            get(api_project_summary::versions),
+        )
+        .route(
+            "/api/project/:collection/:id/summary-versions/:version/restore",
+            post(api_project_summary::restore),
+        )
         .route(
             "/api/project/tags",
             get(api_project_tags::list).post(api_project_tags::create),
@@ -420,6 +432,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route(
             "/api/project/initiatives",
             get(api_project_initiatives::list).post(api_project_initiatives::create),
+        )
+        .route(
+            "/api/project/goals/:id/initiatives/order",
+            axum::routing::put(api_project_initiatives::reorder),
         )
         .route(
             "/api/project/initiatives/:id",

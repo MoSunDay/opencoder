@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use opencoder_core::agent::{
     agent_dir, agents_dir, read_agent_meta, read_resource_meta, validate_agent_name,
-    validate_resource_name, AgentHistoryEntry, AgentMeta, AgentRefs, ResourceMeta, RunMode,
+    validate_resource_name, AgentHistoryEntry, AgentMeta, AgentRefs, ResourceMeta,
     AGENT_CATEGORIES,
 };
 
@@ -163,7 +163,7 @@ pub fn create_agent_with_harness(
     refs: AgentRefs,
     harness: opencoder_core::harness::Harness,
 ) -> io::Result<()> {
-    create_agent_with_profile(name, refs, harness, None, RunMode::default())
+    create_agent_with_profile(name, refs, harness, None)
 }
 
 pub fn create_agent_with_profile(
@@ -171,7 +171,6 @@ pub fn create_agent_with_profile(
     refs: AgentRefs,
     harness: opencoder_core::harness::Harness,
     profile: Option<String>,
-    run_mode: RunMode,
 ) -> io::Result<()> {
     let _lock = crate::resources::lock::write_lock()?;
     crate::resources::validate_refs(name, &refs)?;
@@ -195,7 +194,6 @@ pub fn create_agent_with_profile(
     let meta = AgentMeta {
         harness_profile: profile,
         harness,
-        run_mode,
         name: name.to_string(),
         created_at: now.clone(),
         updated_at: now,
@@ -222,7 +220,7 @@ pub fn update_agent_settings(
     refs: Option<AgentRefs>,
     harness: Option<opencoder_core::harness::Harness>,
 ) -> io::Result<()> {
-    update_agent_with_profile(name, refs, harness, None, None)
+    update_agent_with_profile(name, refs, harness, None)
 }
 
 pub fn update_agent_with_profile(
@@ -230,7 +228,6 @@ pub fn update_agent_with_profile(
     refs: Option<AgentRefs>,
     harness: Option<opencoder_core::harness::Harness>,
     profile: Option<Option<String>>,
-    run_mode: Option<RunMode>,
 ) -> io::Result<()> {
     let _lock = crate::resources::lock::write_lock()?;
     validate_agent_name(name).map_err(invalid_input)?;
@@ -281,19 +278,6 @@ pub fn update_agent_with_profile(
                 to: Some(harness.as_str().into()),
             });
             meta.harness = harness;
-        }
-    }
-    // Run mode mirrors harness: `Some(new)` appends one history entry when
-    // the value actually changes; `None` leaves the card untouched.
-    if let Some(run_mode) = run_mode {
-        if meta.run_mode != run_mode {
-            meta.history.push(AgentHistoryEntry {
-                at: now.clone(),
-                field: "run_mode".into(),
-                from: Some(meta.run_mode.as_str().into()),
-                to: Some(run_mode.as_str().into()),
-            });
-            meta.run_mode = run_mode;
         }
     }
     std::fs::create_dir_all(&dir)?;

@@ -154,6 +154,7 @@ pub(crate) async fn commit_plan_output(deps: &Arc<Deps>, todo_id: &str, output: 
     }
     let now = opencoder_core::message::now_ms();
     let patch = ProjectTodoPatch {
+        people: Default::default(),
         plan_md: Some(Some(output)),
         status: Some(ProjectTodoStatus::Planned),
         ..Default::default()
@@ -381,6 +382,7 @@ mod tests {
     async fn seed_todo(p: &Arc<LibsqlStore>, id: &str, status: ProjectTodoStatus) {
         let now = 1000;
         p.create_todo(&opencoder_store::ProjectTodoRecord {
+            people: Default::default(),
             id: id.into(),
             initiative_id: None,
             title: format!("待办 {id}"),

@@ -5,6 +5,7 @@
 pub mod comments;
 pub mod context;
 pub mod conversation;
+pub mod files;
 pub mod summary;
 pub mod tags;
 
@@ -107,6 +108,9 @@ pub enum InitiativesCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum TodosCmd {
+    /// Upload, list, download or delete handoff files.
+    #[command(subcommand)]
+    Files(files::FilesCmd),
     /// Append/read TODO notes with human or registered capability signatures.
     #[command(subcommand)]
     Comments(comments::CommentsCmd),
@@ -260,6 +264,7 @@ fn plan_initiatives(sub: &InitiativesCmd) -> Result<RequestPlan> {
 
 fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        TodosCmd::Files(command) => files::plan(command)?,
         TodosCmd::Comments(command) => comments::plan(command)?,
         TodosCmd::Get { id } => {
             RequestPlan::get(format!("/api/project/todos/{}", crate::http::urlencode(id)))
@@ -336,6 +341,7 @@ pub async fn run(ctx: &Ctx, sub: ProjectCmd) -> Result<i32> {
     }
     if let ProjectCmd::Todos(command) = &sub {
         match command {
+            TodosCmd::Files(command) => return files::run(ctx, command).await,
             TodosCmd::Context(args) => return context::run(ctx, args).await,
             TodosCmd::Prompt(args) => {
                 return conversation::run(

@@ -1,4 +1,4 @@
-Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
+Commit: f23063530a72e73bddef57a2d077c39754b16e29
 
 # control 模块
 
@@ -66,3 +66,5 @@ Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
 索引报告在 Begin 固定其负载快照的 sequence；报告中间的 RPC 负载快照可以更新连接视图，但不会抬高较早报告的持久水位。被忽略的旧 Begin 也不能替换当前报告水位。初始 pending 捕获和完整报告落库的慢调用记录节点、报告 ID、条数和耗时，不记录帧 payload 或凭据。
 
 协商后的报告按 Begin、批次、Brain 帧和 End 确认，End 仅在原子索引提交及连接代次栅栏通过后确认。一条连接最多保留一个报告提交任务；数据库等待时继续消费该连接的回复与负载快照。该任务属于连接，断线会取消等待，迟到的存储完成不能标记替代连接就绪或发送交接确认。旧 Node 不声明 `acknowledge` 时沿原顺序处理，不接收额外确认。确认复用独立的一项写出队列，不占 RPC 队列或改变配额。
+
+TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；任务删除须先核验没有文件。只读 NFS 生命周期由专用 `opencoder-todo-resources.service` 管理，Server 仅转发管理接口，HTTP 文件操作使用同一绑定目录。见 [任务文件](../../docs/project-files.md)。

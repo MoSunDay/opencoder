@@ -1,4 +1,4 @@
-Commit: a4e0d53645cede306c71663f839ba6e989c21cc3
+Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 
 # project 模块
 
@@ -20,6 +20,8 @@ Commit: a4e0d53645cede306c71663f839ba6e989c21cc3
 - [完成前提](../../crates/store/src/project/acceptance.rs)、[事务核验](../../crates/store/src/libsql_store/project/acceptance.rs) — 验证读取时的任务、能力、执行和依赖仍有效，再修改看板；前提过期由 API 返回 409。
 
 - [评论数据](../../crates/store/src/project/comments.rs)、[评论存储](../../crates/store/src/libsql_store/project/comments.rs) — schema 39 使用递增序号分页，按 TODO、提交用户与请求 ID 保证事务追加幂等；同时核验任务及执行关联，更新任务时间。正文与署名快照不引用用户、能力的可变名称；TODO 删除触发同事务清理，评论不作为执行结果缓存。
+
+- [project_files](../../crates/control/src/project_files/mod.rs) 管理 Server 上主动上传的任务文件，使用创建日期、TODO ID 和相对路径定位；独立 NFS 只读导出。目录绑定、文件锁、原子发布及备份协调与数据库任务删除配合，原生执行记录仍由执行节点持有。配置和接口见 [任务文件](../../docs/project-files.md)。
 
 ## 相关
 - [项目模块约定](../../rules/07-project-module-contract.md) — 归属、看板、执行关联、实时结果读取与进度规则

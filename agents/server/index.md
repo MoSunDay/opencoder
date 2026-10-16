@@ -1,4 +1,4 @@
-Commit: 1ba83e9ec97a38106af1bbe309860a3e5276cc4f
+Commit: f23063530a72e73bddef57a2d077c39754b16e29
 
 # server 模块
 
@@ -23,3 +23,5 @@ Commit: 1ba83e9ec97a38106af1bbe309860a3e5276cc4f
 - [在线发布验收](../../scripts/acceptance/smooth_release/live.py) — 回滚、再发布和观察持续使用同一原生探针定义；等待标记须在任务所属 Runtime 的挂载及根目录视图中释放。[信号失败演练](../../scripts/acceptance/signal_release/main.py) 显式要求配套 `--rootfs`。
 
 常规兼容发布保留资源服务与已有挂载；数据契约升级通过维护流程切换。参见 [发布说明](../../docs/smooth-release.md)、[DAG 执行约定](../../rules/04-dag-execution-contract.md)。
+
+TODO 文件导出由 `--todo-resources` 独立进程负责，只提供健康及 TODO NFS 管理接口，使用启动凭证认证，不打开控制数据库。既有 `--resources` 不托管此导出。

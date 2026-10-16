@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, expect, it, vi } from 'vitest';
 import '../../test/setup-dom.js';
 const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiDel: vi.fn() }));
+const files = vi.hoisted(() => ({ downloadFile: vi.fn(), uploadFile: vi.fn(), fileUrl: vi.fn() }));
 vi.mock('../../api.js', () => api);
+vi.mock('../files/api.js', () => files);
 vi.mock('../../fleet/detail.jsx', () => ({ ExecutionView: () => <div>原生执行</div> }));
 import { TodoDrawer } from '../todoDrawer.jsx';
 import { setIdentity } from '../../store.js';
@@ -22,8 +24,8 @@ it('shows inline comments with the task and only reads execution records when se
   expect(await screen.findByRole('heading', { name: '交付计划' })).toBeTruthy();
   expect(screen.getByText('验收标准').tagName).toBe('STRONG');
   expect(screen.queryByRole('button', { name: '编辑任务' })).toBeNull();
-  expect(screen.queryByRole('textbox', { name: '任务说明' })).toBeNull();
-  expect(screen.getAllByRole('tab')).toHaveLength(3);
+  expect(screen.queryByRole('textbox', { name: '关键信息' })).toBeNull();
+  expect(screen.getAllByRole('tab')).toHaveLength(4);
   expect(screen.queryByRole('tab', { name: '评论' })).toBeNull();
   const heading = screen.getByLabelText('TODO 标题').closest('.project-task-heading');
   expect(within(heading).getByRole('combobox', { name: 'TODO 看板列' })).toBeTruthy();
@@ -51,10 +53,10 @@ it('edits status beside the task title and persists both through the footer save
 
 it('preserves task edits and previews across tabs and saves untouched settings together', async () => {
   const p = props(); const view = render(<TodoDrawer {...p} />);
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('编辑'));
-  fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '## 草稿\n\n**完整内容**' } });
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('预览'));
-  expect(within(screen.getByLabelText('任务说明预览')).getByText('完整内容').tagName).toBe('STRONG');
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('编辑'));
+  fireEvent.change(screen.getByLabelText('关键信息'), { target: { value: '## 草稿\n\n**完整内容**' } });
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('预览'));
+  expect(within(screen.getByLabelText('关键信息预览')).getByText('完整内容').tagName).toBe('STRONG');
   expect(api.apiPatch).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('tab', { name: '设置', exact: true }));
   view.rerender(<TodoDrawer {...p} overview={{ ...overview, backlog: [{ ...overview.backlog[0], draft: '远端文本' }] }} />);
@@ -66,7 +68,7 @@ it('preserves task edits and previews across tabs and saves untouched settings t
 
 it('opens and focuses a hidden invalid task field when saving from settings', async () => {
   render(<TodoDrawer {...props()} />);
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('编辑'));
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('编辑'));
   fireEvent.change(screen.getByLabelText('TODO 标题'), { target: { value: ' ' } });
   fireEvent.click(screen.getByRole('tab', { name: '设置', exact: true }));
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
@@ -127,4 +129,31 @@ it('opens an inline comment source in execution and retains the task draft', asy
   fireEvent.click(screen.getByRole('tab', { name: '任务', exact: true }));
   expect(screen.getByLabelText('TODO 标题').value).toBe('未保存的任务标题');
   expect(api.apiPatch).not.toHaveBeenCalled();
+});
+
+it('keeps the drawer open until a download finishes even if a concurrent comment completes', async () => {
+  let finishDownload;
+  files.downloadFile.mockImplementation(() => new Promise((resolve) => { finishDownload = resolve; }));
+  api.apiGet.mockImplementation(async (path) => path.endsWith('/files')
+    ? { directory: '2026-10-16/t', max_file_bytes: 100, files: [{ path: 'notes.md', bytes: 4, modified_at: 1 }] }
+    : path.endsWith('/people') ? { people: [] }
+    : path.includes('/comments') ? { comments: [], has_more: false } : { capabilities: [], assignments: [] });
+  api.apiPost.mockResolvedValue({ seq: 1, body_md: '已同步', author_name: 'alice', author_kind: 'user', created_at: 1 });
+  const p = props(); render(<TodoDrawer {...p} />);
+  fireEvent.change(screen.getByLabelText('评论正文'), { target: { value: '已同步' } });
+  fireEvent.click(screen.getByRole('tab', { name: '文件', exact: true }));
+  await screen.findByText('notes.md');
+  const download = within(screen.getByLabelText('任务文件')).getByText(/下\s*载/, { selector: 'button span' }).closest('button');
+  fireEvent.click(download);
+  expect(files.downloadFile).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByText('任务', { selector: '[role=tab]' }));
+  fireEvent.click(screen.getByText('发表评论').closest('button'));
+  await waitFor(() => expect(screen.getByLabelText('评论正文').value).toBe(''));
+  expect(screen.getByText('保存 TODO').closest('button').disabled).toBe(true);
+  fireEvent.click(document.querySelector('.ant-drawer-close'));
+  expect(p.onClose).not.toHaveBeenCalled();
+  finishDownload();
+  await waitFor(() => expect(screen.getByText('保存 TODO').closest('button').disabled).toBe(false));
+  fireEvent.click(document.querySelector('.ant-drawer-close'));
+  expect(p.onClose).toHaveBeenCalledOnce();
 });

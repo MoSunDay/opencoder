@@ -18,6 +18,15 @@ afterEach(() => {
 });
 
 describe('authFetch base routing', () => {
+  it('sends raw file bytes with the same bearer and base URL', async () => {
+    setCredentials('test-token', 'http://localhost:8080'); setState({ authEnabled: true });
+    const file = new Blob(['raw bytes']);
+    await authFetch('PUT', '/api/project/todos/t/file?path=a', undefined, { rawBody: file, contentType: 'application/octet-stream' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:8080/api/project/todos/t/file?path=a');
+    expect(init.body).toBe(file);
+    expect(init.headers).toEqual({ Authorization: 'Bearer test-token', 'content-type': 'application/octet-stream' });
+  });
   it('omits Authorization when the server has disabled authentication', async () => {
     setCredentials('previous-token', '');
     setState({ authEnabled: false });

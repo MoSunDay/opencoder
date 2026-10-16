@@ -33,6 +33,10 @@ async fn server() -> (Ctx, tokio::task::JoinHandle<()>, Seen) {
             else if id == "denied" { (StatusCode::FORBIDDEN, Json(json!({"error":"forbidden"}))) }
             else { (StatusCode::OK, Json(json!({"id":id,"title":"核对问题","draft":"原始要求","board_status":"todo"}))) }
         }))
+        .route("/api/project/todos/:id/files", get(|Path(id): Path<String>| async move {
+            if id == "files-unavailable" { (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"file storage unavailable"}))) }
+            else { (StatusCode::OK, Json(json!({"directory":"2026-01-01/t","files":[{"path":"notes.md","bytes":3}]}))) }
+        }))
         .route("/api/project/todos/:id/executions", get(|Path(id): Path<String>| async move {
             Json(if id == "empty" { json!({"assignments":[],"current_execution_id":null}) }
             else { json!({"current_execution_id":null,"assignments":[
@@ -218,5 +222,27 @@ async fn context_cli_dispatches_prints_json_and_preserves_partial_and_http_exit_
             assert_eq!(error["status"], if id == "missing" { 404 } else { 403 });
         }
     }
+    task.abort();
+}
+
+#[tokio::test]
+async fn context_reports_unavailable_task_files_without_claiming_complete_handoff() {
+    let (ctx, task, _) = server().await;
+    let value = context::collect(
+        &ctx,
+        &context::Options {
+            id: "files-unavailable".into(),
+            execution: Some("history".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(value["complete"], false);
+    assert!(value["record"]["files"].is_null());
+    assert!(value["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|issue| issue["source"].as_str().unwrap_or("").ends_with("/files")));
     task.abort();
 }

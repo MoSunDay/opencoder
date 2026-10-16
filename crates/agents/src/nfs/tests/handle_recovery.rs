@@ -1,7 +1,65 @@
 use super::*;
 
+#[test]
+fn unknown_opaque_handle_is_stale_when_the_export_is_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let fs = agents_fs(dir.path().to_path_buf());
+    let handle = nfs_fh3 {
+        data: handles::encode(&PathBuf::from(
+            "a-resource-path-longer-than-sixty-bytes-that-the-export-has-not-registered/file",
+        )),
+    };
+    std::fs::remove_dir(dir.path()).unwrap();
+    assert!(matches!(fs.fh_to_id(&handle), Err(nfsstat3::NFS3ERR_STALE)));
+}
+
 #[tokio::test]
-async fn long_directory_pagination_and_old_handles_survive_restart() {
+#[cfg(target_os = "linux")]
+async fn unknown_opaque_handle_does_not_open_or_read_the_export_directory() {
+    use std::{
+        ffi::CString,
+        io::Read,
+        os::fd::{AsRawFd, FromRawFd},
+    };
+
+    let (dir, original) = fixture();
+    let relative = "a-complete-resource-package-with-a-name-longer-than-sixty-bytes";
+    std::fs::write(dir.path().join(relative), "body").unwrap();
+    let id = original
+        .lookup(original.root_dir(), &name(relative))
+        .await
+        .unwrap();
+    let mut handle = original.id_to_fh(id);
+    let fresh = agents_fs(dir.path().to_path_buf());
+
+    // Observe actual directory access, including scans that happen to return STALE.
+    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+    assert!(fd >= 0, "{}", std::io::Error::last_os_error());
+    let mut events = unsafe { std::fs::File::from_raw_fd(fd) };
+    let path = CString::new(dir.path().as_os_str().as_encoded_bytes()).unwrap();
+    let watch = unsafe {
+        libc::inotify_add_watch(
+            events.as_raw_fd(),
+            path.as_ptr(),
+            libc::IN_OPEN | libc::IN_ACCESS,
+        )
+    };
+    assert!(watch >= 0, "{}", std::io::Error::last_os_error());
+    for fs in [&fresh, &original] {
+        let result = fs.fh_to_id(&handle);
+        let mut buffer = [0u8; 1024];
+        assert_eq!(
+            events.read(&mut buffer).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert!(matches!(result, Err(nfsstat3::NFS3ERR_STALE)));
+        // A valid-sized handle with an unknown digest must also avoid directory I/O.
+        *handle.data.last_mut().unwrap() ^= 1;
+    }
+}
+
+#[tokio::test]
+async fn long_directory_pagination_recovers_after_restart_with_fresh_lookup() {
     let (dir, fs) = fixture();
     let relative = "skills/a-complete-resource-package-with-a-long-name/v1/references";
     std::fs::create_dir_all(dir.path().join(relative)).unwrap();
@@ -18,8 +76,19 @@ async fn long_directory_pagination_and_old_handles_survive_restart() {
     for part in relative.split('/') {
         id = fs.lookup(id, &name(part)).await.unwrap();
     }
+    let old_handle = fs.id_to_fh(id);
     let restarted = agents_fs(dir.path().to_path_buf());
-    let id = restarted.fh_to_id(&fs.id_to_fh(id)).unwrap();
+    assert!(matches!(
+        restarted.fh_to_id(&old_handle),
+        Err(nfsstat3::NFS3ERR_STALE)
+    ));
+    let mut fresh_id = restarted.root_dir();
+    for part in relative.split('/') {
+        fresh_id = restarted.lookup(fresh_id, &name(part)).await.unwrap();
+    }
+    assert_eq!(fresh_id, id);
+    assert_eq!(restarted.id_to_fh(fresh_id).data, old_handle.data);
+    let id = restarted.fh_to_id(&old_handle).unwrap();
     let mut cookie = 0;
     let mut names = Vec::new();
     loop {
@@ -113,7 +182,7 @@ async fn handle_roundtrip_and_rejection() {
 }
 
 #[tokio::test]
-async fn complete_skill_package_survives_long_paths_and_export_restart() {
+async fn complete_skill_package_survives_restart_with_fresh_lookup() {
     let (dir, fs) = fixture();
     let relative = "skills/sample-workflow/v2/sample-analysis/references/service-contract.md";
     std::fs::create_dir_all(dir.path().join(relative).parent().unwrap()).unwrap();
@@ -133,6 +202,15 @@ async fn complete_skill_package_survives_long_paths_and_export_restart() {
     }
     let handle = fs.id_to_fh(parent);
     let restarted = agents_fs(dir.path().to_path_buf());
+    assert!(matches!(
+        restarted.fh_to_id(&handle),
+        Err(nfsstat3::NFS3ERR_STALE)
+    ));
+    let mut fresh_id = restarted.root_dir();
+    for component in relative.split('/') {
+        fresh_id = restarted.lookup(fresh_id, &name(component)).await.unwrap();
+    }
+    assert_eq!(fresh_id, parent);
     let recovered = restarted.fh_to_id(&handle).unwrap();
     assert_eq!(recovered, parent);
     assert_eq!(
@@ -155,7 +233,7 @@ async fn complete_skill_package_survives_long_paths_and_export_restart() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn opaque_handle_recovery_cannot_follow_a_link_outside_the_export() {
+async fn opaque_handle_cannot_follow_a_link_outside_the_export() {
     let (dir, fs) = fixture();
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("secret.md"), "outside").unwrap();

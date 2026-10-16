@@ -13,6 +13,23 @@ from rolling.units import service, freeze_rootfs
 
 
 class PublisherTests(unittest.TestCase):
+    def test_managed_startup_image_pins_platform_cli_and_does_not_change_legacy_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, binaries = root / 'source', root / 'bin'
+            (source / 'usr/bin').mkdir(parents=True)
+            (source / 'usr/share/opencoder').mkdir(parents=True)
+            (source / 'usr/share/opencoder/codex-startup.json').write_text('{}')
+            binaries.mkdir()
+            for name in ['dag-runner', 'agent-step-runner', 'agent-session-runner', 'opencoder-cli']:
+                (binaries / name).write_bytes(('candidate-' + name).encode())
+            image = freeze_rootfs({'runtime_data': str(root / 'runtime')}, source, binaries)
+            self.assertEqual((image / 'usr/bin/opencoder-cli').read_bytes(), b'candidate-opencoder-cli')
+            self.assertFalse((source / 'usr/bin/opencoder-cli').exists())
+            (binaries / 'opencoder-cli').write_bytes(b'changed-cli')
+            with self.assertRaisesRegex(ValueError, 'retained DAG runner differs'):
+                freeze_rootfs({'runtime_data': str(root / 'runtime')}, source, binaries)
+
     def test_frozen_image_preserves_internal_hardlinks_without_linking_the_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

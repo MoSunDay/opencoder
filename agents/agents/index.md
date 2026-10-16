@@ -1,4 +1,4 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: 84c013e1afb63028f7187bd9fb5250cd2425b8a4
 
 # agents 模块
 
@@ -9,7 +9,8 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 - `crates/agents/src/references.rs` — memory 引用扫描
 - [snapshot/files.rs](../../crates/agents/src/snapshot/files.rs) — 复制冻结资源时保留普通文件权限，Unix 去除特殊权限位；Tool 脚本的执行权限随快照保留。
 - [snapshot](../../crates/agents/src/snapshot/mod.rs) — 固定资源当前版本；普通会话保留全部已注册 Agent 卡及其引用的资源，支持后续切换身份，不扫描未被引用的资源池。DAG 按所选 Agent 固定依赖。拒绝软链接与特殊文件，流式校验完整目录摘要，不复制无关历史版本。私有暂存树逐文件落盘，填充后的目录自底向上同步，共享类别目录在所有复制任务结束后同步，最后原子发布；已发布快照重试时保持不变。回归见 [snapshot/tests.rs](../../crates/agents/src/snapshot/tests.rs)。
-- [nfs/acl.rs](../../crates/agents/src/nfs/acl.rs)、[serve/transport.rs](../../crates/agents/src/serve/transport.rs) — 只读 NFS 的 Linux ACL 查询与端口注册；ACL 写入始终拒绝，支持源工作区的内核写时复制。
+- [nfs/acl.rs](../../crates/agents/src/nfs/acl.rs)、[serve/transport.rs](../../crates/agents/src/serve/transport.rs) — 只读 NFS 的 Linux ACL 查询与端口注册；ACL 写入始终拒绝，支持源工作区的内核写时复制。ACL 与普通 NFS 请求共享同一份路径注册表，已通过 LOOKUP 返回的长路径句柄不重新扫描导出目录；复制导出器时保留该共享关系。
+- [nfs/handles.rs](../../crates/agents/src/nfs/handles.rs) — 短句柄直接校验相对路径，长句柄只查询共享注册表；未知长句柄返回 `STALE`，不访问导出树。导出器重启后，客户端必须重新 LOOKUP 长路径，才可继续使用对应句柄；格式错误仍返回 `BADHANDLE`。回归见 [handle_recovery.rs](../../crates/agents/src/nfs/tests/handle_recovery.rs) 和 [nfs_acl.rs](../../crates/agents/tests/nfs_acl.rs)。
 - [testutil.rs](../../crates/agents/src/testutil.rs) — 资源追加、引用扫描及池管理测试共用全局资源目录锁，持锁期间使用独立临时目录。
 
 ## 相关

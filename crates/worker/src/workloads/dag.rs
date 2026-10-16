@@ -91,12 +91,8 @@ pub(super) async fn run(
     apply_input(&mut spec, &assignment.request.input)?;
     let input_path = workflow_root.join(id).join("input.json");
     std::fs::create_dir_all(input_path.parent().unwrap())?;
-    if !input_path.exists() {
-        opencoder_core::atomic_write(
-            &input_path,
-            &serde_json::to_vec(execution_input(&assignment.request.input))?,
-        )?;
-    }
+    crate::brain::workspace::checked(input_path.parent().unwrap(), &input_path)?;
+    crate::brain::workspace::freeze(&input_path, execution_input(&assignment.request.input))?;
     super::agent::create_session(
         worker,
         id,

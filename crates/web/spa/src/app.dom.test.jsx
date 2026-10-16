@@ -4,6 +4,17 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { App, LoginModal, bootUrlCredential, clearCredentials, embeddedBase, getState, setCredentials, setState, HEADERLESS_REASONS, NAV_CATEGORIES, ConfigProvider, Popconfirm, zhCN, dayjs, theme, installFetchRouter, jsonResponse, deprecationHits, mountApp } from './test/appShell.jsx';
 
 describe('App shell landmarks (antd 6 under jsdom)', () => {
+  it('opens the console without a token when authentication is disabled', async () => {
+    installFetchRouter({ authEnabled: false });
+    await mountApp();
+    expect(await screen.findByText('暂无 Opencoder 节点')).toBeTruthy();
+    expect(screen.queryByText('Opencoder Fleet · 登录')).toBeNull();
+    expect(getState().token).toBe('');
+    expect(getState().identity.role).toBe('admin');
+    expect(fetch.mock.calls.find(([url]) => url.includes('/api/me'))[1].headers.Authorization).toBeUndefined();
+    expect(localStorage.getItem('oc_token')).toBeNull();
+  });
+
   it('gates unauthenticated visitors behind the login modal', async () => {
     await mountApp();
     expect(await screen.findByText('Opencoder Fleet · 登录')).toBeTruthy();

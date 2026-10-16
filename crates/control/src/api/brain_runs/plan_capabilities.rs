@@ -55,6 +55,10 @@ pub fn validate(
                 .find(|cap| cap.capability_id == *capability_id)
                 .with_context(|| format!("node capability unavailable: {capability_id}"))?;
             ensure!(
+                !plan.shared_workspace || cap.kind == ExecutionKind::Operator,
+                "shared workspace requires Operator capabilities"
+            );
+            ensure!(
                 catalog
                     .iter()
                     .filter(|item| item.capability_id == *capability_id)
@@ -128,6 +132,18 @@ mod tests {
             definition: child.map(|plan| json!({"plan":plan})).unwrap_or(json!({})),
             version: "1".into(),
         }
+    }
+    #[test]
+    fn shared_workspace_rejects_non_operator_capabilities_before_admission() {
+        let mut request = plan("leaf");
+        request.shared_workspace = true;
+        let mut leaf = cap("leaf", None);
+        assert!(validate(&request, 0, &[leaf.clone()])
+            .unwrap_err()
+            .to_string()
+            .contains("Operator"));
+        leaf.kind = ExecutionKind::Operator;
+        validate(&request, 0, &[leaf]).unwrap();
     }
     #[test]
     fn nested_plans_validate_every_reference() {

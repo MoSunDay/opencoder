@@ -49,7 +49,7 @@ pub async fn run(
         }
     };
     if snapshot.run.phase != LayeredPhase::Deciding {
-        return Ok(state::outcome(&snapshot));
+        return state::outcome(worker, &snapshot).await;
     }
     // A root can race with the control wake immediately after admission;
     // without a durable context, leave it idle so that race cannot finalize the
@@ -65,12 +65,12 @@ pub async fn run(
         .cloned()
         .context("root execution missing")?;
     if latest.annotations["layered_context"].is_null() {
-        return Ok(state::outcome(&snapshot));
+        return state::outcome(worker, &snapshot).await;
     }
     let context: LayeredContext =
         serde_json::from_value(latest.annotations["layered_context"].clone())?;
     if context.generation != snapshot.run.generation {
-        return Ok(state::outcome(&snapshot));
+        return state::outcome(worker, &snapshot).await;
     }
     let stored = &latest.annotations["layered_decision"];
     let decision = if stored["generation"] == context.generation {
@@ -92,9 +92,10 @@ pub async fn run(
     let _guard = gate.lock().await;
     let current = state::load(worker, id).await?;
     if current.run.generation != context.generation {
-        return Ok(state::outcome(&current));
+        return state::outcome(worker, &current).await;
     }
-    let change = match decision.and_then(|decision| {
+    let mut change = match decision.and_then(|decision| {
+        layered::validate_execution_io(context.execution_io_version, &decision)?;
         let change = layered::decide(
             &current,
             &context.request,
@@ -135,6 +136,27 @@ pub async fn run(
         }
         Err(error) => layered::block(&current, format!("layered decision: {error:#}"), now_ms()),
     };
+    state::annotate(
+        worker,
+        id,
+        "layered_artifacts",
+        json!(context.execution_artifacts),
+    )
+    .await?;
+    if change.run.phase == LayeredPhase::Completed {
+        let prospective = LayeredSnapshot {
+            schema_version: 7,
+            run: change.run.clone(),
+            operations: change.operations.clone(),
+        };
+        if let Err(error) = super::super::output::index::root(worker, &prospective).await {
+            change = layered::block(
+                &current,
+                format!("publish run artifact index: {error:#}"),
+                now_ms(),
+            );
+        }
+    }
     let next = worker
         .inner
         .state
@@ -142,7 +164,7 @@ pub async fn run(
         .commit_brain_layered(&change)
         .await?;
     state::annotate(worker, id, "layered_context", Value::Null).await?;
-    Ok(state::outcome(&next))
+    state::outcome(worker, &next).await
 }
 
 /// Called under the node admission and root lifecycle gates. Only persisted

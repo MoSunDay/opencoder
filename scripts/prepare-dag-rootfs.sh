@@ -4,19 +4,22 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 out="${1:-}"
-[ -n "$out" ] || { echo "usage: $0 <rootfs-dir> [--codex <native-codex-binary>] [--python <python3.11+-binary>]" >&2; exit 2; }
+[ -n "$out" ] || { echo "usage: $0 <rootfs-dir> [--codex <native-codex-binary>] [--codex-startup <immutable-launcher-dir>] [--python <python3.11+-binary>]" >&2; exit 2; }
 shift
 codex_binary=""
+codex_startup=""
 python_binary="python3"
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || { echo "option requires an executable" >&2; exit 2; }
   case "$1" in
     --codex) codex_binary="$2" ;;
+    --codex-startup) codex_startup="$2" ;;
     --python) python_binary="$2" ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift 2
 done
+[ -z "$codex_startup" ] || [ -n "$codex_binary" ] || { echo "--codex-startup requires --codex" >&2; exit 2; }
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 
@@ -55,6 +58,12 @@ bash "$repo_root/scripts/dag-rootfs/install-python.sh" "$out" "$python_binary"
 
 if [ -n "$codex_binary" ]; then
   bash "$repo_root/scripts/dag-rootfs/install-codex.sh" "$out" "$codex_binary"
+fi
+if [ -n "$codex_startup" ]; then
+  cargo build --manifest-path "$repo_root/Cargo.toml" -p opencoder-cli
+  source "$repo_root/scripts/dag-rootfs/common.sh"
+  install_binary "$out" "$target_dir/debug/opencoder-cli" /usr/bin/opencoder-cli
+  bash "$repo_root/scripts/dag-rootfs/install-codex-startup.sh" "$out" "$codex_startup" "$codex_binary"
 fi
 
 echo "==> rootfs ready at $out; set dag.rootfs_dir to this immutable directory"

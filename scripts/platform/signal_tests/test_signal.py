@@ -17,7 +17,7 @@ class SignalTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
-        self.settings = Settings(root, root / 'config', root / 'data', root / 'work', root / 'token',
+        self.settings = Settings(root, root / 'token',
             systemd_dir=root / 'units')
         self.journal = Journal(root)
         self.journal.data.update(current='r1', previous='r0', phase='complete', releases={
@@ -142,6 +142,20 @@ class SignalTests(unittest.TestCase):
         for instance in ['stop--r1', 'deploy--', 'deploy--../r1', 'deploy--r1.service/foo']:
             with self.assertRaises(ValueError):
                 runner.parse_instance(instance)
+
+    def test_writer_stage_rejects_a_legacy_baseline_before_installing_the_bundle(self):
+        candidate = {'release_id': 'writer', 'execution_io': {'reader': 1, 'writer': 1}}
+        pending = (self.settings.state_dir / 'signal-pending.json').read_bytes()
+        journal = (self.settings.state_dir / 'release-state.json').read_bytes()
+        with patch.object(controller.manifest, 'verify', return_value=candidate), \
+                patch.object(controller.manifest._installer, 'stage_bundle') as install, \
+                patch.object(controller.manifest, 'resources') as resources, \
+                self.assertRaisesRegex(ValueError, 'reader bridge'):
+            controller.stage(self.settings, Path('/writer-bundle'))
+        install.assert_not_called()
+        resources.assert_not_called()
+        self.assertEqual((self.settings.state_dir / 'signal-pending.json').read_bytes(), pending)
+        self.assertEqual((self.settings.state_dir / 'release-state.json').read_bytes(), journal)
 
 
 if __name__ == '__main__':

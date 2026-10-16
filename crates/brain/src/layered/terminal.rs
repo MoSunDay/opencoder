@@ -5,7 +5,7 @@ use opencoder_core::brain::layered::*;
 
 pub fn terminal(
     snapshot: &LayeredSnapshot,
-    _request: &LayeredRequest,
+    request: &LayeredRequest,
     notice: &LayeredTerminalEvent,
     now: i64,
 ) -> Result<Option<LayeredChange>> {
@@ -28,9 +28,17 @@ pub fn terminal(
     {
         return Ok(None);
     }
-    // Old activations and already terminal operations cannot invalidate a live
-    // decision generation, even if a producer sends a newer receipt sequence.
-    if old.status.terminal() || old.activation != snapshot.run.activation {
+    // Explicitly resuming a failed child preserves its execution identity.
+    // Fold its newer result only while shared-workspace scheduling is stopped;
+    // successful/cancelled children and superseded activations remain immutable.
+    let recovered = request.plan.shared_workspace
+        && old.status == LayeredOperationStatus::Error
+        && !old.cancel_requested
+        && matches!(
+            snapshot.run.phase,
+            LayeredPhase::Blocked | LayeredPhase::Paused
+        );
+    if (old.status.terminal() && !recovered) || old.activation != snapshot.run.activation {
         return Ok(None);
     }
     let mut update = change(snapshot, now);
@@ -45,7 +53,7 @@ pub fn terminal(
     e.decision_summary = Some(format!("{:?}", notice.status).to_lowercase());
     let settle_cancelled =
         snapshot.run.phase.terminal() && old.cancel_requested && !old.status.terminal();
-    if old.status.terminal()
+    if (old.status.terminal() && !recovered)
         || (snapshot.run.phase.terminal() && !settle_cancelled)
         || old.activation != snapshot.run.activation
     {
@@ -60,8 +68,12 @@ pub fn terminal(
         .unwrap();
     op.status = notice.status;
     op.source_sequence = Some(notice.source_sequence);
+    if recovered {
+        e.reason_summary = Some("new receipt from the same recovered execution".into());
+    }
     update.events.push(e);
-    if snapshot.run.phase.terminal() {
+    // A recovered receipt never resumes scheduling on the user's behalf.
+    if snapshot.run.phase.terminal() || recovered {
         return Ok(Some(update));
     }
     if barrier_parts(&update.run, &update.operations) {

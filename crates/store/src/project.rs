@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub mod acceptance;
+pub mod comments;
 pub mod overview;
 pub mod people;
 pub mod summary;
@@ -67,6 +68,27 @@ use crate::project_types::{
 // async_trait annotates futures that are already must-use on Rust 1.99.
 #[allow(clippy::double_must_use)]
 pub trait ProjectStore: Send + Sync {
+    async fn todo_comments(
+        &self,
+        _id: &str,
+        _query: comments::CommentQuery,
+    ) -> Result<Option<comments::CommentPage>> {
+        anyhow::bail!("TODO comments are unsupported by this store")
+    }
+    async fn todo_comment_request(
+        &self,
+        _id: &str,
+        _user: &str,
+        _request: &str,
+    ) -> Result<Option<comments::Comment>> {
+        anyhow::bail!("TODO comments are unsupported by this store")
+    }
+    async fn append_todo_comment(
+        &self,
+        _entry: &comments::NewComment,
+    ) -> Result<comments::Comment> {
+        anyhow::bail!("TODO comments are unsupported by this store")
+    }
     async fn summary_versions(
         &self,
         scope: summary::SummaryScope,

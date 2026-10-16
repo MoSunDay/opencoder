@@ -141,6 +141,7 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify('project'));
     window.history.replaceState(null, '', '/?brain_run=smoke');
     render(<App />);
-    expect(getState().page).toBe('nodes');
+    expect(getState().page).toBe('brain');
+    expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('project'));
   });
 });

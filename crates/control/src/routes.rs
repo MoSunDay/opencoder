@@ -22,6 +22,18 @@ pub fn build_app_with_metrics(
     metrics_token: Option<String>,
     web: bool,
 ) -> Router {
+    let auth_enabled = token.is_some();
+    build_app_with_auth(state, token, metrics_token, web, auth_enabled)
+}
+
+/// Configure public HTTP authentication independently of machine credentials.
+pub fn build_app_with_auth(
+    state: Arc<AppState>,
+    token: Option<String>,
+    metrics_token: Option<String>,
+    web: bool,
+    auth_enabled: bool,
+) -> Router {
     crate::release::outbox::start(&state);
     crate::scheduler::start(&state);
     // Captured before the builder chains consume `state`: the bearer
@@ -47,6 +59,9 @@ pub fn build_app_with_metrics(
                 .delete(admission::reopen),
         )
         .route("/api/time", get(auth_mw::server_time))
+        .route("/api/auth/status", get(move || async move {
+            axum::Json(json!({"enabled":auth_enabled}))
+        }))
         .route("/api/me", get(api::users::me))
         .route("/api/users", get(api::users::list).post(api::users::create))
         .route("/api/users/:name", patch(api::users::update).delete(api::users::delete))
@@ -59,6 +74,7 @@ pub fn build_app_with_metrics(
             "/api/nodes/:id/scheduling",
             get(api::settings::get_scheduling).put(api::settings::save_scheduling),
         )
+        .route("/api/resource-admission-providers/:name/versions/:version", get(api::resource_admission::providers::get).put(api::resource_admission::providers::save))
         .route("/api/resource-admission-provider", get(api::resource_admission::get).put(api::resource_admission::save))
         .route("/api/executions/:id/resources", get(api::resource_admission::inspect).post(api::resource_admission::command))
         .route("/api/harnesses", get(api::settings::get_harnesses))
@@ -136,6 +152,7 @@ pub fn build_app_with_metrics(
         .route("/api/project/todos/order", put(api_project_todos::reorder_todos))
         .route("/api/project/todos/:id", get(project::details::todo).patch(api_project_todos::patch_todo).delete(api_project_todos::delete_todo))
         .route("/api/project/todos/:id/dispatch", post(project_links::dispatch))
+        .route("/api/project/todos/:id/comments", get(project::comments::list).post(project::comments::append))
         .route("/api/project/todos/:id/executions", get(project_links::list).post(project_links::link))
         .route("/api/project/todos/:id/executions/:execution_id", axum::routing::delete(project_links::unlink))
         .route("/api/project/todos/:id/plan", post(project::plan))
@@ -180,7 +197,9 @@ pub fn build_app_with_metrics(
     if let Some(token) = token {
         app = app.layer(axum::middleware::from_fn_with_state(
             Some(Arc::new(
-                auth_mw::AuthState::new(token, auth_store).with_metrics_token(metrics_token),
+                auth_mw::AuthState::new(token, auth_store)
+                    .with_metrics_token(metrics_token)
+                    .with_enabled(auth_enabled),
             )),
             auth_mw::require_bearer,
         ));

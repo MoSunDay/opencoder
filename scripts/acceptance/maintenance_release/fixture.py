@@ -52,8 +52,7 @@ def create_settings(root):
     for name in ('home', 'units', 'state', 'bin', 'server-work', 'agent-work'):
         (root / name).mkdir()
     public = f'127.0.0.1:{port()}'
-    return Settings(root / 'state', root / 'server-work', root / 'server-data',
-                    root / 'agent-work', root / 'token', server_user='root',
+    return Settings(root / 'state', root / 'token', server_user='root',
                     bin_dir=root / 'bin', systemd_dir=root / 'units', node_name=root.name,
                     nginx_include=root / 'ingress.conf', public_url='http://' + public, listen=public,
                     host_port=port(), resource_port=port(), port_base=port(), max_runs=2, min_memory_mb=1,

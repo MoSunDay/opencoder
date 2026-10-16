@@ -24,7 +24,7 @@ use crate::ctx::Ctx;
     name = "opencoder-cli",
     version,
     long_version = opencoder_core::version::VERSION_LONG,
-    about = "opencoder fleet control-plane CLI: every opencoder-server API over Bearer auth"
+    about = "opencoder fleet control-plane CLI: manage remote Server APIs"
 )]
 pub struct Cli {
     /// Print machine-readable version, commit and fleet protocol metadata.
@@ -43,6 +43,9 @@ pub struct Cli {
     /// Read the Bearer token from a credential file.
     #[arg(long, global = true, value_name = "PATH")]
     token_file: Option<PathBuf>,
+    /// Omit credentials when the server has authentication disabled.
+    #[arg(long, global = true, conflicts_with_all = ["token", "token_file"])]
+    no_auth: bool,
     /// Human-facing notes on stderr (request lines, interrupt info).
     #[arg(short, long, global = true)]
     verbose: bool,
@@ -56,7 +59,7 @@ pub enum Command {
     Health,
     /// Readiness probe (honors the frozen drain mode).
     Ready,
-    /// Server time (auth-protected clock).
+    /// Server time.
     Time,
     /// Drain admin: status / freeze / reopen.
     #[command(subcommand)]
@@ -76,7 +79,7 @@ pub enum Command {
     /// TODO environments, tools, templates and workflow runs.
     #[command(subcommand)]
     Todo(cmd::todo::TodoCmd),
-    /// Project tracking: goals, milestones, todos, runs.
+    /// Project tracking: projects (goals), initiatives and TODOs.
     #[command(subcommand)]
     Project(cmd::project::ProjectCmd),
     /// Brain capabilities, search, plans and dispatch.
@@ -128,6 +131,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         cli.server.as_deref(),
         cli.token.as_deref(),
         cli.token_file.clone(),
+        cli.no_auth,
         cli.verbose,
     )?;
     match command {

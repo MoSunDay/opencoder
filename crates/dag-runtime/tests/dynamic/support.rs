@@ -134,6 +134,18 @@ pub fn dynamic_agent() -> Value {
         "template":{"type":"agent","prompt":"common-prompt","how_append":"common-how"}}})
 }
 
+pub fn context(text: &str) -> Value {
+    let tail = text
+        .rsplit_once("本次运行输入与上游步骤输出（JSON）：")
+        .unwrap()
+        .1;
+    serde_json::Deserializer::from_str(tail)
+        .into_iter::<Value>()
+        .next()
+        .unwrap()
+        .unwrap()
+}
+
 pub type ResponseFn = dyn Fn(&str) -> (Duration, Result<String, String>) + Send + Sync;
 pub struct Scripted {
     pub requests: Mutex<Vec<String>>,

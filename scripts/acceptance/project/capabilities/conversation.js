@@ -28,15 +28,17 @@ async function verify(h, todo, id) {
 
   const fromPage = 'Continue the same task. Keep marker ' + todo.marker + '. Page follow-up.';
   const drawer = await openTodo(h.page, todo);
-  const input = drawer.getByPlaceholder('继续会话', { exact: true });
+  const [detailPage] = await Promise.all([h.page.waitForEvent('popup'), drawer.getByRole('row').filter({ hasText: id }).getByRole('link', { name: id, exact: true }).click()]);
+  const input = detailPage.getByPlaceholder('继续会话', { exact: true });
   await input.fill(fromPage);
-  const receipt = h.page.waitForResponse((response) =>
+  const receipt = detailPage.waitForResponse((response) =>
     new URL(response.url()).pathname === '/api/executions/' + id + '/commands'
       && response.request().method() === 'POST');
   await input.press('Enter');
   const response = await receipt;
   assert(response.ok(), await response.text());
   await completed(fromPage);
+  await detailPage.close();
   await closeTodo(h.page, todo);
 
   const fromCli = 'Continue the same task. Keep marker ' + todo.marker + '. CLI follow-up.';

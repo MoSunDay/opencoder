@@ -56,8 +56,8 @@ function register(worker, record) {
 }
 
 export async function downloadArtifact(id, step, file, index) {
-  const token = getState().token;
-  if (!token) throw new Error('请先登录');
+  const { token, authEnabled } = getState();
+  if (!token && authEnabled !== false) throw new Error('请先登录');
   let worker = navigator.serviceWorker?.controller;
   const retainsUserGesture = !!worker;
   if (!worker) worker = await prepareArtifactDownloads();
@@ -66,7 +66,7 @@ export async function downloadArtifact(id, step, file, index) {
   const popup = retainsUserGesture ? window.open('about:blank', '_blank') : null;
   if (retainsUserGesture && !popup) throw new Error('浏览器阻止了下载窗口');
   const registered = register(worker, {
-    id: requestId, path: artifactPath(id, step, file, index), token,
+    id: requestId, path: artifactPath(id, step, file, index), token: authEnabled === false ? '' : token,
   });
   if (retainsUserGesture) {
     await registered;

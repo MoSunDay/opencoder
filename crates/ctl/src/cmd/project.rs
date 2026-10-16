@@ -2,6 +2,8 @@
 //! per-todo plan/execute runs. CRUD uses pure `plan()` mappings; summary
 //! collection reads the native evidence through the shared HTTP transport.
 
+pub mod comments;
+pub mod context;
 pub mod conversation;
 pub mod summary;
 pub mod tags;
@@ -105,8 +107,13 @@ pub enum InitiativesCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum TodosCmd {
+    /// Append/read TODO notes with human or registered capability signatures.
+    #[command(subcommand)]
+    Comments(comments::CommentsCmd),
     /// Fetch a TODO including its selected tags and capability.
     Get { id: String },
+    /// Read TODO notes and full native evidence for all linked executions.
+    Context(context::Options),
     /// Move/reorder a board lane: {initiative_id,board_status,ids}.
     Reorder {
         #[arg(long)]
@@ -253,6 +260,7 @@ fn plan_initiatives(sub: &InitiativesCmd) -> Result<RequestPlan> {
 
 fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        TodosCmd::Comments(command) => comments::plan(command)?,
         TodosCmd::Get { id } => {
             RequestPlan::get(format!("/api/project/todos/{}", crate::http::urlencode(id)))
         }
@@ -260,6 +268,7 @@ fn plan_todos(sub: &TodosCmd) -> Result<RequestPlan> {
             RequestPlan::put("/api/project/todos/order").with_body(required_body(json)?)
         }
         TodosCmd::Prompt(_)
+        | TodosCmd::Context(_)
         | TodosCmd::Messages(_)
         | TodosCmd::Events(_)
         | TodosCmd::Result(_)
@@ -327,6 +336,7 @@ pub async fn run(ctx: &Ctx, sub: ProjectCmd) -> Result<i32> {
     }
     if let ProjectCmd::Todos(command) = &sub {
         match command {
+            TodosCmd::Context(args) => return context::run(ctx, args).await,
             TodosCmd::Prompt(args) => {
                 return conversation::run(
                     ctx,
@@ -340,10 +350,10 @@ pub async fn run(ctx: &Ctx, sub: ProjectCmd) -> Result<i32> {
             TodosCmd::Messages(args) => {
                 let mut query = vec![];
                 if let Some(seq) = args.after_seq {
-                    query.push(("after_seq", seq.to_string()));
+                    query.push(("seq", seq.to_string()));
                 }
                 if let Some(offset) = args.message_offset {
-                    query.push(("message_offset", offset.to_string()));
+                    query.push(("offset", offset.to_string()));
                 }
                 return conversation::run(ctx, &args.target, "messages", None, query).await;
             }

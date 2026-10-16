@@ -15,7 +15,7 @@ def argument(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
 
 
-def service(command, description, runtime=False, user="root", workdir=None):
+def service(command, description, runtime=False, user="root", workdir=None, resource=False):
     directory = str(workdir or "/")
     if not directory.startswith("/") or any(c in directory for c in "\n\r"):
         raise ValueError("service working directory must be an absolute path")
@@ -23,7 +23,7 @@ def service(command, description, runtime=False, user="root", workdir=None):
         command = ['/usr/bin/unshare', '--mount', '--propagation', 'private', '--', *command]
     return f"""[Unit]
 Description={description}
-After=network-online.target remote-fs.target opencoder-resources.service
+After=network-online.target remote-fs.target{("" if resource else " opencoder-resources.service")}
 Wants=network-online.target
 
 [Service]
@@ -95,6 +95,8 @@ def prepare(settings, bundle, record):
         raise ValueError("retained bundle differs from the immutable release record")
     installed.chmod(0o755)
     (installed / "bin").chmod(0o755)
+    from .storage import allow_server_traversal
+    allow_server_traversal(settings, installed / "bin")
     for binary in (installed / "bin").iterdir():
         binary.chmod(0o755)
     node_id = (settings.state_dir / "host/node-id").read_text().strip()
@@ -145,7 +147,10 @@ def freeze_rootfs(record, source, binaries=None):
         if target.is_symlink() or not target.is_dir():
             raise ValueError("Runtime OCI image must be a real directory")
         if binaries:
-            for name in ['dag-runner', 'agent-step-runner', 'agent-session-runner']:
+            names = ['dag-runner', 'agent-step-runner', 'agent-session-runner']
+            if (target / 'usr/share/opencoder/codex-startup.json').exists():
+                names.append('opencoder-cli')
+            for name in names:
                 if (target / 'usr/bin' / name).read_bytes() != (binaries / name).read_bytes():
                     raise ValueError('retained DAG runner differs from the candidate release')
         return target
@@ -167,7 +172,10 @@ def freeze_rootfs(record, source, binaries=None):
         return destination
     shutil.copytree(source,stage,symlinks=True,ignore=ignored,copy_function=copy_file)
     if binaries:
-        for name in ['dag-runner', 'agent-step-runner', 'agent-session-runner']:
+        names = ['dag-runner', 'agent-step-runner', 'agent-session-runner']
+        if (stage / 'usr/share/opencoder/codex-startup.json').exists():
+            names.append('opencoder-cli')
+        for name in names:
             runner = stage / 'usr/bin' / name
             runner.unlink(missing_ok=True)
             shutil.copy2(binaries / name, runner)
@@ -207,11 +215,15 @@ def prepare_server(settings, record):
         "host_service": settings.host_url, "resource_service": settings.resource_url}
     release_config = root / "release.json"
     atomic_bytes(release_config, (json.dumps(platform) + "\n").encode(), 0o644)
+    from .storage import allow_server_traversal
+    allow_server_traversal(settings, root)
     command = [root / "bundle/bin/opencoder-server", "--host", "127.0.0.1", "--port", record["server_port"],
         "--workdir", settings.server_workdir, "--release-config", release_config,
         "--data-dir", settings.server_data, "--token-file", settings.token_file]
     if settings.metrics_token_file:
         command.extend(["--metrics-token-file", settings.metrics_token_file])
+    if not settings.auth_enabled:
+        command.extend(["--auth-enabled", "false"])
     content = service(command,record["server_unit"],user=settings.server_user,workdir=settings.server_workdir)
     content = content.replace("Type=simple", "Type=simple\n" + inherited_environment(settings,settings.legacy_server_unit))
     atomic_bytes(settings.systemd_dir / record["server_unit"],content.encode(),0o644)

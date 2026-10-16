@@ -34,6 +34,8 @@ axum = { version = "0.7", features = ["ws"] }
 reqwest.workspace = true
 
 [dev-dependencies]
+libsql.workspace = true
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
 opencoder-node.workspace = true

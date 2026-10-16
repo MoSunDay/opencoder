@@ -59,7 +59,7 @@ pub use api::project_util as api_project_util;
 
 pub use bootstrap::{new_state, new_state_with_projects, serve, serve_release, ServerCredentials};
 use opencoder_store::{fleet::FleetStore, ProjectStore, Store};
-pub use routes::{build_app, build_app_with_metrics};
+pub use routes::{build_app, build_app_with_auth, build_app_with_metrics};
 use std::{path::PathBuf, sync::Arc};
 
 pub struct AppState {

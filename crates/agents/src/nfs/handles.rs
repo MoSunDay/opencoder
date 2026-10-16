@@ -17,7 +17,6 @@ pub(super) fn encode(path: &Path) -> Vec<u8> {
 }
 
 pub(super) fn resolve(
-    root: &Path,
     ids: &RwLock<HashMap<fileid3, PathBuf>>,
     handle: &[u8],
 ) -> Result<PathBuf, nfsstat3> {
@@ -36,31 +35,7 @@ pub(super) fn resolve(
     {
         return Ok(path.clone());
     }
-    // A client may retain handles across export restart. Recover from the tree
-    // instead of requiring a writable database or invalidating every old mount.
-    let mut pending = vec![PathBuf::new()];
-    while let Some(relative) = pending.pop() {
-        let directory =
-            std::fs::read_dir(root.join(&relative)).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        for entry in directory {
-            let entry = entry.map_err(|_| nfsstat3::NFS3ERR_IO)?;
-            let name = entry.file_name();
-            if name.to_str().is_none() {
-                continue;
-            }
-            let path = relative.join(name);
-            if encode(&path) == handle {
-                return Ok(path);
-            }
-            // Never follow links while resolving an opaque handle.
-            if entry
-                .file_type()
-                .map_err(|_| nfsstat3::NFS3ERR_IO)?
-                .is_dir()
-            {
-                pending.push(path);
-            }
-        }
-    }
+    // A digest cannot be reversed safely. Walking the export could enter an
+    // unrelated, blocked NFS mount. The client must LOOKUP the path again.
     Err(nfsstat3::NFS3ERR_STALE)
 }

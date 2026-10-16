@@ -16,6 +16,7 @@ use opencoder_core::brain::layered::*;
 pub use prompt::{instruction, PROMPT};
 pub use terminal::barrier;
 pub use terminal::{admit, command, terminal};
+pub use validate::validate_execution_io;
 pub use validate::{validate_plan, validate_request};
 
 pub fn event(run: &LayeredRun, kind: &str, reason: Option<String>) -> LayeredEvent {

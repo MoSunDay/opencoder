@@ -41,15 +41,25 @@ fn with_workdir(
 }
 
 fn operator_env(worker: &Worker, record: &Record) -> Result<Option<(PathBuf, PathBuf)>> {
-    crate::operations::operator_env::resolve(
+    let env = crate::operations::operator_env::resolve(
         &worker.inner.layout,
         record.assignment.request.kind,
         &record.assignment.index.id,
         record.annotations.get("operator_environment_version"),
-    )
+    )?;
+    Ok(match env {
+        Some((home, workspace)) => Some((
+            home,
+            super::workspace::workdir(record)?.unwrap_or(workspace),
+        )),
+        None => None,
+    })
 }
 
 pub fn for_record(worker: &Worker, record: &Record) -> Result<PathBuf> {
+    if let Some(path) = super::workspace::workdir(record)? {
+        return Ok(path);
+    }
     if let Some((_, workspace)) = operator_env(worker, record)? {
         return Ok(workspace);
     }

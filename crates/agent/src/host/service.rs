@@ -347,12 +347,23 @@ impl NodeService for Host {
         self.changes.subscribe()
     }
     async fn report(&self) -> Result<opencoder_node::fleet::NodeReport> {
+        let started = std::time::Instant::now();
         let _gate = self.report_gate.lock().await;
+        let gate_ms = started.elapsed().as_millis();
         let records = self.indexes().await?;
+        let inventory_ms = started.elapsed().as_millis() - gate_ms;
+        let snapshot = self.snapshot();
+        let brain = self.brain_frames().await?;
+        if started.elapsed().as_millis() >= 250 {
+            tracing::info!(node_id = %self.registration.id, gate_ms, inventory_ms,
+                brain_ms = started.elapsed().as_millis() - gate_ms - inventory_ms,
+                records = records.len(), brain_frames = brain.len(),
+                "host inventory report timing");
+        }
         Ok(opencoder_node::fleet::NodeReport {
-            snapshot: self.snapshot(),
+            snapshot,
             records,
-            brain: self.brain_frames().await?,
+            brain,
         })
     }
     async fn indexes(&self) -> Result<Vec<ExecutionIndex>> {

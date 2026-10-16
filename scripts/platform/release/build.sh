@@ -148,6 +148,7 @@ for name in names:
 manifest = {
     "release_id": "rel-" + commit,
     "compatibility": info["release_compatibility"],
+    "execution_io": info["execution_io"],
     "schema_version": 1,
     "commit": commit,
     "version": info["version"],

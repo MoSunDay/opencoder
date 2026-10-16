@@ -23,7 +23,7 @@ pub async fn execute(
     let StepProcess {
         key,
         argv,
-        env,
+        mut env,
         cwd,
         timeout_secs,
     } = process;
@@ -48,6 +48,7 @@ pub async fn execute(
     let process_file = private.join(format!("{key}.json"));
     let pid_file = private.join(format!("{key}.pid"));
     let _cleanup = Files(vec![process_file.clone(), pid_file.clone()]);
+    let broker = crate::sandbox::codex::broker::Broker::start(root, &key, &mut env).await?;
     let mut args = vec!["/usr/bin/dag-runner".to_string(), "step".to_string()];
     args.extend(argv);
     let mut environment = vec![
@@ -134,6 +135,11 @@ pub async fn execute(
                 anyhow::bail!("step process tree cleanup failed; DAG container stopped");
             }
         }
+    }
+    if let Some(broker) = broker {
+        broker
+            .finish(result.as_ref().map(|(code, _)| *code).unwrap_or(143))
+            .await?;
     }
     result.map_err(|error| {
         super::ProcessFailure::new(error, captured_stdout.text() + &captured_stderr.text()).into()

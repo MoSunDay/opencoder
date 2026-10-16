@@ -11,7 +11,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 mod dispatch;
-mod reference;
+pub(crate) mod reference;
 pub use dispatch::dispatch;
 
 #[derive(Deserialize)]

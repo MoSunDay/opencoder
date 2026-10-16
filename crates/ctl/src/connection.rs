@@ -3,14 +3,32 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Defaults {
     pub server: Option<String>,
     pub token: Option<String>,
     pub token_file: Option<PathBuf>,
+    #[serde(default = "auth_enabled")]
+    pub auth_enabled: bool,
     #[serde(default)]
     pub verbose: bool,
+}
+
+fn auth_enabled() -> bool {
+    true
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        Self {
+            server: None,
+            token: None,
+            token_file: None,
+            auth_enabled: true,
+            verbose: false,
+        }
+    }
 }
 
 pub fn default_path(env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
@@ -56,6 +74,7 @@ pub fn merge(
     defaults: Defaults,
     env: impl Fn(&str) -> Option<String>,
 ) -> Defaults {
+    let auth_enabled = token.is_some() || token_file.is_some() || defaults.auth_enabled;
     let server = server
         .map(str::to_owned)
         .or_else(|| env("OPENCODER_SERVER_URL"))
@@ -71,6 +90,7 @@ pub fn merge(
         server,
         token,
         token_file,
+        auth_enabled,
         verbose: verbose || defaults.verbose,
     }
 }

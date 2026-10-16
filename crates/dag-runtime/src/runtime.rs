@@ -25,6 +25,7 @@ use tracing::{info, warn};
 use crate::dag_events::{run_finished_event, run_started_event, RunEventSink};
 use crate::exec::{execute_agent_step, ExecDeps, StepCtx, StepResult};
 mod dynamic;
+mod input;
 mod scheduler;
 
 /// Everything the run loop needs besides the claimed run itself.
@@ -110,6 +111,18 @@ async fn execute_run_inner(
     sink.emit(run_started_event(&run.spec.name));
 
     let root = deps.workflow_root.join(&run.run_id);
+    let input = match input::load(&root, resume) {
+        Ok(input) => input,
+        Err(error) => {
+            return fail_run(
+                &deps.uplink,
+                run,
+                sink,
+                format!("DAG frozen input unavailable: {error:#}"),
+            )
+            .await
+        }
+    };
     if let Err(error) = crate::sandbox::run::preflight(&exec.config) {
         return fail_run(
             &deps.uplink,
@@ -178,8 +191,16 @@ async fn execute_run_inner(
             .await
         }
     };
-    let scheduled =
-        scheduler::schedule(exec, &deps.workflow_root, &run, &sink, cancel_rx, resume).await;
+    let scheduled = scheduler::schedule(
+        exec,
+        &deps.workflow_root,
+        &run,
+        &sink,
+        cancel_rx,
+        resume,
+        input,
+    )
+    .await;
     let cleaned = container.cleanup().await;
     let (states, step_errors, user_cancelled) = match scheduled {
         Ok(result) if cleaned.is_ok() => result,

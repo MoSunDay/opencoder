@@ -3,14 +3,15 @@ import subprocess
 
 
 class Resources:
-    def __init__(self, root, allocate_port):
+    def __init__(self, root, allocate_port, workspace):
         self.roots = {}
         self.mounts = {}
         self.ports = {}
         self.mounted = []
         for section in ['agent','dag','workspace','ontology']:
-            source = root / 'exports' / section
-            mount = root / 'mounts' / section
+            name = {'agent': 'agents', 'dag': 'binaries'}.get(section, section)
+            source = workspace if section == 'workspace' else root / 'exports' / name
+            mount = root / 'mounts' / name
             source.mkdir(parents=True)
             mount.mkdir(parents=True)
             (source / 'release-evidence.txt').write_text('resource-service-kept-running')

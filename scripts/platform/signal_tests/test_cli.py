@@ -15,7 +15,7 @@ class CliTests(unittest.TestCase):
     def test_signal_dispatch_releases_deploy_lock_but_keeps_staged_target_pinned(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            settings = Settings(root, root, root, root, root / 'token')
+            settings = Settings(root, root / 'token')
             def signal(settings, action, operations, seconds):
                 with locked(root):
                     pass  # The independently running controller can acquire it.
@@ -46,7 +46,7 @@ class CliTests(unittest.TestCase):
     def test_signal_rollback_uses_running_server_instead_of_inline_deployer(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            settings = Settings(root,root,root,root,root / 'token')
+            settings = Settings(root, root / 'token')
             with patch.object(sys,'argv',['deploy','--signal','--rollback']), \
                     patch.object(cli.config,'load',return_value=settings), \
                     patch.object(cli,'Operations',return_value=Mock()), \

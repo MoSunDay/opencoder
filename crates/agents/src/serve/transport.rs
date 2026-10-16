@@ -1,6 +1,6 @@
-use crate::nfs::{agents_fs, ReadOnlyAgentsFs};
+use crate::nfs::ReadOnlyAgentsFs;
 use anyhow::{ensure, Result};
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -95,8 +95,12 @@ async fn connection(
     Ok(())
 }
 
-pub(super) async fn serve(listener: TcpListener, backend: SocketAddr, root: PathBuf) -> Result<()> {
-    let fs = Arc::new(agents_fs(root));
+pub(super) async fn serve(
+    listener: TcpListener,
+    backend: SocketAddr,
+    fs: ReadOnlyAgentsFs,
+) -> Result<()> {
+    let fs = Arc::new(fs);
     let port = listener.local_addr()?.port();
     let mut connections = JoinSet::new();
     loop {

@@ -18,7 +18,7 @@ use project_relations::CREATE_PROJECT_MILESTONES;
 
 // Scheduler tables bootstrap additively. Project v33 removes result caches;
 // the release data-format gate excludes older Servers before this migration.
-pub(crate) const SCHEMA_VERSION: i64 = 38;
+pub(crate) const SCHEMA_VERSION: i64 = 39;
 
 // Order invariant: busy_timeout must precede any locking statement, and
 // synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
@@ -444,6 +444,7 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     catalog::upgrade(conn).await?;
     project_people::initialize(conn).await?;
     super::project::summaries::initialize(conn).await?;
+    super::project::comments::initialize(conn).await?;
     // The task_type index depends on a column that only physically exists in
     // fresh databases (via CREATE TABLE) or after the v5 migration adds it for
     // older databases, so it must run AFTER `migrate` rather than in the

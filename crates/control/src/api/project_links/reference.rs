@@ -18,7 +18,7 @@ fn matches(capability: &Value, assignment: &Assignment) -> bool {
     capability["target"].as_str() == request.target.as_deref() && request.target.is_some()
 }
 
-pub(super) async fn resolve(
+pub(crate) async fn resolve(
     state: &Arc<AppState>,
     index: &ExecutionIndex,
     selected: Option<&str>,

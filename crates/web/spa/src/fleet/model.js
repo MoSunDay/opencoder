@@ -58,7 +58,8 @@ export function messagePagePath(id, cursor) {
   const query = new URLSearchParams();
   if (cursor?.seq) query.set('seq', String(cursor.seq));
   if (cursor?.offset) query.set('offset', String(cursor.offset));
-  return `/api/executions/${encodeURIComponent(id)}/messages${query.size ? `?${query}` : ''}`;
+  const search = query.toString();
+  return `/api/executions/${encodeURIComponent(id)}/messages${search ? `?${search}` : ''}`;
 }
 
 export function decodeBase64(value) {

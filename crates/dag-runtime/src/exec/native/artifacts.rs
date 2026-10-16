@@ -1,74 +1,10 @@
 use anyhow::{ensure, Context, Result};
-use serde_json::Value;
+use opencoder_dag::artifacts::parse_declarations;
 use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
-    path::{Component, Path},
+    path::Path,
 };
-
-fn parse_declarations(documents: &[(&str, Value)]) -> Result<Vec<(String, u64, String)>> {
-    let mut declared = Vec::new();
-    for (file, value) in documents {
-        let rows = if *file == "artifacts.json" {
-            value["files"]
-                .as_array()
-                .context("artifacts.json files must be an array")?
-                .clone()
-        } else {
-            value.get("report_archive").cloned().into_iter().collect()
-        };
-        for row in rows {
-            let name = row
-                .get("path")
-                .or_else(|| row.get("file"))
-                .and_then(Value::as_str)
-                .context("artifact path missing")?;
-            ensure!(
-                !name.is_empty()
-                    && !Path::new(name).is_absolute()
-                    && !name.contains('\\')
-                    && !name.chars().any(char::is_control)
-                    && Path::new(name)
-                        .components()
-                        .all(|part| matches!(part, Component::Normal(_))),
-                "artifact path must be confined"
-            );
-            let first = Path::new(name)
-                .components()
-                .next()
-                .context("empty artifact path")?;
-            ensure!(
-                !matches!(
-                    first.as_os_str().to_str(),
-                    Some(
-                        "meta"
-                            | "instances"
-                            | "meta.json"
-                            | "output.txt"
-                            | "output.json"
-                            | "session.json"
-                            | "events.ndjson"
-                            | "transcript.txt"
-                            | "artifacts.json"
-                    )
-                ),
-                "artifact path conflicts with step metadata"
-            );
-            let bytes = row["bytes"].as_u64().context("artifact size missing")?;
-            let digest = row["sha256"].as_str().context("artifact digest missing")?;
-            ensure!(
-                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
-                "invalid artifact digest"
-            );
-            ensure!(
-                !declared.iter().any(|(path, _, _)| path == name),
-                "duplicate artifact path"
-            );
-            declared.push((name.into(), bytes, digest.into()));
-        }
-    }
-    Ok(declared)
-}
 
 fn declarations(dir: &Path) -> Result<Vec<(String, u64, String)>> {
     let mut documents = Vec::new();

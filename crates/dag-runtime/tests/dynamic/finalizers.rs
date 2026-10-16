@@ -20,7 +20,7 @@ async fn collect_all_drains_failed_batch_and_runs_finalizer() {
     let client = Scripted::new(|text| {
         (
             Duration::ZERO,
-            if text.contains("FAIL-FIRST") {
+            if context(text)["instance"]["input"] == "FAIL-FIRST" {
                 Err("original failure".into())
             } else {
                 Ok("{}".into())
@@ -98,7 +98,7 @@ async fn cancellation_stops_instances_and_still_runs_all_done_cleanup() {
     );
     run.spec.max_concurrency = 1;
     let client = Scripted::new(|text| {
-        assert!(!text.contains("NEVER-START"));
+        assert_ne!(context(text)["instance"]["input"], "NEVER-START");
         (
             if text.contains("FINALIZE") {
                 Duration::ZERO

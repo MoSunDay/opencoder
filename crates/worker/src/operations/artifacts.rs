@@ -5,6 +5,8 @@ use opencoder_core::fleet::*;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+#[cfg(test)]
+mod tests;
 pub(super) async fn read(worker: &Worker, id: &str, input: Value) -> Result<RpcReply> {
     let journal = worker.inner.journal.lock().await;
     if !journal.records.get(id).is_some_and(|record| {
@@ -34,6 +36,54 @@ pub(super) async fn read(worker: &Worker, id: &str, input: Value) -> Result<RpcR
 pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> Result<RpcReply> {
     if let Some(reply) = super::validate_reference(worker, &request.execution).await? {
         return Ok(reply);
+    }
+    if request.step == "brain-result" && request.file.starts_with("artifacts-") {
+        let name = request
+            .file
+            .strip_prefix("artifacts-")
+            .and_then(|v| v.strip_suffix(".json"));
+        let Some(digest) =
+            name.filter(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+        else {
+            return Ok(RpcReply::error(400, "invalid artifact index name"));
+        };
+        if request.index.is_some() {
+            return Ok(RpcReply::error(400, "artifact index has no instance index"));
+        }
+        let managed = worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .records
+            .get(&request.execution.id)
+            .is_some_and(|record| {
+                crate::brain::v4::parent::leaf(&record.assignment.request.input)
+                    || crate::brain::v4::parent::root(&record.assignment.request.input)
+            });
+        if !managed {
+            return Ok(RpcReply::error(404, "managed artifact index not found"));
+        }
+        let dir = worker
+            .inner
+            .layout
+            .execution_dir(request.execution.kind, &request.execution.id)?
+            .join("brain-result");
+        let path = dir.join(&request.file);
+        crate::brain::workspace::checked(&dir, &path)?;
+        if !path.try_exists()? {
+            return Ok(RpcReply::error(404, "artifact index not available"));
+        }
+        let expected = (std::fs::metadata(&path)?.len(), digest.to_ascii_lowercase());
+        return read_chunk(
+            &path,
+            &request.step,
+            &request.file,
+            request.offset,
+            request.version.as_deref(),
+            Some(&expected),
+        )
+        .await;
     }
     if request.step == "brain-result" && request.file == "output.json" {
         let managed = worker
@@ -65,6 +115,32 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
     if request.execution.kind == ExecutionKind::Project {
         return super::query::project::artifact(worker, request).await;
     }
+    if request.step == "workspace" && request.execution.kind != ExecutionKind::Dag {
+        if request.index.is_some() {
+            return Ok(RpcReply::error(
+                400,
+                "workspace artifacts have no instance index",
+            ));
+        }
+        let dir = {
+            let journal = worker.inner.journal.lock().await;
+            let record = journal
+                .records
+                .get(&request.execution.id)
+                .ok_or_else(|| anyhow::anyhow!("execution missing"))?;
+            if crate::brain::v4::parent::leaf(&record.assignment.request.input)
+                || crate::brain::v4::parent::root(&record.assignment.request.input)
+            {
+                Some(crate::brain::workdir::for_record(worker, record)?)
+            } else {
+                crate::brain::workspace::workdir(record)?
+            }
+        };
+        let Some(dir) = dir else {
+            return Ok(RpcReply::error(404, "execution has no shared workspace"));
+        };
+        return read_directory(&dir, &request, true).await;
+    }
     if request.execution.kind != ExecutionKind::Dag {
         return Ok(RpcReply::error(400, "artifacts require a DAG execution"));
     }
@@ -75,9 +151,6 @@ async fn read_fields(worker: &Worker, request: &ArtifactRequest) -> Result<RpcRe
     let id = &request.execution.id;
     let step = &request.step;
     let index = request.index;
-    let name = request.file.as_str();
-    let offset = request.offset;
-    let expected_version = request.version.as_deref();
     let workflow_root = {
         let journal = worker.inner.journal.lock().await;
         crate::layout::dag::accepted_parent(
@@ -102,6 +175,15 @@ async fn read_fields(worker: &Worker, request: &ArtifactRequest) -> Result<RpcRe
             "artifact directory cannot be a symlink"
         );
     }
+    read_directory(&dir, request, false).await
+}
+
+async fn read_directory(
+    dir: &std::path::Path,
+    request: &ArtifactRequest,
+    shared: bool,
+) -> Result<RpcReply> {
+    let name = request.file.as_str();
     if name.is_empty()
         || name.contains('\\')
         || name
@@ -114,15 +196,17 @@ async fn read_fields(worker: &Worker, request: &ArtifactRequest) -> Result<RpcRe
     let declared = if matches!(
         name,
         "output.txt" | "output.json" | "meta.json" | "artifacts.json"
-    ) {
+    ) || (shared && matches!(name, "context.json" | "plan.json" | "inputs.json"))
+    {
         None
     } else {
-        let Some(value) = declaration(&dir, name).await? else {
+        let Some(value) = declaration(dir, name).await? else {
             return Ok(RpcReply::error(400, "unknown artifact file"));
         };
         Some(value)
     };
     let path = dir.join(name);
+    crate::brain::workspace::checked(dir, &path)?;
     if !path.exists() {
         return Ok(RpcReply::error(404, "artifact not available"));
     }
@@ -133,10 +217,10 @@ async fn read_fields(worker: &Worker, request: &ArtifactRequest) -> Result<RpcRe
     }
     read_chunk(
         &path,
-        step,
+        &request.step,
         name,
-        offset,
-        expected_version,
+        request.offset,
+        request.version.as_deref(),
         declared.as_ref(),
     )
     .await
@@ -154,13 +238,21 @@ async fn declaration(dir: &std::path::Path, name: &str) -> Result<Option<(u64, S
         };
         let value: Value = serde_json::from_slice(&bytes)?;
         let row = if file == "artifacts.json" {
-            value["files"]
-                .as_array()
-                .and_then(|rows| rows.iter().find(|row| row["path"] == name))
+            value["files"].as_array().and_then(|rows| {
+                rows.iter().find(|row| {
+                    row.get("path")
+                        .or_else(|| row.get("file"))
+                        .and_then(Value::as_str)
+                        == Some(name)
+                })
+            })
         } else {
-            value
-                .get("report_archive")
-                .filter(|row| row["file"] == name)
+            value.get("report_archive").filter(|row| {
+                row.get("path")
+                    .or_else(|| row.get("file"))
+                    .and_then(Value::as_str)
+                    == Some(name)
+            })
         };
         if let Some(row) = row {
             let (Some(bytes), Some(hash)) = (row["bytes"].as_u64(), row["sha256"].as_str()) else {

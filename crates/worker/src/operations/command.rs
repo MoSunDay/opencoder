@@ -109,20 +109,25 @@ pub(super) async fn command(
             let Some(mut record) = journal.records.get(id).cloned() else {
                 return Ok(RpcReply::error(404, "execution not found"));
             };
-            if command.input.get("operator_environment_version").is_some() {
+            const OWNED: [&str; 4] = [
+                "operator_environment_version",
+                "brain_workspace",
+                "layered_artifacts",
+                "execution_io_version",
+            ];
+            if OWNED.iter().any(|key| command.input.get(key).is_some()) {
                 return Ok(RpcReply::error(
                     400,
-                    "operator environment version is node-owned",
+                    "operator environment and Brain workspace are node-owned",
                 ));
             }
-            let version = record
-                .annotations
-                .get("operator_environment_version")
-                .cloned();
-            record.annotations = command.input;
-            if let Some(version) = version {
-                record.annotations["operator_environment_version"] = version;
+            let mut annotations = command.input;
+            for key in OWNED {
+                if let Some(value) = record.annotations.get(key) {
+                    annotations[key] = value.clone();
+                }
             }
+            record.annotations = annotations;
             journal.save(record)?;
             Ok(RpcReply::ok(json!({"ok":true})))
         }
@@ -227,18 +232,26 @@ pub(crate) async fn durable_stop(
     id: &str,
     intent: StopIntent,
 ) -> Result<RpcReply> {
+    let mut timing = super::admission::timing::Timing::new(id, "stop");
     let gate = worker.lifecycle_gate(id).await;
     let _guard = gate.lock().await;
+    timing.mark("lifecycle_lock");
     let cancel = worker.inner.active.lock().await.get(id).cloned();
-    let update = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .request_stop(id, intent, cancel.is_some())?;
-    if intent == StopIntent::Cancel {
+    timing.mark("active_lookup");
+    let update = {
         let mut journal = worker.inner.journal.lock().await;
-        if let Some(mut record) = journal.records.get(id).cloned() {
+        timing.mark("journal_lock");
+        let update = journal.request_stop(id, intent, cancel.is_some())?;
+        timing.mark("durable_stop");
+        // Do not release and requeue behind inventory/dispatch after the
+        // durable stop fence: cancellation must signal the owned process
+        // before another journal user can delay it.
+        if let Some(mut record) = journal
+            .records
+            .get(id)
+            .cloned()
+            .filter(|_| intent == StopIntent::Cancel)
+        {
             let mut changed = false;
             for control in record
                 .lifecycle
@@ -255,9 +268,12 @@ pub(crate) async fn durable_stop(
                 journal.save(record)?;
             }
         }
-    }
+        timing.mark("rerun_bookkeeping");
+        update
+    };
     if update.signal {
         cancel.expect("active cancellation token").cancel();
+        timing.mark("signal");
     } else {
         let record = worker.inner.journal.lock().await.records.get(id).cloned();
         if let Some(record) = record.filter(|r| r.assignment.index.kind == ExecutionKind::Project) {

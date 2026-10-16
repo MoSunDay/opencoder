@@ -260,34 +260,23 @@ impl Host {
                 .store
                 .shared_request_lock("runtime-use", &runtime.id)
                 .await?;
-            let inventory = match self.inventory(&runtime, false).await {
-                Ok(inventory) => {
-                    if self
-                        .store
-                        .definition("runtime_sleep", &runtime.id)
-                        .await?
-                        .is_some_and(|v| !v.is_null())
-                    {
-                        self.store
-                            .put_definition("runtime_sleep", &runtime.id, &serde_json::Value::Null)
-                            .await?;
-                    }
-                    inventory
-                }
-                Err(error) => {
-                    // Only an explicitly hibernated runtime may use its final
-                    // inventory. A missing live runtime fails readiness.
-                    if let Some(saved) = self
-                        .store
-                        .definition("runtime_sleep", &runtime.id)
-                        .await?
-                        .filter(|v| !v.is_null())
-                    {
-                        serde_json::from_value(saved)?
-                    } else {
-                        return Err(error);
-                    }
-                }
+            let inventory = if let Some(saved) = self
+                .store
+                .definition("runtime_sleep", &runtime.id)
+                .await?
+                .filter(|value| !value.is_null())
+            {
+                // A sleeping Runtime has a frozen final inventory. Its old
+                // port can belong to another service; only an explicit wake
+                // may clear this marker and resume live reads.
+                ensure!(
+                    runtime.mode == "retired",
+                    "sleep inventory requires a retired runtime"
+                );
+                serde_json::from_value(saved)?
+            } else {
+                // A missing live Runtime must still fail readiness.
+                self.inventory(&runtime, false).await?
             };
             let ids: Vec<_> = inventory
                 .indexes

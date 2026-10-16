@@ -1,4 +1,4 @@
-"""Deployment settings live in the existing opencoder.json configuration."""
+"""One deployment declaration supplies the persistent root and service settings."""
 from dataclasses import dataclass, fields
 from pathlib import Path
 import json
@@ -9,11 +9,9 @@ from urllib.parse import urlparse
 @dataclass(frozen=True)
 class Settings:
     state_dir: Path
-    server_workdir: Path
-    server_data: Path
-    agent_workdir: Path
     token_file: Path
     metrics_token_file: Path | None = None
+    auth_enabled: bool = True
     bin_dir: Path = Path("/usr/local/bin")
     node_name: str = "local"
     server_user: str = "opencoder-server"
@@ -33,6 +31,18 @@ class Settings:
     server_config: Path | None = None
 
     @property
+    def server_workdir(self):
+        return self.state_dir / "workspaces/server"
+
+    @property
+    def server_data(self):
+        return self.state_dir / "server"
+
+    @property
+    def agent_workdir(self):
+        return self.state_dir / "workspaces/agent"
+
+    @property
     def host_url(self):
         return f"http://127.0.0.1:{self.host_port}"
 
@@ -43,10 +53,14 @@ class Settings:
 
 def load(path):
     raw = json.loads(Path(path).read_text())["deployment"]
+    repeated = set(raw) & {"server_workdir", "server_data", "agent_workdir"}
+    if repeated:
+        raise ValueError("deployment.state_dir is the single persistent root; migrate existing data "
+                         "before removing redundant settings: " + ", ".join(sorted(repeated)))
     unknown = set(raw) - {field.name for field in fields(Settings)}
     if unknown:
         raise ValueError(f"unknown deployment settings: {sorted(unknown)}")
-    for key in ("state_dir", "server_workdir", "server_data", "agent_workdir",
+    for key in ("state_dir",
                 "token_file", "metrics_token_file", "bin_dir", "nginx_include", "systemd_dir", "legacy_agent_data",
                 "agent_config", "server_config"):
         if raw.get(key) is not None:
@@ -54,6 +68,10 @@ def load(path):
             if not raw[key].is_absolute() or any(c in str(raw[key]) for c in "\n\r%"):
                 raise ValueError(f"{key} must be an absolute path without control characters or %")
     settings = Settings(**raw)
+    if not isinstance(settings.auth_enabled, bool):
+        raise ValueError("auth_enabled must be a JSON boolean")
+    if settings.state_dir.is_symlink():
+        raise ValueError("state_dir must be a real directory, not a symlink")
     if settings.metrics_token_file is not None:
         if settings.metrics_token_file == settings.token_file:
             raise ValueError("metrics token file must differ from server token file")

@@ -26,7 +26,7 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
   };
   const columns = [
     { title: 'TODO', key: 'title', width: 220, searchValue: (r) => r.title, render: (_, r) => <Button type="link" className="project-name" onClick={(e) => { e.stopPropagation(); openTodo(r.id); }}><TableText>{r.title}</TableText></Button> },
-    { title: '所属专项', key: 'initiative', width: 170, kind: 'enum', searchValue: (r) => r.group_title || '未关联', render: (_, r) => <TableText>{r.group_title}</TableText> },
+    { title: '所属子项', key: 'initiative', width: 170, kind: 'enum', searchValue: (r) => r.group_title || '未关联', render: (_, r) => <TableText>{r.group_title}</TableText> },
     { title: '所属项目', key: 'project', width: 170, kind: 'enum', searchValue: (r) => r.goal_title || '未关联', render: (_, r) => <TableText>{r.goal_title}</TableText> },
     { title: '状态', key: 'status', width: 130, kind: 'enum', searchValue: (r) => LANES.find(([id]) => id === laneOf(r))?.[1], render: (_, r) => <div onClick={(e) => e.stopPropagation()}><Select size="small" aria-label={`${r.title}状态`} value={laneOf(r)} disabled={!canEdit || busyId === r.id} loading={busyId === r.id} onChange={(v) => setStatus(r, v)} style={{ width: '100%' }} options={LANES.map(([value, label]) => ({ value, label }))} /></div> },
     { title: 'Tag', key: 'tags', width: 180, kind: 'enum', searchValue: (r) => todoTags(overview, r).map((tag) => tag.name), render: (_, r) => <Space wrap size={[0, 4]}>{todoTags(overview, r).map((tag) => <Tag key={tag.id}>{tag.name}</Tag>)}</Space> },

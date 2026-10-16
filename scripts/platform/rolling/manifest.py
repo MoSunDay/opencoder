@@ -19,7 +19,7 @@ def verify(bundle):
     compatibility = manifest.get("compatibility", {})
     for key in ("protocol", "data_format"):
         limits = compatibility.get(key, {})
-        supported = (1,) if key == "protocol" else (1, 2, 3, 4, 5, 6, 7, 8, 9)
+        supported = (1,) if key == "protocol" else (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
         if limits.get("min") not in supported or limits.get("max") != limits.get("min"):
             raise ValueError(f"unsupported handoff {key}")
     info = _installer.build_info(bundle / "bin/opencoder-agent")
@@ -27,16 +27,56 @@ def verify(bundle):
         raise ValueError("release compatibility does not match compiled binary")
     if manifest.get("brain_schema_version", 4) != info.get("brain_schema_version", 4):
         raise ValueError("brain schema does not match compiled binary")
+    if execution_io(manifest) != execution_io(info):
+        raise ValueError("execution IO compatibility does not match compiled binary")
+    io_format(manifest)
     return manifest
 
 
+def execution_io(manifest):
+    # Releases before the reader bridge have no marker and use the legacy wire.
+    value = manifest.get('execution_io', {'reader': 0, 'writer': 0})
+    if (not isinstance(value, dict) or set(value) != {'reader', 'writer'}
+            or any(type(v) is not int or v not in (0, 1) for v in value.values())
+            or value['writer'] > value['reader']):
+        raise ValueError('unsupported execution IO compatibility')
+    return value
+
+
+def writer_preflight(candidate, current):
+    if execution_io(candidate)['writer'] > execution_io(current)['reader']:
+        raise ValueError('publish the execution IO reader bridge before enabling the writer; current rollback Server cannot read the new wire')
+
+
+def io_format(manifest):
+    io = execution_io(manifest)
+    data = manifest['compatibility']['data_format']
+    if data == {'min': 10, 'max': 10}:
+        if io != {'reader': 1, 'writer': 1}:
+            raise ValueError('handoff format 10 requires execution IO reader/writer 1')
+    elif io['writer'] != 0:
+        raise ValueError('execution IO writer requires handoff format 10 so legacy controllers reject unsafe rollback')
+    return data
+
+
 def compatible(candidate, retained):
+    reader = execution_io(candidate)['reader']
+    new_format = io_format(candidate)
     for previous in retained:
+        old_format = io_format(previous)
+        if reader < execution_io(previous)['writer']:
+            raise ValueError(f"release {candidate['release_id']} cannot read execution IO produced by retained release {previous['release_id']}; roll back to the reader bridge")
         for key in ("protocol", "data_format"):
             new = candidate["compatibility"][key]
             old = previous["compatibility"][key]
             if new != old:
-                raise ValueError(f"release {previous['release_id']} has a different {key}; use --maintenance")
+                # Schema remains v39. Format 10 marks the durable new binding
+                # wire so a legacy controller cannot authorize unsafe rollback.
+                io_bridge = key == 'data_format' and reader == 1 and all(
+                    value in ({'min': 9, 'max': 9}, {'min': 10, 'max': 10})
+                    for value in (new_format, old_format))
+                if not io_bridge:
+                    raise ValueError(f"release {previous['release_id']} has a different {key}; use --maintenance")
         if candidate["protocol_version"] != previous["protocol_version"]:
             raise ValueError("fleet protocol differs from a retained runtime")
 

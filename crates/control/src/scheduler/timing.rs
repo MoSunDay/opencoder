@@ -20,15 +20,18 @@ pub(super) struct DueTick {
 
 /// Creation, edits and re-enabling take effect from the stored revision.
 /// Only unchanged definitions catch up across downtime or retry old errors.
+/// Definitively rejected dispatches disable retry and follow normal cron timing.
 pub(super) fn plan_due(
     expr: &CronExpr,
     def: &ScheduleDefRecord,
     last: Option<&ScheduleRunRecord>,
     now: i64,
+    retry_error: bool,
 ) -> Option<DueTick> {
     let effective_since = def.created_at.max(def.updated_at);
     if let Some(last) = last {
-        if last.status == SCHEDULE_RUN_ERROR
+        if retry_error
+            && last.status == SCHEDULE_RUN_ERROR
             && last.scheduled_for_ms >= effective_since
             && last.scheduled_for_ms <= now
             && now.saturating_sub(last.scheduled_for_ms) < RETRY_WINDOW_MS
@@ -114,9 +117,9 @@ mod tests {
         let expr = CronExpr::parse("* * * * *", None).unwrap();
         let created = NOW_MS + 1_000;
         let def = definition(created, created);
-        assert_eq!(plan_due(&expr, &def, None, created + 15_000), None);
+        assert_eq!(plan_due(&expr, &def, None, created + 15_000, true), None);
         assert_eq!(
-            plan_due(&expr, &def, None, NOW_MS + 60_000),
+            plan_due(&expr, &def, None, NOW_MS + 60_000, true),
             Some(DueTick {
                 scheduled_for_ms: NOW_MS + 60_000,
                 missed_for_ms: None,
@@ -124,7 +127,7 @@ mod tests {
         );
         // Creating exactly at a tick still starts strictly after creation.
         assert_eq!(
-            plan_due(&expr, &definition(NOW_MS, NOW_MS), None, NOW_MS),
+            plan_due(&expr, &definition(NOW_MS, NOW_MS), None, NOW_MS, true),
             None
         );
     }
@@ -135,16 +138,19 @@ mod tests {
         let def = definition(NOW_MS - CATCHUP_WINDOW_MS, NOW_MS + 1_000);
         for status in [opencoder_store::SCHEDULE_RUN_FIRED, SCHEDULE_RUN_ERROR] {
             let old = run(NOW_MS - 60_000, status);
-            assert_eq!(plan_due(&expr, &def, Some(&old), NOW_MS + 15_000), None);
             assert_eq!(
-                plan_due(&expr, &def, Some(&old), NOW_MS + 60_000),
+                plan_due(&expr, &def, Some(&old), NOW_MS + 15_000, true),
+                None
+            );
+            assert_eq!(
+                plan_due(&expr, &def, Some(&old), NOW_MS + 60_000, true),
                 Some(DueTick {
                     scheduled_for_ms: NOW_MS + 60_000,
                     missed_for_ms: None,
                 })
             );
         }
-        assert_eq!(plan_due(&expr, &def, None, NOW_MS + 15_000), None);
+        assert_eq!(plan_due(&expr, &def, None, NOW_MS + 15_000, true), None);
     }
 
     #[test]
@@ -153,7 +159,7 @@ mod tests {
         let def = definition(NOW_MS - 180_000, NOW_MS - 180_000);
         // Restart before the first ever dispatch still catches up.
         assert_eq!(
-            plan_due(&expr, &def, None, NOW_MS),
+            plan_due(&expr, &def, None, NOW_MS, true),
             Some(DueTick {
                 scheduled_for_ms: NOW_MS,
                 missed_for_ms: Some(NOW_MS - 120_000),
@@ -161,14 +167,17 @@ mod tests {
         );
         let last = run(NOW_MS - 120_000, opencoder_store::SCHEDULE_RUN_FIRED);
         assert_eq!(
-            plan_due(&expr, &def, Some(&last), NOW_MS),
+            plan_due(&expr, &def, Some(&last), NOW_MS, true),
             Some(DueTick {
                 scheduled_for_ms: NOW_MS,
                 missed_for_ms: Some(NOW_MS - 60_000),
             })
         );
         let latest = run(NOW_MS, opencoder_store::SCHEDULE_RUN_FIRED);
-        assert_eq!(plan_due(&expr, &def, Some(&latest), NOW_MS + 15_000), None);
+        assert_eq!(
+            plan_due(&expr, &def, Some(&latest), NOW_MS + 15_000, true),
+            None
+        );
     }
 
     #[test]
@@ -177,7 +186,7 @@ mod tests {
         let def = definition(NOW_MS - CATCHUP_WINDOW_MS, NOW_MS - CATCHUP_WINDOW_MS);
         let last = run(NOW_MS - RETRY_WINDOW_MS + 1, SCHEDULE_RUN_ERROR);
         assert_eq!(
-            plan_due(&expr, &def, Some(&last), NOW_MS),
+            plan_due(&expr, &def, Some(&last), NOW_MS, true),
             Some(DueTick {
                 scheduled_for_ms: last.scheduled_for_ms,
                 missed_for_ms: None,
@@ -185,7 +194,7 @@ mod tests {
         );
         let expired = run(NOW_MS - RETRY_WINDOW_MS, SCHEDULE_RUN_ERROR);
         assert_eq!(
-            plan_due(&expr, &def, Some(&expired), NOW_MS),
+            plan_due(&expr, &def, Some(&expired), NOW_MS, true),
             Some(DueTick {
                 scheduled_for_ms: NOW_MS,
                 missed_for_ms: Some(expired.scheduled_for_ms + 60_000),
@@ -194,13 +203,38 @@ mod tests {
     }
 
     #[test]
+    fn rejected_error_waits_for_the_next_tick_and_then_catches_up() {
+        let expr = CronExpr::parse("* * * * *", None).unwrap();
+        let def = definition(NOW_MS - CATCHUP_WINDOW_MS, NOW_MS - CATCHUP_WINDOW_MS);
+        let rejected = run(NOW_MS, SCHEDULE_RUN_ERROR);
+        assert_eq!(
+            plan_due(&expr, &def, Some(&rejected), NOW_MS + 15_000, false),
+            None
+        );
+        assert_eq!(
+            plan_due(&expr, &def, Some(&rejected), NOW_MS + 60_000, false),
+            Some(DueTick {
+                scheduled_for_ms: NOW_MS + 60_000,
+                missed_for_ms: None
+            })
+        );
+        assert_eq!(
+            plan_due(&expr, &def, Some(&rejected), NOW_MS + 180_000, false),
+            Some(DueTick {
+                scheduled_for_ms: NOW_MS + 180_000,
+                missed_for_ms: Some(NOW_MS + 60_000),
+            })
+        );
+    }
+
+    #[test]
     fn future_definitions_and_ledger_rows_never_fire_early() {
         let expr = CronExpr::parse("* * * * *", None).unwrap();
         let def = definition(NOW_MS + 1_000, NOW_MS + 1_000);
-        assert_eq!(plan_due(&expr, &def, None, NOW_MS), None);
+        assert_eq!(plan_due(&expr, &def, None, NOW_MS, true), None);
         let def = definition(NOW_MS - CATCHUP_WINDOW_MS, NOW_MS - CATCHUP_WINDOW_MS);
         let future = run(NOW_MS + 60_000, SCHEDULE_RUN_ERROR);
-        assert_eq!(plan_due(&expr, &def, Some(&future), NOW_MS), None);
+        assert_eq!(plan_due(&expr, &def, Some(&future), NOW_MS, true), None);
     }
 
     #[test]

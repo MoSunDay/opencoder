@@ -14,7 +14,7 @@ import { err, ok } from '../notice.js';
 
 export function initiativeColumns({ openInitiative }) {
   return [
-    { title: '专项', key: 'title', width: 300, searchValue: (r) => r.title, render: (_, r) => <Button type="link" className="project-name" onClick={(e) => { e.stopPropagation(); openInitiative(r.id); }}><span className="project-name-full">{r.title}</span></Button> },
+    { title: '子项', key: 'title', width: 300, searchValue: (r) => r.title, render: (_, r) => <Button type="link" className="project-name" onClick={(e) => { e.stopPropagation(); openInitiative(r.id); }}><span className="project-name-full">{r.title}</span></Button> },
     { title: '所属项目', key: 'project', width: 300, kind: 'enum', searchValue: (r) => r.goal_title || '未关联', render: (_, r) => <TableText>{r.goal_title}</TableText> },
     { title: 'TODO 数', key: 'todos', width: 100, kind: 'number', searchValue: (r) => r.progress.total, render: (_, r) => r.progress.total },
     ...peopleColumns(),
@@ -31,23 +31,23 @@ export function InitiativesTab({ overview, refresh, onNotice, openInitiative }) 
       const body = { ...values, goal_id: values.goal_id ?? null };
       if (editing) await apiPatch(`/api/project/initiatives/${encodeURIComponent(editing.id)}`, body);
       else await apiPost('/api/project/initiatives', body);
-      setOpen(false); await refresh(); onNotice(ok('专项已保存，TODO 标签已按归属重新匹配')); return true;
+      setOpen(false); await refresh(); onNotice(ok('子项已保存，TODO 标签已按归属重新匹配')); return true;
     } catch (error) { onNotice(err(error.message)); return false; }
   };
   const remove = async (row) => {
-    try { await apiDel(`/api/project/initiatives/${encodeURIComponent(row.id)}`); await refresh(); onNotice(ok('专项已删除')); }
+    try { await apiDel(`/api/project/initiatives/${encodeURIComponent(row.id)}`); await refresh(); onNotice(ok('子项已删除')); }
     catch (error) { onNotice(err(error.message)); }
   };
   const columns = [...initiativeColumns({ openInitiative }), { ...dateColumn, width: 170 }, { title: '操作', key: 'actions', width: 180, fixed: 'right', render: (_, row) => <Space onClick={(e) => e.stopPropagation()} wrap size={0}>
     <SummaryHistory compact collection="initiatives" record={row} refresh={refresh} />
     <EditButton type="link" size="small" onClick={() => { setEditing(row); setOpen(true); }}>编辑</EditButton>
-    <Popconfirm title="删除该专项？" onConfirm={() => remove(row)}><EditButton danger type="link" size="small" disabled={!!row.todos?.length} title={row.todos?.length ? '先迁移或移除 TODO，再删除专项' : ''}>删除</EditButton></Popconfirm>
+    <Popconfirm title="删除该子项？" onConfirm={() => remove(row)}><EditButton danger type="link" size="small" disabled={!!row.todos?.length} title={row.todos?.length ? '先迁移或移除 TODO，再删除子项' : ''}>删除</EditButton></Popconfirm>
   </Space> }];
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
-    <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建专项</EditButton>
-    <ProjectTable scroll={{ x: 2060 }} label="专项表格" rows={rows} columns={columns} onRowClick={(row) => openInitiative(row.id)} locale={{ emptyText: '还没有专项' }} />
-    <MdEditDrawer open={open} title={editing ? '编辑专项' : '新建专项'} initial={editing}
-      extraTop={<><Form.Item name="goal_id" label="所属项目"><Select {...searchSelect} aria-label="goal_id" placeholder="独立专项" options={projectOptions(overview)} /></Form.Item></>}
+    <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建子项</EditButton>
+    <ProjectTable scroll={{ x: 2060 }} label="子项表格" rows={rows} columns={columns} onRowClick={(row) => openInitiative(row.id)} locale={{ emptyText: '还没有子项' }} />
+    <MdEditDrawer open={open} title={editing ? '编辑子项' : '新建子项'} detailLabel="子项目标" initial={editing}
+      extraTop={<><Form.Item name="goal_id" label="所属项目"><Select {...searchSelect} aria-label="goal_id" placeholder="独立子项" options={projectOptions(overview)} /></Form.Item></>}
       onCancel={() => setOpen(false)} onOk={save} />
   </Space>;
 }

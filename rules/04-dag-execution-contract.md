@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 # 规则 04：DAG 执行约定
 
@@ -11,7 +11,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 ## 节点与容器
 
 - Server 是控制面，只保存定义、派发和执行索引；一次 DAG 运行及其详细记录始终归属同一个执行节点，不跨节点分拆步骤。
-- 派发前确认节点支持 `dag_container_v1`；没有这项能力的节点不能接收静态或动态 DAG。动态节点还必须支持 `dag_dynamic_v1`，不能因旧节点只回复通用兼容标记就放行。
+- 派发前确认节点支持 `dag_container_v1` 和 `execution_io_v1`；没有这些能力的节点不能接收静态或动态 DAG。动态节点还必须支持 `dag_dynamic_v1`，不能因旧节点只回复通用兼容标记就放行。
 - 每次运行只启动一个 `runc` 容器。静态步骤、动态实例与 Agent 步骤都在该容器内执行，共享同一个 `/workspace`；不得恢复每步单独启动容器的做法。
 - 所有步骤使用同一个执行用户；目录是组织方式，不是步骤之间的安全边界。不得重新加入步骤级运行时隔离或宿主执行回退。
 - 静态步骤的工作目录是 `/workspace/<step_name>`，动态实例是 `/workspace/<step_name>/instances/<index>`。步骤名称遵循协议校验，不得与运行时保留目录冲突；保留名单以 `crates/dag/src/artifacts.rs` 为准。
@@ -28,6 +28,8 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 - 执行节点按 `YYYY-MM-DD/<dag_id>/<run_id>` 保存本次写层、步骤产物和恢复记录；Server 不集中保存工作区文件。日期和标识符必须稳定且路径安全。
 - 日期取 Server 创建时间的 UTC 日期。受理时保存实际目录与配置，重启和恢复不能根据新配置重新选择目录或资源版本。
 - 步骤通过 `OPENCODER_STEP_CONTEXT` 读取只读 `meta/context.json`，通过 `output.json` 交付结构化结果。其他需要下载的文件必须在 `artifacts.json` 声明相对路径、字节数及 SHA-256；归档只复制声明的文件，不复制整块源工作区。
+- 静态二进制、Agent 与动态实例的 context 都包含稳定 `run_id` 和本次冻结的完整 `inputs`，`steps` 仍只包含声明依赖的上游结果。动态实例另有 `instance.index` 与 `instance.input`，不改变参数数组或 Agent how 追加规则。运行在容器启动前保存完整 `inputs.json`；恢复核对已保存输入，快照缺失、软链接或内容不一致时拒绝执行，不重建快照或覆盖原记录。
+- Brain 调用 DAG 时只交接绑定的命名输入和执行结果；DAG 保留自己的运行空间。交给 Brain 的文件索引包含已声明的业务文件、步骤输出与元数据，以及动态实例的文件，引用保留 execution、step、可选 index、file、bytes 和 SHA-256。
 - 运行前从 NFS 固定每个步骤使用的二进制与 Agent 版本，仅准备本次所需依赖到该步骤的 `/workspace/<step_name>/meta/`；缺失、摘要不符或工作区无法建立时拒绝启动，不能退回宿主执行。
 
 ## 步骤能力与变更门槛

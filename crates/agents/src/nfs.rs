@@ -9,6 +9,8 @@
 //!   bytes for short paths, or a digest for long paths. A tiny id→path
 //!   registry is the only state — integration glue required because the
 //!   `NFSFileSystem` trait exchanges opaque `u64` ids in both directions.
+//!   Unknown long handles return STALE without filesystem access; after an
+//!   export restart clients must LOOKUP those paths again.
 //! - **traversal rejection at the FS layer**: handle/lookup names must be a
 //!   single canonical UTF-8 component — `..`, `.`, absolute paths, embedded
 //!   separators, NUL and non-UTF8 are rejected before any `join`.
@@ -22,7 +24,7 @@
 use std::collections::HashMap;
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use nfsserve::fs_util::metadata_to_fattr3;
@@ -42,9 +44,10 @@ const MAX_FH_PATH: usize = 60;
 const MAX_READ: usize = 1024 * 1024;
 
 /// The exported tree: absolute root + the id→path glue registry.
+#[derive(Clone)]
 pub struct ReadOnlyAgentsFs {
     root: PathBuf,
-    ids: RwLock<HashMap<fileid3, PathBuf>>,
+    ids: Arc<RwLock<HashMap<fileid3, PathBuf>>>,
 }
 
 impl ReadOnlyAgentsFs {
@@ -63,7 +66,7 @@ impl ReadOnlyAgentsFs {
 pub fn agents_fs(root: PathBuf) -> ReadOnlyAgentsFs {
     ReadOnlyAgentsFs {
         root,
-        ids: RwLock::new(HashMap::new()),
+        ids: Arc::new(RwLock::new(HashMap::new())),
     }
 }
 
@@ -205,7 +208,7 @@ impl NFSFileSystem for ReadOnlyAgentsFs {
     }
 
     fn fh_to_id(&self, fh: &nfs_fh3) -> Result<fileid3, nfsstat3> {
-        let rel = handles::resolve(&self.root, &self.ids, &fh.data)?;
+        let rel = handles::resolve(&self.ids, &fh.data)?;
         Ok(register(&self.ids, &rel))
     }
 

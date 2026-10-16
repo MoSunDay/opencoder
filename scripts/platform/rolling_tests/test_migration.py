@@ -16,7 +16,7 @@ class MigrationTests(unittest.TestCase):
     def test_service_stage_preserves_existing_resource_mounts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            settings = Settings(root,root/'work',root/'server',root/'agent',root/'token',
+            settings = Settings(root, root / 'token',
                 nginx_include=root/'nginx.conf',systemd_dir=root/'units')
             settings.systemd_dir.mkdir()
             mount = settings.systemd_dir / 'mnt-opencoder-agents.mount'
@@ -50,7 +50,7 @@ class MigrationTests(unittest.TestCase):
     def test_resume_after_current_pointer_was_written_finishes_ingress(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            settings = Settings(root,root/'work',root/'server',root/'agent',root/'token',
+            settings = Settings(root, root / 'token',
                 nginx_include=root/'nginx.conf',systemd_dir=root/'units')
             journal = Journal(root)
             record = record_for(settings,manifest('r1'),0)

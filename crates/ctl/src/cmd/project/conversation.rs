@@ -30,9 +30,11 @@ pub struct Prompt {
 pub struct Messages {
     #[command(flatten)]
     pub target: Target,
-    #[arg(long)]
+    /// Native message sequence cursor; use the returned next_cursor value.
+    #[arg(long = "seq", alias = "after-seq")]
     pub after_seq: Option<i64>,
-    #[arg(long)]
+    /// Byte offset within the cursor's message.
+    #[arg(long = "offset", alias = "message-offset")]
     pub message_offset: Option<u64>,
 }
 
@@ -93,9 +95,7 @@ pub async fn run(
             return Ok(4);
         }
     };
-    if matches!(operation, "prompt" | "interrupt" | "messages")
-        && !matches!(kind, "agent" | "operator")
-    {
+    if matches!(operation, "prompt" | "interrupt") && !matches!(kind, "agent" | "operator") {
         out::fail(409, "this capability does not support a conversation");
         return Ok(4);
     }

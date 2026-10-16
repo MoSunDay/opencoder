@@ -110,6 +110,12 @@ pub struct LayeredPlan {
     pub edges: Vec<LayeredEdge>,
     #[serde(default = "max_rounds")]
     pub max_rounds: u32,
+    /// Keep Operator steps on the owning node in one run workspace.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shared_workspace: bool,
+    /// Rework may revisit only the current or immediately preceding layer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adjacent_only: bool,
 }
 impl LayeredPlan {
     pub fn node(&self, node_id: &str) -> Option<&LayeredNode> {
@@ -132,6 +138,13 @@ impl LayeredPlan {
                 });
             }
             for target in self.layers.iter().take(index + 1) {
+                if self.adjacent_only
+                    && target.layer_id != layer.layer_id
+                    && index > 0
+                    && target.layer_id != self.layers[index - 1].layer_id
+                {
+                    continue;
+                }
                 self.transitions.push(LayeredTransition {
                     from: layer.layer_id.clone(),
                     to: target.layer_id.clone(),

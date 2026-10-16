@@ -11,6 +11,7 @@ import { TodoActions } from './forms/section.jsx';
 import { useCloseGuard } from './forms/closeGuard.js';
 import { TodoExecution } from './execute/todoExecution.jsx';
 import { TodoComments } from './comments/panel.jsx';
+import { UnavailableDetail } from './navigation/unavailable.jsx';
 
 function seed(todo) {
   return { title: todo.title || '', draft: todo.draft || '', initiative_id: todo.initiative_id || null,
@@ -95,9 +96,9 @@ function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice 
   </Drawer>;
 }
 
-export function TodoDrawer({ todoId, overview, refresh, onClose, onNotice }) {
+export function TodoDrawer({ todoId, overview, overviewError, refresh, onClose, onNotice }) {
   if (!todoId) return null;
   const todo = flattenTodos(overview).find((item) => item.id === todoId);
-  if (!todo) return <Drawer open title="TODO" onClose={onClose} placement="right" size="100vw"><Typography.Text type="secondary">TODO 已删除或正在加载</Typography.Text></Drawer>;
+  if (!todo) return <Drawer open title={`TODO · ${todoId}`} onClose={onClose} placement="right" size="100vw"><UnavailableDetail label="TODO" overview={overview} error={overviewError} refresh={refresh} /></Drawer>;
   return <TodoDrawerSession key={todoId} {...{ todoId, todo, overview, refresh, onClose, onNotice }} />;
 }

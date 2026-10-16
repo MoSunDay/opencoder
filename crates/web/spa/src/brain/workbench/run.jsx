@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { LayeredRunBody } from './layered/run.jsx';
 import { isLayeredView } from './layered/model.js';
 import { useBrainRun } from './useRun.js';
+import { replaceLocation } from '../../fleet/navigation/history.js';
 export function BrainRunBody({ id, onNotice, header = null }) {
   const { run, error, connection, refresh } = useBrainRun(id);
   return <div className="brain-run">{header}{error && <Alert type="error" showIcon title={error} action={<Button onClick={() => refresh()?.catch(() => {})}>重试</Button>} />}
@@ -11,6 +12,6 @@ export function BrainRunBody({ id, onNotice, header = null }) {
   </div>;
 }
 export function BrainRunView({ id, onBack, onNotice }) {
-  useEffect(() => { const params = new URLSearchParams(location.search); params.set('brain_run', id); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); }, [id]);
+  useEffect(() => { const params = new URLSearchParams(location.search); params.set('brain_run', id); replaceLocation(`${location.pathname}?${params}${location.hash}`); }, [id]);
   return <BrainRunBody id={id} onNotice={onNotice} header={<Button className="brain-run-back" aria-label="返回工作台" icon={<ArrowLeftOutlined />} onClick={onBack} />} />;
 }

@@ -55,6 +55,8 @@ TODO 正文显示为“关键信息”，保留 `draft` 数据和 Markdown 编�
 - 先发布兼容版本，再开放上传；最低回滚能力要求在配置变更前持久化，禁止退回缺少删除保护的 Server。
 - 新增验证映射：独立 NFS/代理 `dedicated_service_exports_uploaded_bytes_and_rejects_nfs_writes`；关闭上传 `disabled_uploads_preserve_reads_and_delete_protection`；无回退 `unavailable_dedicated_owner_never_falls_back_to_local_export`；无数据库认证 `private_seed_authentication_needs_no_database`；安装恢复与回滚 `rolling_tests/test_todo_service.py`。
 
-后续定向验证：独立托管后的 control `project_files` 8 passed；core 配置 2 passed；Web 鉴权 6 passed；Server 参数 4 passed；相关五个 crate 的 Clippy 零警告。Python 存储与安装恢复 8 passed、部署 29 passed、信号 10 passed、manifest 15 passed、probes 14 passed、CLI 3 passed、维护 flow 11 passed。未运行全仓测试。
+后续定向验证：独立托管后的 control `project_files` 8 passed；core 配置 2 passed；Web 鉴权 6 passed；Server 参数 4 passed；相关五个 crate 的 Clippy 零警告。Python 存储与安装恢复 9 passed、部署 29 passed、信号 10 passed、manifest 15 passed、probes 14 passed、CLI 3 passed、维护 flow 11 passed。未运行全仓测试。
 
 公开入口验收由 `scripts/acceptance/todo_files/live.py` 和 `browser.js` 覆盖两个任务、五种文件、HTTP/CLI/内核 NFS 内容校验、四种屏宽、静态产物一致性及 900 秒持续观察。发布连续性继续使用现有 `smooth_release/live.py`。
+
+恢复首次服务安装前核验当前 Server 已不再依赖 TODO 存储，避免撤销仍在使用的服务；用例 `test_restore_cannot_remove_storage_used_by_the_active_server` 覆盖拒绝发生在任何系统操作之前。

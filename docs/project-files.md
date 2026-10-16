@@ -52,7 +52,7 @@ mount -t nfs -o ro,vers=3,tcp,port=2053,mountport=2053,nolock server:/ /mnt/todo
 两版均具备 `todo_files_contract=1` 后，使用 `deploy.sh --todo-uploads enable` 开放上传；
 命令先持久化最低回滚能力要求，再修改配置。`--todo-uploads disable` 关闭新上传并保留读取。
 回滚保留专用服务及文件，并拒绝缺少保护的旧 Server；不恢复旧数据库。
-首次安装中断可用同一发布包续跑；未开放上传且没有文件时可用 `--restore-todo-service` 恢复配置与服务安装。
+首次安装中断可用同一发布包续跑；未开放上传且没有文件时，先回退仍依赖该服务的 Server，再用 `--restore-todo-service` 恢复配置与服务安装。
 备份包含实际绑定的文件根、绑定及专用服务恢复记录，包括自定义根目录。
 备份期间通过跨进程锁暂停文件操作；既有数据库备份的跨库一致性语义保持不变。
 

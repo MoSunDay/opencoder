@@ -120,6 +120,7 @@ class TodoServiceTests(unittest.TestCase):
         self.ops.crash = True
         with self.assertRaises(RuntimeError):
             installation.prepare(self.settings, self.bundle, self.candidate, self.ops)
+
         config = self.config(); config['project']['todo_storage']['max_file_bytes'] = 2
         write(self.config_path, config)
         with self.assertRaisesRegex(ValueError, 'configuration changed'):
@@ -127,6 +128,14 @@ class TodoServiceTests(unittest.TestCase):
         (installation.location(self.settings)/'bin/opencoder-server').write_bytes(b'tampered')
         with self.assertRaisesRegex(ValueError, 'artifact changed'):
             installation.prepare(self.settings, self.bundle, self.candidate, self.ops)
+
+    def test_restore_cannot_remove_storage_used_by_the_active_server(self):
+        installation.prepare(self.settings, self.bundle, self.candidate, self.ops)
+        self.bridge()
+        before = len(self.ops.calls)
+        with self.assertRaisesRegex(ValueError, 'active TODO Server'):
+            installation.restore(self.settings, self.ops)
+        self.assertEqual(len(self.ops.calls), before)
 
 
 if __name__ == '__main__':

@@ -190,3 +190,5 @@ Ontology 备份先取得 ontology.db 快照，再复制数据库记录的实际�
 Runtime 使用私有挂载时，宿主看到的 `workspace` 可能只是空挂载点。当前 `release_native_gate` 文件辅助函数不跨挂载空间；独立验收作业须按任务所属 Runtime，通过 `nsenter --target <Runtime PID> --mount --root --wd=/ -- ...` 在正确视图中调用它。仅切换 `--mount` 仍可能沿用宿主的根目录视图。操作只限本次验收创建的等待标记，失败日志与复验回执均须保留。
 
 加入 `--signal` 使用 Server 信号发布；两版均支持信号时，再加入 `--signal-roundtrip`，在新旧长任务仍运行时执行发布、回滚、再发布。验收脚本应由独立 systemd 作业运行，避免终端退出中断观察。独立信号失败演练入口为 `scripts/acceptance/signal_release/main.py --bin-dir <已构建二进制目录> --nginx <nginx路径> --rootfs <配套原生镜像>`，验证真实 USR1/USR2、重复信号、失败回执和 Server 继续服务。
+
+TODO 过程文件由专用 `opencoder-todo-resources.service` 提供只读 NFS（端口 2053、管理端口 18085），不升级或重启既有资源服务。首次滚动发布安装服务并绑定 `<state_dir>/exports/todos`；先发布上传关闭的兼容版本，再发布完整页面，最后用 `--todo-uploads enable` 开放上传。持久化的最低回滚能力要求阻止退回没有文件保护的旧 Server；回滚关闭上传并保留读取与文件。健康检查核验实际进程摘要、导出根及端口。备份覆盖实际文件根、`todo-storage.json`、服务安装与上传策略记录，备份期间暂停文件操作。详见 [TODO 任务文件](project-files.md)。

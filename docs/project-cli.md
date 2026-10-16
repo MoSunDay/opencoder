@@ -75,3 +75,5 @@ opencoder-79 project todos messages TODO_ID --execution EXECUTION_ID --seq 7 --o
 ## Skill
 
 [opencoder-projects](../skills/opencoder-projects/SKILL.md) 是可安装的 Codex Skill，安装目录为 `~/.codex/skills/opencoder-projects`；也可将同一目录安装到 OpenCoder 的 `~/.opencoder/skills`。使用 `$opencoder-projects` 发起项目操作。Skill 使用 CLI，不写数据库或修改鉴权数据。
+
+任务资料可通过 `project todos files list/upload/download/delete` 管理；`context` 返回文件清单和下载入口。正文“关键信息”仍使用 `draft`。配置与命令见 [TODO 任务文件](project-files.md)。

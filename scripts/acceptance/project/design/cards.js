@@ -63,11 +63,11 @@ async function verifyCards({ page, api, initiative, rows }) {
   page.off('request', observe);
   await title().focus();
   await title().press('Enter');
-  await drawer.getByLabel('任务说明预览', { exact: true }).waitFor();
+  await drawer.getByLabel('关键信息预览', { exact: true }).waitFor();
   assert.equal(await drawer.getByLabel('TODO 标题', { exact: true }).inputValue(), todo.title);
   await drawer.locator('.ant-drawer-close').click(); await drawer.waitFor({ state: 'hidden' });
   await title().click();
-  await drawer.getByLabel('任务说明预览', { exact: true }).waitFor();
+  await drawer.getByLabel('关键信息预览', { exact: true }).waitFor();
   await drawer.locator('.ant-drawer-close').click(); await drawer.waitFor({ state: 'hidden' });
   return { title_drag: true, content_drag: true, no_accidental_open: true, save_failure_rollback: true,
     menu_without_drag: true, keyboard_cancel_preserves_drawer: true, title_click_and_enter_open: true };

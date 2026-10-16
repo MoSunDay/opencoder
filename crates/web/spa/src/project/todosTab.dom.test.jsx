@@ -97,8 +97,8 @@ it('saves TODO changes before opening the native capability UI', async () => {
   render(<TodoDrawer todoId="todo-1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
   fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
   fireEvent.click(screen.getByRole('tab', { name: '任务', exact: true }));
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('编辑'));
-  fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '新说明' } });
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('编辑'));
+  fireEvent.change(screen.getByLabelText('关键信息'), { target: { value: '新说明' } });
   fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
   fireEvent.click(action('指派所选能力'));
   await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/todo-1', expect.objectContaining({ draft: '新说明' })));

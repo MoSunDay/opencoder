@@ -1,4 +1,4 @@
-Commit: 34bf9abe968e3dba88dbb79d5dbe08d6a5707392
+Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 
 # web 模块
 
@@ -83,3 +83,5 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [UI 验收约定](../../rules/05-ui-acceptance.md)
 
 [project/summary/section.jsx](../../crates/web/spa/src/project/summary/section.jsx) 为项目、子项详情的现状和目标提供独立折叠按钮，默认收起正文，标题、现状时间与历史入口始终可用。记录 ID 作为组件 key；刷新同一记录保留展开状态，切换记录重置。网页名称“子项 / 目标 / 现状”分别对应 `initiative / detail_md / current_summary`。
+
+TODO 正文显示为“关键信息”，仍使用 draft；详情新增文件页签，单独上传、下载、确认删除，切换时保留任务和评论草稿。Agent 配置页显示第五路 TODO 文件只读导出。见 [任务文件](../../docs/project-files.md)。

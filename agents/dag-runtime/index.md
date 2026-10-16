@@ -1,4 +1,4 @@
-Commit: 93acdeaa53cd864e85760a2123efb20526d92051
+Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
 
 # dag-runtime 模块
 
@@ -22,7 +22,7 @@ Commit: 93acdeaa53cd864e85760a2123efb20526d92051
 - [runtime/input.rs](../../crates/dag-runtime/src/runtime/input.rs) 在启动容器前独占发布完整 `inputs.json`，与受理的 `input.json` 比较；恢复拒绝快照缺失、链接、非法 JSON、容量超限或输入漂移，不按变更后的文件重建快照。全部步骤与动态展开读取这一份冻结值。
 - [resources.rs](../../crates/dag-runtime/src/resources.rs) 的 `frozen_resources` 只读取本次 `resources.json`，限制为 32 MiB 普通文件并拒绝软链接；缺失和损坏分别返回未准备与错误，不读取池的当前版本作为替代。
 - [exec/how_copy.rs](../../crates/dag-runtime/src/exec/how_copy.rs)：在运行副本上追加 `how_append` 与实例文本，不回写资源池。
-- [exec/native/artifacts.rs](../../crates/dag-runtime/src/exec/native/artifacts.rs)：共用 [声明校验](../../crates/dag/src/artifacts/declarations.rs)，只归档明确声明的业务文件，核对路径、大小和摘要；大文件流式复制。
+- [exec/native/artifacts.rs](../../crates/dag-runtime/src/exec/native/artifacts.rs)：共用 [声明校验](../../crates/dag/src/artifacts/declarations.rs)，只归档明确声明的任务产物文件，核对路径、大小和摘要；大文件流式复制。
 - [step_log.rs](../../crates/dag-runtime/src/step_log.rs)、[dag_events.rs](../../crates/dag-runtime/src/dag_events.rs)：有界输出落库与实例事件。二进制输出写 `step_output`，Agent 事件通过 [runc_events.rs](../../crates/dag-runtime/src/exec/runc_events.rs) 导入子会话。
 - [agent_runc.rs](../../crates/dag-runtime/src/exec/agent_runc.rs) 在启动 Agent 和事件读取器之前重置本次工作副本的事件流；[native/files.rs](../../crates/dag-runtime/src/exec/native/files.rs) 先拒绝软链接与非普通文件，再截断。事件持久化失败只停止内部执行进程，保留错误状态，不传播为用户取消。
 - [exec/private_files.rs](../../crates/dag-runtime/src/exec/private_files.rs)：私有任务文件只读挂载到 `/run/opencoder-task`，模型只接收目录路径；系统不自动归档私有目录，公开记录不返回私有内容。

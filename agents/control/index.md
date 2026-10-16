@@ -1,4 +1,4 @@
-Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
+Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
 
 # control 模块
 
@@ -60,7 +60,7 @@ Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 - [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。
 - [outbox/resources.rs](../../crates/control/src/release/outbox/resources.rs)：资源任务受理后先持久化等待，按创建时间及 ID 扫描，获得外部授权后才创建节点执行；不可运行项不阻挡其他项。普通任务保持持久化前预留节点容量的路径，不依赖资源提供方。
-- [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的业务帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道数据库调用逐项等待阻塞线程的结果，避免同步 SQLite 占住 Tokio 线程；心跳只更新在线时间。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属业务 future，迟到的数据库结果不能确认替代连接。
+- [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的应用帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道数据库调用逐项等待阻塞线程的结果，避免同步 SQLite 占住 Tokio 线程；心跳只更新在线时间。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属连接的处理 future，迟到的数据库结果不能确认替代连接。
 - [v4/view.rs](../../crates/control/src/api/brain_runs/v4/view.rs)：层调度理由只取本层 `layer_started` 事件，不被执行终态覆盖。
 
 索引报告在 Begin 固定其负载快照的 sequence；报告中间的 RPC 负载快照可以更新连接视图，但不会抬高较早报告的持久水位。被忽略的旧 Begin 也不能替换当前报告水位。初始 pending 捕获和完整报告落库的慢调用记录节点、报告 ID、条数和耗时，不记录帧 payload 或凭据。

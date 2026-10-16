@@ -16,8 +16,8 @@ use crate::tool_call::CompletedToolCall;
 ///   - OpenAI native: nested under `prompt_tokens_details.cached_tokens`
 ///
 /// Persisted verbatim into `messages.usage_json` via `MessageUsage`, so
-/// downstream consumers (sync/billing) see the full picture from this turn
-/// forward. Historical rows predate these fields and deserialize to `0`
+/// readers receive complete token counts from this turn forward.
+/// Historical rows predate these fields and deserialize to `0`
 /// (`#[serde(default)]`) -- past cache usage is unrecoverable.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {

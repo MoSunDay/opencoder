@@ -26,13 +26,15 @@ def main():
     actions.add_argument("--storage-plan", action="store_true", help="show paths derived from the single persistent root")
     actions.add_argument("--prepare-storage", action="store_true", help="prepare service configs and mount units without starting services")
     actions.add_argument("--backup", type=Path, help="independent online database backups")
+    actions.add_argument('--todo-uploads', choices=('enable', 'disable'), help='change uploads after verifying the compatible rollback bridge')
+    actions.add_argument('--restore-todo-service', action='store_true', help='restore an unused first TODO service installation')
     actions.add_argument("--stage", action="store_true", help="verify and retain a candidate for a later SIGUSR2")
     actions.add_argument("--recover-capacity", action="store_true",
                          help="recover proven stale capacity reservations after a restart")
     args = parser.parse_args()
     if args.wait_seconds <= 0:
         parser.error("--wait-seconds must be positive")
-    if args.signal and (args.migrate or args.migration_receipt or args.backup or args.status or args.stage or args.recover_capacity or args.storage_plan or args.prepare_storage):
+    if args.signal and (args.migrate or args.migration_receipt or args.backup or args.status or args.stage or args.recover_capacity or args.storage_plan or args.prepare_storage or args.todo_uploads or args.restore_todo_service):
         parser.error("--signal supports deploy or --rollback only")
     if args.rollback and args.bundle:
         parser.error("--rollback does not accept --bundle")
@@ -61,7 +63,13 @@ def main():
     operations = Operations(settings.token_file)
     with controller.request_lock(settings) if args.signal or args.stage else contextlib.nullcontext():
         with locked(settings.state_dir):
-            if args.recover_capacity:
+            if args.todo_uploads or args.restore_todo_service:
+                if args.bundle or args.maintenance:
+                    parser.error('TODO service actions do not accept a bundle or maintenance')
+                from . import todo_resources
+                result = (todo_resources.set_uploads(settings, args.todo_uploads == 'enable', operations)
+                          if args.todo_uploads else todo_resources.restore(settings, operations))
+            elif args.recover_capacity:
                 journal = Journal(settings.state_dir)
                 current = journal.record(journal.data['current'])
                 # A reboot can leave more than one versioned Host connected to

@@ -46,6 +46,10 @@ def configuration(agent, server):
         if export.get('enabled') is not True or export.get('read_only', True) is not True:
             raise ValueError(f'Server {section}.{key} must enable a read-only NFS export')
         ports.append(export.get('port', default))
+    from ..storage import todos
+    todo_port = todos.port(server)
+    if todo_port is not None:
+        ports.append(todo_port)
     if len(set(ports)) != len(ports) or any(type(p) is not int or not 0 < p < 65536 for p in ports):
         raise ValueError('resource NFS ports must be valid and distinct')
     return paths
@@ -83,6 +87,8 @@ def check(settings, candidate, operations):
     agent, server = configs(settings)
     paths = configuration(agent, server)
     ontology_binding(settings, server)
+    from ..storage import todos
+    todos.validate(server, settings.server_data)
     if shutil.which('runc') is None:
         raise ValueError('runc is required before maintenance')
     operations.run('runc', '--version')

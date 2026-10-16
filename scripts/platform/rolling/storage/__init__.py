@@ -26,6 +26,8 @@ def layout(settings):
         "agents_export": root / "exports/agents",
         "binaries_export": root / "exports/binaries",
         "ontology_export": root / "exports/ontology",
+        "todos_export": root / "exports/todos",
+        "todos_state": root / "exports/todos.state",
         "agents_mount": root / "mounts/agents",
         "binaries_mount": root / "mounts/binaries",
         "workspace_mount": root / "mounts/workspace",
@@ -82,6 +84,11 @@ def configurations(settings, declaration):
     ]:
         for section, key, name in bindings:
             _bind(config, section, key, paths[name])
+    todo = server.setdefault("project", {}).setdefault("todo_storage", {})
+    if todo.get("files_dir") is not None and Path(todo["files_dir"]) != paths["todos_export"]:
+        raise ValueError("project.todo_storage.files_dir is managed by deployment.state_dir")
+    todo["files_dir"] = str(paths["todos_export"])
+    agent.pop("project", None)
     # A Runtime always derives its execution directory from its immutable record.
     for config in (server, agent):
         if config.get("dag", {}).pop("data_dir", None) is not None:
@@ -136,6 +143,8 @@ def plan(settings, declaration):
         raise ValueError("Ontology files root differs from its database binding; verify and migrate "
                          "all ready text revisions before changing the binding to "
                          + str(paths["ontology_export"]))
+    from . import todos
+    todos.validate(server, settings.server_data)
     from ..maintenance.mounts import name
     mounts = [{"path": str(paths[path]), "source": str(source_path),
                "port": server[section][key].get("port", port)}
@@ -146,6 +155,9 @@ def plan(settings, declaration):
     ports = [item["port"] for item in mounts]
     if server.get("ontology", {}).get("nfs", {}).get("enabled"):
         ports.append(server["ontology"]["nfs"].get("port", 2052))
+    todo_port = todos.port(server)
+    if todo_port is not None:
+        ports.append(todo_port)
     if any(type(port) is not int or not 0 < port < 65536 for port in ports) or len(set(ports)) != len(ports):
         raise ValueError("resource NFS ports must be valid and distinct")
     for mount in mounts:
@@ -180,7 +192,7 @@ def prepare(settings, declaration):
         if not path.exists():
             atomic_bytes(path, data, mode)
     for key in ("server", "server_share", "resources", "server_workdir", "agents_export",
-                "binaries_export", "ontology_export"):
+                "binaries_export", "ontology_export", "todos_export", "todos_state"):
         os.chown(paths[key], account.pw_uid, account.pw_gid)
         allow_server_traversal(settings, paths[key])
     for key in ("services", "releases"):

@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+fs2 = "0.4"
+libc = "0.2"
+tokio-util = { workspace = true, features = ["io"] }
 http-body = "1"
 opencoder-core.workspace = true
 opencoder-ontology.workspace = true

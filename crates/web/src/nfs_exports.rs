@@ -42,6 +42,7 @@ fn stopped(key: &'static str) -> NfsServerStatus {
         DAG_BINARY_EXPORT => 2050,
         DAG_WORKSPACE_EXPORT => 2051,
         "ontology" => 2052,
+        "project-todos" => 2053,
         _ => 0,
     };
     status

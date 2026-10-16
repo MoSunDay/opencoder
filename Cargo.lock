@@ -1860,6 +1860,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
  "ulid",
 ]
 
@@ -1873,9 +1874,11 @@ dependencies = [
  "base64",
  "chrono",
  "dirs",
+ "fs2",
  "futures",
  "http-body",
  "image",
+ "libc",
  "libsql",
  "opencoder-agents",
  "opencoder-brain",
@@ -1895,6 +1898,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
+ "tokio-util",
  "tower",
  "tracing",
  "ulid",

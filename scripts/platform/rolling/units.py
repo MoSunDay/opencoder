@@ -270,6 +270,7 @@ def nginx(settings, server_port, host_port):
     return f"""map $http_upgrade $opencoder_platform_connection {{ default upgrade; '' close; }}
 server {{ listen {settings.listen}; client_max_body_size 2m;
     {location(server_port, '~ ^/api/dag/binaries(?:/[^/]+)?$', 'client_max_body_size 48m;')}
+    {location(server_port, '~ ^/api/project/todos/[^/]+/file$', 'client_max_body_size 0;')}
     {location(server_port)} }}
 server {{ listen 127.0.0.1:{settings.host_port}; client_max_body_size 2m; {location(host_port)} }}
 """

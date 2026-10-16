@@ -61,6 +61,10 @@ def plan(settings, candidate, rootfs, original, scope):
     image = tree_bytes(rootfs, {'dev', 'proc', 'sys', 'tmp', 'workspace/context'}, block_size) + binaries
     freeze = 0 if frozen.exists() else image
     roots = list(backup_roots(settings, runtime_data=False).values())
+    from ...storage.todos import files_root as todo_files_root
+    todo_root = todo_files_root(settings.server_data)
+    if todo_root:
+        roots.append(todo_root)
     ontology = files_root(settings.server_data)
     if ontology:
         roots.append(ontology)

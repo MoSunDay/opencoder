@@ -90,3 +90,5 @@ DAG 的静态二进制、Agent 与动态实例都取得完整的冻结命名输�
 环境恢复时先让根运行保持 paused/blocked，再 resume 原失败 Operator；Worker 接收同一执行更高序号的新终态，保留目录和轮次。待结果恢复后显式 resume 根运行。改变任务或修复方案则属于返工，需要新 activation。共享目录归属为节点自有字段，普通 annotate 不能修改或删除。
 
 下载证据使用 `GET /api/executions/{id}/artifact?step=workspace&file=artifacts.json`，再按清单逐文件下载；Brain ID 指向共享根，Operator ID 指向该 activation。额外文件须声明 bytes 和 sha256，接口核验内容并拒绝软链接及目录逃逸。此模式要求节点声明 `brain_workspace_v1`。
+
+Host 对共享工作区子执行和嵌套 Brain 的能力探测与创建都查询父运行的持久 Runtime 归属；普通子执行只有父在同一物理节点时才继承 Runtime。探测不抢先创建 owner，已接受子执行的 owner 优先于新探测输入，Worker 保持本地父运行、节点与 operation 校验。

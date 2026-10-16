@@ -1,4 +1,5 @@
 mod dispatch;
+mod native;
 mod operators;
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use reqwest::Method;

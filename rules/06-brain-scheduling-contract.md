@@ -74,7 +74,7 @@ flowchart TD
 - 输入绑定支持根输入、已登记产物、终态执行的 JSON pointer 和具体值。执行绑定的可选 `source` 为 `output` 或 `artifacts`，默认 `output`。普通及共享目录计划都只能引用本次 run 中该逻辑节点最新 activation 的终态；旧记录保留供查询，最新失败结果可以作为整改输入。引用必须存在且可解析，实际值还须通过能力必填字段校验。
 - 必填字段缺失、为 `null` 或空白文本时校验失败；`false`、`0` 和空数组是有效数据。字段校验不能替代任务达成标准。
 - 叶子能力交给大脑的成功输出与文件引用合计最多 16 KiB，保留完整结构化字段；大文件和长报告用产物引用。较大的文件索引由 Worker 保存为带大小与 SHA-256 的清单文件引用，嵌套 Brain 也用清单引用交接子产物。无文件产物时索引为空。输出缺失、产物不符或压缩索引后仍超限转为 `Error`，完整结果留在子执行，传给大脑的失败证据须标明省略部分。
-- 每次执行保存 `scheduler_output` 和 `scheduler_artifacts`；文件引用包含执行身份、步骤、可选实例 index、文件名、大小及 SHA-256，进入决策 context 的 `execution_artifacts` 并计入容量检查。只索引声明的业务文件及运行器元数据，不遍历整块工作区；文件仍从其所属执行的产物接口读取。路径逃逸、软链接、文件缺失、大小或摘要不符均明确失败。
+- 每次执行保存 `scheduler_output` 和 `scheduler_artifacts`；文件引用包含执行身份、步骤、可选实例 index、文件名、大小及 SHA-256，进入决策 context 的 `execution_artifacts` 并计入容量检查。只索引声明的任务产物文件及运行器元数据，不遍历整块工作区；文件仍从其所属执行的产物接口读取。路径逃逸、软链接、文件缺失、大小或摘要不符均明确失败。
 - 默认各子执行有各自的工作区。设置 `shared_workspace: true` 的计划只允许 Operator 能力，全部固定在根 Brain 所属节点，共用该次运行的 workspace；每次 activation 有独立证据目录，HOME、凭据与配置仍按 Operator 隔离。运行上下文通过 `OPENCODER_RUN_CONTEXT`、`OPENCODER_RUN_WORKSPACE` 和 `OPENCODER_RUN_STEP_DIR` 提供，目录与归属在受理时持久化，恢复不重新选目录。跨阶段仍须绑定准确提交与证据，不得用旧通过结论替代新版本验收。共享工作区不是步骤之间的安全隔离边界。
 - 共享目录的计划和输入保存为 plan.json、inputs.json；每个 activation 保存 context.json、output.json 和 artifacts.json。通过执行产物接口的 `step=workspace` 读取，额外文件必须声明大小和 SHA-256；拒绝路径逃逸、软链接和内容不符。只有属于该根 Brain 的已持久化 operation 才能接入共享目录。
 - 一个 DAG 内部的步骤仍按规则 04 共享该次运行的工作区，不因 Brain 调度而改变其单节点、单容器约定。

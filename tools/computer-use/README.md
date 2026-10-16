@@ -4,15 +4,7 @@
 
 实现使用 Cua 原生 Computer Server，不创建虚拟机，不接管远端服务的生命周期。Windows、macOS、Linux 的实际能力取决于远端 Cua 后端及其权限，Linux 不限定 Wayland，也没有自研 Wayland/X11 驱动。
 
-## 方案调研与版本
-
-调研日期：2026-10-01。选型依据是操作已有远程桌面、独立 Agent 完成自然语言任务、可通过 CLI 接入。
-
-| 方案 | 与本次需求的关系 | 结论 |
-| --- | --- | --- |
-| [Cua](https://github.com/trycua/cua) | Computer SDK、Agent SDK、Computer Server 和原生 Driver；可连接桌面并运行模型循环 | 本次采用 |
-| [UI-TARS Desktop](https://github.com/bytedance/UI-TARS-desktop) | 提供桌面 Agent 和 SDK，适合视觉操作；本次接入会需要另一套执行组件 | 保留为后续替代方案 |
-| [Agent S](https://github.com/simular-ai/Agent-S) | 桌面任务规划与操作框架，需要配置推理和定位模型 | 本次先不引入第二套 Agent |
+## 依赖与版本
 
 锁定 Cua 源码提交 [`9545a3d17b44b587b593d59090dc140740876a6e`](https://github.com/trycua/cua/tree/9545a3d17b44b587b593d59090dc140740876a6e)，对应 Agent SDK 0.8.4、Computer SDK 0.5.19、Computer Server 0.3.46。使用源码依赖是为了包含发布包之后的上游修复；升级时应一起更新依赖、远端服务及 SDK 集成测试。
 

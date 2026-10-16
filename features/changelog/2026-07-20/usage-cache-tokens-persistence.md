@@ -1,3 +1,5 @@
+Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
+
 # 完整 provider usage 持久化：捕获 cache_read / cache_creation token
 
 ## 背景
@@ -24,11 +26,11 @@ prompt-cache 的 token（Anthropic `cache_read_input_tokens`、网关 `cache_rea
 
 | 方案 | 做法 | 取舍 |
 |------|------|------|
-| A（不改核心） | sync 只读现有 3 字段 | 与现网对不上（cache_read 常是大头），统计偏低 ❌ |
+| A（不改核心） | 只读取现有 3 字段 | 缺少 cache token，统计不完整 ❌ |
 | B2（jsonl 全量） | 在 `run_stream` 落 `requests.jsonl` | 保留完整原始负载，但要新增并发追加/轮转/行号游标，更 invasive |
 | **B1（推荐，采纳）** | 扩 `Usage`/`MessageUsage` + `parse_usage` 解析 cache，顺现有 `usage_json` 落库 | 改动最小，天然走现有持久化，无需 schema 迁移，cache 从此不再丢 ✅ |
 
-B1 不引入新文件层；sync 工具直接读 `messages.usage_json`（现在变完整），增量游标逻辑完全不变。
+B1 不引入新文件层；完整用量仍从 `messages.usage_json` 读取。
 **代价**：历史数据仍是 3 字段，无法回填——只能从此刻起向前追踪。
 
 ## 变更
@@ -42,14 +44,14 @@ pub struct Usage {
     pub output_tokens: u64,
     pub total_tokens: u64,
     #[serde(default)]
-    pub cache_read_tokens: u64,       // 命中缓存、便宜计价的 token
+    pub cache_read_tokens: u64,       // 从缓存读取的 token
     #[serde(default)]
     pub cache_creation_tokens: u64,   // 本轮写入缓存的 token
 }
 ```
 
 字段命名是**我们自己的持久化规约**（不是 provider 原始 key），serde 直接按此名落 `usage_json`，
-下游消费者（sync/billing）从此处读稳定 key。doc 注释写明 provider 命名差异与历史数据不可回填。
+读取方使用稳定 key。doc 注释写明 provider 命名差异与历史数据不可回填。
 
 ### `parse_usage`（`crates/llm/src/client.rs`）
 重写为：先抽三件套，再把 provider 各路 cache 命名**归一化**进两个字段。
@@ -75,7 +77,7 @@ pub struct Usage {
 `messages::append` / `append_many` / `import` 继续用 `serde_json::to_string(&msg.usage)` 通用序列化，
 新字段自动出现在 `usage_json` TEXT 列里。读取侧 `row_to_message` 同样通用反序列化。
 
-## 设计备忘（供 sync 工具 / 后续迭代）
+## 存储与兼容约定
 
 - **数据源**：`messages.usage_json`（TEXT，每条 assistant 消息一行）。
 - **规约 key**：`cache_read_tokens` / `cache_creation_tokens`（u64，缺失即 0）。

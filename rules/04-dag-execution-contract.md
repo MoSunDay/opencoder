@@ -29,7 +29,7 @@ Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 - 日期取 Server 创建时间的 UTC 日期。受理时保存实际目录与配置，重启和恢复不能根据新配置重新选择目录或资源版本。
 - 步骤通过 `OPENCODER_STEP_CONTEXT` 读取只读 `meta/context.json`，通过 `output.json` 交付结构化结果。其他需要下载的文件必须在 `artifacts.json` 声明相对路径、字节数及 SHA-256；归档只复制声明的文件，不复制整块源工作区。
 - 静态二进制、Agent 与动态实例的 context 都包含稳定 `run_id` 和本次冻结的完整 `inputs`，`steps` 仍只包含声明依赖的上游结果。动态实例另有 `instance.index` 与 `instance.input`，不改变参数数组或 Agent how 追加规则。运行在容器启动前保存完整 `inputs.json`；恢复核对已保存输入，快照缺失、软链接或内容不一致时拒绝执行，不重建快照或覆盖原记录。
-- Brain 调用 DAG 时只交接绑定的命名输入和执行结果；DAG 保留自己的运行空间。交给 Brain 的文件索引包含已声明的业务文件、步骤输出与元数据，以及动态实例的文件，引用保留 execution、step、可选 index、file、bytes 和 SHA-256。
+- Brain 调用 DAG 时只交接绑定的命名输入和执行结果；DAG 保留自己的运行空间。交给 Brain 的文件索引包含已声明的任务产物文件、步骤输出与元数据，以及动态实例的文件，引用保留 execution、step、可选 index、file、bytes 和 SHA-256。
 - 运行前从 NFS 固定每个步骤使用的二进制与 Agent 版本，仅准备本次所需依赖到该步骤的 `/workspace/<step_name>/meta/`；缺失、摘要不符或工作区无法建立时拒绝启动，不能退回宿主执行。
 
 ## 步骤能力与变更门槛

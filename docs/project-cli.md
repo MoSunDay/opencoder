@@ -19,7 +19,7 @@ opencoder-cli --server http://10.199.79.43:18081 --no-auth project initiatives l
 opencoder-cli --server http://10.199.79.43:18081 --no-auth project todos list
 ```
 
-`--no-auth` 省略 Authorization，不读取已有 Token 文件；它只控制 CLI 请求。服务端仍开启鉴权时，项目命令返回 401。stdout 成功时为 JSON；stderr 错误包含实际 HTTP 状态，退出码 1 是连接/配置错误、2 是 401/403、4 是其他业务拒绝。
+`--no-auth` 省略 Authorization，不读取已有 Token 文件；它只控制 CLI 请求。服务端仍开启鉴权时，项目命令返回 401。stdout 成功时为 JSON；stderr 错误包含实际 HTTP 状态，退出码 1 是连接/配置错误、2 是 401/403、4 是其他请求拒绝。
 
 可以保存单独的连接文件，避免覆盖其他 Server 的默认连接：
 

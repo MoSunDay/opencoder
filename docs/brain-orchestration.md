@@ -58,13 +58,13 @@
 }
 ```
 
-子执行明细保存 `scheduler_output`、`scheduler_artifacts`。决策 context 的 `execution_artifacts` 按 execution ID 保存文件引用，每项包含 `execution`、`step`、可选 `index`、`file`、`bytes` 和 `sha256`。DAG 的索引包含声明的业务文件、步骤输出及元数据，也包含动态实例文件。其他叶子能力只纳入自己工作区声明的文件；没有文件时返回空数组。
+子执行明细保存 `scheduler_output`、`scheduler_artifacts`。决策 context 的 `execution_artifacts` 按 execution ID 保存文件引用，每项包含 `execution`、`step`、可选 `index`、`file`、`bytes` 和 `sha256`。DAG 的索引包含声明的任务产物文件、步骤输出及元数据，也包含动态实例文件。其他叶子能力只纳入自己工作区声明的文件；没有文件时返回空数组。
 
 文件通过 `GET /api/executions/{execution.id}/artifact?step={step}&file={file}` 读取；动态实例另传 `index`。消费者核对引用的执行身份、字节数和 SHA-256，文件仍保存在其所属节点。路径逃逸、软链接、文件缺失和声明不符都返回实际错误。
 
 叶子能力的结构化输出与文件引用合计最多 16 KiB。较大的索引与嵌套 Brain 使用 `step: "brain-result"` 的清单引用，下载后读取 `{"schema_version":1,"execution":...,"artifacts":[...]}`，按其中的引用继续取文件。清单文件名包含自身摘要，恢复不覆盖旧清单；它只压缩索引，不裁剪成功输出，证据仍超限时执行失败。
 
-`brain-result` 属于运行时产物接口的保留步骤名称，新 DAG 不能将它作为业务步骤名，避免与清单下载冲突。
+`brain-result` 属于运行时产物接口的保留步骤名称，新 DAG 不能将它作为自定义步骤名，避免与清单下载冲突。
 
 DAG 的静态二进制、Agent 与动态实例都取得完整的冻结命名输入。只读 `OPENCODER_STEP_CONTEXT` 包含 `run_id`、`inputs` 和声明依赖的 `steps`；动态实例另有 `instance: {index,input}`。恢复使用原输入和身份，已保存输入漂移时拒绝执行。
 

@@ -1,4 +1,4 @@
-Commit: f8cb8fdf60333fbbeb896355a0732501bef908e0
+Commit: 34bf9abe968e3dba88dbb79d5dbe08d6a5707392
 
 # web 模块
 
@@ -36,7 +36,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `src/api_project*.rs` — 项目、子项、TODO 与 Tag 的共享 HTTP 处理器；Tag 范围和选择经存储验证，TODO 顺序写入携带 `initiative_id` 范围，负数位置保留给迁移且 API 拒绝；Control 复用同一组处理器
 - [api_project_people.rs](../../crates/web/src/api_project_people.rs)、[project/people/fields.jsx](../../crates/web/spa/src/project/people/fields.jsx) — 只读用户名目录、人员错误映射与三层共用的选择、展示和筛选；请求失败提供重试，按原有角色禁用写入，清空负责人使用显式 `null`。
 - `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 项目、子项、TODO、Tag 四个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和子项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`；项目详情在桌面使用 `size="70vw"`，1024px 及以下全宽；子项详情与 `todoDrawer.jsx` 使用 `size="100vw"`，内部容器不再限宽居中。
-- [project/navigation/links.js](../../crates/web/spa/src/project/navigation/links.js) 编解码 `project/initiative/todo` 定位，优先片段、兼容查询参数；[project.jsx](../../crates/web/spa/src/project/project.jsx) 直接从地址派生三个详情 ID，逐层打开和关闭写入浏览器历史。目标 ID 从总览投影查找，不依赖当前筛选或父级 ID；[unavailable.jsx](../../crates/web/spa/src/project/navigation/unavailable.jsx) 分别展示加载中、读取失败和记录不存在。
+- [project/navigation/links.js](../../crates/web/spa/src/project/navigation/links.js) 编解码 `project/initiative/todo` 定位，优先片段、兼容查询参数；[project.jsx](../../crates/web/spa/src/project/project.jsx) 通过 [hierarchy.js](../../crates/web/spa/src/project/navigation/hierarchy.js) 从地址目标及总览中的实际归属恢复父级，逐层打开和关闭写入浏览器历史。同一时刻只打开最深层抽屉，父级组件保留当前页签；关闭按钮与 Escape 均只返回一层，避免异步加载和门户挂载顺序导致错层。目标 ID 从总览投影查找，不依赖当前筛选或父级 ID；[unavailable.jsx](../../crates/web/spa/src/project/navigation/unavailable.jsx) 分别展示加载中、读取失败和记录不存在。
 - [project/forms/](../../crates/web/spa/src/project/forms/) — TODO 共用一个 Ant Design Form，任务与设置页签字段预先注册，切换保留值；MarkdownInput 通过 defaultMode 区分新建编辑和已有正文预览；只切换说明区域，标题与状态输入框同行并始终挂载，任务页底部的评论独立维护草稿与提交，三个页签切换保留各自内容。标题校验回到任务页并聚焦，保存失败保留草稿；关闭未保存内容由 Modal 确认。创建使用任务/设置；项目详情保留概览/子项页签，子项详情将现状与说明、基本信息与进度、看板依次展示，基本信息和进度靠左相邻排列。真实 CRUD 和四种屏宽验收见 [project/forms.js](../../scripts/acceptance/project/forms.js)。
 - [project/summary/view.jsx](../../crates/web/spa/src/project/summary/view.jsx)、[views/mdDrawer.jsx](../../crates/web/spa/src/project/views/mdDrawer.jsx) — 项目、子项列表与详情共用现状及时间展示，沿用表格筛选。子项表单将 detail_md 明确标为“子项目标”并前置，表单保留打开时的现状基线，只提交被编辑的现状，避免改其他字段时更新时间或覆盖刷新后的新现状。共享项目 API 为显式现状写入生成时间。[history.jsx](../../crates/web/spa/src/project/summary/history.jsx) 复用于详情及三个列表的现状历史按钮，阻止点击穿透到行详情；按需读取版本，处理错误、取消过期读取并确认恢复；[现状 API](../../crates/web/src/api_project/summary.rs) 复用读写权限，返回最近 10 个版本及恢复来源。
 - [project/sorting/](../../crates/web/spa/src/project/sorting/) — 项目内子项使用表格手柄拖拽及键盘排序；纯函数在完整列表上移动，保留筛选隐藏项，保存中禁用重复操作，失败恢复原顺序。排序接口携带完整原顺序和目标顺序。子项名称列与所属项目等宽，名称换行展示。

@@ -26,6 +26,41 @@ beforeEach(() => {
 });
 afterEach(() => window.history.replaceState(null, '', '/'));
 
+it.each(['/#todo=t1', '/?todo=t1', '/#initiative=i1'])('closes an ID-only %s link through its real ancestors', async (href) => {
+  window.history.replaceState(null, '', href);
+  mount();
+  if (href.includes('todo=')) {
+    const task = await dialog('TODO · 分享任务');
+    expect(queryDialog('子项 · 分享子项')).toBeNull();
+    expect(queryDialog('项目 · 分享项目')).toBeNull();
+    fireEvent.click(task.querySelector('.ant-drawer-close'));
+    await waitFor(() => expect(queryDialog('TODO · 分享任务')).toBeNull());
+    expect(window.location.hash).toBe('#project=p1&initiative=i1');
+  }
+  fireEvent.click((await dialog('子项 · 分享子项')).querySelector('.ant-drawer-close'));
+  await waitFor(() => expect(queryDialog('子项 · 分享子项')).toBeNull());
+  expect(window.location.hash).toBe('#project=p1');
+  fireEvent.click((await dialog('项目 · 分享项目')).querySelector('.ant-drawer-close'));
+  await waitFor(() => expect(window.location.hash).toBe(''));
+  expect(api.apiPost).not.toHaveBeenCalled();
+  expect(api.apiPatch).not.toHaveBeenCalled();
+});
+
+it('restores ancestors after delayed loading without replacing the shared address', async () => {
+  let resolve;
+  api.apiGet.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  window.history.replaceState(null, '', '/#todo=t1');
+  mount(); await dialog('TODO · t1');
+  expect(queryDialog('项目 · 分享项目')).toBeNull();
+  await act(async () => resolve(overview));
+  await dialog('TODO · 分享任务');
+  expect(queryDialog('子项 · 分享子项')).toBeNull();
+  expect(queryDialog('项目 · 分享项目')).toBeNull();
+  expect(window.location.hash).toBe('#todo=t1');
+});
+
+// Escape ordering is exercised against the production build in navigation.js;
+// Antd's test-only shared portal ID prevents a faithful keyboard stack here.
 it.each([['project=p1', '项目 · 分享项目'], ['initiative=i1', '子项 · 分享子项'], ['todo=t1', 'TODO · 分享任务']])('opens and restores a shared %s link without earlier navigation', async (hash, name) => {
   window.history.replaceState(null, '', '/#' + hash);
   setIdentity({ name: 'reader', role: 'viewer' });

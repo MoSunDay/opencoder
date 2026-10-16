@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useLinkedLocation } from '../fleet/navigation/location.js';
 import { pushLocation } from '../fleet/navigation/history.js';
 import { projectLocation, projectTab } from './navigation/links.js';
+import { projectHierarchy } from './navigation/hierarchy.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { ProjectsTab } from './projectsTab.jsx';
 import { InitiativesTab } from './initiativesTab.jsx';
@@ -18,7 +19,7 @@ export function ProjectPanel(props) { return <ProjectViewState><ProjectPage {...
 function ProjectPage({ onNotice }) {
   const { overview, loading, refresh, error } = useOverview({ onNotice });
   const { project: selection } = useLinkedLocation();
-  const { projectId = null, initiativeId = null, todoId = null } = selection || {};
+  const { projectId, initiativeId, todoId } = projectHierarchy(overview, selection);
   const [tab, setTab] = useState(() => projectTab(selection) || 'projects');
   useEffect(() => { const next = projectTab(selection); if (next) setTab(next); }, [selection]);
   const navigate = (next) => pushLocation(projectLocation(window.location.href, next));
@@ -34,8 +35,8 @@ function ProjectPage({ onNotice }) {
   return <PageShell page="project">
     {error && <Alert type="error" showIcon title={error} />}
     <Spin spinning={loading}><Tabs activeKey={tab} onChange={setTab} items={tabs} /></Spin>
-    <ProjectDrawer {...shared} projectId={projectId} onClose={() => setProjectId(null)} openInitiative={setInitiativeId} />
-    <InitiativeDrawer {...shared} initiativeId={initiativeId} onClose={() => setInitiativeId(null)} openTodo={setTodoId} />
+    <ProjectDrawer {...shared} active={!initiativeId && !todoId} projectId={projectId} onClose={() => setProjectId(null)} openInitiative={setInitiativeId} />
+    <InitiativeDrawer {...shared} active={!todoId} initiativeId={initiativeId} onClose={() => setInitiativeId(null)} openTodo={setTodoId} />
     <TodoDrawer {...shared} todoId={todoId} onClose={() => setTodoId(null)} />
   </PageShell>;
 }

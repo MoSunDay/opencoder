@@ -13,7 +13,7 @@ import { progressOf } from '../model/catalog.js';
 import { TodoProgress } from './progress.jsx';
 import { MdEditDrawer } from './mdDrawer.jsx';
 import { UnavailableDetail } from '../navigation/unavailable.jsx';
-export function InitiativeDrawer({ initiativeId, overview, overviewError, refresh, onNotice, onClose, openTodo }) {
+export function InitiativeDrawer({ initiativeId, overview, overviewError, refresh, onNotice, onClose, openTodo, active = true }) {
   const initiative = flattenInitiatives(overview).find((i) => i.id === initiativeId);
   const [editing, setEditing] = useState(false);
   useEffect(() => { setEditing(false); }, [initiativeId]);
@@ -26,7 +26,7 @@ export function InitiativeDrawer({ initiativeId, overview, overviewError, refres
     try { await apiPatch(`/api/project/initiatives/${encodeURIComponent(initiativeId)}`, { ...values, goal_id: values.goal_id ?? null }); await refresh(); setEditing(false); onNotice(ok('子项已保存，TODO 标签已重新匹配')); return true; }
     catch (error) { onNotice(err(error.message)); return false; }
   };
-  return <Drawer open={!!initiativeId} title={`子项 · ${initiative?.title || initiativeId || ''}`} onClose={close} size="100vw" className="project-detail-drawer project-initiative-drawer" destroyOnHidden extra={initiative && <EditButton onClick={() => setEditing(true)}>编辑子项</EditButton>}>
+  return <Drawer open={active && !!initiativeId} title={`子项 · ${initiative?.title || initiativeId || ''}`} onClose={close} size="100vw" className="project-detail-drawer project-initiative-drawer" destroyOnHidden extra={initiative && <EditButton onClick={() => setEditing(true)}>编辑子项</EditButton>}>
     {initiative ? <div className="project-detail-overview">
       <div className="project-initiative-context">
         <CurrentSummary record={initiative} collection="initiatives" refresh={refresh} />

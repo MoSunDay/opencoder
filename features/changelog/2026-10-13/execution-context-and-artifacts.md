@@ -10,7 +10,7 @@ Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 - DAG 静态二进制、Agent 和动态实例的只读 context 提供完整冻结 `inputs`、`run_id`；动态实例另有实际输入和编号。原有依赖结果、参数数组与 how 追加语义保留，恢复拒绝保存输入漂移。
 - 运行器在启动容器前保存完整 `inputs.json`；恢复拒绝输入漂移或快照缺失，恢复原输入后可继续原实例及资源副本。动态测试按实际 `instance.input` 区分执行，完整 context 中其他输入不代表那些实例已启动。
-- 执行绑定增加可选 `source: output | artifacts`，默认 output；文件引用增加可选实例 index，保留 execution、step、file、bytes 与 SHA-256。DAG 业务文件及动态实例进入索引，其他能力索引自己声明的文件。
+- 执行绑定增加可选 `source: output | artifacts`，默认 output；文件引用增加可选实例 index，保留 execution、step、file、bytes 与 SHA-256。DAG 任务产物文件及动态实例进入索引，其他能力索引自己声明的文件。
 - 叶子输出与文件引用合计限 16 KiB；较大索引与嵌套 Brain 使用带内容摘要的清单引用，不裁剪成功输出。文件仍通过所属执行节点的产物接口读取；Brain 托管的 Agent、Team、TODO 也可以下载文件。
 - 普通和共享目录计划统一拒绝跨 run 及旧 activation 的执行绑定，允许最新失败证据作为整改输入。Worker 校验决策 context 中的文件执行归属，普通 annotate 不能修改自身索引归属。
 - 新 DAG、根 Brain 和托管子执行要求 `execution_io_v1`，先升级 Worker 后启用 Server；历史绑定及无实例引用仍可读取，原 Runtime 的执行归属保留。
@@ -38,7 +38,7 @@ Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 | 托管 Agent、Team、TODO 的 HTTP 文件下载及普通执行门禁 | `managed_agent_team_and_todo_artifacts_stream_while_ordinary_executions_stay_rejected` | [managed.rs](../../../crates/control/tests/e2e/executions_artifacts/managed.rs) |
 | 历史绑定和新 output/artifacts 选择 | `execution_sources_preserve_old_bindings_and_reject_unknown_sources` | [capability.rs](../../../crates/core/src/brain/capability.rs) |
 | 历史文件引用和第 0 个动态实例 | `artifact_references_read_historical_files_and_preserve_zero_instance_index` | [run.rs](../../../crates/core/src/brain/run.rs) |
-| 清单接口与业务步骤的名称冲突在定义校验时拒绝 | `managed_manifest_step_name_cannot_shadow_business_step_artifacts` | [artifacts.rs](../../../crates/dag/src/artifacts.rs) |
+| 清单接口与自定义步骤的名称冲突在定义校验时拒绝 | `managed_manifest_step_name_cannot_shadow_custom_step_artifacts` | [artifacts.rs](../../../crates/dag/src/artifacts.rs) |
 
 ## 验证状态
 

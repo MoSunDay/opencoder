@@ -36,4 +36,4 @@ opencoder-cli --server http://10.199.79.43:18081 --no-auth project overview
 - 概述按需用 `project initiatives summary-context ID`、`project goals summary-context ID` 收集证据，通过 PATCH 的 `current_summary` 保存。证据读取失败明确报告来源，不视为已完成验收。
 - 了解 TODO 的执行上下文时，用 `project todos context TODO_ID` 读取任务、全部评论和关联执行的原生详情、消息、事件、完整字段；历史较多时使用 `--execution EXECUTION_ID` 只读取指定关联。`assignments` 保留全部关联，`executions` 是本次读取的证据。`complete:false` 与 `issues` 表示证据缺失，退出码 4，不能当作完整上下文；运行中仍可能产生新消息。轻量查看用 `links`、`result`、`messages`，分页用返回的 `next_cursor.seq/offset` 传给 `--seq/--offset`。具体示例见参考文档。
 
-命令成功后读取对象验证关键字段；删除后确认 GET 返回 404 或列表已移除。只重试可确认结果的请求；创建超时先按已创建 ID、名称和时间查重。输出用户关心的名称、ID、归属、状态与实际结果。CLI 返回 0 表示请求成功；1 为连接或配置错误，2 为 401/403，4 为业务拒绝或 context 的证据读取不完整，不将局部成功写成全部成功。
+命令成功后读取对象验证关键字段；删除后确认 GET 返回 404 或列表已移除。只重试可确认结果的请求；创建超时先按已创建 ID、名称和时间查重。输出用户关心的名称、ID、归属、状态与实际结果。CLI 返回 0 表示请求成功；1 为连接或配置错误，2 为 401/403，4 为请求拒绝或 context 的证据读取不完整，不将局部成功写成全部成功。

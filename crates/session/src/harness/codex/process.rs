@@ -55,6 +55,15 @@ pub fn spawn(
     prompt: String,
     images: &[std::path::PathBuf],
 ) -> Result<Running> {
+    spawn_with_context(session, prompt, images, None)
+}
+
+pub(super) fn spawn_with_context(
+    session: &SessionState,
+    prompt: String,
+    images: &[std::path::PathBuf],
+    context: Option<String>,
+) -> Result<Running> {
     let launcher = super::launch::startup_program(
         session.harness.codex.as_ref(),
         &session.harness.envs,
@@ -137,7 +146,10 @@ pub fn spawn(
         cmd.env("PATH", std::env::join_paths(paths)?);
     }
     if launcher.is_some() {
-        cmd.env("OPENCODER_HARNESS_CONTEXT", super::launch::context(session));
+        cmd.env(
+            "OPENCODER_HARNESS_CONTEXT",
+            context.unwrap_or_else(|| super::launch::context(session)),
+        );
     }
     #[cfg(unix)]
     cmd.process_group(0);

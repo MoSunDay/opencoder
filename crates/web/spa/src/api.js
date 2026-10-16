@@ -11,15 +11,17 @@ function token() {
 export async function authFetch(method, pathAndQuery, bodyObj, opts = {}) {
   const m = String(method).toUpperCase();
   const bodyText = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
+  const rawBody = opts.rawBody;
   const headers = {};
   if (getState().authEnabled !== false && token()) headers.Authorization = 'Bearer ' + token();
+  if (rawBody !== undefined && opts.contentType) headers['content-type'] = opts.contentType;
   if (bodyText) {
     headers['content-type'] = 'application/json';
   }
   const response = await fetch(urlFor(pathAndQuery), {
     method: m,
     headers,
-    body: bodyText || undefined,
+    body: rawBody === undefined ? (bodyText || undefined) : rawBody,
     signal: opts.signal,
   });
   if (response.status === 401) {

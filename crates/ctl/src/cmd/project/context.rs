@@ -35,6 +35,25 @@ pub async fn collect(ctx: &Ctx, args: &Options) -> Result<Value> {
         }
     }
     let mut issues = vec![];
+    record["files"] = match summary::read(ctx, RequestPlan::get(format!("{base}/files"))).await {
+        Ok(mut value) => {
+            if let Some(files) = value["files"].as_array_mut() {
+                for file in files {
+                    if let Some(path) = file["path"].as_str() {
+                        file["download_path"] =
+                            json!(format!("{base}/file?path={}", http::urlencode(path)));
+                    }
+                }
+            } else {
+                issues.push(json!({"source":format!("{base}/files"),"error":"missing file list"}));
+            }
+            value
+        }
+        Err(error) => {
+            issues.push(json!({"source":format!("{base}/files"),"error":error.to_string()}));
+            Value::Null
+        }
+    };
     record["comments"] = match comments::all(ctx, &args.id).await {
         Ok(value) => value,
         Err(error) => {

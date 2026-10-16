@@ -1,0 +1,70 @@
+// @vitest-environment jsdom
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, expect, it, vi } from 'vitest';
+import '../../test/setup-dom.js';
+const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiDel: vi.fn() }));
+const transfer = vi.hoisted(() => ({ uploadFile: vi.fn(), downloadFile: vi.fn(), fileUrl: (id, path) => `/api/project/todos/${id}/file?path=${path}` }));
+vi.mock('../../api.js', () => api);
+vi.mock('./api.js', () => transfer);
+import { TodoFiles } from './panel.jsx';
+import { setIdentity } from '../../store.js';
+const listing = { directory: '2026-01-01/t', max_file_bytes: 1024, files: [{ path: 'notes.md', bytes: 5, modified_at: 1 }] };
+beforeEach(() => {
+  vi.resetAllMocks(); setIdentity({ name: 'writer', role: 'editor' });
+  api.apiGet.mockResolvedValue(listing); api.apiDel.mockResolvedValue({ deleted: true });
+  transfer.uploadFile.mockResolvedValue({}); transfer.downloadFile.mockResolvedValue();
+});
+it('loads only when active, uploads separately, downloads and confirms deletion', async () => {
+  const busy = vi.fn(); const draft = vi.fn();
+  const view = render(<TodoFiles todoId="t" active={false} onBusyChange={busy} onDraftChange={draft} />);
+  expect(api.apiGet).not.toHaveBeenCalled();
+  view.rerender(<TodoFiles todoId="t" active onBusyChange={busy} onDraftChange={draft} />);
+  expect(await screen.findByText('notes.md')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('选择任务文件'), { target: { files: [new File(['abc'], 'new.txt')] } });
+  fireEvent.change(screen.getByLabelText('文件存储路径'), { target: { value: 'logs/new.txt' } });
+  fireEvent.click(screen.getByRole('button', { name: '上传文件' }));
+  await waitFor(() => expect(transfer.uploadFile).toHaveBeenCalledWith('t', 'logs/new.txt', expect.any(File), expect.any(AbortSignal)));
+  await waitFor(() => expect(busy).toHaveBeenLastCalledWith(false));
+  expect(draft).toHaveBeenLastCalledWith(false);
+  fireEvent.click(screen.getByRole('button', { name: /下\s*载/ }));
+  await waitFor(() => expect(transfer.downloadFile).toHaveBeenCalledWith('t', 'notes.md', expect.any(AbortSignal)));
+  await waitFor(() => expect(busy).toHaveBeenLastCalledWith(false));
+  fireEvent.click(screen.getByRole('button', { name: /删\s*除/ }));
+  expect(api.apiDel).not.toHaveBeenCalled();
+  const buttons = await screen.findAllByRole('button', { name: /删\s*除/ });
+  fireEvent.click(buttons.at(-1));
+  await waitFor(() => expect(api.apiDel).toHaveBeenCalled());
+});
+it('retains selection after upload failure and exposes read errors without an empty success', async () => {
+  transfer.uploadFile.mockRejectedValue(new Error('file already exists'));
+  render(<TodoFiles todoId="t" active />);
+  await screen.findByText('notes.md');
+  fireEvent.change(screen.getByLabelText('选择任务文件'), { target: { files: [new File(['abc'], 'notes.md')] } });
+  fireEvent.click(screen.getByRole('button', { name: '上传文件' }));
+  expect(await screen.findByText('file already exists')).toBeTruthy();
+  expect(screen.getByLabelText('文件存储路径').value).toBe('notes.md');
+  api.apiGet.mockRejectedValueOnce(new Error('storage unavailable'));
+  fireEvent.click(screen.getByRole('button', { name: /刷新文件/ }));
+  expect(await screen.findByText('storage unavailable')).toBeTruthy();
+  expect(screen.queryByText('notes.md')).toBeNull();
+});
+it('viewer can read and download but cannot upload or delete', async () => {
+  setIdentity({ name: 'reader', role: 'viewer' });
+  render(<TodoFiles todoId="t" active />);
+  expect(await screen.findByText('notes.md')).toBeTruthy();
+  expect(screen.queryByLabelText('选择任务文件')).toBeNull();
+  expect(screen.queryByRole('button', { name: /删\s*除/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /下\s*载/ }));
+  await waitFor(() => expect(transfer.downloadFile).toHaveBeenCalled());
+});
+it('rejects oversized selections before transfer and aborts stale reads', async () => {
+  const view = render(<TodoFiles todoId="t" active />);
+  await screen.findByText('notes.md');
+  fireEvent.change(screen.getByLabelText('选择任务文件'), { target: { files: [new File(['a'.repeat(1025)], 'large')] } });
+  fireEvent.click(screen.getByRole('button', { name: '上传文件' }));
+  expect(await screen.findByText('文件超过大小上限 1024 字节')).toBeTruthy();
+  expect(transfer.uploadFile).not.toHaveBeenCalled();
+  const signal = api.apiGet.mock.calls[0][1].signal;
+  view.rerender(<TodoFiles todoId="t" active={false} />);
+  expect(signal.aborted).toBe(true);
+});

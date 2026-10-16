@@ -10,6 +10,7 @@ import { TodoTaskFields, TodoSettingsFields } from './forms/editor.jsx';
 import { TodoActions } from './forms/section.jsx';
 import { useCloseGuard } from './forms/closeGuard.js';
 import { TodoExecution } from './execute/todoExecution.jsx';
+import { TodoFiles } from './files/panel.jsx';
 import { TodoComments } from './comments/panel.jsx';
 import { UnavailableDetail } from './navigation/unavailable.jsx';
 
@@ -33,12 +34,16 @@ function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice 
   const dirty = JSON.stringify(payload(values, overview)) !== baseline;
   const [tab, setTab] = useState('task');
   const [saving, setSaving] = useState(false);
-  const [working, setWorking] = useState(false);
+  const [commentWorking, setCommentWorking] = useState(false);
+  const [fileWorking, setFileWorking] = useState(false);
+  const [executionWorking, setExecutionWorking] = useState(false);
+  const working = commentWorking || fileWorking || executionWorking;
   const [commentDirty, setCommentDirty] = useState(false);
+  const [fileDirty, setFileDirty] = useState(false);
   const [source, setSource] = useState(null);
   const [error, setError] = useState('');
   const submitting = useRef(false);
-  const [close, holder] = useCloseGuard({ dirty: dirty || commentDirty, busy: saving || working, onClose });
+  const [close, holder] = useCloseGuard({ dirty: dirty || commentDirty || fileDirty, busy: saving || working, onClose });
   const updated = JSON.stringify(seed(todo));
   const previous = useRef(updated);
   useEffect(() => {
@@ -83,13 +88,14 @@ function TodoDrawerSession({ todoId, todo, overview, refresh, onClose, onNotice 
             <TodoTaskFields />
             <section className="project-task-comments" aria-label="任务评论">
               <Typography.Title level={5}>评论</Typography.Title>
-              <TodoComments todoId={todoId} active={tab === 'task'} onDraftChange={setCommentDirty} onBusyChange={setWorking}
+              <TodoComments todoId={todoId} active={tab === 'task'} onDraftChange={setCommentDirty} onBusyChange={setCommentWorking}
                 openExecution={(id) => { setSource(id); setTab('execution'); }} refresh={refresh} />
             </section>
           </> },
+          { key: 'files', label: '文件', forceRender: true, children: <TodoFiles todoId={todoId} active={tab === 'files'} onBusyChange={setFileWorking} onDraftChange={setFileDirty} /> },
           { key: 'settings', label: '设置', forceRender: true, children: <TodoSettingsFields overview={overview} /> },
           { key: 'execution', label: '执行', forceRender: true, children: <TodoExecution todoId={todoId} active={tab === 'execution'} save={save} source={source}
-            onSourceOpened={() => setSource(null)} onBusyChange={setWorking} onNotice={onNotice} /> },
+            onSourceOpened={() => setSource(null)} onBusyChange={setExecutionWorking} onNotice={onNotice} /> },
         ]} />
       </Form>
     </div>

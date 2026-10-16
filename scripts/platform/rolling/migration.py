@@ -105,14 +105,15 @@ def migrate(settings, bundle, operations, seconds=90):
         resource_binary = settings.state_dir / "services/opencoder-resources"
         if not resource_binary.exists():
             atomic_bytes(resource_binary, (bundle / "bin/opencoder-server").read_bytes(), 0o755)
+        from .storage import allow_server_traversal
+        allow_server_traversal(settings, resource_binary.parent)
         resource_unit = units.service([resource_binary, "--resources", "--workdir", settings.server_workdir,
             "--data-dir", settings.state_dir / "resources", "--port", settings.resource_port,
             "--token-file", settings.token_file], "OpenCoder independent read-only resource service",
-            user=settings.server_user, workdir=settings.server_workdir)
+            user=settings.server_user, workdir=settings.server_workdir, resource=True)
         resource_data = settings.state_dir / "resources"
         resource_data.mkdir(exist_ok=True)
         shutil.chown(resource_data, user=settings.server_user)
-        resource_unit = resource_unit.replace(" remote-fs.target opencoder-resources.service", "")
         resource_unit = resource_unit.replace("Type=simple", "Type=simple\n" + units.inherited_environment(settings,settings.legacy_server_unit))
         atomic_bytes(settings.systemd_dir / "opencoder-resources.service", resource_unit.encode(), 0o644)
         units.prepare(settings, bundle, record)

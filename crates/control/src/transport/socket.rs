@@ -23,13 +23,20 @@ pub async fn upgrade(
     Query(query): Query<NodeChannelQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    ws.max_message_size(MAX_FRAME_BYTES)
+    let mut response = ws
+        .max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
         .on_upgrade(move |socket| async move {
-            if let Err(error) = serve(state, socket, query.node_id).await {
-                tracing::error!(%error, "node channel failed");
+            let node_id = query.node_id;
+            if let Err(error) = serve(state, socket, node_id.clone()).await {
+                tracing::error!(%node_id, %error, "node channel failed");
             }
-        })
+        });
+    response.headers_mut().insert(
+        INDEX_REPORT_ACK_HEADER,
+        axum::http::HeaderValue::from_static("1"),
+    );
+    response
 }
 
 async fn serve(
@@ -60,11 +67,13 @@ async fn serve(
     }
     let id = registration.id.clone();
     let generation = snapshot.generation.clone();
-    let mut report_sequence = snapshot.sequence;
+    let mut snapshot_sequence = snapshot.sequence;
+    let mut report_sequence = snapshot_sequence;
+    let mut report_flow: Option<(u64, u64)> = None;
     let mut reports = ReportCollector::default();
     let brain_deliveries = super::brain_delivery::InFlight::default();
     let mut initial_admission_request;
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<SocketCommand>(128);
+    let (tx, rx) = tokio::sync::mpsc::channel::<SocketCommand>(128);
     {
         // Admission transitions and attaches share this lock. A node joining a
         // frozen server is queued a Freeze before a concurrent Reopen can be
@@ -91,96 +100,236 @@ async fn serve(
         })))?;
         initial_admission_request = Some((request_id, command));
     }
-    let outcome = async {
-        state.fleet.register(&registration).await?;
+    let (acknowledgements, ack_rx) = tokio::sync::mpsc::channel(1);
+    let (input, mut incoming) = tokio::sync::mpsc::channel(128);
+    let mut transport = tokio::task::JoinSet::new();
+    transport.spawn(
+        super::socket_io::Transport {
+            writer,
+            reader,
+            commands: rx,
+            acknowledgements: ack_rx,
+            incoming: input,
+        }
+        .run(state.clone(), id.clone(), generation.clone()),
+    );
+    let process = async {
+        let fleet = state.fleet.clone();
+        let node = registration.clone();
+        super::socket_io::storage(async move { fleet.register(&node).await }).await?;
+        let mut applying = tokio::task::JoinSet::<anyhow::Result<()>>::new();
         loop {
-            tokio::select! {
-                _ = state.lifecycle.channels_retired() => {
-                    writer.send(Message::Close(None)).await?;
-                    break;
+            // Transport owns termination and its precise I/O error. Once the
+            // input queue closes, let the outer select collect that result.
+            let frame = tokio::select! {
+                finished = applying.join_next(), if !applying.is_empty() => {
+                    finished.expect("one report application")??;
+                    continue;
                 }
-                Some(frame) = rx.recv() => {
-                    let SocketCommand::Frame(frame) = frame else {
-                        writer.send(Message::Close(None)).await?;
-                        break;
-                    };
-                    let text = serde_json::to_string(frame.as_ref())?;
-                    if text.len() > MAX_FRAME_BYTES { anyhow::bail!("server frame exceeds limit"); }
-                    tokio::time::timeout(std::time::Duration::from_secs(5), writer.send(Message::Text(text))).await??;
-                }
-                incoming = tokio::time::timeout(std::time::Duration::from_millis(STALE_MS as u64), reader.next()) => {
-                    let Some(incoming) = incoming? else { break; };
-                    let frame = match incoming? {
-                        Message::Text(text) => serde_json::from_str::<NodeFrame>(&text)?,
-                        Message::Close(_) => break,
-                        Message::Ping(data) => {
-                            // A verified connection can remain live while its
-                            // inventory/admission waits; keep load unchanged.
-                            state.hub.touch(&id, &generation).await;
-                            writer.send(Message::Pong(data)).await?;
-                            continue;
-                        }
-                        _ => anyhow::bail!("invalid node frame"),
-                    };
-                    match frame {
-                        NodeFrame::Brain { execution, action, input } => {
-                            if !state.hub.touch(&id, &generation).await { continue; }
-                            if let Some(delivery) = brain_deliveries.start(&execution, &action, &input) {
-                                let state = state.clone(); let node = id.clone();
-                                tokio::spawn(async move {
-                                    let _delivery = delivery;
-                                    if let Err(error) = crate::api::brain_runs::effects::deliver(state,node,execution,action,input).await {
-                                        tracing::warn!(%error,"brain delivery remains pending for replay");
-                                    }
-                                });
+                incoming = incoming.recv() => match incoming {
+                    Some(frame) => frame,
+                    None => break std::future::pending::<anyhow::Result<()>>().await,
+                },
+            };
+            match frame {
+                NodeFrame::Brain {
+                    execution,
+                    action,
+                    input,
+                } => {
+                    if !state.hub.touch(&id, &generation).await {
+                        continue;
+                    }
+                    if let Some(delivery) = brain_deliveries.start(&execution, &action, &input) {
+                        let state = state.clone();
+                        let node = id.clone();
+                        tokio::spawn(async move {
+                            let _delivery = delivery;
+                            if let Err(error) = crate::api::brain_runs::effects::deliver(
+                                state, node, execution, action, input,
+                            )
+                            .await
+                            {
+                                tracing::warn!(%error,"brain delivery remains pending for replay");
                             }
-                        }
-                        NodeFrame::Hello { .. } => anyhow::bail!("duplicate hello"),
-                        NodeFrame::Snapshot { snapshot } => {
-                            report_sequence = snapshot.sequence;
-                            state.hub.snapshot(&id, &generation, snapshot).await;
+                        });
+                    }
+                    if let Some((report_id, sequence)) = report_flow.as_mut() {
+                        *sequence = sequence
+                            .checked_add(1)
+                            .ok_or_else(|| anyhow::anyhow!("report acknowledgement overflow"))?;
+                        super::socket_report::acknowledge(&acknowledgements, *report_id, *sequence)
+                            .await?;
+                    }
+                }
+                NodeFrame::Hello { .. } => anyhow::bail!("duplicate hello"),
+                NodeFrame::Snapshot { snapshot } => {
+                    snapshot_sequence = snapshot.sequence;
+                    state.hub.snapshot(&id, &generation, snapshot).await;
+                }
+                NodeFrame::IndexReport { report } => {
+                    if !state.hub.touch(&id, &generation).await {
+                        continue;
+                    }
+                    if !applying.is_empty() {
+                        applying
+                            .join_next()
+                            .await
+                            .expect("one report application")??;
+                    }
+                    let report_id = report.report_id;
+                    let acknowledged = report.acknowledge;
+                    match report.part {
+                        IndexReportPart::Begin => match reports.begin(report_id)? {
+                            BeginDecision::CapturePending => {
+                                report_sequence = snapshot_sequence;
+                                let fleet = state.fleet.clone();
+                                let node = id.clone();
+                                let started = std::time::Instant::now();
+                                let pending = super::socket_io::storage(async move {
+                                    fleet.pending_ids(&node).await
+                                })
+                                .await?;
+                                if started.elapsed().as_millis() >= 250 {
+                                    tracing::info!(node_id = %id, report_id, pending = pending.len(),
+                                            elapsed_ms = started.elapsed().as_millis(),
+                                            "control initial report capture timing");
+                                }
+                                reports.set_pending_at_begin(report_id, pending)?;
+                                report_flow = acknowledged.then_some((report_id, 0));
+                                if acknowledged {
+                                    super::socket_report::acknowledge(
+                                        &acknowledgements,
+                                        report_id,
+                                        0,
+                                    )
+                                    .await?;
+                                }
+                            }
+                            BeginDecision::Started => {
+                                report_sequence = snapshot_sequence;
+                                report_flow = acknowledged.then_some((report_id, 0));
+                                if acknowledged {
+                                    super::socket_report::acknowledge(
+                                        &acknowledgements,
+                                        report_id,
+                                        0,
+                                    )
+                                    .await?;
+                                }
+                            }
+                            BeginDecision::Ignore => {}
                         },
-                        NodeFrame::IndexReport { report } => {
-                            if !state.hub.touch(&id, &generation).await { continue; }
-                            let report_id = report.report_id;
-                            match report.part {
-                                IndexReportPart::Begin => match reports.begin(report_id)? {
-                                    BeginDecision::CapturePending => {
-                                        let pending = state.fleet.pending_ids(&id).await?;
-                                        reports.set_pending_at_begin(report_id, pending)?;
-                                    }
-                                    BeginDecision::Started | BeginDecision::Ignore => {}
-                                },
-                                IndexReportPart::Batch { records } => reports.batch(report_id, records)?,
-                                IndexReportPart::End => {
-                                    if let Some(complete) = reports.end(report_id)? {
-                                        if !super::socket_report::finish(&state, &id, &generation, report_sequence, &complete, &mut writer).await? {
-                                            continue;
-                                        }
-                                        tracing::debug!(node_id = %id, report_id = complete.report_id, records = complete.records.len(), "index report applied");
-                                    }
-                                }
+                        IndexReportPart::Batch { records } => {
+                            reports.batch(report_id, records)?;
+                            if let Some((active, sequence)) = report_flow.as_mut() {
+                                anyhow::ensure!(
+                                    *active == report_id && acknowledged,
+                                    "report acknowledgement ownership mismatch"
+                                );
+                                *sequence = sequence.checked_add(1).ok_or_else(|| {
+                                    anyhow::anyhow!("report acknowledgement overflow")
+                                })?;
+                                super::socket_report::acknowledge(
+                                    &acknowledgements,
+                                    report_id,
+                                    *sequence,
+                                )
+                                .await?;
                             }
                         }
-                        NodeFrame::Reply { request_id, reply } => {
-                            if initial_admission_request.as_ref().is_some_and(|(id, _)| id == &request_id) {
-                                let (_, command) = initial_admission_request.take().unwrap();
-                                let expected = if command == NodeAdmissionCommand::Freeze { "frozen" } else { "open" };
-                                if !(200..300).contains(&reply.status) || (command != NodeAdmissionCommand::Status && reply.body["mode"] != expected) {
-                                    tracing::warn!(node_id = %id, ?command, status = reply.status, body = %reply.body, "joining node rejected admission synchronization");
+                        IndexReportPart::End => {
+                            if let Some(complete) = reports.end(report_id)? {
+                                if let Some((active, sequence)) = report_flow.take() {
+                                    anyhow::ensure!(
+                                        active == report_id && acknowledged,
+                                        "report acknowledgement ownership mismatch"
+                                    );
+                                    let sequence = sequence.checked_add(1).ok_or_else(|| {
+                                        anyhow::anyhow!("report acknowledgement overflow")
+                                    })?;
+                                    let state = state.clone();
+                                    let id = id.clone();
+                                    let generation = generation.clone();
+                                    let sender = acknowledgements.clone();
+                                    // One connection-owned application preserves ordering while
+                                    // the same socket still resolves replies and reads load updates.
+                                    applying.spawn(async move {
+                                        if super::socket_report::finish(
+                                            &state,
+                                            &id,
+                                            &generation,
+                                            report_sequence,
+                                            &complete,
+                                            &sender,
+                                        )
+                                        .await?
+                                        {
+                                            super::socket_report::acknowledge(
+                                                &sender, report_id, sequence,
+                                            )
+                                            .await?;
+                                        }
+                                        Ok(())
+                                    });
+                                } else {
+                                    super::socket_report::finish(
+                                        &state,
+                                        &id,
+                                        &generation,
+                                        report_sequence,
+                                        &complete,
+                                        &acknowledgements,
+                                    )
+                                    .await?;
                                 }
-                                continue;
-                            }
-                            if let Some(create) = state.hub.resolve(&id, &generation, &request_id, reply).await {
-                                settle_create_reply(&state, create).await?;
                             }
                         }
                     }
                 }
+                NodeFrame::Reply { request_id, reply } => {
+                    if initial_admission_request
+                        .as_ref()
+                        .is_some_and(|(id, _)| id == &request_id)
+                    {
+                        let (_, command) = initial_admission_request.take().unwrap();
+                        let expected = if command == NodeAdmissionCommand::Freeze {
+                            "frozen"
+                        } else {
+                            "open"
+                        };
+                        if !(200..300).contains(&reply.status)
+                            || (command != NodeAdmissionCommand::Status
+                                && reply.body["mode"] != expected)
+                        {
+                            tracing::warn!(node_id = %id, ?command, status = reply.status, body = %reply.body, "joining node rejected admission synchronization");
+                        }
+                        continue;
+                    }
+                    if let Some(create) = state
+                        .hub
+                        .resolve(&id, &generation, &request_id, reply)
+                        .await
+                    {
+                        let state = state.clone();
+                        super::socket_io::storage(async move {
+                            settle_create_reply(&state, create).await
+                        })
+                        .await?;
+                    }
+                }
             }
         }
-        Ok::<_, anyhow::Error>(())
-    }.await;
+    };
+    let outcome = tokio::select! {
+        result = process => result,
+        result = transport.join_next() => match result.expect("one transport task") {
+            Ok(result) => result,
+            Err(error) => Err(error.into()),
+        },
+    };
+    transport.abort_all();
+    while transport.join_next().await.is_some() {}
     state.hub.detach(&id, &generation).await;
     outcome
 }

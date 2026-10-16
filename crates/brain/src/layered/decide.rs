@@ -103,6 +103,10 @@ pub fn decide(
                 ensure!(*layer == 1, "first dispatch must enter the first milestone");
             }
             let back = *layer <= snapshot.run.layer;
+            ensure!(
+                !request.plan.adjacent_only || *layer >= snapshot.run.layer.saturating_sub(1),
+                "adjacent workflow cannot skip a layer when returning"
+            );
             assess(&mut update, snapshot, request, assessments, !back)?;
             if back {
                 let reflection = reflection
@@ -167,6 +171,10 @@ pub fn decide(
                     .iter()
                     .find(|c| c.capability_id == assignment.capability_id)
                     .context("capability unavailable")?;
+                ensure!(
+                    !request.plan.shared_workspace || cap.kind == ExecutionKind::Operator,
+                    "shared workspace requires Operator capabilities"
+                );
                 validate::reason(&assignment.reason)?;
                 validate::bindings(
                     assignment,

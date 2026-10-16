@@ -9,11 +9,21 @@ const MILESTONE_BRAIN: &str = "brain_scheduler_v7";
 
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
+    let plan = &request.input["layered_request"]["plan"];
+    if request.input["brain_workspace"] == true
+        || plan["shared_workspace"] == true
+        || plan["adjacent_only"] == true
+    {
+        features.push("brain_workspace_v1");
+    }
     if request.kind == ExecutionKind::Dag
         || (request.kind == ExecutionKind::Project
             && definition.is_some_and(|definition| definition["todo"]["executor_kind"] == "dag"))
     {
         features.push("dag_container_v1");
+        if request.input.get("brain_layered").is_none() {
+            features.push(opencoder_core::brain::EXECUTION_IO_CAPABILITY);
+        }
     }
     if requires_dynamic(request.kind, definition) {
         features.push(DYNAMIC_DAG);
@@ -25,6 +35,13 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
     {
         features.push(MILESTONE_BRAIN);
         features.push(opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY);
+    }
+    if request.input["execution_io_version"]
+        .as_u64()
+        .is_some_and(|version| version > 0)
+        && !features.contains(&opencoder_core::brain::EXECUTION_IO_CAPABILITY)
+    {
+        features.push(opencoder_core::brain::EXECUTION_IO_CAPABILITY);
     }
     if request.kind == ExecutionKind::Brain && request.input["schema_version"] == 7 {
         features.push(opencoder_brain::layered::budget::CAPABILITY);
@@ -128,6 +145,7 @@ mod tests {
             DYNAMIC_DAG,
             MILESTONE_BRAIN,
             opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,
+            opencoder_core::brain::EXECUTION_IO_CAPABILITY,
         ] {
             assert!(!supports(
                 &RpcReply::ok(json!({"compatible":true})),
@@ -154,7 +172,7 @@ mod tests {
             id: "brain-v7".into(),
             kind: ExecutionKind::Brain,
             target: None,
-            input: json!({"schema_version":7,"layered_request":{}}),
+            input: json!({"schema_version":7,"execution_io_version":1,"layered_request":{}}),
             node_id: None,
         };
         assert_eq!(
@@ -162,6 +180,7 @@ mod tests {
             vec![
                 MILESTONE_BRAIN,
                 opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,
+                opencoder_core::brain::EXECUTION_IO_CAPABILITY,
                 opencoder_brain::layered::budget::CAPABILITY
             ]
         );
@@ -169,14 +188,15 @@ mod tests {
             id: "brain-nested".into(),
             kind: ExecutionKind::Agent,
             target: None,
-            input: json!({"brain_layered":{}}),
+            input: json!({"execution_io_version":1,"brain_layered":{}}),
             node_id: None,
         };
         assert_eq!(
             required(&nested, None),
             vec![
                 MILESTONE_BRAIN,
-                opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY
+                opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,
+                opencoder_core::brain::EXECUTION_IO_CAPABILITY
             ]
         );
         let scheduler = CreateExecution {
@@ -195,6 +215,35 @@ mod tests {
             node_id: None,
         };
         assert!(required(&legacy, None).is_empty());
+    }
+
+    #[test]
+    fn legacy_root_and_children_do_not_gain_new_io_requirements() {
+        for (kind, input) in [
+            (ExecutionKind::Brain, json!({"schema_version":7})),
+            (
+                ExecutionKind::Operator,
+                json!({"brain_layered":{"run_id":"brain-old"},"brain_workspace":true}),
+            ),
+            (
+                ExecutionKind::Dag,
+                json!({"brain_layered":{"run_id":"brain-old"}}),
+            ),
+        ] {
+            let request = CreateExecution {
+                id: "old-child".into(),
+                kind,
+                target: None,
+                input,
+                node_id: None,
+            };
+            let required = required(&request, None);
+            assert!(!required.contains(&opencoder_core::brain::EXECUTION_IO_CAPABILITY));
+            assert!(required.contains(&MILESTONE_BRAIN));
+            if kind == ExecutionKind::Dag {
+                assert!(required.contains(&"dag_container_v1"));
+            }
+        }
     }
 
     #[test]

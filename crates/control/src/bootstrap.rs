@@ -182,6 +182,7 @@ pub async fn serve(
         ServerCredentials {
             server: token,
             metrics: None,
+            auth_enabled: true,
         },
         None,
     )
@@ -191,6 +192,7 @@ pub async fn serve(
 pub struct ServerCredentials {
     pub server: String,
     pub metrics: Option<String>,
+    pub auth_enabled: bool,
 }
 
 pub async fn serve_release(
@@ -205,6 +207,7 @@ pub async fn serve_release(
     let ServerCredentials {
         server: token,
         metrics: metrics_token,
+        auth_enabled,
     } = credentials;
     anyhow::ensure!(
         metrics_token.as_deref() != Some(token.as_str()),
@@ -219,7 +222,9 @@ pub async fn serve_release(
             .set(platform)
             .map_err(|_| anyhow::anyhow!("release configuration supplied twice"))?;
     }
-    seed_admin(&state.store, &token).await?;
+    if auth_enabled {
+        seed_admin(&state.store, &token).await?;
+    }
     // One-time import of legacy `schedules.json` definitions into the
     // libsql `schedules` table (only when the table is empty; a failure
     // warns and never blocks boot) — see `seed_schedules`.
@@ -261,7 +266,7 @@ pub async fn serve_release(
     let mut server = tokio::spawn(async move {
         axum::serve(
             listener,
-            crate::build_app_with_metrics(server_state, Some(token), metrics_token, web)
+            crate::build_app_with_auth(server_state, Some(token), metrics_token, web, auth_enabled)
                 .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(async {

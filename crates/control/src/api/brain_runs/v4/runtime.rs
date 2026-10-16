@@ -22,10 +22,12 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
         .context("root assignment missing")?;
     let request: LayeredRequest =
         serde_json::from_value(assignment.request.input["layered_request"].clone())?;
+    let io_version = execution_io_version(&assignment.request.input)?;
     let capabilities: Vec<BrainCapabilityDescriptor> =
         serde_json::from_value(assignment.request.input["frozen_capabilities"].clone())
             .context("frozen capability descriptors missing")?;
     let mut summaries = BTreeMap::new();
+    let mut execution_artifacts = BTreeMap::new();
     let history = read::events(state, run_id, snapshot.run.last_event_seq)
         .await
         .map_err(|reply| anyhow::anyhow!("layered input history: {}", reply.body))?;
@@ -59,12 +61,17 @@ pub async fn wake(state: &Arc<AppState>, run_id: &str) -> Result<Option<u64>> {
             );
             continue;
         };
-        let summary = read::summary(state, &index)
+        let (summary, artifacts) = read::summary(state, &index)
             .await
             .context("layered summary missing")?;
         summaries.insert(operation.execution_id.clone(), summary);
+        if io_version != 0 {
+            execution_artifacts.insert(operation.execution_id.clone(), artifacts);
+        }
     }
     let mut context = context(state, &snapshot, &request, &capabilities, summaries).await?;
+    context.execution_io_version = io_version;
+    context.execution_artifacts = execution_artifacts;
     context.guidance_only = !opencoder_brain::layered::barrier(&snapshot);
     context.human_inputs = history
         .iter()

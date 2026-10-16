@@ -12,10 +12,10 @@ When guidance_only is true, some executions in the current layer are still runni
 Evaluate the current LAYER milestone success criteria from the supplied results, including failed execution diagnostics.
 Execution status done only means the capability finished; inspect the complete structured evidence and its task verdict before assessing the milestone. Summary text never overrides contradictory result fields.
 Required input and output fields are enforced. Admission and output contract errors are execution evidence: correct the task or bindings and retry the appropriate layer.
-Every execution has its own workspace. Bind exact code versions, patches or artifacts between tasks; do not assume a previous execution's local files are present. Bind failed verification diagnostics into concrete rework inputs.
+When plan.shared_workspace is true, Operator steps share one workspace on the root's owning node. Each activation has its own evidence directory and private HOME; use the runtime context paths. Otherwise executions have separate workspaces. Always bind exact code versions and artifact references, and bind failed verification diagnostics into concrete rework inputs.
 Use the complete plan, attached capability contracts and execution evidence to choose the next layer. Explain why that layer is appropriate.
 Forward dispatch is only to current layer + 1 and requires the current layer milestone to meet its criteria.
-If results require rework, choose the current layer or any previously executed layer that can address the problem.
+If results require rework and plan.adjacent_only is true, choose only the current or immediately preceding layer. Otherwise choose the current or any previously executed layer that can address the problem. A return to an earlier stage must proceed through each adjacent stage.
 Returning begins the next round, invalidating that layer and subsequent layers' earlier achievements.
 Every dispatch after the first and every completion MUST include assessments with exactly one key: the current layer_id, value {"met":true|false,"reason":"evidence-based layer assessment"}. Initial dispatch has assessments {}. Forward and completion require met=true.
 Do not re-assess earlier layers; their evidence may appear in the summary only.
@@ -29,6 +29,7 @@ Decisions:
 {"decision":"dispatch_layer","layer":1,"assignments":[{"node_id":"coding","capability_id":"attached-id","inputs":{"task":{"kind":"value","value":"specific task"}},"reason":"why this capability"}],"reason":"assessment and next-layer rationale","reflection":null,"evidence_execution_ids":[],"assessments":{}}
 For a return use the same dispatch decision with a nonempty reflection and previously executed target layer.
 Input bindings: {"kind":"root","name":"key"}, {"kind":"execution","execution_id":"id","path":"/json/pointer"}, {"kind":"artifact","reference":"key"}, or {"kind":"value","value":<generated task input>}.
+Bind only the latest activation of the logical node; failed latest results remain valid diagnostic inputs. Artifact bindings are available only when explicitly enabled in the context.
 Execution binding path is a JSON Pointer: use path="" for the complete output, including a text result. path="/" selects an empty property name, not the complete output. A subfield such as passed uses path="/passed"; escape property names with ~0 for ~ and ~1 for /.
 {"decision":"complete","reason":"final layer milestone met","evidence_execution_ids":["id"],"summary":"final deliverables","assessments":{"<current-layer-id>":{"met":true,"reason":"criteria evidence"}}}
 {"decision":"block","reason":"specific missing prerequisite"}
@@ -59,12 +60,18 @@ pub fn instruction(context: &LayeredContext) -> Result<String> {
         .enumerate()
         .map(|(index, layer)| json!({"layer": index + 1, "layer_id": layer.layer_id}))
         .collect();
-    let instruction = serde_json::to_string(
-        &json!({"schema_version":LAYERED_SCHEMA_VERSION,"run":context.run,"plan":plan,"layer_numbers":layer_numbers,"assessment_layer_id":assessment_layer_id,
+    let mut payload = json!({"schema_version":LAYERED_SCHEMA_VERSION,"run":context.run,"plan":plan,"layer_numbers":layer_numbers,"assessment_layer_id":assessment_layer_id,
         "capabilities":capabilities,"root_inputs":context.request.inputs,"artifacts":context.request.artifacts,"todo":context.todo,
         "operations":context.operations,"summaries":context.summaries,"human_inputs":context.human_inputs,
-        "guidance_only":context.guidance_only,"guidance_notes":context.guidance_notes}),
-    )?;
+        "guidance_only":context.guidance_only,"guidance_notes":context.guidance_notes});
+    if context.execution_io_version != 0 {
+        payload["execution_artifacts"] = json!(context.execution_artifacts);
+        payload["artifact_bindings"] = json!({
+            "example":{"kind":"execution","execution_id":"id","source":"artifacts","path":"/0"},
+            "instructions":"Use path='' for the complete artifact index. References include instance index, bytes and SHA-256. Large indexes and nested plans export a manifest reference; consumers read it through the execution artifact API."
+        });
+    }
+    let instruction = serde_json::to_string(&payload)?;
     ensure!(
         instruction.len() <= super::budget::INSTRUCTION_BYTES,
         "milestone decision context exceeds 1 MiB; evidence retained, start a smaller plan; resuming cannot increase transport capacity"

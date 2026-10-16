@@ -1,7 +1,10 @@
 //! Reads of the node-owned layered projection and capability outputs.
 use crate::{api::brain_runs::runs, AppState};
 use anyhow::Result;
-use opencoder_core::{brain::layered::*, fleet::*};
+use opencoder_core::{
+    brain::{layered::*, ArtifactRef, BrainExecutionSource},
+    fleet::*,
+};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -73,13 +76,26 @@ fn page(body: &Value) -> Option<Vec<LayeredEvent>> {
     serde_json::from_value(body.get("events")?.clone()).ok()
 }
 
-pub(super) async fn summary(state: &Arc<AppState>, index: &ExecutionIndex) -> Option<String> {
+pub(super) async fn summary(
+    state: &Arc<AppState>,
+    index: &ExecutionIndex,
+) -> Option<(String, Vec<ArtifactRef>)> {
     let reply = child(state, index, "layered_summary", Value::Null).await;
     if reply.status >= 300 {
         return None;
     }
     match &reply.body["summary"] {
-        Value::String(summary) => Some(summary.clone()),
+        Value::String(summary) => Some((
+            summary.clone(),
+            serde_json::from_value(
+                reply
+                    .body
+                    .get("artifacts")
+                    .cloned()
+                    .unwrap_or_else(|| json!([])),
+            )
+            .ok()?,
+        )),
         _ => None,
     }
 }
@@ -89,8 +105,15 @@ pub(super) async fn output(
     state: &Arc<AppState>,
     index: &ExecutionIndex,
     path: &str,
+    source: BrainExecutionSource,
 ) -> Result<Value, RpcReply> {
-    let reply = child(state, index, "layered_output", json!({"path":path})).await;
+    let reply = child(
+        state,
+        index,
+        "layered_output",
+        json!({"path":path,"source":source}),
+    )
+    .await;
     if reply.status >= 300 {
         return Err(reply);
     }

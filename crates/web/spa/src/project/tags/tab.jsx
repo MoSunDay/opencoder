@@ -18,7 +18,7 @@ export function TagsTab({ overview, refresh, onNotice }) {
     try {
       if (editing) await apiPatch(`/api/project/tags/${encodeURIComponent(editing.id)}`, body);
       else await apiPost('/api/project/tags', body);
-      setOpen(false); await refresh(); onNotice(ok('Tag 已保存，TODO 标签已按专项优先重新匹配')); return true;
+      setOpen(false); await refresh(); onNotice(ok('Tag 已保存，TODO 标签已按子项优先重新匹配')); return true;
     } catch (error) { onNotice(err(error.message)); return false; }
     finally { mutating.current = false; setBusy(false); }
   };
@@ -33,7 +33,7 @@ export function TagsTab({ overview, refresh, onNotice }) {
     { title: 'Tag 名称', key: 'name', width: '25%', searchValue: (row) => row.name, render: (_, row) => <TableText>{row.name}</TableText> },
     { title: '归属类型', key: 'scope', width: '13%', kind: 'enum', searchValue: (row) => row.scope_label, render: (_, row) => row.scope_label },
     { title: '所属项目', key: 'project', width: '23%', searchValue: (row) => row.project_title, render: (_, row) => <TableText>{row.project_title}</TableText> },
-    { title: '所属专项', key: 'initiative', width: '23%', searchValue: (row) => row.initiative_title, render: (_, row) => <TableText>{row.initiative_title}</TableText> },
+    { title: '所属子项', key: 'initiative', width: '23%', searchValue: (row) => row.initiative_title, render: (_, row) => <TableText>{row.initiative_title}</TableText> },
     { title: '操作', key: 'actions', width: '16%', render: (_, row) => <Space size={4}>
       <EditButton size="small" disabled={busy} aria-label={`编辑 Tag ${row.name}`} onClick={() => { setEditing(row); setOpen(true); }}>编辑</EditButton>
       <Popconfirm title={`删除 Tag「${row.name}」？`} description="同名可用标签会接替，无法匹配的 TODO 标签会解除。" okText="删除" cancelText="取消" onConfirm={() => remove(row)}>
@@ -43,7 +43,7 @@ export function TagsTab({ overview, refresh, onNotice }) {
   ];
   return <Space orientation="vertical" size={12} style={{ width: '100%' }}>
     <Space wrap><EditButton type="primary" disabled={busy} onClick={() => { setEditing(null); setOpen(true); }}>新建 Tag</EditButton>
-      <Typography.Text type="secondary">全局 Tag 在所有项目、专项及未归属 TODO 中可用；同名时专项优先，其次项目，最后全局。</Typography.Text></Space>
+      <Typography.Text type="secondary">全局 Tag 在所有项目、子项及未归属 TODO 中可用；同名时子项优先，其次项目，最后全局。</Typography.Text></Space>
     <ProjectTable label="Tag 表格" viewKey="tags" columns={columns} rows={tagRows(overview)} locale={{ emptyText: '还没有 Tag' }} />
     <TagEditor open={open} initial={editing} overview={overview} onCancel={() => setOpen(false)} onOk={save} />
   </Space>;

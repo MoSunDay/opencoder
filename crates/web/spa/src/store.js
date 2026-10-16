@@ -3,6 +3,7 @@
 // rule: pure functions, state passed/returned, no internal mutation).
 
 import { useSyncExternalStore } from 'react';
+import { linkedPage } from './fleet/navigation/links.js';
 
 export const TOKEN_KEY = 'oc_token';
 export const BASE_KEY = 'oc_base';
@@ -15,11 +16,12 @@ let state = {
   // null (never stored) falls back to the build-time embedded base; an
   // explicitly stored '' still means same-origin and wins over the embed.
   base: localStorage.getItem(BASE_KEY) ?? embeddedBase(),
-  page: new URLSearchParams(window.location.search).has('brain_run') ? 'brain' : 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics'
+  page: linkedPage(window.location.search, window.location.hash) || 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics'
   preselectNode: null, // node id the fleet tab asked chat to open
   nodes: [], // last fleet snapshot shared between tabs
   conn: 'init', // 'init' | 'ok' | 'fail'
   identity: null, // {name, role} from GET /api/me; null until probed
+  authEnabled: null, // Public /api/auth/status; never persisted.
 };
 
 const listeners = new Set();
@@ -60,7 +62,7 @@ export function setCredentials(token, base) {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(BASE_KEY, cleanBase);
   // identity is re-probed after login (GET /api/me in login.jsx).
-  setState({ token, base: cleanBase, conn: 'init', identity: null });
+  setState({ token, base: cleanBase, conn: 'init', identity: null, authEnabled: null });
 }
 
 /// Publish the authenticated identity ({name, role}) resolved by the login
@@ -73,7 +75,7 @@ export function clearCredentials() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(BASE_KEY);
   setState({
-    token: '', base: embeddedBase(), conn: 'init', nodes: [], preselectNode: null, identity: null,
+    token: '', base: embeddedBase(), conn: 'init', nodes: [], preselectNode: null, identity: null, authEnabled: null,
   });
 }
 
@@ -84,7 +86,7 @@ export function clearCredentials() {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   setState({
-    token: '', conn: 'init', nodes: [], preselectNode: null, identity: null,
+    token: '', conn: 'init', nodes: [], preselectNode: null, identity: null, authEnabled: true,
   });
 }
 

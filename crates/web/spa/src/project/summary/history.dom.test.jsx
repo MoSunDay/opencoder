@@ -8,11 +8,11 @@ import { setIdentity } from '../../store.js';
 import { CurrentSummary } from './view.jsx';
 
 const versions = [
-  { version: 3, current_summary: '最新概述', created_at: 1700000003000, restored_from: 1 },
-  { version: 2, current_summary: '可恢复的概述', created_at: 1700000002000 },
+  { version: 3, current_summary: '最新现状', created_at: 1700000003000, restored_from: 1 },
+  { version: 2, current_summary: '可恢复的现状', created_at: 1700000002000 },
   { version: 1, current_summary: '', created_at: 1700000001000 },
 ];
-const props = { collection: 'goals', record: { id: 'p', current_summary: '最新概述' } };
+const props = { collection: 'goals', record: { id: 'p', current_summary: '最新现状' } };
 beforeEach(() => {
   vi.resetAllMocks(); setIdentity({ name: 'editor', role: 'editor' });
   apiGet.mockResolvedValue({ versions, limit: 10 }); apiPost.mockResolvedValue({ version: 4 });
@@ -23,10 +23,10 @@ it('reads history on demand and restores a selected version after confirmation',
   render(<CurrentSummary {...props} refresh={refresh} />);
   expect(apiGet).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '修改记录' }));
-  expect(await screen.findByText('可恢复的概述')).toBeTruthy();
+  expect(await screen.findByText('可恢复的现状')).toBeTruthy();
   expect(screen.getByText('版本 3（当前）')).toBeTruthy();
   expect(screen.getByText('恢复自版本 1')).toBeTruthy();
-  expect(screen.getByText('空概述')).toBeTruthy();
+  expect(screen.getByText('空现状')).toBeTruthy();
   expect(apiGet.mock.calls[0][0]).toBe('/api/project/goals/p/summary-versions');
   fireEvent.click(screen.getAllByRole('button', { name: '恢复此版本' })[0]);
   expect(apiPost).not.toHaveBeenCalled();
@@ -45,11 +45,11 @@ it('shows read failures with retry and retains history after a restore failure',
   expect(await screen.findByText('记录暂时不可用')).toBeTruthy();
   expect(screen.queryByText('暂无修改记录')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
-  await screen.findByText('可恢复的概述');
+  await screen.findByText('可恢复的现状');
   fireEvent.click(screen.getAllByRole('button', { name: '恢复此版本' })[0]);
   fireEvent.click(await screen.findByRole('button', { name: '确认恢复' }));
   expect(await screen.findByText('该版本已被清理')).toBeTruthy();
-  expect(screen.getByText('可恢复的概述')).toBeTruthy();
+  expect(screen.getByText('可恢复的现状')).toBeTruthy();
   expect(refresh).not.toHaveBeenCalled();
   expect(apiPost.mock.calls[0][0]).toBe('/api/project/initiatives/p/summary-versions/2/restore');
 });
@@ -58,7 +58,7 @@ it('allows viewers to read history but disables restoration', async () => {
   setIdentity({ name: 'viewer', role: 'viewer' });
   render(<CurrentSummary {...props} />);
   fireEvent.click(screen.getByRole('button', { name: '修改记录' }));
-  await screen.findByText('可恢复的概述');
+  await screen.findByText('可恢复的现状');
   for (const button of screen.getAllByRole('button', { name: '恢复此版本' })) expect(button.disabled).toBe(true);
   expect(apiPost).not.toHaveBeenCalled();
 });
@@ -70,10 +70,10 @@ it('discards a history response after switching to another record', async () => 
   fireEvent.click(screen.getByRole('button', { name: '修改记录' }));
   await waitFor(() => expect(apiGet).toHaveBeenCalledOnce());
   const signal = apiGet.mock.calls[0][1].signal;
-  view.rerender(<CurrentSummary {...props} record={{ id: 'other', current_summary: '其他项目概述' }} />);
+  view.rerender(<CurrentSummary {...props} record={{ id: 'other', current_summary: '其他项目现状' }} />);
   expect(signal.aborted).toBe(true);
   resolveOld({ versions, limit: 10 });
   fireEvent.click(screen.getByRole('button', { name: '修改记录' }));
-  await screen.findByText('可恢复的概述');
+  await screen.findByText('可恢复的现状');
   expect(apiGet.mock.calls.at(-1)[0]).toBe('/api/project/goals/other/summary-versions');
 });

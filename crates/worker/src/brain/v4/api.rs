@@ -54,6 +54,17 @@ pub async fn handle(
     let change = match action {
         "layered_intent" => {
             let intent: LayeredDispatchIntent = serde_json::from_value(input.clone())?;
+            layered::validate_execution_io(
+                opencoder_core::brain::execution_io_version(&record.assignment.request.input)?,
+                &LayeredDecision::DispatchLayer {
+                    layer: intent.layer,
+                    reflection: None,
+                    assignments: intent.assignments.clone(),
+                    assessments: Default::default(),
+                    reason: String::new(),
+                    evidence_execution_ids: vec![],
+                },
+            )?;
             ensure!(
                 intent.generation == snapshot.run.generation + 1,
                 "layered intent generation mismatch"
@@ -139,6 +150,15 @@ pub async fn handle(
         }
         "layered_context" => {
             let mut context: LayeredContext = serde_json::from_value(input)?;
+            if context.execution_io_version
+                != opencoder_core::brain::execution_io_version(&record.assignment.request.input)?
+                || (context.execution_io_version == 0 && !context.execution_artifacts.is_empty())
+            {
+                return Ok(RpcReply::error(
+                    409,
+                    "layered context execution IO version differs from frozen admission",
+                ));
+            }
             if snapshot.run.phase != LayeredPhase::Ready
                 || context.generation != snapshot.run.generation
             {
@@ -154,6 +174,21 @@ pub async fn handle(
                     && context.run.as_ref() == Some(&snapshot.run),
                 "layered context identity mismatch"
             );
+            if !context.execution_artifacts.iter().all(|(id, files)| {
+                context.operations.iter().any(|operation| {
+                    &operation.execution_id == id
+                        && operation.status.terminal()
+                        && files.iter().all(|file| {
+                            file.execution.id == *id
+                                && file.execution.kind == operation.execution_kind
+                        })
+                })
+            }) {
+                return Ok(RpcReply::error(
+                    409,
+                    "artifact index does not belong to this run's terminal execution",
+                ));
+            }
             let mut change = layered::change(&snapshot, now_ms());
             context.generation = change.run.generation;
             if let Err(error) = super::budget::context(worker, &record, &context) {

@@ -58,6 +58,7 @@ async function createHierarchy(page) {
     await drawer.locator('input#title').fill(title);
     await drawer.locator('textarea#draft').fill(draft);
     if (groupId) {
+      await drawer.getByRole('tab', { name: '设置', exact: true }).click();
       await drawer.getByRole('combobox', { name: '所属专项' }).click();
       const label = groupId === initiative.id ? 'Project initiative' : 'Standalone initiative';
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: label }).click();
@@ -66,6 +67,7 @@ async function createHierarchy(page) {
     await page.getByText(`TODO · ${title}`, { exact: true }).waitFor();
     if (capability) {
       const detail = page.getByRole('dialog', { name: `TODO · ${title}` });
+      await detail.getByRole('tab', { name: '执行', exact: true }).click();
       await detail.getByRole('combobox', { name: '执行能力' }).click();
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(capability === 'Agent' ? 'General purpose agent · act' : 'Execute an explicit host operation using the registered Operator · act', { exact: true }).click();
       const updated = page.waitForResponse((r) => r.url().endsWith(`/api/project/todos/${created.id}`) && r.request().method() === 'PATCH');
@@ -85,18 +87,18 @@ async function createHierarchy(page) {
 async function verifyWorkbench(page, root, executionId) {
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();
   await page.getByRole('button', { name: 'Acceptance TODO', exact: true }).click();
-  await page.getByRole('button', { name: '返回 TODO' }).click();
+  await page.getByRole('tab', { name: '执行', exact: true }).click();
   await page.getByText('指派记录', { exact: true }).waitFor();
   await page.getByRole('button', { name: '指派所选能力' }).waitFor();
   const row = page.locator('tr').filter({ hasText: executionId });
   await row.getByText('Agent', { exact: true }).waitFor();
-  await row.getByRole('button', { name: '查看' }).click();
-  await page.getByRole('button', { name: '返回 TODO' }).waitFor();
-  await page.screenshot({ path: path.join(root, 'project-workbench.png'), fullPage: true });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: path.join(root, 'project-workbench-mobile.png'), fullPage: true });
-  const mobile = await page.evaluate(() => {
+  const [detailPage] = await Promise.all([page.waitForEvent('popup'), row.getByRole('link', { name: executionId, exact: true }).click()]);
+  await detailPage.locator('.execution-view-full').waitFor();
+  await detailPage.screenshot({ path: path.join(root, 'project-workbench.png'), fullPage: true });
+  await detailPage.setViewportSize({ width: 390, height: 844 });
+  await detailPage.waitForTimeout(350);
+  await detailPage.screenshot({ path: path.join(root, 'project-workbench-mobile.png'), fullPage: true });
+  const mobile = await detailPage.evaluate(() => {
     const drawer = document.querySelector('.ant-drawer-content-wrapper');
     const title = document.querySelector('.ant-drawer-title');
     const bounds = (element) => { const { left, right, width } = element.getBoundingClientRect(); return { left, right, width }; };
@@ -105,13 +107,13 @@ async function verifyWorkbench(page, root, executionId) {
   if (mobile.drawer.left < -1 || mobile.drawer.right > mobile.viewport + 1 || mobile.title.left < 0 || mobile.title.right > mobile.viewport) {
     throw new Error(`Mobile workbench drawer is clipped: ${JSON.stringify(mobile)}`);
   }
-  await page.setViewportSize({ width: 1500, height: 1000 });
+  await detailPage.close();
   fs.writeFileSync(path.join(root, 'workbench-browser.json'), JSON.stringify({ linked_execution_id: executionId, detail_opened: true }, null, 2));
 }
 async function launchFromTodo(page, todoTitle, agent) {
   await page.locator('.ant-drawer-close').click();
   await page.getByRole('button', { name: todoTitle, exact: true }).click();
-  await page.getByRole('button', { name: '返回 TODO' }).click();
+  await page.getByRole('tab', { name: '执行', exact: true }).click();
   if (agent) {
     await page.getByRole('combobox', { name: '执行能力' }).click();
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: 'acceptance-agent' }).click();
@@ -123,12 +125,11 @@ async function launchFromTodo(page, todoTitle, agent) {
   const response = await submitted;
   if (!response.ok()) throw new Error(`browser capability launch: ${await response.text()}`);
   const execution = await response.json();
-  await page.getByRole('button', { name: '返回 TODO' }).click();
+  await page.getByRole('button', { name: '返回指派记录' }).click();
   await page.locator('tr').filter({ hasText: execution.execution_id }).waitFor();
   return execution.execution_id;
 }
 async function verifyNativeAgentLaunch(page, todoTitle) {
-  await page.getByRole('button', { name: '返回 TODO' }).click();
   return launchFromTodo(page, todoTitle, true);
 }
 async function verifyNativeOperatorLaunch(page, todoTitle) {

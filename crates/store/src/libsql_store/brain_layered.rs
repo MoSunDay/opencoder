@@ -59,7 +59,22 @@ pub async fn commit(conn: &Connection, change: &LayeredChange) -> Result<Layered
                             && n.capability_id == o.capability_id
                             && n.execution_kind == o.execution_kind
                             && n.execution_id == o.execution_id
-                            && (!o.status.terminal() || o.status == n.status)
+                            && (!o.status.terminal()
+                                || o.status == n.status
+                                || (o.status == LayeredOperationStatus::Error
+                                    && n.status == LayeredOperationStatus::Done
+                                    && matches!(old.run.phase, LayeredPhase::Paused | LayeredPhase::Blocked)
+                                    && change.run.phase == old.run.phase
+                                    && change.run.activation == old.run.activation
+                                    && change.run.layer == old.run.layer
+                                    && change.run.round == old.run.round
+                                    && change.run.valid_layers == old.run.valid_layers
+                                    && o.activation == old.run.activation
+                                    && !o.cancel_requested
+                                    && !n.cancel_requested
+                                    && o.source_sequence
+                                        .zip(n.source_sequence)
+                                        .is_some_and(|(previous, current)| current > previous)))
                     })
                 }),
                 "operation identity or terminal state changed"

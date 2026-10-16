@@ -1,8 +1,9 @@
 import { CurrentSummary } from '../summary/view.jsx';
+import { ContentSection } from '../summary/section.jsx';
 import { PeopleSummary } from '../people/fields.jsx';
 import { EditButton } from '../../ui/permissions.jsx';
-import { Button, Drawer, Space, Typography } from 'antd';
-import { useState } from 'react';
+import { Drawer, Space, Tabs, Typography } from 'antd';
+import { useEffect, useState } from 'react';
 import { apiPatch, apiPost } from '../../api.js';
 import { err, ok } from '../../notice.js';
 import { Markdown } from '../markdown.jsx';
@@ -13,6 +14,8 @@ import { MdEditDrawer } from './mdDrawer.jsx';
 export function ProjectDrawer({ projectId, overview, refresh, onNotice, onClose, openInitiative }) {
   const project = overview?.goals?.find((g) => g.id === projectId);
   const [editing, setEditing] = useState(null);
+  const [tab, setTab] = useState('overview');
+  useEffect(() => { setTab('overview'); setEditing(null); }, [projectId]);
   const rows = (project?.initiatives || []).map((i) => ({ ...i, goal_title: project?.title, progress: progressOf(i.todos) }));
   const save = async (values) => {
     try {
@@ -21,15 +24,19 @@ export function ProjectDrawer({ projectId, overview, refresh, onNotice, onClose,
       setEditing(null); await refresh(); onNotice(ok('已保存')); return true;
     } catch (error) { onNotice(err(error.message)); return false; }
   };
-  return <Drawer open={!!projectId} title={`项目 · ${project?.title || ''}`} onClose={onClose} size="min(880px, 100vw)">
-    {!project && projectId ? <Typography.Text type="secondary">项目已删除或正在加载</Typography.Text> : <Space orientation="vertical" size={20} style={{ width: '100%' }}>
-      <EditButton onClick={() => setEditing('project')}>编辑项目</EditButton>
-      <PeopleSummary record={project} />
-      <CurrentSummary record={project} collection="goals" refresh={refresh} />
-      <Markdown text={project?.detail_md} /><TodoProgress progress={progressOf(rows.flatMap((i) => i.todos || []))} />
-      <Space><Typography.Title level={5} style={{ margin: 0 }}>专项进度</Typography.Title><EditButton onClick={() => setEditing('initiative')}>新建专项</EditButton></Space>
-      <ProjectInitiatives key={projectId} projectId={projectId} rows={rows} refresh={refresh} onNotice={onNotice} openInitiative={openInitiative} />
-    </Space>}
-    <MdEditDrawer open={!!editing} title={editing === 'project' ? '编辑项目' : '新建专项'} initial={editing === 'project' ? project : null} onCancel={() => setEditing(null)} onOk={save} />
+  return <Drawer open={!!projectId} title={`项目 · ${project?.title || ''}`} onClose={onClose} size="70vw" className="project-detail-drawer" rootClassName="project-project-drawer" destroyOnHidden extra={<EditButton onClick={() => setEditing('project')}>编辑项目</EditButton>}>
+    {!project && projectId ? <Typography.Text type="secondary">项目已删除或正在加载</Typography.Text> : <Tabs className="project-detail-tabs" activeKey={tab} onChange={setTab} items={[
+      { key: 'overview', label: '概览', children: <div className="project-detail-overview">
+        <div className="project-detail-meta"><PeopleSummary record={project} />
+          <TodoProgress progress={progressOf(rows.flatMap((i) => i.todos || []))} /></div>
+        <CurrentSummary record={project} collection="goals" refresh={refresh} />
+        <ContentSection key={projectId} title="项目目标"><Markdown text={project?.detail_md} /></ContentSection>
+      </div> },
+      { key: 'initiatives', label: '子项', children: <div className="project-detail-overview">
+        <Space wrap><Typography.Title level={5} style={{ margin: 0 }}>子项进度</Typography.Title><EditButton onClick={() => setEditing('initiative')}>新建子项</EditButton></Space>
+        <ProjectInitiatives key={projectId} projectId={projectId} rows={rows} refresh={refresh} onNotice={onNotice} openInitiative={openInitiative} />
+      </div> },
+    ]} />}
+    <MdEditDrawer open={!!editing} title={editing === 'project' ? '编辑项目' : '新建子项'} detailLabel={editing === 'project' ? '项目目标' : '子项目标'} initial={editing === 'project' ? project : null} onCancel={() => setEditing(null)} onOk={save} />
   </Drawer>;
 }

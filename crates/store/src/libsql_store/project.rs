@@ -11,6 +11,7 @@ use libsql::{params, Connection, Value};
 
 use super::LibsqlStore;
 mod acceptance;
+pub(crate) mod comments;
 mod order;
 pub(crate) mod people;
 pub(crate) mod summaries;
@@ -338,6 +339,30 @@ async fn exists(conn: &Connection, sql: &str, id: &str) -> Result<bool> {
 /// delegates to the free functions above / in `project_runs`.
 #[async_trait::async_trait]
 impl ProjectStore for LibsqlStore {
+    async fn todo_comments(
+        &self,
+        id: &str,
+        query: crate::project::comments::CommentQuery,
+    ) -> Result<Option<crate::project::comments::CommentPage>> {
+        let _guard = self.db_lock.lock().await;
+        comments::page(&self.conn().await?, id, query).await
+    }
+    async fn todo_comment_request(
+        &self,
+        id: &str,
+        user: &str,
+        request: &str,
+    ) -> Result<Option<crate::project::comments::Comment>> {
+        let _guard = self.db_lock.lock().await;
+        comments::request(&self.conn().await?, id, user, request).await
+    }
+    async fn append_todo_comment(
+        &self,
+        entry: &crate::project::comments::NewComment,
+    ) -> Result<crate::project::comments::Comment> {
+        let _guard = self.db_lock.lock().await;
+        comments::append(&self.conn().await?, entry).await
+    }
     async fn summary_versions(
         &self,
         scope: SummaryScope,

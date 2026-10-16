@@ -27,6 +27,7 @@ pub fn layer_context(
         capabilities.insert(id.to_owned(), cap.clone());
     }
     Ok(LayeredContext {
+        execution_io_version: 0,
         guidance_only: false,
         guidance_notes: vec![],
         human_inputs: vec![],
@@ -40,6 +41,7 @@ pub fn layer_context(
         capabilities: capabilities.into_values().collect(),
         todo,
         summaries,
+        execution_artifacts: BTreeMap::new(),
         operations,
     })
 }

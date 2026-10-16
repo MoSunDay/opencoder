@@ -37,6 +37,9 @@ struct Args {
     /// Serve the bundled web frontend.
     #[arg(long, default_value_t = true)]
     web: bool,
+    /// Require HTTP credentials; machine/resource credentials remain configured.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    auth_enabled: bool,
     /// Bearer token. Mutually exclusive with --token-file.
     #[arg(long, conflicts_with = "token_file")]
     token: Option<String>,
@@ -133,6 +136,7 @@ async fn main() -> Result<()> {
         opencoder_control::ServerCredentials {
             server: token,
             metrics: metrics_token,
+            auth_enabled: args.auth_enabled,
         },
         platform,
     )
@@ -196,5 +200,16 @@ mod tests {
             "/run/credentials/token"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn authentication_defaults_on_and_requires_an_explicit_boolean() {
+        assert!(Args::try_parse_from(["server"]).unwrap().auth_enabled);
+        assert!(
+            !Args::try_parse_from(["server", "--auth-enabled", "false"])
+                .unwrap()
+                .auth_enabled
+        );
+        assert!(Args::try_parse_from(["server", "--auth-enabled", "disable"]).is_err());
     }
 }

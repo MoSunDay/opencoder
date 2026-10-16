@@ -13,7 +13,7 @@ import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
 from rolling.config import Settings
-from rolling import ingress, probes, units
+from rolling import ingress, probes, units, storage
 from rolling.state import atomic_bytes, write
 from fixture import Model, publish_hold
 from resources import Resources
@@ -69,7 +69,7 @@ class Environment:
         self.shared_skill = self.root / '.opencoder/skills/release-reference/SKILL.md'
         self.shared_skill.parent.mkdir(parents=True)
         self.shared_skill.write_text('---\nname: release-reference\ndescription: fixture\n---\nfirst release bytes\n')
-        self.resources = Resources(self.root,port)
+        self.resources = Resources(self.root / 'state', port, self.root / 'source-workspace')
         self.token = secrets.token_hex(24)
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         # The caller supplies an immutable bundle (or a completed debug build)
@@ -77,21 +77,21 @@ class Environment:
         self.bin = binaries
         self.info = json.loads(subprocess.check_output([self.bin / 'opencoder-agent','--build-info']))
         write(self.root / 'build-info.json',self.info)
-        self.settings = Settings(self.root / 'state',self.root / 'server-work',self.root / 'server-data',
-            self.root / 'agent-work',self.root / 'token',public_url=f'http://127.0.0.1:{port()}',
+        self.settings = Settings(self.root / 'state', self.root / 'token', public_url=f'http://127.0.0.1:{port()}',
             host_port=port(),resource_port=port(),nginx_include=self.root / 'ingress.conf',max_runs=6)
         s = self.settings
         self.settings = Settings(**{**s.__dict__,'listen':s.public_url.removeprefix('http://')})
         atomic_bytes(s.token_file,self.token.encode())
+        storage.prepare(self.settings, {**self.model.config(), **self.resources.server_config(),
+            'deployment': {key: str(value) if isinstance(value, Path) else value
+                           for key, value in self.settings.__dict__.items()}})
         for directory in [s.server_workdir,s.agent_workdir]:
-            resource_config = self.resources.server_config() if directory == s.server_workdir else self.resources.client_config()
-            write(directory / 'opencoder.json',{**self.model.config(),**resource_config})
             write(directory / '.opencoder/ap.json',{'mode':'off'})
         self.env = {**os.environ,'HOME':str(self.root),'XDG_CONFIG_HOME':str(self.root / 'config'),
             'XDG_DATA_HOME':str(self.root / 'data')}
         try:
             self.start('resources','opencoder-server',['--resources','--workdir',s.server_workdir,
-                '--data-dir',self.root / 'resources','--port',s.resource_port,'--token-file',s.token_file])
+                '--data-dir',s.state_dir / 'resources','--port',s.resource_port,'--token-file',s.token_file])
             until(lambda:self.http(s.resource_url,'/api/health'),'resource service')
             self.resources.mount()
             self.hold_resource = publish_hold(self)
@@ -143,7 +143,7 @@ class Environment:
         mark('start')
         s = self.settings
         record = {'id':label,'server_port':port(),'runtime_port':port(),'host_port':port(),
-            'runtime_data':str(s.state_dir / label),'manifest':{'commit':self.info['git_commit']},
+            'runtime_data':str(s.state_dir / 'runtimes' / label),'manifest':{'commit':self.info['git_commit']},
             'created_at':int(time.time()*1000),'runtime_unit':f'opencoder-runtime-{self.prefix}-{label}.service'}
         self.records.append(record)
         host = f"http://127.0.0.1:{record['host_port']}"

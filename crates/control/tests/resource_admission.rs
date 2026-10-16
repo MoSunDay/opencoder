@@ -30,13 +30,24 @@ async fn call(app: &Router, method: &str, path: &str, value: Value) -> (u16, Val
 }
 
 async fn freeze(state: &opencoder_control::AppState, id: &str) -> CreateExecution {
-    let request = CreateExecution {
+    freeze_with_provider(state, id, None).await
+}
+
+async fn freeze_with_provider(
+    state: &opencoder_control::AppState,
+    id: &str,
+    provider: Option<Value>,
+) -> CreateExecution {
+    let mut request = CreateExecution {
         id: id.into(),
         kind: ExecutionKind::Dag,
         target: Some("fixture".into()),
         node_id: Some("offline-node".into()),
         input: json!({"_resource_request":{"units":1}}),
     };
+    if let Some(value) = provider {
+        request.input["_resource_provider"] = value;
+    }
     let fingerprint = opencoder_core::token_hash(&serde_json::to_string(&request).unwrap());
     assert!(state
         .fleet
@@ -219,4 +230,153 @@ async fn missing_authority_fails_closed_without_losing_submission() {
         .0,
         400
     );
+}
+
+#[tokio::test]
+async fn named_authorities_are_isolated_immutable_and_frozen_across_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let authority = Router::new()
+        .route(
+            "/default",
+            post(|| async { Json(json!({"authority":"default","allocated":false})) }),
+        )
+        .route(
+            "/alternate",
+            post(|| async { Json(json!({"authority":"alternate-v1","allocated":false})) }),
+        )
+        .route(
+            "/next",
+            post(|| async { Json(json!({"authority":"alternate-v2","allocated":false})) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let serving = tokio::spawn(async move { axum::serve(listener, authority).await.unwrap() });
+    let token = dir.path().join("provider.token");
+    std::fs::write(&token, "fixture-token").unwrap();
+    let work = dir.path().join("work");
+    let data = dir.path().join("data");
+    let state = opencoder_control::new_state(work.clone(), data.clone(), None)
+        .await
+        .unwrap();
+    let app = opencoder_control::build_app(
+        state.clone(),
+        Some("resource-test-credential".into()),
+        false,
+    );
+    let named = "/api/resource-admission-providers/alternate-provider/versions/1";
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            named,
+            json!({"endpoint":base.clone()+"/alternate","token_file":token})
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            named,
+            json!({"endpoint":base.clone()+"/next","token_file":token})
+        )
+        .await
+        .0,
+        409
+    );
+    assert_eq!(call(&app, "GET", named, json!(null)).await.1["version"], 1);
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/resource-admission-provider",
+            json!({"endpoint":base.clone()+"/default","token_file":token})
+        )
+        .await
+        .0,
+        200
+    );
+    let alternate = freeze_with_provider(
+        &state,
+        "dag-alternate",
+        Some(json!({"name":"alternate-provider","version":1})),
+    )
+    .await;
+    let default = freeze(&state, "dag-default").await;
+    assert_eq!(
+        call(&app, "POST", "/api/executions", json!(alternate))
+            .await
+            .0,
+        202
+    );
+    assert_eq!(
+        call(&app, "POST", "/api/executions", json!(default))
+            .await
+            .0,
+        202
+    );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/resource-admission-providers/alternate-provider/versions/2",
+            json!({"endpoint":base.clone()+"/next","token_file":token})
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            "/api/resource-admission-provider",
+            json!({"endpoint":base+"/next","token_file":token})
+        )
+        .await
+        .0,
+        200
+    );
+    drop(app);
+    drop(state);
+    let state = opencoder_control::new_state(work, data, None)
+        .await
+        .unwrap();
+    let app = opencoder_control::build_app(state, Some("resource-test-credential".into()), false);
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            "/api/executions/dag-alternate/resources",
+            json!(null)
+        )
+        .await
+        .1["authority"],
+        "alternate-v1"
+    );
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            "/api/executions/dag-default/resources",
+            json!(null)
+        )
+        .await
+        .1["authority"],
+        "default"
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/executions/dag-alternate/resources",
+            json!({"action":"release_batch"})
+        )
+        .await
+        .0,
+        409
+    );
+    serving.abort();
 }

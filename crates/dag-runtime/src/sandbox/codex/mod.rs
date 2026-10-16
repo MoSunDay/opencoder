@@ -1,6 +1,8 @@
 //! Codex launch contract for the OCI runner. Credentials remain in the node's
 //! original Codex home; only paths and private settings cross the bundle seam.
+pub(crate) mod broker;
 mod bundle;
+mod startup;
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +40,7 @@ const INHERITED: &[&str] = &[
 pub struct Launch {
     pub runtime: HarnessRuntime,
     pub home: PathBuf,
+    pub startup: Option<startup::Managed>,
 }
 
 /// Resolve the selected Agent's private profile against the node configuration.
@@ -94,7 +97,18 @@ pub fn resolve(
             validate_executable(rootfs, program)
                 .context("Codex startup script unavailable in rootfs")?;
         }
-        Ok(Some(Launch { runtime, home }))
+        let startup = startup::resolve(rootfs, &runtime.codex.as_ref().unwrap().startup_script)?;
+        if let Some(startup) = &startup {
+            ensure!(
+                startup.configuration["codex_home"].as_str() == home.to_str(),
+                "managed startup home differs from pinned Codex home"
+            );
+        }
+        Ok(Some(Launch {
+            runtime,
+            home,
+            startup,
+        }))
     })
 }
 

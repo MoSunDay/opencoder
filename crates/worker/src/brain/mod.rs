@@ -9,3 +9,4 @@ pub(crate) mod output;
 pub(crate) mod v4;
 pub(crate) mod wake;
 pub(crate) mod workdir;
+pub(crate) mod workspace;

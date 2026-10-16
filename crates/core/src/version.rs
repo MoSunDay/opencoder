@@ -59,6 +59,7 @@ pub fn long_version() -> &'static str {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct BuildInfo {
+    pub execution_io: crate::brain::ExecutionIoCompatibility,
     pub release_compatibility: crate::fleet::release::ReleaseCompatibility,
     pub version: &'static str,
     pub version_long: &'static str,
@@ -71,6 +72,7 @@ pub struct BuildInfo {
 
 pub fn build_info() -> BuildInfo {
     BuildInfo {
+        execution_io: crate::brain::ExecutionIoCompatibility::current(),
         release_compatibility: crate::fleet::release::ReleaseCompatibility::current(),
         version: VERSION,
         version_long: VERSION_LONG,

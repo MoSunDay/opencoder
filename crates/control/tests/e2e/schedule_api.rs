@@ -91,4 +91,5 @@ fn fired_run(schedule: &str, for_ms: i64, execution_id: &str) -> ScheduleRunReco
 mod definitions;
 mod firing;
 mod isolation;
+mod retry;
 mod timing;

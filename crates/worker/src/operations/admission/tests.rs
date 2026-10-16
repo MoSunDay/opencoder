@@ -9,6 +9,9 @@ mod native_fixture;
 #[path = "tests/pinned_retry.rs"]
 mod pinned_retry;
 
+#[path = "tests/stop_signal.rs"]
+mod stop_signal;
+
 async fn open(root: &Path) -> Worker {
     Worker::open(
         WorkerOptions {

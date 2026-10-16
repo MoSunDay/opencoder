@@ -63,11 +63,12 @@ const jsonResponse = (body, status = 200) => Promise.resolve({
   json: () => Promise.resolve(body),
 });
 
-const installFetchRouter = ({ rejectToken, failNodes, withGoal } = {}) => {
+const installFetchRouter = ({ rejectToken, failNodes, withGoal, authEnabled = true } = {}) => {
   vi.stubGlobal('fetch', vi.fn((input, init) => {
     const url = typeof input === 'string' ? input : String((input && input.url) || '');
     const bearer = String((init && init.headers && init.headers.Authorization) || '');
-    if (rejectToken && bearer === 'Bearer ' + rejectToken) {
+    if (url.includes('/api/auth/status')) return jsonResponse({ enabled: authEnabled });
+    if (authEnabled && rejectToken && bearer === 'Bearer ' + rejectToken) {
       // Any protected surface (nodes fetch, /api/me identity probe) rejects.
       return jsonResponse({ error: 'unauthorized' }, 401);
     }

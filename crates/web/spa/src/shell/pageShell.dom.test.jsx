@@ -21,7 +21,7 @@ describe('PageShell', () => {
     const { container } = render(<PageShell page="project">body-content</PageShell>);
     expect(container.querySelector('.oc-page-header')).toBeNull();
     expect(screen.queryByRole('heading', { name: '项目' })).toBeNull();
-    expect(screen.queryByText('项目、专项与 TODO 工作台')).toBeNull();
+    expect(screen.queryByText('项目、子项与 TODO 工作台')).toBeNull();
     expect(screen.getByText('body-content')).toBeTruthy();
   });
 

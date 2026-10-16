@@ -6,12 +6,16 @@ use serde_json::{json, Value};
 use super::admission::{preparation, replay::accepted_reply};
 pub(super) use super::launch::{launch_locked, LaunchOutcome};
 
+mod io;
 mod preflight_agents;
 use preflight_agents::project_preflight_agents;
 
 pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Result<RpcReply> {
     if let Err(error) = assignment.request.validate() {
         return Ok(RpcReply::error(400, error));
+    }
+    if let Err(error) = opencoder_core::brain::execution_io_version(&assignment.request.input) {
+        return Ok(RpcReply::error(400, error.to_string()));
     }
     if assignment.request.kind == ExecutionKind::System {
         return Ok(RpcReply::error(
@@ -189,6 +193,15 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         ));
     }
     timing.mark("operator_materialization");
+    let shared_workspace = match crate::brain::workspace::prepare(worker, &assignment).await {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(RpcReply::error(
+                400,
+                format!("shared workspace preflight: {error:#}"),
+            ))
+        }
+    };
     let _gate = worker.inner.admission.clone().lock_owned().await;
     timing.mark("queue_admission_lock");
     if let Some(error) = worker.admission_error() {
@@ -226,13 +239,13 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     } else {
         Lifecycle::default()
     };
-    let record = Record {
+    let mut record = Record {
         annotations: if assignment.request.kind == ExecutionKind::Dag {
             json!({"dag_parent":crate::layout::dag::parent(worker, &config, &assignment)?, "dag_config":config.dag})
         } else if assignment.request.kind == ExecutionKind::Operator {
-            json!({"operator_environment_version": 1})
+            json!({"operator_environment_version": 1, "brain_workspace":shared_workspace})
         } else if let Some(budget) = brain_budget {
-            json!({"brain_context_budget": budget})
+            json!({"brain_context_budget": budget, "brain_workspace":shared_workspace})
         } else {
             Value::Null
         },
@@ -246,6 +259,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         events: vec![],
         lifecycle,
     };
+    io::annotate(&mut record)?;
     timing.mark("project_reservation");
     let record = super::queue::enqueue(worker, record, config, false).await?;
     timing.mark("durable_queue");

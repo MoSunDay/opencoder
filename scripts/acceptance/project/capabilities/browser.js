@@ -40,7 +40,8 @@ async function openTodo(page, todo) {
   await search.press('Enter');
   await page.getByRole('button', { name: todo.title, exact: true }).click();
   const drawer = drawerFor(page, todo);
-  await drawer.getByRole('button', { name: '返回 TODO', exact: true }).waitFor();
+  await drawer.getByRole('tab', { name: '执行', exact: true }).click();
+  await drawer.getByRole('combobox', { name: '执行能力', exact: true }).waitFor();
   return drawer;
 }
 
@@ -69,11 +70,13 @@ async function create(page, scenario) {
     const form = page.getByRole('dialog', { name: '新建 TODO', exact: true });
     await form.locator('input#title').fill(marker);
     await form.locator('textarea#draft').fill(instruction(marker));
+    await form.getByRole('tab', { name: '设置', exact: true }).click();
     await choose(page, form.getByRole('combobox', { name: '所属专项' }), groupTitle);
     const todo = await submit(page, '/api/project/todos', 'POST',
       form.getByRole('button', { name: /创\s*建/ }));
     assert.equal(todo.initiative_id, initiative.id);
     const drawer = drawerFor(page, todo);
+    await drawer.getByRole('tab', { name: '执行', exact: true }).click();
     await choose(page, drawer.getByRole('combobox', { name: '执行能力' }), scenario.capabilities[kind].label);
     await submit(page, '/api/project/todos/' + todo.id, 'PATCH', drawer.getByRole('button', { name: '保存 TODO' }));
     todos[kind] = { ...todo, marker };
@@ -101,7 +104,6 @@ async function launch(page, scenario, todo, kind, loseReceipt = false) {
     interruptedReceipt = await accepted.json();
     return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"injected lost acceptance receipt"}' });
   });
-  await drawer.getByRole('button', { name: '返回 TODO', exact: true }).click();
   await drawer.getByRole('button', { name: '指派所选能力' }).click();
   const prompt = drawer.getByRole('textbox', { name: '执行任务', exact: true });
   assert((await prompt.inputValue()).includes(todo.marker), 'TODO input was not forwarded');
@@ -129,7 +131,7 @@ async function launch(page, scenario, todo, kind, loseReceipt = false) {
   assert.equal(receipt.capability_id, scenario.capabilities[kind].id);
   await drawer.locator('.execution-view-full, .execution-view-conversation').waitFor({ timeout: 30000 });
   if (loseReceipt) await page.unroute(createUrl);
-  await drawer.getByRole('button', { name: '返回 TODO' }).click();
+  await drawer.getByRole('button', { name: '返回指派记录' }).click();
   await drawer.getByRole('row').filter({ hasText: id }).waitFor();
   page.off('request', countSubmission);
   assert.equal(bodies.length, loseReceipt ? 2 : 1, 'unexpected execution creation request');
@@ -140,8 +142,7 @@ async function launch(page, scenario, todo, kind, loseReceipt = false) {
 
 async function inspect(page, todo, id, root, status) {
   const drawer = await openTodo(page, todo);
-  await drawer.locator('.execution-view-full, .execution-view-conversation').waitFor();
-  await drawer.getByRole('button', { name: '返回 TODO', exact: true }).click();
+  await drawer.getByRole('combobox', { name: '执行能力', exact: true }).waitFor();
   const row = drawer.getByRole('row').filter({ hasText: id });
   await drawer.getByRole('columnheader', { name: /状态/ }).waitFor();
   await row.getByText(status, { exact: true }).waitFor();
@@ -154,14 +155,11 @@ async function inspect(page, todo, id, root, status) {
     await drawer.locator('.md-body').filter({ hasText: todo.marker }).waitFor();
     result = await drawer.locator('.md-body').filter({ hasText: todo.marker }).innerText();
   }
-  const [loaded] = await Promise.all([
-    page.waitForResponse((response) => new URL(response.url()).pathname === '/api/executions/' + id),
-    row.getByRole('button', { name: '查看', exact: true }).click(),
-  ]);
-  assert(loaded.ok(), 'native execution detail unavailable');
-  await drawer.locator('.execution-view-full, .execution-view-conversation').waitFor();
-  await drawer.locator('.ant-descriptions').getByText(statusText, { exact: true }).first().waitFor();
-  await page.screenshot({ path: path.join(root, todo.marker + '.png'), animations: 'disabled' });
+  const [detailPage] = await Promise.all([page.waitForEvent('popup'), row.getByRole('link', { name: id, exact: true }).click()]);
+  await detailPage.locator('.execution-view-full').waitFor();
+  await detailPage.locator('.ant-descriptions').getByText(statusText, { exact: true }).first().waitFor();
+  await detailPage.screenshot({ path: path.join(root, todo.marker + '.png'), animations: 'disabled' });
+  await detailPage.close();
   await closeTodo(page, todo);
   await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
   await page.getByRole('menuitem', { name: '全部执行' }).click();
@@ -183,7 +181,7 @@ async function inspect(page, todo, id, root, status) {
 
 async function markDone(page, todo) {
   const drawer = await openTodo(page, todo);
-  await drawer.getByRole('button', { name: '返回 TODO', exact: true }).click();
+  await drawer.getByRole('tab', { name: '设置', exact: true }).click();
   await choose(page, drawer.getByRole('combobox', { name: 'TODO 看板列' }), '已完成');
   await submit(page, '/api/project/todos/' + todo.id, 'PATCH', drawer.getByRole('button', { name: '保存 TODO' }));
   await closeTodo(page, todo);

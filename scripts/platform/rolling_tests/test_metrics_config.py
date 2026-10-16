@@ -18,8 +18,7 @@ class MetricsCredentialConfigTest(unittest.TestCase):
             server.write_text("admin")
             metrics.write_text("admin")
             config.write_text(json.dumps({"deployment": {
-                "state_dir": str(root), "server_workdir": str(root),
-                "server_data": str(root), "agent_workdir": str(root),
+                "state_dir": str(root),
                 "token_file": str(server), "metrics_token_file": str(metrics),
             }}))
             with self.assertRaisesRegex(ValueError, "distinct"):

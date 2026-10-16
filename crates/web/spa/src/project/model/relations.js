@@ -12,7 +12,7 @@ export function flattenTodos(overview) {
   ];
 }
 export const projectOptions = (overview) => (overview?.goals || []).map((g) => ({ value: g.id, label: g.title }));
-export const initiativeOptions = (overview) => flattenInitiatives(overview).map((i) => ({ value: i.id, label: `${i.title} · ${i.goal_title || '独立专项'}` }));
+export const initiativeOptions = (overview) => flattenInitiatives(overview).map((i) => ({ value: i.id, label: `${i.title} · ${i.goal_title || '独立子项'}` }));
 export const groupOptions = initiativeOptions;
 export const matchesText = (query, ...values) => values.some((v) => String(v || '').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 export const searchSelect = { showSearch: true, optionFilterProp: 'label', allowClear: true };

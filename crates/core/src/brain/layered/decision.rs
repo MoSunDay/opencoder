@@ -65,6 +65,8 @@ pub struct LayeredGuidance {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LayeredContext {
+    #[serde(default, skip_serializing_if = "crate::brain::is_legacy_io")]
+    pub execution_io_version: u32,
     #[serde(default)]
     pub guidance_only: bool,
     #[serde(default)]
@@ -86,6 +88,8 @@ pub struct LayeredContext {
     /// Bounded necessary summaries fetched from the execution owners.
     #[serde(default)]
     pub summaries: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub execution_artifacts: BTreeMap<String, Vec<crate::brain::ArtifactRef>>,
     #[serde(default)]
     pub operations: Vec<crate::brain::layered::LayeredOperation>,
 }

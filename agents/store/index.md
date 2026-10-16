@@ -1,4 +1,4 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 # store 模块
 
@@ -21,7 +21,7 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 - `src/fleet/` — 节点容量/归属/派发回执（`handoff/`），容量领取在 `handoff/capacity.rs`
 - [fleet/handoff/acceptance.rs](../../crates/store/src/fleet/handoff/acceptance.rs)、[receipts.rs](../../crates/store/src/fleet/handoff/receipts.rs) — Agent/Operator 准备派发只保存冻结请求与回执，远端持久接收后才发布执行索引；确认和节点上报都核对冻结归属，迟到确认不覆盖较新的状态。其他执行种类保留准备阶段索引。
 - `src/fleet/records.rs` — 终态执行索引批删
-- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，版本以 [schema.rs](../../crates/store/src/libsql_store/schema.rs) 为准）
+- `src/libsql_store/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，版本以 [schema.rs](../../crates/store/src/libsql_store/schema.rs) 为准）；当前 activation 的 Error 仅在 paused/blocked 且阶段不变、无取消请求、来源序号递增和身份不变时可恢复为 Done，generation CAS 与暂停状态保留。
 - [project.rs](../../crates/store/src/project.rs)、[project_links.rs](../../crates/store/src/libsql_store/project_links.rs) — TODO 看板及执行引用；关联只保存能力 ID、执行 ID、类型、名称和创建时间，删除关联不删除节点执行；排序按专项或未归属范围校验，拒绝缺失或外部 TODO，在 libsql 事务内提交。
 - [project/summary.rs](../../crates/store/src/project/summary.rs)、[libsql_store/project.rs](../../crates/store/src/libsql_store/project.rs) — schema v37 在现有项目与专项表保存 `current_summary`、`summary_updated_at`；显式正文补丁在对象事务中记录时间，未传正文保持原概述时间，概览随记录序列化。[summaries.rs](../../crates/store/src/libsql_store/project/summaries.rs) 用一张共享历史表保存每个对象最近 10 个版本，初始化现有内容；新增版本、回滚和超额清理与正文共享事务，删除对象清理自身历史。
 - [project/acceptance.rs](../../crates/store/src/project/acceptance.rs)、[libsql_store/project/acceptance.rs](../../crates/store/src/libsql_store/project/acceptance.rs) — 验收前提的纯比较及事务核验；`patch_todo_accepted` 在同一写事务检查任务要求、归属、最新执行和依赖，再提交看板补丁；过期验收返回 `AcceptanceConflict`。

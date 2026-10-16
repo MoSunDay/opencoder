@@ -64,6 +64,10 @@ async fn server() -> (Ctx, tokio::task::JoinHandle<()>, Seen) {
             Json(if id == "a" { json!({"assignments":[{"execution_id":"old","kind":"operator"},{"execution_id":"offline","kind":"dag"},{"execution_id":"team","kind":"team"},{"execution_id":"workflow","kind":"todos"},{"execution_id":"brain","kind":"brain"}]}) }
                 else { json!({"assignments":[{"execution_id":"old","kind":"operator"}]}) })
         }))
+        .route("/api/project/todos/:id/comments", get(|Query(query):Query<HashMap<String,String>>| async move {
+            Json(if query.contains_key("before_seq") { json!({"comments":[{"seq":1,"body_md":"first note"}],"has_more":false}) }
+                else { json!({"comments":[{"seq":2,"body_md":"latest note"}],"has_more":true}) })
+        }))
         .route("/api/executions/:id", get(|State(seen):State<Seen>,Path(id):Path<String>| async move {
             seen.lock().unwrap().push(id.clone());
             if id == "offline" { (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"node offline"}))) }
@@ -94,7 +98,7 @@ async fn server() -> (Ctx, tokio::task::JoinHandle<()>, Seen) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ctx = Ctx {
         server: format!("http://{}", listener.local_addr().unwrap()),
-        token: "test".into(),
+        token: Some("test".into()),
         verbose: false,
         http: opencoder_cli::http::client().unwrap(),
     };
@@ -115,6 +119,10 @@ async fn initiative_reads_all_assignments_pages_full_messages_and_reports_offlin
         5
     );
     assert_eq!(data["record"]["todos"][0]["board_status"], "todo");
+    assert_eq!(
+        data["record"]["todos"][0]["comments"],
+        json!([{"seq":1,"body_md":"first note"},{"seq":2,"body_md":"latest note"}])
+    );
     assert_eq!(
         data["executions"]["brain"]["events"]
             .as_array()
@@ -243,7 +251,7 @@ async fn non_advancing_process_cursor_is_reported_without_hanging() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ctx = Ctx {
         server: format!("http://{}", listener.local_addr().unwrap()),
-        token: "test".into(),
+        token: Some("test".into()),
         verbose: false,
         http: opencoder_cli::http::client().unwrap(),
     };

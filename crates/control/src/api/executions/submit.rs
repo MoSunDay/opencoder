@@ -236,11 +236,7 @@ async fn submit_inner(
                             id: request.id.clone(),
                             kind: request.kind,
                         },
-                        if request.kind == ExecutionKind::Brain {
-                            request.input.clone()
-                        } else {
-                            action.cloned().unwrap_or_else(|| serde_json::json!({}))
-                        },
+                        super::capabilities::probe_input(&request),
                         &required,
                     )
                     .await

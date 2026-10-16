@@ -10,7 +10,7 @@ const spa = path.resolve(__dirname, '../../../crates/web/spa/dist');
 const task = { id: 'todo-link', title: '链接验收任务', draft: '# 任务要求\n\n正文预览', board_status: 'todo', tag_ids: [] };
 const initiative = { id: 'initiative-link', title: '链接验收子项', todos: [task] };
 const project = { id: 'project-link', title: '链接验收项目', status: 'active', initiatives: [initiative] };
-const overview = { goals: [project], standalone_initiatives: [{ id: 'solo-link', title: '独立子项', todos: [] }],
+const overview = { goals: [project], standalone_initiatives: [{ id: 'solo-link', title: '独立子项', todos: [{ ...task, id: 'solo-task', title: '独立子项任务' }] }],
   backlog: [{ ...task, id: 'free-link', title: '未归属任务' }], tags: [] };
 
 async function main() {
@@ -60,6 +60,7 @@ async function main() {
     const targets = [
       ['project=project-link', '项目 · 链接验收项目'], ['initiative=initiative-link', '子项 · 链接验收子项'],
       ['todo=todo-link', 'TODO · 链接验收任务'], ['initiative=solo-link', '子项 · 独立子项'], ['todo=free-link', 'TODO · 未归属任务'],
+      ['todo=solo-task', 'TODO · 独立子项任务'],
     ];
     for (const [route, title] of targets) {
       await page.goto(base + '/#' + route); await dialog(title).waitFor();
@@ -68,14 +69,35 @@ async function main() {
       if (route.includes('link') && !route.includes('solo') && !route.includes('free')) {
         for (const width of [1920, 1280, 768, 390]) {
           await page.setViewportSize({ width, height: 1000 });
-          const fits = await dialog(title).evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
-          assert(fits, `${title} overflows at ${width}`);
           await page.screenshot({ path: path.join(output, `${route.split('=')[0]}-${width}.png`), animations: 'disabled' });
+          const fits = await dialog(title).evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= innerWidth + 1);
+          assert(fits, `${title} overflows at ${width}`);
         }
       }
-      await close(title); assert.equal(new URL(page.url()).hash, '');
+      await close(title);
+      if (route === 'todo=todo-link') {
+        await hash('#project=project-link&initiative=initiative-link');
+        await close('子项 · 链接验收子项');
+      }
+      if (['todo=todo-link', 'initiative=initiative-link'].includes(route)) {
+        await hash('#project=project-link'); await close('项目 · 链接验收项目');
+      }
+      if (route === 'todo=solo-task') {
+        await hash('#initiative=solo-link'); await close('子项 · 独立子项');
+      }
+      assert.equal(new URL(page.url()).hash, '');
     }
     checks.push('project, initiative, TODO, standalone and unassigned links survive refresh and new tabs');
+    checks.push('closing direct links reveals each real ancestor, including standalone and unassigned records');
+    await page.goto(base + '/#todo=todo-link'); await dialog('TODO · 链接验收任务').waitFor();
+    await page.keyboard.press('Escape'); await hash('#project=project-link&initiative=initiative-link');
+    await dialog('TODO · 链接验收任务').waitFor({ state: 'hidden' });
+    await dialog('子项 · 链接验收子项').getByRole('heading', { name: 'TODO 看板' }).click();
+    await page.keyboard.press('Escape'); await hash('#project=project-link');
+    await dialog('子项 · 链接验收子项').waitFor({ state: 'hidden' });
+    await dialog('项目 · 链接验收项目').waitFor();
+    await page.keyboard.press('Escape'); await hash('');
+    checks.push('Escape closes only the topmost detail and reveals its parent');
     await page.setViewportSize({ width: 1280, height: 1000 });
     await page.goto(base + '/#project=project-link');
     const projectPanel = dialog('项目 · 链接验收项目'); await projectPanel.getByRole('tab', { name: '子项', exact: true }).click();

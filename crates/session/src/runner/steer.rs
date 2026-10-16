@@ -189,6 +189,10 @@ pub(super) async fn apply_steer_batch(
             on_event(SessionEvent::Done);
             return Ok(SteerApplyOutcome::Cancelled);
         }
+        if crate::harness::codex::control::recover(session, *seq, on_event).await? {
+            steer_recorded = true;
+            continue;
+        }
         // Echo only what the model will see: the compound tail is recorded
         // as the real user turn; a bare control command is applied inline
         // with nothing recorded, so its echo is empty (display surfaces

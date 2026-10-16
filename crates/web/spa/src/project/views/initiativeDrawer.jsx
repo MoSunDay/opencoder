@@ -12,7 +12,8 @@ import { flattenInitiatives, projectOptions, searchSelect } from '../model/relat
 import { progressOf } from '../model/catalog.js';
 import { TodoProgress } from './progress.jsx';
 import { MdEditDrawer } from './mdDrawer.jsx';
-export function InitiativeDrawer({ initiativeId, overview, refresh, onNotice, onClose, openTodo }) {
+import { UnavailableDetail } from '../navigation/unavailable.jsx';
+export function InitiativeDrawer({ initiativeId, overview, overviewError, refresh, onNotice, onClose, openTodo }) {
   const initiative = flattenInitiatives(overview).find((i) => i.id === initiativeId);
   const [editing, setEditing] = useState(false);
   useEffect(() => { setEditing(false); }, [initiativeId]);
@@ -25,7 +26,7 @@ export function InitiativeDrawer({ initiativeId, overview, refresh, onNotice, on
     try { await apiPatch(`/api/project/initiatives/${encodeURIComponent(initiativeId)}`, { ...values, goal_id: values.goal_id ?? null }); await refresh(); setEditing(false); onNotice(ok('子项已保存，TODO 标签已重新匹配')); return true; }
     catch (error) { onNotice(err(error.message)); return false; }
   };
-  return <Drawer open={!!initiativeId} title={`子项 · ${initiative?.title || ''}`} onClose={close} size="100vw" className="project-detail-drawer project-initiative-drawer" destroyOnHidden extra={<EditButton onClick={() => setEditing(true)}>编辑子项</EditButton>}>
+  return <Drawer open={!!initiativeId} title={`子项 · ${initiative?.title || initiativeId || ''}`} onClose={close} size="100vw" className="project-detail-drawer project-initiative-drawer" destroyOnHidden extra={initiative && <EditButton onClick={() => setEditing(true)}>编辑子项</EditButton>}>
     {initiative ? <div className="project-detail-overview">
       <div className="project-initiative-context">
         <CurrentSummary record={initiative} collection="initiatives" refresh={refresh} />
@@ -39,7 +40,7 @@ export function InitiativeDrawer({ initiativeId, overview, refresh, onNotice, on
         <Typography.Title level={5}>TODO 看板</Typography.Title>
         <TodoBoard key={initiativeId} initiative={initiative} overview={overview} refresh={refresh} onNotice={onNotice} openTodo={openTodo} />
       </section>
-    </div> : initiativeId && <Typography.Text type="secondary">子项已删除或正在加载</Typography.Text>}
+    </div> : initiativeId && <UnavailableDetail label="子项" overview={overview} error={overviewError} refresh={refresh} />}
     <MdEditDrawer open={editing} title="编辑子项" detailLabel="子项目标" initial={initiative} onCancel={() => setEditing(false)} onOk={save}
       extraTop={<><Form.Item name="goal_id" label="所属项目"><Select {...searchSelect} aria-label="goal_id" options={projectOptions(overview)} /></Form.Item></>} />
   </Drawer>;

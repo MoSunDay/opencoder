@@ -1,7 +1,9 @@
 import { Modal } from 'antd';
 import { useRef } from 'react';
+import { useDraftGuard } from '../../ontology/navigation/DraftGuard';
 
-export function useCloseGuard({ dirty, busy, onClose }) {
+export function useCloseGuard({ dirty, busy, onClose, active = true }) {
+  useDraftGuard(active && dirty, active && busy);
   const [modal, holder] = Modal.useModal();
   const confirming = useRef(false);
   const close = () => {

@@ -47,6 +47,8 @@ import { bootUrlCredential } from './boot.js';
 import { DraftGuardProvider, useDraftGuard } from './ontology/navigation/DraftGuard';
 import { linkedPage, withoutExecutionLink } from './fleet/navigation/links.js';
 import { useLinkedLocation } from './fleet/navigation/location.js';
+import { projectLocation } from './project/navigation/links.js';
+import { replaceLocation } from './fleet/navigation/history.js';
 
 // zh-CN everywhere: antd built-ins (Modal/Popconfirm buttons) + dayjs
 // relative dates (fromNow lands in iteration 3).
@@ -112,6 +114,7 @@ function FleetShell() {
   const canConnect = authEnabled === false || !!token;
   const draftGuard = useDraftGuard();
   const linkedLocation = useLinkedLocation();
+  const linkedRoutePage = linkedLocation.execution || linkedLocation.project ? linkedLocation.page : null;
   // 项目 / Agent / 节点 分类选择的持久化：显式导航（goPage）经 usehooks-ts 的
   // useLocalStorage 把所选页写入 `oc_nav_page`（键与校验集都在 nav.js）；重新
   // 挂载时在首帧绘制前恢复进 store——useLayoutEffect 先于绘制执行，默认页不
@@ -127,10 +130,10 @@ function FleetShell() {
     // 引导只做一次：后续 page 变化由 goPage 单向镜像，恢复不回环。
   }, []);
   useEffect(() => {
-    if (linkedLocation.execution && page !== 'topics') {
-      setState({ page: 'topics' });
+    if (linkedRoutePage && page !== linkedRoutePage) {
+      setState({ page: linkedRoutePage });
     }
-  }, [linkedLocation.execution?.id]);
+  }, [linkedRoutePage, linkedLocation.execution?.id, linkedLocation.project, page]);
   const [navCollapsed, setNavCollapsed] = useState(false);
   // Panel→shell notices carry {type, text} (notice.js); normalizeNotice
   // keeps legacy bare-string call sites safe. Empty text (the onNotice('')
@@ -147,7 +150,7 @@ function FleetShell() {
   // renders the topics panel instead (highlight never dangles).
   const visible = visibleCategories(identity);
   const allowed = allowedPages(identity);
-  const routedPage = linkedLocation.execution ? 'topics' : page;
+  const routedPage = linkedRoutePage || page;
   const shownPage = allowed.includes(routedPage) ? routedPage : 'project';
   const category = visible.find((c) => c.items.some((i) => i.page === shownPage)) || visible[0];
   const categoryOptions = visible.map((c) => ({ value: c.key, label: c.label }));
@@ -157,9 +160,9 @@ function FleetShell() {
   // the store-only semantics they already had.
   const goPage = (key) => {
     if (key !== shownPage) draftGuard.run(() => {
-      if (linkedLocation.execution) {
-        window.history.replaceState(null, '', withoutExecutionLink(window.location.href));
-        window.dispatchEvent(new PopStateEvent('popstate'));
+      if (linkedLocation.execution || linkedLocation.project) {
+        const cleared = new URL(withoutExecutionLink(window.location.href), window.location.href);
+        replaceLocation(projectLocation(cleared.href));
       }
       setStoredPage(key);
       setState({ page: key });

@@ -1,5 +1,8 @@
 import { Alert, Spin, Tabs } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLinkedLocation } from '../fleet/navigation/location.js';
+import { pushLocation } from '../fleet/navigation/history.js';
+import { projectLocation, projectTab } from './navigation/links.js';
 import { PageShell } from '../shell/pageShell.jsx';
 import { ProjectsTab } from './projectsTab.jsx';
 import { InitiativesTab } from './initiativesTab.jsx';
@@ -14,11 +17,15 @@ export function ProjectPanel(props) { return <ProjectViewState><ProjectPage {...
 
 function ProjectPage({ onNotice }) {
   const { overview, loading, refresh, error } = useOverview({ onNotice });
-  const [tab, setTab] = useState('projects');
-  const [projectId, setProjectId] = useState(null);
-  const [initiativeId, setInitiativeId] = useState(null);
-  const [todoId, setTodoId] = useState(null);
-  const shared = { overview, refresh, onNotice };
+  const { project: selection } = useLinkedLocation();
+  const { projectId = null, initiativeId = null, todoId = null } = selection || {};
+  const [tab, setTab] = useState(() => projectTab(selection) || 'projects');
+  useEffect(() => { const next = projectTab(selection); if (next) setTab(next); }, [selection]);
+  const navigate = (next) => pushLocation(projectLocation(window.location.href, next));
+  const setProjectId = (id) => navigate({ projectId: id });
+  const setInitiativeId = (id) => navigate({ projectId, initiativeId: id });
+  const setTodoId = (id) => navigate({ projectId, initiativeId, todoId: id });
+  const shared = { overview, refresh, onNotice, overviewError: error };
   const tabs = [
     { key: 'projects', label: '项目', children: <ProjectsTab {...shared} openProject={setProjectId} /> },
     { key: 'initiatives', label: '子项', children: <InitiativesTab {...shared} openInitiative={setInitiativeId} /> },

@@ -19,7 +19,7 @@ export function bootUrlCredential() {
   if (!captured) {
     return '';
   }
-  window.history.replaceState(null, '', clean);
+  window.history.replaceState(window.history.state, '', clean);
   if (token || base) {
     // Captured ⇒ adopted, symmetrically: a token-only link keeps the stored
     // base; a base-only link re-points the console while keeping the session

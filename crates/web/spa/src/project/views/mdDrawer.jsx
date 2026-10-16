@@ -14,7 +14,7 @@ export function MdEditDrawer({ open, title, initial, extraTop, detailLabel = 'é¡
   const submitting = useRef(false);
   seed.current = initial;
   const recordId = initial?.id || 'new';
-  const [close, holder] = useCloseGuard({ dirty, busy: saving, onClose: onCancel });
+  const [close, holder] = useCloseGuard({ dirty, busy: saving, onClose: onCancel, active: open });
 
   useEffect(() => {
     if (!open) return;

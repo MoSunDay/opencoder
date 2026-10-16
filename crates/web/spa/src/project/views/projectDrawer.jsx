@@ -11,7 +11,8 @@ import { ProjectInitiatives } from '../sorting/initiatives.jsx';
 import { progressOf } from '../model/catalog.js';
 import { TodoProgress } from './progress.jsx';
 import { MdEditDrawer } from './mdDrawer.jsx';
-export function ProjectDrawer({ projectId, overview, refresh, onNotice, onClose, openInitiative }) {
+import { UnavailableDetail } from '../navigation/unavailable.jsx';
+export function ProjectDrawer({ projectId, overview, overviewError, refresh, onNotice, onClose, openInitiative }) {
   const project = overview?.goals?.find((g) => g.id === projectId);
   const [editing, setEditing] = useState(null);
   const [tab, setTab] = useState('overview');
@@ -24,8 +25,8 @@ export function ProjectDrawer({ projectId, overview, refresh, onNotice, onClose,
       setEditing(null); await refresh(); onNotice(ok('已保存')); return true;
     } catch (error) { onNotice(err(error.message)); return false; }
   };
-  return <Drawer open={!!projectId} title={`项目 · ${project?.title || ''}`} onClose={onClose} size="70vw" className="project-detail-drawer" rootClassName="project-project-drawer" destroyOnHidden extra={<EditButton onClick={() => setEditing('project')}>编辑项目</EditButton>}>
-    {!project && projectId ? <Typography.Text type="secondary">项目已删除或正在加载</Typography.Text> : <Tabs className="project-detail-tabs" activeKey={tab} onChange={setTab} items={[
+  return <Drawer open={!!projectId} title={`项目 · ${project?.title || projectId || ''}`} onClose={onClose} size="70vw" className="project-detail-drawer" rootClassName="project-project-drawer" destroyOnHidden extra={project && <EditButton onClick={() => setEditing('project')}>编辑项目</EditButton>}>
+    {!project && projectId ? <UnavailableDetail label="项目" overview={overview} error={overviewError} refresh={refresh} /> : <Tabs className="project-detail-tabs" activeKey={tab} onChange={setTab} items={[
       { key: 'overview', label: '概览', children: <div className="project-detail-overview">
         <div className="project-detail-meta"><PeopleSummary record={project} />
           <TodoProgress progress={progressOf(rows.flatMap((i) => i.todos || []))} /></div>

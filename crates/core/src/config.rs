@@ -47,6 +47,7 @@ mod model_guard;
 #[path = "config/runtime/ontology.rs"]
 mod ontology;
 mod persistence;
+mod project;
 mod provider;
 pub mod redact;
 mod schedule;
@@ -66,6 +67,7 @@ pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
 pub use model_guard::is_suspicious_model;
 pub use ontology::{OntologyConfig, OntologyNfsConfig};
+pub use project::{ProjectConfig, TodoNfsConfig, TodoStorageConfig};
 pub use provider::{Endpoint, HttpHeader, ProviderConfig};
 pub use schedule::{
     load_schedules, schedules_path, validate_id as validate_schedule_id, ScheduleJob, ScheduleKind,
@@ -120,6 +122,8 @@ pub struct Config {
     pub dag: DagConfig,
     #[serde(default)]
     pub ontology: OntologyConfig,
+    #[serde(default)]
+    pub project: ProjectConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
     /// Per-message assistant-output streamlining (deterministic, meaning-
@@ -313,6 +317,7 @@ impl Default for Config {
             agent: AgentDefaults::default(),
             dag: DagConfig::default(),
             ontology: OntologyConfig::default(),
+            project: ProjectConfig::default(),
             compaction: CompactionConfig::default(),
             output_streamline: OutputStreamlineConfig::default(),
             context_limit: None,
@@ -431,6 +436,7 @@ impl Config {
                     serde_json::from_str(&std::fs::read_to_string(&p)?)?;
                 crate::provider::validate_protocol_patch(&parsed)?;
                 agent::validate_private_settings(&parsed)?;
+                project::validate(&parsed)?;
                 if parsed.is_object() {
                     merge::merge_into(&mut cfg, parsed);
                 }
@@ -504,6 +510,7 @@ impl Config {
                 let parsed: serde_json::Value = serde_json::from_str(&raw)?;
                 crate::provider::validate_protocol_patch(&parsed)?;
                 agent::validate_private_settings(&parsed)?;
+                project::validate(&parsed)?;
                 if !parsed.is_object() {
                     // A valid-JSON-but-not-object file (e.g. `[1,2]` or
                     // `"foo"`) falls through `merge_into` silently. Warn so the

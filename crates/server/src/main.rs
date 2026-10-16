@@ -22,6 +22,9 @@ struct Args {
     /// Run the independent resource service instead of a platform server.
     #[arg(long)]
     resources: bool,
+    /// Run only the independent read-only TODO resource service.
+    #[arg(long, conflicts_with_all = ["resources", "release_config"])]
+    todo_resources: bool,
     /// Per-instance release metadata; keeps the existing resource workdir.
     #[arg(long, conflicts_with = "resources")]
     release_config: Option<PathBuf>,
@@ -101,6 +104,16 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let token = resolve_token(args.token, args.token_file)?;
+    if args.todo_resources {
+        return opencoder_control::release::todo_resources::serve(
+            workdir,
+            args.data_dir
+                .context("TODO resource service requires --data-dir")?,
+            args.port,
+            token,
+        )
+        .await;
+    }
     let metrics_token = args
         .metrics_token_file
         .map(|path| -> Result<_> {

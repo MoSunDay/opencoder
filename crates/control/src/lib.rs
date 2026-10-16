@@ -83,3 +83,5 @@ impl AppState {
     /// retain their pinned snapshot, so there are no drains to reload here.
     pub async fn reload_agents(&self) {}
 }
+
+mod project_files;

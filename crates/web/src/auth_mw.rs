@@ -24,7 +24,7 @@ pub struct AuthState {
     enabled: bool,
     seed_token: Option<String>,
     metrics_token: Option<String>,
-    lookup: Arc<dyn Store>,
+    lookup: Option<Arc<dyn Store>>,
 }
 
 impl AuthState {
@@ -33,7 +33,17 @@ impl AuthState {
             enabled: true,
             seed_token: Some(seed_token),
             metrics_token: None,
-            lookup,
+            lookup: Some(lookup),
+        }
+    }
+
+    /// Authenticate a private service without opening or modifying user storage.
+    pub fn seed_only(seed_token: String) -> Self {
+        Self {
+            enabled: true,
+            seed_token: Some(seed_token),
+            metrics_token: None,
+            lookup: None,
         }
     }
 
@@ -87,14 +97,18 @@ fn token_eq(expected: &str, actual: &str) -> bool {
 
 /// Resolve a bearer credential to an identity, without logging secrets.
 /// Owns its inputs so the returned future is `Send` under any caller.
-async fn identify(seed: Option<String>, lookup: Arc<dyn Store>, token: String) -> Option<Identity> {
+async fn identify(
+    seed: Option<String>,
+    lookup: Option<Arc<dyn Store>>,
+    token: String,
+) -> Option<Identity> {
     if seed
         .as_deref()
         .is_some_and(|expected| token_eq(expected, &token))
     {
         return Some(Identity::admin("admin"));
     }
-    let user = lookup
+    let user = lookup?
         .find_user_by_token_hash(&token_hash(&token))
         .await
         .ok()??;
@@ -228,6 +242,23 @@ mod tests {
         .await;
         assert_eq!(identity, Some(Identity::admin("admin")));
         assert_eq!(identity.map(|i| i.role.as_str()), Some("admin"));
+    }
+
+    #[tokio::test]
+    async fn private_seed_authentication_needs_no_database() {
+        let state = AuthState::seed_only("private-seed".into());
+        assert_eq!(
+            identify(
+                state.seed_token.clone(),
+                state.lookup.clone(),
+                "private-seed".into()
+            )
+            .await,
+            Some(Identity::admin("admin"))
+        );
+        assert!(identify(state.seed_token, state.lookup, "unknown".into())
+            .await
+            .is_none());
     }
 
     #[tokio::test]

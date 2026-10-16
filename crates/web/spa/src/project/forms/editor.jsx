@@ -14,7 +14,7 @@ export function TodoTaskFields({ creating = false }) {
       <Form.Item name="board_status" label="状态"><Select aria-label="TODO 看板列" options={LANES.map(([value, label]) => ({ value, label }))} /></Form.Item>
     </div>
     <Form.Item name="draft" className="project-todo-field-full">
-      <MarkdownInput label="任务说明" showLabel defaultMode={creating ? 'edit' : 'preview'} placeholder="写下任务要求、交付内容和验收标准，支持 Markdown" />
+      <MarkdownInput label="关键信息" showLabel defaultMode={creating ? 'edit' : 'preview'} placeholder="记录任务目标、当前进展、已确认结论、卡点、下一步和资料位置，方便随时交接，支持 Markdown" />
     </Form.Item>
   </div>;
 }

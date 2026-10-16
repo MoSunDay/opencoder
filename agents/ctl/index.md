@@ -1,4 +1,4 @@
-Commit: 4c174685c758d7dabd7503d708917a560f125c4d
+Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 
 # ctl 模块
 
@@ -30,3 +30,5 @@ Commit: 4c174685c758d7dabd7503d708917a560f125c4d
 
 ## 相关
 - [brain](../brain/index.md)、[运行协议](../../docs/brain-orchestration.md)
+
+`project todos files` 提供任务资料的列表、上传、下载和删除，二进制通过流传输；下载成功后才发布本地文件，不覆盖原文件。TODO context 返回文件清单及下载入口，读取失败计入 issues。见 [任务文件](../../docs/project-files.md)。

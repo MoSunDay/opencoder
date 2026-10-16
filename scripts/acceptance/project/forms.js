@@ -62,7 +62,7 @@ async function main() {
     const errors = []; const measurements = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript((value) => localStorage.setItem('oc_token', value), token);
-    const cap = { id: 'agent:form-layout', kind: 'agent', target: '表单显示验收', summary: '执行设置表单', definition: {}, required_inputs: ['目标路径', '验收要求'], input_desc: '填写任务说明和能力需要的参数。' };
+    const cap = { id: 'agent:form-layout', kind: 'agent', target: '表单显示验收', summary: '执行设置表单', definition: {}, required_inputs: ['目标路径', '验收要求'], input_desc: '填写关键信息和能力需要的参数。' };
     await page.route('**/api/brain/library', (route) => route.fulfill({ json: { capabilities: [cap] } }));
     await page.goto(base, { waitUntil: 'networkidle' });
     await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
@@ -148,8 +148,8 @@ async function main() {
       if (width !== 1920) { await editor.locator('.ant-drawer-close').click(); await editor.waitFor({ state: 'hidden' }); await page.getByRole('button', { name: todo.title, exact: true }).click(); }
       await measure(editor, 'reading', width);
       assert.equal(await editor.getByRole('button', { name: '编辑任务', exact: true }).count(), 0);
-      assert.equal(await editor.getByLabel('任务说明', { exact: true }).isVisible(), false);
-      await editor.getByLabel('任务说明显示方式', { exact: true }).getByText('编辑', { exact: true }).click();
+      assert.equal(await editor.getByLabel('关键信息', { exact: true }).isVisible(), false);
+      await editor.getByLabel('关键信息显示方式', { exact: true }).getByText('编辑', { exact: true }).click();
       await measure(editor, 'task-edit', width);
       await editor.getByRole('tab', { name: '设置', exact: true }).click();
       await measure(editor, 'settings', width);
@@ -165,13 +165,13 @@ async function main() {
     assert.equal(await editor.getByLabel('TODO 标题', { exact: true }).evaluate((el) => document.activeElement === el), true);
     await editor.getByLabel('TODO 标题', { exact: true }).fill(todo.title);
     const changed = `${draft}\n新增：失败时保留未保存的内容。`;
-    await editor.getByLabel('任务说明', { exact: true }).fill(changed);
+    await editor.getByLabel('关键信息', { exact: true }).fill(changed);
     const patchPath = `/api/project/todos/${todo.id}`;
     await page.route(`**${patchPath}`, (route) => route.request().method() === 'PATCH' ? route.fulfill({ status: 500, json: { error: '表单保存失败验收' } }) : route.continue());
     await editor.getByRole('button', { name: /保存 TODO/ }).click();
     await editor.getByText('表单保存失败验收', { exact: true }).waitFor();
     assert((await editor.getByText('表单保存失败验收', { exact: true }).boundingBox()).y < 1000, 'save error must be visible beside actions');
-    assert.equal(await editor.getByLabel('任务说明', { exact: true }).inputValue(), changed);
+    assert.equal(await editor.getByLabel('关键信息', { exact: true }).inputValue(), changed);
     await page.unroute(`**${patchPath}`);
     const saved = page.waitForResponse((r) => r.url().endsWith(patchPath) && r.request().method() === 'PATCH');
     await editor.getByRole('button', { name: /保存 TODO/ }).click(); assert.equal((await saved).status(), 200);
@@ -190,7 +190,7 @@ async function main() {
     await page.getByRole('button', { name: '新建 TODO', exact: true }).click();
     const create = dialog('新建 TODO');
     await create.getByLabel('标题', { exact: true }).fill('新建布局验收');
-    await create.getByLabel('任务说明', { exact: true }).fill(draft);
+    await create.getByLabel('关键信息', { exact: true }).fill(draft);
     await create.getByRole('tab', { name: '设置', exact: true }).click();
     await choose(create, '所属专项', groupTitle);
     for (const name of tagNames) await choose(create, 'TODO Tag', name);
@@ -217,11 +217,11 @@ async function main() {
     const overview = await api('GET', '/api/project/overview');
     const persisted = overview.goals[0].initiatives[0].todos.find((row) => row.id === created.id);
     assert.deepEqual(persisted.tag_ids.sort(), tags.map((tag) => tag.id).sort());
-    const next = dialog('TODO · 新建布局验收'); await next.getByLabel('任务说明预览', { exact: true }).waitFor();
+    const next = dialog('TODO · 新建布局验收'); await next.getByLabel('关键信息预览', { exact: true }).waitFor();
     await page.reload({ waitUntil: 'networkidle' });
     await tab('TODO').click();
     await page.getByRole('button', { name: '新建布局验收', exact: true }).click();
-    assert.equal(await next.getByLabel('任务说明', { exact: true }).inputValue(), draft);
+    assert.equal(await next.getByLabel('关键信息', { exact: true }).inputValue(), draft);
     await next.locator('.ant-drawer-close').click(); await next.waitFor({ state: 'hidden' });
     await tab('专项').click(); await page.getByRole('button', { name: groupTitle, exact: true }).click();
     const initiative = dialog(`专项 · ${groupTitle}`);

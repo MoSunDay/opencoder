@@ -31,6 +31,7 @@ opencoder-cli --server http://10.199.79.43:18081 --no-auth project overview
 - 项目 → 专项 → TODO；专项的 `goal_id`、TODO 的 `initiative_id` 都可为空。TODO 通过专项归属项目。
 - PATCH 只发送要改的字段；人员清空使用 `owner_user_name:null`、`follower_user_names:[]`；解除归属使用对应 ID 字段的 `null`。负责人和关注人先用 `project people` 查询现有用户名。
 - TODO 看板仅接受 `backlog`、`todo`、`in_progress`、`done`。执行结束不会自动完成 TODO；只按用户要求或已授权验收更新看板。专项没有自身状态。
+- TODO 的“关键信息”使用 `draft`，持续维护目标、进展、结论、卡点和下一步。资料使用 `project todos files list/upload/download/delete`；同名不覆盖，有文件时不能删除 TODO，不能为了删任务擅自清空资料。`context` 的 `record.files` 提供清单和下载入口，内容按需下载。
 - 删除项目保留专项与 TODO，专项解除项目归属；含 TODO 的专项拒绝删除。若用户只要求删除专项，不擅自删除其 TODO；可以在已授权范围内先移动或解除 TODO 归属。删除 TODO 不取消其关联的原生执行。
 - 本 Skill 的 CRUD 不发起执行。明确要求派发、关联或继续能力时，查 `project todos dispatch/attach/prompt --help`，使用真实能力和稳定执行 ID；项目 TODO 与 `opencoder-cli todo` 的工作流任务是不同对象。
 - 概述按需用 `project initiatives summary-context ID`、`project goals summary-context ID` 收集证据，通过 PATCH 的 `current_summary` 保存。证据读取失败明确报告来源，不视为已完成验收。

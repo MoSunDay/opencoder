@@ -23,9 +23,9 @@ it('groups labelled fields into task, settings and execution tabs', async () => 
   expect(screen.getByRole('tabpanel', { name: '任务' }).textContent).toContain('原说明');
   expect(screen.queryByRole('button', { name: '指派所选能力' })).toBeNull();
   expect(screen.queryByLabelText('已有执行 ID')).toBeNull();
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('编辑'));
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('编辑'));
   for (const [tab, labels] of [
-    ['任务', ['TODO 标题', 'TODO 看板列', '任务说明']], ['设置', ['所属子项', 'TODO Tag', '负责人', '关注人']],
+    ['任务', ['TODO 标题', 'TODO 看板列', '关键信息']], ['设置', ['所属子项', 'TODO Tag', '负责人', '关注人']],
     ['执行', ['执行能力']],
   ]) {
     fireEvent.click(screen.getByRole('tab', { name: tab, exact: true }));
@@ -45,14 +45,14 @@ it('retains failed edits and prevents field changes while a save is pending', as
   let reject;
   apiPatch.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
   const p = props(); const view = render(<TodoDrawer {...p} />);
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('编辑'));
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('编辑'));
   fireEvent.change(screen.getByLabelText('TODO 标题'), { target: { value: '   ' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
   expect(await screen.findByText('TODO 标题不能为空')).toBeTruthy();
   expect(document.activeElement).toBe(screen.getByLabelText('TODO 标题'));
   expect(apiPatch).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('TODO 标题'), { target: { value: '保留我的修改' } });
-  fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '尚未保存的完整说明' } });
+  fireEvent.change(screen.getByLabelText('关键信息'), { target: { value: '尚未保存的完整说明' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
   await waitFor(() => expect(screen.getByLabelText('TODO 标题').disabled).toBe(true));
   view.rerender(<TodoDrawer {...p} overview={{ ...overview, backlog: [{ ...todo, title: '远端刷新' }] }} />);
@@ -60,7 +60,7 @@ it('retains failed edits and prevents field changes while a save is pending', as
   expect(await screen.findByText('保存失败，请重试')).toBeTruthy();
   expect(screen.getByText('保存失败，请重试').closest('.ant-drawer-footer')).toBeTruthy();
   expect(screen.getByLabelText('TODO 标题').value).toBe('保留我的修改');
-  expect(screen.getByLabelText('任务说明').value).toBe('尚未保存的完整说明');
+  expect(screen.getByLabelText('关键信息').value).toBe('尚未保存的完整说明');
   expect(screen.getByLabelText('TODO 标题').disabled).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: /保存 TODO/ }));
   await waitFor(() => expect(p.refresh).toHaveBeenCalledOnce());
@@ -73,7 +73,7 @@ it('keeps create errors and drafts in place and exposes creation in the drawer f
   render(<CreateTodo open overview={overview} onClose={vi.fn()} onCreated={vi.fn()} onNotice={onNotice} />);
   expect(screen.getByRole('tab', { name: '设置' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('标题'), { target: { value: '新任务' } });
-  fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '需要保留的说明' } });
+  fireEvent.change(screen.getByLabelText('关键信息'), { target: { value: '需要保留的说明' } });
   const create = screen.getByRole('button', { name: /^创\s*建$/ });
   expect(create.closest('.ant-drawer-footer')).toBeTruthy();
   fireEvent.click(create);
@@ -81,13 +81,13 @@ it('keeps create errors and drafts in place and exposes creation in the drawer f
   expect(screen.getByText('创建暂时失败')).toBeTruthy();
   expect(screen.getByText('创建暂时失败').closest('.ant-drawer-footer')).toBeTruthy();
   expect(screen.getByLabelText('标题').value).toBe('新任务');
-  expect(screen.getByLabelText('任务说明').value).toBe('需要保留的说明');
+  expect(screen.getByLabelText('关键信息').value).toBe('需要保留的说明');
 });
 
 it('keeps read-only fields and both footer actions disabled', async () => {
   setIdentity({ name: 'viewer', role: 'viewer' });
   render(<TodoDrawer {...props()} />);
-  for (const label of ['TODO 标题', '任务说明', '所属子项', 'TODO 看板列', 'TODO Tag', '负责人', '关注人', '执行能力']) {
+  for (const label of ['TODO 标题', '关键信息', '所属子项', 'TODO 看板列', 'TODO Tag', '负责人', '关注人', '执行能力']) {
     expect(screen.getByLabelText(label).disabled).toBe(true);
   }
   expect(screen.getByRole('button', { name: '保存 TODO' }).disabled).toBe(true);

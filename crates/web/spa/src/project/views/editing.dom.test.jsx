@@ -28,9 +28,9 @@ it('preserves a project edit buffer when the record object refreshes', () => {
 it('saves TODO title, description, initiative and board column together', async () => {
   const overview = { goals: [], standalone_initiatives: [], backlog: [{ id: 't1', title: '原任务', draft: '原说明', status: 'draft' }] };
   render(<TodoDrawer todoId="t1" overview={overview} refresh={vi.fn()} onClose={vi.fn()} onNotice={vi.fn()} />);
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('编辑'));
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('编辑'));
   fireEvent.change(screen.getByLabelText('TODO 标题'), { target: { value: '新任务' } });
-  fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '新说明' } });
+  fireEvent.change(screen.getByLabelText('关键信息'), { target: { value: '新说明' } });
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
   await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/t1', {
     title: '新任务', draft: '新说明', initiative_id: null, board_status: 'backlog', capability_id: null, tag_ids: [], owner_user_name: null, follower_user_names: [],
@@ -66,13 +66,13 @@ it('waits for a newly created TODO before seeding its edit buffer and preserves 
   const overview = { ...empty, standalone_initiatives: [{ id: 'group', title: '子项', todos: [todo] }] };
   view.rerender(<TodoDrawer {...props} overview={overview} />);
   expect(screen.getByLabelText('TODO 标题').value).toBe('新建任务');
-  expect(screen.getByLabelText('任务说明').value).toBe('新建说明');
-  fireEvent.click(within(screen.getByLabelText('任务说明显示方式')).getByText('编辑'));
+  expect(screen.getByLabelText('关键信息').value).toBe('新建说明');
+  fireEvent.click(within(screen.getByLabelText('关键信息显示方式')).getByText('编辑'));
   fireEvent.change(screen.getByLabelText('TODO 标题'), { target: { value: '未保存的标题' } });
-  fireEvent.change(screen.getByLabelText('任务说明'), { target: { value: '未保存的说明' } });
+  fireEvent.change(screen.getByLabelText('关键信息'), { target: { value: '未保存的说明' } });
   view.rerender(<TodoDrawer {...props} overview={{ ...overview }} />);
   expect(screen.getByLabelText('TODO 标题').value).toBe('未保存的标题');
-  expect(screen.getByLabelText('任务说明').value).toBe('未保存的说明');
+  expect(screen.getByLabelText('关键信息').value).toBe('未保存的说明');
   fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
   await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/todos/new', {
     title: '未保存的标题', draft: '未保存的说明', initiative_id: 'group', board_status: 'todo', capability_id: null, tag_ids: [], owner_user_name: null, follower_user_names: [],

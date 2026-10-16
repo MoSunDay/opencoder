@@ -112,3 +112,11 @@ node scripts/acceptance/project/main.js
 - `workbench-browser.json`、`project-workbench.png`：TODO 关联执行与详情入口的浏览器证据。
 - `report.json`：只有全部 E2E 断言与当前健康检查通过后才写入的最终结果。
 - `browser-failure.html/png` 与进程日志：失败定位信息。
+
+TODO 关键信息与文件上传下载使用隔离真实 Server 验收：
+
+```sh
+node scripts/acceptance/project_files_ui.js /path/to/opencoder-server /path/to/spa/dist /path/to/evidence
+```
+
+覆盖 3 MiB 二进制上传下载、同名冲突、有文件时禁止删任务、草稿保留，以及四种屏宽的任务和文件页签。证据保存 SPA 摘要、截图和布局测量，不连接正式服务。

@@ -93,6 +93,7 @@ impl Config {
         };
         merge::merge_json(&mut root, patch);
         crate::provider::validate_protocol_patch(&root)?;
+        super::project::validate(&root)?;
         // MCP name-collision guard (bug #14): two `mcp_servers` names that
         // normalize to the same tool prefix would shadow each other's tools
         // at registration. Defensive for paths that still carry the key

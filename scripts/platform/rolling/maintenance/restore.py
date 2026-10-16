@@ -12,6 +12,9 @@ from . import archive
 
 
 def prior_controller(settings, release_id):
+    policy = settings.state_dir / 'todo-files-policy.json'
+    if policy.exists() and json.loads(policy.read_text())['minimum_contract']:
+        raise ValueError('retain the controller enforcing the TODO rollback floor')
     path = settings.state_dir / 'maintenance-controller.json'
     if not path.exists():
         return
@@ -47,6 +50,9 @@ def data(settings, root, metadata):
     manifest = json.loads((root / 'data/backup-manifest.json').read_text())
     if manifest.get('ontology_files_root'):
         replace(root / 'data/ontology-files', Path(manifest['ontology_files_root']))
+    if manifest.get('todo_files_root'):
+        replace(root / 'data/todo-files', Path(manifest['todo_files_root']))
+        replace(root / 'data/server/todo-storage.json', settings.server_data / 'todo-storage.json')
     for label, live in [('server', settings.server_data), ('resources', settings.state_dir / 'resources')]:
         saved = root / 'data' / label
         for source in saved.rglob('*.db'):

@@ -19,6 +19,7 @@ class Settings:
     listen: str = "127.0.0.1:18081"
     host_port: int = 18082
     resource_port: int = 18084
+    todo_resource_port: int = 18085
     port_base: int = 3000
     max_runs: int = 20
     min_memory_mb: int = 1024
@@ -49,6 +50,10 @@ class Settings:
     @property
     def resource_url(self):
         return f"http://127.0.0.1:{self.resource_port}"
+
+    @property
+    def todo_resource_url(self):
+        return f"http://127.0.0.1:{self.todo_resource_port}"
 
 
 def load(path):
@@ -89,7 +94,7 @@ def load(path):
     host, port = settings.listen.rsplit(":", 1)
     if host not in ("127.0.0.1", "0.0.0.0") or not port.isdigit():
         raise ValueError("listen must be an IPv4 bind address and port")
-    if not all(0 < int(p) < 65536 for p in (port, settings.host_port, settings.resource_port, settings.port_base)):
+    if not all(0 < int(p) < 65536 for p in (port, settings.host_port, settings.resource_port, settings.todo_resource_port, settings.port_base)):
         raise ValueError("ports must be between 1 and 65535")
     if urlparse(settings.public_url).scheme not in ("http", "https"):
         raise ValueError("public_url must use HTTP or HTTPS")

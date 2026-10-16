@@ -72,11 +72,23 @@ SendSIGKILL=no
 Restart=no
 """
     path = settings.systemd_dir / (prefix(settings) + "@.service")
+    activation = target / 'activation.json'
+    if activation.exists():
+        recovery = json.loads(activation.read_text())
+    else:
+        recovery = {'phase': 'prepared', 'unit': str(path),
+                    'before': path.read_text() if path.exists() else None, 'after': unit}
+        write(activation, recovery)
+    actual = path.read_text() if path.exists() else None
+    if actual not in (recovery['before'], unit):
+        raise ValueError('signal controller unit changed since its activation journal')
     atomic_bytes(path, unit.encode(), 0o644)
     operations.run("systemd-analyze", "verify", str(path))
     operations.run("systemctl", "daemon-reload")
     write(settings.state_dir / "host/deployment.json", {
         "state_dir": str(settings.state_dir), "unit_prefix": prefix(settings)})
+    recovery['phase'] = 'complete'
+    write(activation, recovery)
     return {"unit_prefix": prefix(settings), "controller": str(target)}
 
 
@@ -84,6 +96,8 @@ def stage(settings, bundle, maintenance=False, wait_seconds=90):
     if type(wait_seconds) is not int or wait_seconds <= 0:
         raise ValueError('wait_seconds must be a positive integer')
     candidate = manifest.verify(bundle)
+    from rolling.todo_resources import require_candidate
+    require_candidate(settings, candidate)
     journal = Journal(settings.state_dir).data
     if not journal["current"]:
         raise ValueError("first migration is required before staging a signal release")

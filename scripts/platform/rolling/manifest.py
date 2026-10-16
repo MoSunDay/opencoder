@@ -29,6 +29,8 @@ def verify(bundle):
         raise ValueError("brain schema does not match compiled binary")
     if execution_io(manifest) != execution_io(info):
         raise ValueError("execution IO compatibility does not match compiled binary")
+    if manifest.get('todo_files_contract', 0) != info.get('todo_files_contract', 0):
+        raise ValueError('TODO files contract does not match compiled binary')
     io_format(manifest)
     return manifest
 

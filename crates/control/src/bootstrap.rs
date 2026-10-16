@@ -79,6 +79,9 @@ async fn state_with_projects(
 ) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
     let config = Config::load(&workdir)?;
+    if enable_ontology {
+        crate::project_files::initialize(&config, &workdir, &data)?;
+    }
     let files = crate::ontology::checked_files_root(&config, &workdir, &data)?;
     let ontology = if enable_ontology {
         Some(opencoder_ontology::AppState::open(&data.join("ontology.db"), &files).await?)
@@ -330,6 +333,7 @@ async fn autostart_nfs_exports(workdir: &Path, config: &Config, data: &Path) -> 
     crate::api_dag_binaries_nfs::autostart(workdir).await?;
     crate::api_dag_workspace_nfs::autostart(workdir).await?;
     crate::ontology::autostart(config, workdir, data).await?;
+    crate::project_files::nfs::autostart(config, workdir, data).await?;
     Ok(())
 }
 

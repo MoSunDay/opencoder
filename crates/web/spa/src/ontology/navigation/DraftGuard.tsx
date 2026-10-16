@@ -1,5 +1,6 @@
 import { App } from "antd";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, type ReactNode } from "react";
+import { useHistoryGuard } from '../../fleet/navigation/history.js';
 
 type Draft = { dirty: boolean; saving: boolean };
 type Guard = {
@@ -29,6 +30,7 @@ export function DraftGuardProvider({ children }: { children: ReactNode }) {
       onCancel: () => { dialogOpen.current = false; cancel?.(); } });
   }, [message, modal]);
   const value = useMemo(() => ({ register, blocked, run }), [register, blocked, run]);
+  useHistoryGuard(value);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => { if (blocked()) { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", beforeUnload);

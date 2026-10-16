@@ -1,3 +1,5 @@
+import { projectLink } from '../../project/navigation/links.js';
+
 export function executionHref(id, kind) {
   const query = new URLSearchParams({ execution: id });
   if (kind) query.set('execution_kind', kind);
@@ -16,6 +18,7 @@ export function executionLink(search, hash = '') {
 
 export function linkedPage(search, hash = '') {
   if (executionLink(search, hash)) return 'topics';
+  if (projectLink(search, hash)) return 'project';
   return new URLSearchParams(search).has('brain_run') ? 'brain' : null;
 }
 

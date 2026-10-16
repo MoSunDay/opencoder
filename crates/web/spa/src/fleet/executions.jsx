@@ -11,6 +11,7 @@ import { KIND_LABELS, KINDS, executionPagePath } from './model.js';
 import { err } from '../notice.js';
 import { executionHref, withoutExecutionLink } from './navigation/links.js';
 import { useLinkedLocation } from './navigation/location.js';
+import { pushLocation, replaceLocation } from './navigation/history.js';
 
 export function ExecutionsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]);
@@ -46,8 +47,7 @@ export function ExecutionsPanel({ onNotice }) {
     <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={tableRows(loading, rows)} size="small" loading={tableLoading(loading)} columns={[
       { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" style={{ fontFamily: MONO_VAR }} onClick={() => {
         setDetail(row);
-        window.history.pushState(null, '', executionHref(id));
-        window.dispatchEvent(new PopStateEvent('popstate'));
+        pushLocation(executionHref(id));
       }}>{id}</Button> },
       { title: '类型', dataIndex: 'kind', render: (v) => KIND_LABELS[v] || v },
       { title: '名称', dataIndex: 'name', render: (v) => v || '-' },
@@ -57,8 +57,7 @@ export function ExecutionsPanel({ onNotice }) {
     ]} />
     {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => {
       setDetail(null);
-      window.history.replaceState(null, '', withoutExecutionLink(window.location.href));
-      window.dispatchEvent(new PopStateEvent('popstate'));
+      replaceLocation(withoutExecutionLink(window.location.href));
     }} onNotice={onNotice} />}
   </PageShell>;
 }

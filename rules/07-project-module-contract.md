@@ -1,4 +1,4 @@
-Commit: a4e0d53645cede306c71663f839ba6e989c21cc3
+Commit: f8cb8fdf60333fbbeb896355a0732501bef908e0
 
 # 规则 07：项目模块约定
 
@@ -90,6 +90,7 @@ Commit: a4e0d53645cede306c71663f839ba6e989c21cc3
 - TODO 卡片不提供单独拖动按钮，标题和内容可直接拖动；点击标题打开详情，更多菜单不触发拖拽。键盘在标题上用空格开始排序、Escape 取消，取消不得关闭专项详情。
 - 筛选条件在刷新、保存和关闭后重新打开详情时保留。筛选后拖动须保留隐藏卡片的相对顺序；保存失败恢复原看板状态。
 - TODO 总表包含所有归属和未归属任务；已有悬空关系在概览中展示为独立专项或未归属 TODO，不能静默丢失。
+- 项目、专项和 TODO 详情使用 `project`、`initiative`、`todo` 地址参数定位，优先片段、兼容查询参数。分享只需目标 ID，不能要求先打开父级或在当前筛选结果中找到记录；打开、关闭、刷新与浏览器前进后退同步详情。登录和保存的主页选择不得丢失定位。未保存草稿离开前须确认，取消保留原内容和地址；读取失败不能显示为记录已删除。
 
 ### TODO 评论
 
@@ -127,6 +128,7 @@ Commit: a4e0d53645cede306c71663f839ba6e989c21cc3
 | 实时结果、离线清空与读取重试 | [result.dom.test.jsx](../crates/web/spa/src/project/execute/result.dom.test.jsx)、[results/mod.rs](../crates/control/src/api/executions/results/mod.rs) |
 | 看板完成数与项目加权进度 | [overview.rs](../crates/store/src/project/overview.rs) 内联测试、[catalog.test.js](../crates/web/spa/src/project/model/catalog.test.js) |
 | 归属编辑、看板移动与筛选保留 | [relations.dom.test.jsx](../crates/web/spa/src/project/views/relations.dom.test.jsx)、[board.test.js](../crates/web/spa/src/project/model/board.test.js)、[project.dom.test.jsx](../crates/web/spa/src/project/project.dom.test.jsx) |
+| 详情分享、登录后定位、历史切换与草稿保护 | [navigation.dom.test.jsx](../crates/web/spa/src/project/navigation/navigation.dom.test.jsx)、[history.dom.test.jsx](../crates/web/spa/src/fleet/navigation/history.dom.test.jsx)、[浏览器验收](../scripts/acceptance/project/navigation.js) |
 | 项目内专项排序、冲突与失败回滚 | [存储测试](../crates/store/tests/project_initiative_order.rs)、[HTTP 测试](../crates/control/tests/e2e/project_api/order.rs)、[表格交互测试](../crates/web/spa/src/project/sorting/initiatives.dom.test.jsx) |
 | 执行发起、关联及详情切换 | [launcher.dom.test.jsx](../crates/web/spa/src/project/execute/launcher.dom.test.jsx)、[todoDrawer.dom.test.jsx](../crates/web/spa/src/project/tests/todoDrawer.dom.test.jsx) |
 

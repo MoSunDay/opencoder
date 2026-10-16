@@ -1,5 +1,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { executionLink, linkedPage } from './links.js';
+import { projectLink } from '../../project/navigation/links.js';
+import { locationSnapshot } from './history.js';
 
 function subscribe(changed) {
   window.addEventListener('hashchange', changed);
@@ -9,12 +11,10 @@ function subscribe(changed) {
     window.removeEventListener('popstate', changed);
   };
 }
-const snapshot = () => window.location.href;
-
 export function useLinkedLocation() {
-  const href = useSyncExternalStore(subscribe, snapshot);
+  const href = useSyncExternalStore(subscribe, locationSnapshot);
   return useMemo(() => {
     const url = new URL(href);
-    return { page: linkedPage(url.search, url.hash), execution: executionLink(url.search, url.hash) };
+    return { page: linkedPage(url.search, url.hash), execution: executionLink(url.search, url.hash), project: projectLink(url.search, url.hash) };
   }, [href]);
 }

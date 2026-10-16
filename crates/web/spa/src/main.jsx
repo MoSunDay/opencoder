@@ -27,6 +27,7 @@ import 'dayjs/locale/zh-cn';
 import { useLocalStorage } from 'usehooks-ts';
 import { apiGet } from './api.js';
 import { LoginModal } from './login.jsx';
+import { useServerAuth } from './access/useServerAuth.js';
 import './app.css';
 import {
   ALL_PAGES,
@@ -44,6 +45,8 @@ import { normalizeNotice } from './notice.js';
 import { theme } from './theme.js';
 import { bootUrlCredential } from './boot.js';
 import { DraftGuardProvider, useDraftGuard } from './ontology/navigation/DraftGuard';
+import { linkedPage, withoutExecutionLink } from './fleet/navigation/links.js';
+import { useLinkedLocation } from './fleet/navigation/location.js';
 
 // zh-CN everywhere: antd built-ins (Modal/Popconfirm buttons) + dayjs
 // relative dates (fromNow lands in iteration 3).
@@ -105,20 +108,29 @@ const SHEET_PAGES = new Set(['chat']);
 
 function FleetShell() {
   const { token, page, identity } = useStore();
+  const authEnabled = useServerAuth();
+  const canConnect = authEnabled === false || !!token;
   const draftGuard = useDraftGuard();
+  const linkedLocation = useLinkedLocation();
   // 项目 / Agent / 节点 分类选择的持久化：显式导航（goPage）经 usehooks-ts 的
   // useLocalStorage 把所选页写入 `oc_nav_page`（键与校验集都在 nav.js）；重新
   // 挂载时在首帧绘制前恢复进 store——useLayoutEffect 先于绘制执行，默认页不
-  // 闪现。brain_run 深链优先于存储值；ALL_PAGES 之外的陌生/损坏值一律忽略。
+  // 闪现。执行地址与 brain_run 优先于存储值；ALL_PAGES 之外的陌生/损坏值一律忽略。
   // localStorage 的读写全部在 hook 库内完成，本文件不自管 getItem/setItem。
   const [storedPage, setStoredPage] = useLocalStorage(NAV_STORAGE_KEY, null);
   useLayoutEffect(() => {
-    const deepLink = new URLSearchParams(window.location.search).has('brain_run');
+    const deepLink = linkedPage(window.location.search, window.location.hash);
+    if (deepLink && deepLink !== page) setState({ page: deepLink });
     if (!deepLink && ALL_PAGES.includes(storedPage) && storedPage !== page) {
       setState({ page: storedPage });
     }
     // 引导只做一次：后续 page 变化由 goPage 单向镜像，恢复不回环。
   }, []);
+  useEffect(() => {
+    if (linkedLocation.execution && page !== 'topics') {
+      setState({ page: 'topics' });
+    }
+  }, [linkedLocation.execution?.id]);
   const [navCollapsed, setNavCollapsed] = useState(false);
   // Panel→shell notices carry {type, text} (notice.js); normalizeNotice
   // keeps legacy bare-string call sites safe. Empty text (the onNotice('')
@@ -135,7 +147,8 @@ function FleetShell() {
   // renders the topics panel instead (highlight never dangles).
   const visible = visibleCategories(identity);
   const allowed = allowedPages(identity);
-  const shownPage = allowed.includes(page) ? page : 'project';
+  const routedPage = linkedLocation.execution ? 'topics' : page;
+  const shownPage = allowed.includes(routedPage) ? routedPage : 'project';
   const category = visible.find((c) => c.items.some((i) => i.page === shownPage)) || visible[0];
   const categoryOptions = visible.map((c) => ({ value: c.key, label: c.label }));
 
@@ -143,7 +156,11 @@ function FleetShell() {
   // the single writer of the persisted selection; programmatic jumps keep
   // the store-only semantics they already had.
   const goPage = (key) => {
-    if (key !== page) draftGuard.run(() => {
+    if (key !== shownPage) draftGuard.run(() => {
+      if (linkedLocation.execution) {
+        window.history.replaceState(null, '', withoutExecutionLink(window.location.href));
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
       setStoredPage(key);
       setState({ page: key });
     });
@@ -155,7 +172,7 @@ function FleetShell() {
   // A 401 clears the credential via api.js (login modal reopens); other
   // failures keep the shell and surface through the connection badge.
   useEffect(() => {
-    if (!token) {
+    if (!canConnect) {
       return undefined;
     }
     let live = true;
@@ -172,7 +189,7 @@ function FleetShell() {
     return () => {
       live = false;
     };
-  }, [token, identityRevision]);
+  }, [token, canConnect, authEnabled, identityRevision]);
 
   return (
       <div className="fleet-root">
@@ -183,7 +200,7 @@ function FleetShell() {
               <ConnectionBadge />
               <ServerBase />
               <IdentityBadge />
-              <Button size="small" type="text" onClick={() => draftGuard.run(clearCredentials)}>退出</Button>
+              {authEnabled !== false && <Button size="small" type="text" onClick={() => draftGuard.run(clearCredentials)}>退出</Button>}
             </div>
           </Header>
           <Layout style={{ minHeight: 0 }}>
@@ -250,9 +267,9 @@ function FleetShell() {
                   onClose={() => setNotice(null)}
                 />
               ) : null}
-              {token && !identity && <Alert type={identityError ? 'error' : 'info'} showIcon title={identityError ? `身份确认失败：${identityError}` : '正在确认登录身份…'}
+              {canConnect && !identity && <Alert type={identityError ? 'error' : 'info'} showIcon title={identityError ? `身份确认失败：${identityError}` : '正在确认登录身份…'}
                 action={identityError ? <Button onClick={() => { setIdentityError(''); setIdentityRevision((value) => value + 1); }}>重试身份确认</Button> : null} />}
-              {token && identity ? (
+              {canConnect && identity ? (
                 <div className={SHEET_PAGES.has(shownPage) ? 'fleet-sheet' : undefined}>
                   <PageBody page={shownPage} onNotice={notify} />
                 </div>
@@ -260,7 +277,7 @@ function FleetShell() {
             </Content>
           </Layout>
         </Layout>
-        <LoginModal open={!token} onConnected={() => setNotice(null)} />
+        <LoginModal open={authEnabled === true && !token} onConnected={() => setNotice(null)} />
       </div>
   );
 }

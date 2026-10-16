@@ -1,10 +1,12 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: a4e0d53645cede306c71663f839ba6e989c21cc3
 
 # web 模块
 
 axum HTTP + SSE 会话管理 + 内嵌 SPA。
 
-- 专项列表与编辑不显示状态；共享专项 API 拒绝 `status` 字段。TODO 看板状态和项目归档保持独立，专项进度只统计 TODO。
+[access/useServerAuth.js](../../crates/web/spa/src/access/useServerAuth.js) 在连接服务器和凭据变化时读取公开鉴权状态；关闭时无需 Token 即可读取 admin 身份并打开控制台，JSON/SSE 请求和文件下载省略 Authorization。重新开启后 401 恢复登录入口。旧 Server 没有状态接口时沿用 Token 登录。
+
+- 子项列表与编辑不显示状态；共享子项 API 拒绝 `status` 字段。TODO 看板状态和项目归档保持独立，子项进度只统计 TODO。
 
 ## 索引
 - [admin/users.jsx](../../crates/web/spa/src/admin/users.jsx) — 创建用户后展示返回的初始 Token，支持复制；明文只在组件内存中保存，确认保存、离开页面或刷新后不再展示；编辑角色不签发 Token。列表与节点页共用 [admin/layout.jsx](../../crates/web/spa/src/admin/layout.jsx)；[admin/model.js](../../crates/web/spa/src/admin/model.js) 提供搜索与状态判断纯函数，[admin/formModal.jsx](../../crates/web/spa/src/admin/formModal.jsx) 管理单次编辑、提交互斥和失败草稿；[admin/styles.css](../../crates/web/spa/src/admin/styles.css) 使用 `oc-admin-` 前缀隔离后台样式。
@@ -24,22 +26,23 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [chat/useTranscriptStream.js](../../crates/web/spa/src/chat/useTranscriptStream.js)、[chat/stream/completion.js](../../crates/web/spa/src/chat/stream/completion.js) — `sse.js` 的 `onEnd` 单独通知 `stream_end`；Hook 在 15 秒内读取执行结果与会话快照，纯函数合并消息与结束状态。读取失败恢复输入；取消或重新订阅使旧读取失效，包括同一会话的新订阅。
 - [chat.jsx](../../crates/web/spa/src/chat.jsx) — 打开运行中或初始化中的会话时先读游标，再取快照并续接事件；创建重试只在首轮输入不变时复用原 ID。Agent 配置不提供容器执行开关；启动取消和中断显示实际原因。
 - `spa/src/main.jsx` — 身份确认完成后才挂载导航与页面；身份格式错误和读取失败提供重试，401 返回登录入口。
-- [nav.js](../../crates/web/spa/src/nav.js)、[shell/categoryTabs.jsx](../../crates/web/spa/src/shell/categoryTabs.jsx) — 项目、Agent、Ontology、后台管理四类导航；标签保持完整宽度，容器支持滚轮、触摸和键盘滚动，并保持当前标签可见。editor 与 viewer 可打开平台页面，后台管理仅管理员可见；viewer 的写入控件禁用。项目 Overview 登记为 `body-title`，从项目、专项、TODO 页签开始，PageShell 不生成额外标题行。用户权限登记为 `menu-only`，页面从表格工具栏开始，不渲染额外的标题和说明；不设独立 Token 管理页。
+- [nav.js](../../crates/web/spa/src/nav.js)、[shell/categoryTabs.jsx](../../crates/web/spa/src/shell/categoryTabs.jsx) — 项目、Agent、Ontology、后台管理四类导航；标签保持完整宽度，容器支持滚轮、触摸和键盘滚动，并保持当前标签可见。editor 与 viewer 可打开平台页面，后台管理仅管理员可见；viewer 的写入控件禁用。项目 Overview 登记为 `body-title`，从项目、子项、TODO 页签开始，PageShell 不生成额外标题行。用户权限登记为 `menu-only`，页面从表格工具栏开始，不渲染额外的标题和说明；不设独立 Token 管理页。
 - [Ontology 前端](ontology.md) — 四个页面固定使用当前 Server 的默认数据空间，提供图谱与结果列表、实体详情草稿及观测记忆；复用平台身份、请求与 antd。接口与存储见 [ontology](../ontology/index.md)。
 - `spa/src/ui/requests/query.js` — 读取请求的取消、迟到响应丢弃、响应校验与错误状态；失败不替换为空数据。
 - `spa/src/fleet/`、`spa/src/schedule/` — 执行表与定时任务页；`schedule/history.jsx` 按历史记录的执行 ID 打开原执行，不重新派发。节点调度设置读取失败时禁止保存默认值。
 - [fleet/detail.jsx](../../crates/web/spa/src/fleet/detail.jsx)、[fleet/detail/workloads.jsx](../../crates/web/spa/src/fleet/detail/workloads.jsx) — TODO 执行明细在工作流建立后加载工作台；初始化、停止和初始化失败只展示对应状态，初始化错误只显示一次。工作流建立后的读取错误仍显示实际原因。
 - [fleet/teams/](../../crates/web/spa/src/fleet/teams/) — Team 列表、成员编辑、启动表单与可复用的 `TeamExecutionHistory`；历史记录按服务端游标分页并自动刷新，点击打开原执行。`submission.js` 限制提交与回执读取的等待时间并校验执行身份，`useSubmission.js` 在提交超时或回复不确定后查询现有 `/receipt`，确认受理后跳转详情。重试保留原请求，关闭时取消读取并忽略迟到响应。
 - [fleet/detail/team/](../../crates/web/spa/src/fleet/detail/team/) — 通用执行详情复用 `TeamExecutionProcess`，展示轮次、发言与小结；`progress.js` 读取当前未完成轮次已落盘的计划与小结，`record.jsx` 更新尚未生成的发言。读取有界、请求不重叠，澄清对象来自上次小结；切换执行取消旧请求，大记录保留分段读取，异常结束保留已保存的未完成轮次。
-- `src/api_project*.rs` — 项目、专项、TODO 与 Tag 的共享 HTTP 处理器；Tag 范围和选择经存储验证，TODO 顺序写入携带 `initiative_id` 范围，负数位置保留给迁移且 API 拒绝；Control 复用同一组处理器
+- `src/api_project*.rs` — 项目、子项、TODO 与 Tag 的共享 HTTP 处理器；Tag 范围和选择经存储验证，TODO 顺序写入携带 `initiative_id` 范围，负数位置保留给迁移且 API 拒绝；Control 复用同一组处理器
 - [api_project_people.rs](../../crates/web/src/api_project_people.rs)、[project/people/fields.jsx](../../crates/web/spa/src/project/people/fields.jsx) — 只读用户名目录、人员错误映射与三层共用的选择、展示和筛选；请求失败提供重试，按原有角色禁用写入，清空负责人使用显式 `null`。
-- `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 项目、专项、TODO、Tag 四个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和专项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`；专项详情与 `todoDrawer.jsx` 的外层 Drawer 均使用 `size="100vw"`，不设置固定最大宽度。
-- [project/forms/](../../crates/web/spa/src/project/forms/) — TODO 新建、编辑与执行参数共用分区和响应式间距；编辑内容区居中限宽，窄屏单列，长标签换行，说明自动增高。新建与保存操作、请求错误位于抽屉底部；标题校验定位到输入框。字段值和请求仍由各入口管理。真实 CRUD 与四种屏宽验收见 [project/forms.js](../../scripts/acceptance/project/forms.js)。
-- [project/summary/view.jsx](../../crates/web/spa/src/project/summary/view.jsx)、[views/mdDrawer.jsx](../../crates/web/spa/src/project/views/mdDrawer.jsx) — 项目、专项列表与详情共用当前概述及时间展示，沿用表格筛选。表单保留打开时的概述基线，只提交被编辑的概述，避免改其他字段时更新时间或覆盖刷新后的新概述。共享项目 API 为显式概述写入生成时间。[history.jsx](../../crates/web/spa/src/project/summary/history.jsx) 复用于详情及三个列表的概述历史按钮，阻止点击穿透到行详情；按需读取版本，处理错误、取消过期读取并确认恢复；[概述 API](../../crates/web/src/api_project/summary.rs) 复用读写权限，返回最近 10 个版本及恢复来源。
-- [project/sorting/](../../crates/web/spa/src/project/sorting/) — 项目内专项使用表格手柄拖拽及键盘排序；纯函数在完整列表上移动，保留筛选隐藏项，保存中禁用重复操作，失败恢复原顺序。排序接口携带完整原顺序和目标顺序。专项名称列与所属项目等宽，名称换行展示。
-- [tags/panel.jsx](../../crates/web/spa/src/project/tags/panel.jsx)、[tags/tab.jsx](../../crates/web/spa/src/project/tags/tab.jsx)、[tags/editor.jsx](../../crates/web/spa/src/project/tags/editor.jsx) — Tag 独立菜单及管理表格；Overview 保留项目、专项、TODO 三个页签。定义行由 `tags/model.js` 纯投影，支持全局、项目和专项；全局隐藏归属选择，切换类型清空旧归属，保存失败保留草稿。共享 [api_project_tags.rs](../../crates/web/src/api_project_tags.rs) 校验名称与归属，全局允许省略或传空 `scope_id`，修改保留 ID。
-- `spa/src/project/board/`、`model/board.js`、`model/catalog.js` — dnd-kit 看板与纯移动、进度、Tag 解析；按完整任务集合计算筛选后的拖动顺序，多 Tag 卡片共享 TODO ID，失败回退原数据
-- [project/todoDrawer.jsx](../../crates/web/spa/src/project/todoDrawer.jsx)、[project/execute/](../../crates/web/spa/src/project/execute/) — TODO 选择实际能力 ID，以稳定执行 ID 派发并关联；回复丢失时保留同一请求重试。结论在打开时向所属节点读取，失败清空旧结果并显示错误；`ExecutionView` 复用原会话、事件与引导入口。
+- `spa/src/project/`、`views/projectTable.jsx`、`views/viewState.jsx` — 项目、子项、TODO、Tag 四个表格与列筛选，视图状态在保存刷新及抽屉关闭后保留；项目和子项分别进入 `views/projectDrawer.jsx`、`views/initiativeDrawer.jsx`；项目详情在桌面使用 `size="70vw"`，1024px 及以下全宽；子项详情与 `todoDrawer.jsx` 使用 `size="100vw"`，内部容器不再限宽居中。
+- [project/forms/](../../crates/web/spa/src/project/forms/) — TODO 共用一个 Ant Design Form，任务与设置页签字段预先注册，切换保留值；MarkdownInput 通过 defaultMode 区分新建编辑和已有正文预览；只切换说明区域，标题与状态输入框同行并始终挂载，任务页底部的评论独立维护草稿与提交，三个页签切换保留各自内容。标题校验回到任务页并聚焦，保存失败保留草稿；关闭未保存内容由 Modal 确认。创建使用任务/设置；项目详情保留概览/子项页签，子项详情将现状与说明、基本信息与进度、看板依次展示，基本信息和进度靠左相邻排列。真实 CRUD 和四种屏宽验收见 [project/forms.js](../../scripts/acceptance/project/forms.js)。
+- [project/summary/view.jsx](../../crates/web/spa/src/project/summary/view.jsx)、[views/mdDrawer.jsx](../../crates/web/spa/src/project/views/mdDrawer.jsx) — 项目、子项列表与详情共用现状及时间展示，沿用表格筛选。子项表单将 detail_md 明确标为“子项目标”并前置，表单保留打开时的现状基线，只提交被编辑的现状，避免改其他字段时更新时间或覆盖刷新后的新现状。共享项目 API 为显式现状写入生成时间。[history.jsx](../../crates/web/spa/src/project/summary/history.jsx) 复用于详情及三个列表的现状历史按钮，阻止点击穿透到行详情；按需读取版本，处理错误、取消过期读取并确认恢复；[现状 API](../../crates/web/src/api_project/summary.rs) 复用读写权限，返回最近 10 个版本及恢复来源。
+- [project/sorting/](../../crates/web/spa/src/project/sorting/) — 项目内子项使用表格手柄拖拽及键盘排序；纯函数在完整列表上移动，保留筛选隐藏项，保存中禁用重复操作，失败恢复原顺序。排序接口携带完整原顺序和目标顺序。子项名称列与所属项目等宽，名称换行展示。
+- [tags/panel.jsx](../../crates/web/spa/src/project/tags/panel.jsx)、[tags/tab.jsx](../../crates/web/spa/src/project/tags/tab.jsx)、[tags/editor.jsx](../../crates/web/spa/src/project/tags/editor.jsx) — Tag 独立菜单及管理表格；Overview 保留项目、子项、TODO 三个页签。定义行由 `tags/model.js` 纯投影，支持全局、项目和子项；全局隐藏归属选择，切换类型清空旧归属，保存失败保留草稿。共享 [api_project_tags.rs](../../crates/web/src/api_project_tags.rs) 校验名称与归属，全局允许省略或传空 `scope_id`，修改保留 ID。
+- `spa/src/project/board/`、`model/board.js`、`model/catalog.js` — dnd-kit 看板与纯移动、进度、Tag 解析；卡片将标题、可读说明摘要、标签、负责人分层展示，标题与卡片内容直接拖拽，更多菜单阻止拖拽冒泡；标题保留 Enter 打开、空格开始键盘排序，Escape 取消。按完整任务集合计算筛选后的拖动顺序，多 Tag 卡片共享 TODO ID，失败回退原数据。
+- [project/comments/](../../crates/web/spa/src/project/comments/) — Markdown 评论、认证用户署名、来源跳转和稳定请求 ID；失败保留正文和 ID，分页去重并保持滚动位置，可见时读取全部增量页，隐藏时取消读取并隔离迟到响应。
+- [project/todoDrawer.jsx](../../crates/web/spa/src/project/todoDrawer.jsx)、[project/execute/](../../crates/web/spa/src/project/execute/) — TODO 选择实际能力 ID，以稳定执行 ID 派发并关联；回复丢失时保留同一请求重试。执行页可见时读取执行，任务页可见时读取内嵌评论，隐藏时停止轮询；能力选择和指派按钮同行显示，网页不提供手动关联输入，派发后的自动关联及失败重试保留；结论向所属节点读取，失败清空旧结果并显示错误；执行 ID 通过新页面链接进入原生执行详情；[fleet/navigation/links.js](../../crates/web/spa/src/fleet/navigation/links.js) 编解码执行 ID 与类型，Shell 的首次页面选择优先执行链接，ExecutionsPanel 无需在当前列表页找到该记录即可挂载原生详情；评论来源与派发后的内嵌 `ExecutionView` 保留原会话、事件与引导入口。
 - [chat/inputAttempt.js](../../crates/web/spa/src/chat/inputAttempt.js) — 会话页与执行明细共享人工输入 ID 的生成与重试规则，未确认的回复保持原输入 ID，避免断线重试重复提交。
 - `spa/src/dag/editor/canvasEditor.jsx` — 用已发出的 spec 签名避免重复通知，并保证依赖边更新在节点编辑之后仍能保存
 - `spa/src/agents/`、`spa/src/agentNfsCard.jsx` — Agent 配置与资源页签；复用状态卡读取 Agent、二进制、源工作区、Ontology 正文四个实际只读 NFS 导出，停止须确认，读取失败不显示为已停止。
@@ -57,6 +60,10 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `tests/` — 集成测试
 
 ## 接缝
+
+- [fleet/navigation/location.js](../../crates/web/spa/src/fleet/navigation/location.js) 监听地址和浏览器历史；执行地址持续优先于持久化的主页选择。[links.js](../../crates/web/spa/src/fleet/navigation/links.js) 生成仅含执行 ID 的片段链接，兼容旧查询参数，并在关闭详情或显式切换菜单时清除执行定位。TODO 不依赖预先取得类型或列表第一页；ExecutionView 按 ID 请求 Server 原生详情，再由返回类型展示能力过程。
+
+- 原生执行详情与消息翻页兼容缺少 `Array.at`、`URLSearchParams.size` 的浏览器；会话 Markdown 无法解析时以普通文本展示，仍可读取 Session 上下文。执行深链测试挂载真实 `ExecutionView`，检查所属节点、消息、分页和离线错误。
 - 会话执行复用 session 运行时；持久化经 `Arc<dyn Store>`。
 - [serve](../../crates/web/src/lib.rs) 为会话与 `ProjectService` 提供同一 `LibsqlStore` 实例，共享连接和锁；存储接口见 [store](../store/index.md)。
 - [全站验收入口](../../scripts/acceptance/ui/main.js) 以 `nav.js` 注册页和 `ui/scope.js` 功能覆盖表为范围，校验成套构建、SPA 产物、四种屏宽、真实功能与 Server TUI；缺页、异常、超时或构建摘要不一致使验收失败。
@@ -65,10 +72,12 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [responsive/services.js](../../scripts/acceptance/ui/responsive/services.js) 直接绑定系统分配的空闲端口并返回实际端口，避免先查询再占用的竞争；显式端口冲突返回启动错误。
 - [大脑运行画布验收](../../scripts/acceptance/brain/ui/run-canvas.js) — 只读打开已有运行，在四种屏宽核对画布尺寸、全屏和每层实际执行详情；可用本地候选页面代理真实 API。
 - [大脑编辑画布验收](../../scripts/acceptance/brain/ui/editor.js) — 对实际 SPA 产物执行键盘及批量删除、取消、拖动、连续修改、关闭重开和新版本保存，核验计划层级与位置；使用临时 HTTP 数据，不操作已有计划。
-- [项目能力对接验收](../../scripts/acceptance/project/README.md) 的 `capabilities/main.js` 覆盖浏览器创建项目、专项和 TODO，连接 Agent、Operator、DAG、Brain，核验同一执行详情、实时结果读取、完整结果绑定与看板进度；隔离环境只替换模型传输，正式环境模式保留具名数据和版本回执。
+- [项目能力对接验收](../../scripts/acceptance/project/README.md) 的 `capabilities/main.js` 覆盖浏览器创建项目、子项和 TODO，连接 Agent、Operator、DAG、Brain，核验同一执行详情、实时结果读取、完整结果绑定与看板进度；隔离环境只替换模型传输，正式环境模式保留具名数据和版本回执。
 
 ## 相关
 - [control](../control/index.md)、[brain](../brain/index.md) — Brain 校验/快照发布/执行在后端
 - [动态 DAG 步骤](../../docs/dag-dynamic.md)
 - [DAG 能力](../../features/dag/index.md)、[执行约定](../../rules/04-dag-execution-contract.md)
 - [UI 验收约定](../../rules/05-ui-acceptance.md)
+
+[project/summary/section.jsx](../../crates/web/spa/src/project/summary/section.jsx) 为项目、子项详情的现状和目标提供独立折叠按钮，默认收起正文，标题、现状时间与历史入口始终可用。记录 ID 作为组件 key；刷新同一记录保留展开状态，切换记录重置。网页名称“子项 / 目标 / 现状”分别对应 `initiative / detail_md / current_summary`。

@@ -44,11 +44,11 @@ export function TagEditor({ open, initial, overview, onCancel, onOk }) {
         return length >= 1 && length <= 128 ? Promise.resolve() : Promise.reject(new Error('请输入 1–128 字符的 Tag 名称'));
       } }]}><Input aria-label="Tag 名称" placeholder="输入 Tag 名称" /></Form.Item>
       <Form.Item name="scope_type" label="归属类型" rules={[{ required: true }]}>
-        <Select aria-label="Tag 归属类型" options={[{ value: 'global', label: '全局' }, { value: 'project', label: '项目' }, { value: 'initiative', label: '专项' }]} />
+        <Select aria-label="Tag 归属类型" options={[{ value: 'global', label: '全局' }, { value: 'project', label: '项目' }, { value: 'initiative', label: '子项' }]} />
       </Form.Item>
-      {scopeType !== 'global' && <Form.Item name="scope_id" label={scopeType === 'initiative' ? '所属专项' : '所属项目'} rules={[{ required: true, message: '请选择具体项目或专项' }, {
+      {scopeType !== 'global' && <Form.Item name="scope_id" label={scopeType === 'initiative' ? '所属子项' : '所属项目'} rules={[{ required: true, message: '请选择具体项目或子项' }, {
         validator: (_, value) => !value || owners.some((owner) => owner.value === value) ? Promise.resolve() : Promise.reject(new Error('归属已删除，请重新选择')),
-      }]}><Select {...searchSelect} aria-label="Tag 归属" options={owners} placeholder="选择具体项目或专项" /></Form.Item>}
+      }]}><Select {...searchSelect} aria-label="Tag 归属" options={owners} placeholder="选择具体项目或子项" /></Form.Item>}
     </Form>
   </Drawer>;
 }

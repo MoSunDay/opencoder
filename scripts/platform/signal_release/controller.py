@@ -98,6 +98,7 @@ def stage(settings, bundle, maintenance=False, wait_seconds=90):
     if not repair and forward.active(state) and state['target'] != candidate['release_id']:
         raise ValueError('another maintenance upgrade is unfinished')
     if not maintenance:
+        manifest.writer_preflight(candidate, journal['releases'][journal['current']]['manifest'])
         manifest.compatible(candidate, manifest.overlapping(journal))
     elif not repair:
         from rolling.maintenance.preflight import check

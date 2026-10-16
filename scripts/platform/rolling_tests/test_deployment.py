@@ -37,6 +37,14 @@ class Operations:
                 'protocol_version': 9, 'release_compatibility': manifest('resources')['compatibility']}}
         if path == '/api/admin/release':
             return {'retirement_protocol': 2}
+        if path == '/status':
+            return {'node': {'id': 'node'},
+                    'snapshot': {'generation': 'host-test', 'ready': True}}
+        if path == '/api/nodes':
+            return {'nodes': [{'id': 'node', 'online': True,
+                    'snapshot': {'generation': 'host-test', 'ready': True}}]}
+        if path == '/api/ready':
+            return {'ready_nodes': 1}
         if path.startswith("/runtimes/") and path.endswith("/activate"):
             self.active = path.split("/")[2]
             if self.crash:
@@ -68,18 +76,54 @@ class DeploymentTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
-        self.settings = Settings(root, root / "server-config", root / "server", root / "agent", root / "token", systemd_dir=root / "units", bin_dir=root / "bin")
+        self.settings = Settings(root, root / "token", systemd_dir=root / "units", bin_dir=root / "bin")
         self.journal = Journal(root)
         self.old = record_for(self.settings, manifest("r1"), 0)
         self.journal.data.update(current="r1", phase="complete", releases={"r1": self.old})
         self.journal.save()
         self.operations = Operations()
+        activated = patch("rolling.deployment.probes.activated_host", create=True)
+        self.activated_host = activated.start()
+        self.addCleanup(activated.stop)
         for target, value in (("manifest.verify", manifest("r2")), ("manifest.resources", None),
                               ("units.prepare", None), ("units.switch_ingress", None),
                               ("probes.candidate", "node-one"), ("probes.ready", True), ("probes.public", True)):
             mocked = patch("rolling.deployment." + target, return_value=value)
             setattr(self, target.replace(".", "_"), mocked.start())
             self.addCleanup(mocked.stop)
+
+    def test_forward_switch_waits_for_the_activated_host_generation(self):
+        def switch(*args):
+            self.activated_host.assert_called_once()
+            self.assertIn(("POST", "/activate-host", {}), self.operations.calls)
+            self.assertNotIn(("POST", "/commit-host", {}), self.operations.calls)
+        self.units_switch_ingress.side_effect = switch
+        deploy(self.settings, Path("bundle"), self.operations)
+
+    def test_rollback_switch_waits_for_the_activated_host_generation(self):
+        deploy(self.settings, Path("bundle"), self.operations)
+        self.activated_host.reset_mock()
+        def switch(*args):
+            self.activated_host.assert_called_once()
+            self.assertEqual(self.operations.calls[-1], ("POST", "/activate-host", {}))
+        self.units_switch_ingress.side_effect = switch
+        rollback(self.settings, self.operations)
+
+    def test_forward_host_sync_failure_preserves_old_ingress(self):
+        self.activated_host.side_effect = [TimeoutError("Host index not synced"), True]
+        with self.assertRaisesRegex(TimeoutError, "Host index not synced"):
+            deploy(self.settings, Path("bundle"), self.operations)
+        self.assertEqual([call.args[1]["id"] for call in self.units_switch_ingress.call_args_list], ["r1"])
+        self.assertEqual(Journal(self.settings.state_dir).data["current"], "r1")
+
+    def test_rollback_host_sync_failure_never_changes_ingress(self):
+        deploy(self.settings, Path("bundle"), self.operations)
+        self.units_switch_ingress.reset_mock()
+        self.activated_host.side_effect = TimeoutError("rollback Host index not synced")
+        with self.assertRaisesRegex(TimeoutError, "rollback Host index not synced"):
+            rollback(self.settings, self.operations)
+        self.units_switch_ingress.assert_not_called()
+        self.assertEqual(Journal(self.settings.state_dir).data["current"], "r2")
 
     def test_historical_retirements_reload_manager_once_without_stopping_runtimes(self):
         for i in range(50):

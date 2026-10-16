@@ -122,8 +122,8 @@ describe('headerless reason registry', () => {
   it('starts the project workspace with its table tabs and no repeated page header', async () => {
     const { container, getByRole, queryByText } = await renderPanel('project');
     expect(container.querySelector('.oc-page-header')).toBeNull();
-    expect(queryByText('项目、专项与 TODO 工作台')).toBeNull();
-    for (const name of ['项目', '专项', 'TODO']) {
+    expect(queryByText('项目、子项与 TODO 工作台')).toBeNull();
+    for (const name of ['项目', '子项', 'TODO']) {
       expect(getByRole('tab', { name })).toBeTruthy();
     }
   });

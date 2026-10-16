@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 /// Shared verifier state. Neither token nor digests are returned or logged.
 pub struct AuthState {
+    enabled: bool,
     seed_token: Option<String>,
     metrics_token: Option<String>,
     lookup: Arc<dyn Store>,
@@ -29,6 +30,7 @@ pub struct AuthState {
 impl AuthState {
     pub fn new(seed_token: String, lookup: Arc<dyn Store>) -> Self {
         Self {
+            enabled: true,
             seed_token: Some(seed_token),
             metrics_token: None,
             lookup,
@@ -37,6 +39,12 @@ impl AuthState {
 
     pub fn with_metrics_token(mut self, token: Option<String>) -> Self {
         self.metrics_token = token;
+        self
+    }
+
+    /// Disable HTTP authentication without changing stored users or tokens.
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
         self
     }
 }
@@ -49,7 +57,11 @@ pub async fn server_time() -> impl IntoResponse {
 /// Unauthenticated paths (shell assets, readiness). Also honored by the
 /// control-plane role gate.
 pub fn exempt(path: &str) -> bool {
-    path == "/" || path.starts_with("/static/") || path == "/api/time" || path == "/favicon.ico"
+    path == "/"
+        || path.starts_with("/static/")
+        || path == "/api/time"
+        || path == "/api/auth/status"
+        || path == "/favicon.ico"
 }
 
 fn bearer_token(req: &Request<Body>) -> Option<&str> {
@@ -101,6 +113,10 @@ pub async fn require_bearer(
         return next.run(req).await;
     };
     if exempt(req.uri().path()) {
+        return next.run(req).await;
+    }
+    if !auth.enabled {
+        req.extensions_mut().insert(Identity::admin("admin"));
         return next.run(req).await;
     }
     let token = bearer_token(&req).map(str::to_owned);

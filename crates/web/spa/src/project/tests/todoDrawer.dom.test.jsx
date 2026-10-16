@@ -34,40 +34,54 @@ const drawer = () => render(<TodoDrawer todoId="todo" overview={overview}
 beforeEach(() => {
   Object.values(api).forEach((method) => method.mockReset());
   api.apiPatch.mockResolvedValue({});
-  api.apiGet.mockResolvedValue({ assignments: [] });
+  api.apiGet.mockImplementation(async (path) => path.includes('/comments') ? { comments: [], has_more: false } : { assignments: [] });
 });
 
-it('keeps the TODO visible when a dispatched execution read completes after returning', async () => {
+it('keeps the task selected when dispatch reads finish after changing tabs', async () => {
   const read = deferred();
   drawer();
+  fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
+  expect(screen.getByRole('button', { name: '指派所选能力' }).disabled).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '指派所选能力' }));
-  await screen.findByRole('button', { name: '发起验收' });
-  api.apiGet.mockImplementationOnce(() => read.promise);
-  fireEvent.click(screen.getByRole('button', { name: '发起验收' }));
-  fireEvent.click(screen.getByRole('button', { name: '返回 TODO' }));
-  fireEvent.change(screen.getByLabelText('已有执行 ID'), { target: { value: 'agent-next' } });
+  await screen.findByText('发起验收', { selector: 'button' });
+  let signal;
+  api.apiGet.mockImplementation((path, options) => {
+    if (path.endsWith('/executions')) { signal = options.signal; return read.promise; }
+    return Promise.resolve({ people: [] });
+  });
+  fireEvent.click(screen.getByText('发起验收', { selector: 'button' }));
+  expect(signal).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '任务', exact: true }));
+  expect(signal.aborted).toBe(true);
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/index')
-    ? { id: 'agent-late', kind: 'agent' } : { assignments: [{ execution_id: 'agent-late' }] }));
+    ? { id: 'agent-late', kind: 'agent' } : path.endsWith('/people') ? { people: [] } : { assignments: [{ execution_id: 'agent-late' }] }));
   await act(async () => read.resolve({ assignments: [{ execution_id: 'agent-late' }] }));
-  expect(await screen.findByText('agent-late')).toBeTruthy();
+  expect(screen.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected')).toBe('true');
   expect(api.apiPost).not.toHaveBeenCalled();
   expect(screen.queryByText('执行详情')).toBeNull();
-  expect(screen.getByLabelText('已有执行 ID').value).toBe('agent-next');
+  fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '返回指派记录' }));
+  expect(await screen.findByText('agent-late')).toBeTruthy();
 });
 
-it('ignores the old list response superseded by a successful new link', async () => {
+it('ignores the old list response superseded by a newly dispatched execution', async () => {
   const old = deferred();
   let signal;
-  api.apiGet.mockImplementationOnce((path, options) => { signal = options.signal; return old.promise; });
-  api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/index')
-    ? { id: 'agent-late', kind: 'agent' } : { assignments: [{ execution_id: 'agent-late' }] }));
+  api.apiGet.mockImplementation((path, options) => {
+    if (path.endsWith('/executions') && !signal) { signal = options.signal; return old.promise; }
+    return Promise.resolve(path.endsWith('/index') ? { id: 'agent-late', kind: 'agent' } : path.endsWith('/people')
+      ? { people: [] } : { assignments: [{ execution_id: 'agent-late' }] });
+  });
   api.apiPost.mockResolvedValue({});
   drawer();
-  fireEvent.change(screen.getByLabelText('已有执行 ID'), { target: { value: 'agent-late' } });
-  fireEvent.click(screen.getByRole('button', { name: /^关\s*联$/ }));
+  expect(screen.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected')).toBe('true');
+  expect(api.apiGet.mock.calls.some(([path]) => path.endsWith('/executions'))).toBe(false);
+  fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '指派所选能力' }));
+  fireEvent.click(await screen.findByText('发起验收', { selector: 'button' }));
   await screen.findByText('执行详情');
   expect(signal.aborted).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: '返回 TODO' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回指派记录' }));
   await act(async () => old.resolve({ assignments: [] }));
   expect(screen.getByText('agent-late')).toBeTruthy();
 });
@@ -77,20 +91,22 @@ it('aborts an unfinished list read when closing the TODO', async () => {
   let signal;
   api.apiGet.mockImplementation((path, options) => { signal = options.signal; return old.promise; });
   const view = drawer();
+  fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
   expect(signal.aborted).toBe(false);
   view.unmount();
   expect(signal.aborted).toBe(true);
   await act(async () => old.resolve({ assignments: [] }));
 });
 
-it('opens the current execution without dispatching or saving the TODO', async () => {
+it('keeps the task selected until the user opens the execution tab', async () => {
   api.apiGet.mockImplementation((path) => Promise.resolve(path.endsWith('/index')
     ? { id: 'agent-current', kind: 'agent', status: 'running' }
     : { current_execution_id: 'agent-current', assignments: [{ execution_id: 'agent-current', kind: 'agent' }, { execution_id: 'old-dag', kind: 'dag' }] }));
   drawer();
-  await screen.findByText('执行详情');
+  fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
+  expect(screen.queryByText('执行详情')).toBeNull();
+  expect(screen.getByRole('tab', { name: '执行', exact: true }).getAttribute('aria-selected')).toBe('true');
   expect(api.apiPost).not.toHaveBeenCalled();
   expect(api.apiPatch).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '返回 TODO' }));
-  expect(screen.getByText('old-dag')).toBeTruthy();
+  expect(await screen.findByText('old-dag')).toBeTruthy();
 });

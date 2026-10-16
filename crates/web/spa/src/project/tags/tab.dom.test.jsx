@@ -8,8 +8,8 @@ import { TagsTab } from './tab.jsx';
 import { ProjectViewState } from '../views/viewState.jsx';
 
 const overview = {
-  goals: [{ id: 'p', title: '项目甲', initiatives: [{ id: 'i', title: '专项甲' }] }, { id: 'q', title: '项目乙', initiatives: [] }],
-  standalone_initiatives: [{ id: 's', title: '独立专项甲' }],
+  goals: [{ id: 'p', title: '项目甲', initiatives: [{ id: 'i', title: '子项甲' }] }, { id: 'q', title: '项目乙', initiatives: [] }],
+  standalone_initiatives: [{ id: 's', title: '独立子项甲' }],
   tags: [{ id: 'parent', name: '前端', scope_type: 'project', scope_id: 'p' }, { id: 'local', name: '前端', scope_type: 'initiative', scope_id: 'i' }],
 };
 const props = () => ({ overview, refresh: vi.fn(), onNotice: vi.fn() });
@@ -26,7 +26,7 @@ it('lists both same-name definitions and creates a tag on a standalone initiativ
   expect(within(table).getAllByText('前端')).toHaveLength(2);
   fireEvent.click(screen.getByRole('button', { name: '新建 Tag' }));
   fireEvent.change(screen.getByLabelText('Tag 名称'), { target: { value: ' 独立标签 ' } });
-  await select('Tag 归属类型', '专项'); await select('Tag 归属', '独立专项甲 · 独立专项'); save();
+  await select('Tag 归属类型', '子项'); await select('Tag 归属', '独立子项甲 · 独立子项'); save();
   await waitFor(() => expect(api.apiPost).toHaveBeenCalledWith('/api/project/tags', { name: '独立标签', scope_type: 'initiative', scope_id: 's' }));
   expect(p.refresh).toHaveBeenCalledOnce();
 });
@@ -48,7 +48,7 @@ it('converts project tags to global and requires a fresh owner when changing bac
   await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Tag 归属' })).toBeNull());
   await select('Tag 归属类型', '项目');
   await screen.findByRole('combobox', { name: 'Tag 归属' }); save();
-  await screen.findByText('请选择具体项目或专项');
+  await screen.findByText('请选择具体项目或子项');
   expect(api.apiPatch).not.toHaveBeenCalled();
   await select('Tag 归属类型', '全局');
   await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Tag 归属' })).toBeNull()); save();
@@ -59,9 +59,9 @@ it('clears the old owner on type change and saves name and scope using the origi
   render(<TagsTab {...props()} />);
   fireEvent.click(screen.getAllByRole('button', { name: '编辑 Tag 前端' })[1]);
   fireEvent.change(screen.getByLabelText('Tag 名称'), { target: { value: '后端' } });
-  await select('Tag 归属类型', '专项'); save();
-  await screen.findByText('请选择具体项目或专项'); expect(api.apiPatch).not.toHaveBeenCalled();
-  await select('Tag 归属', '专项甲 · 项目甲'); save();
+  await select('Tag 归属类型', '子项'); save();
+  await screen.findByText('请选择具体项目或子项'); expect(api.apiPatch).not.toHaveBeenCalled();
+  await select('Tag 归属', '子项甲 · 项目甲'); save();
   await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith('/api/project/tags/parent', { name: '后端', scope_type: 'initiative', scope_id: 'i' }));
 });
 
@@ -87,15 +87,15 @@ it('rejects blank and overlong names and missing owners', async () => {
   fireEvent.change(screen.getByLabelText('Tag 名称'), { target: { value: '   ' } }); save();
   await screen.findByText('请输入 1–128 字符的 Tag 名称');
   fireEvent.change(screen.getByLabelText('Tag 名称'), { target: { value: '长'.repeat(129) } }); save();
-  await screen.findByText('请选择具体项目或专项'); expect(api.apiPost).not.toHaveBeenCalled();
+  await screen.findByText('请选择具体项目或子项'); expect(api.apiPost).not.toHaveBeenCalled();
 });
 
 it('keeps filters after saving and requires confirmation before deleting', async () => {
   const p = props(); const view = render(<ProjectViewState><TagsTab {...p} /></ProjectViewState>);
   const table = screen.getByLabelText('Tag 表格');
-  fireEvent.click(within(table).getByLabelText('筛选所属专项'));
-  const filter = await screen.findByLabelText('搜索所属专项');
-  fireEvent.change(filter, { target: { value: '专项甲' } }); fireEvent.keyDown(filter, { key: 'Enter', code: 'Enter' });
+  fireEvent.click(within(table).getByLabelText('筛选所属子项'));
+  const filter = await screen.findByLabelText('搜索所属子项');
+  fireEvent.change(filter, { target: { value: '子项甲' } }); fireEvent.keyDown(filter, { key: 'Enter', code: 'Enter' });
   await waitFor(() => expect(within(table).getAllByText('前端')).toHaveLength(1));
   fireEvent.click(within(table).getByRole('button', { name: '编辑 Tag 前端' }));
   fireEvent.change(screen.getByLabelText('Tag 名称'), { target: { value: '新前端' } }); save();

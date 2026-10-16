@@ -12,6 +12,19 @@ pub async fn dispatch(
     assignment: &LayeredAssignment,
     cap: &BrainCapabilityDescriptor,
 ) -> Result<RpcReply> {
+    if let Some(reply) = super::io::replay(
+        state,
+        &run.run_id,
+        &op.operation_id,
+        &ExecutionRef {
+            id: op.execution_id.clone(),
+            kind: op.execution_kind,
+        },
+    )
+    .await?
+    {
+        return Ok(reply);
+    }
     let bindings = serde_json::to_value(&assignment.inputs)?;
     let root = state
         .fleet
@@ -19,6 +32,7 @@ pub async fn dispatch(
         .await?
         .context("layered root assignment missing")?;
     let request = root.request.input["layered_request"].clone();
+    let io_version = execution_io_version(&root.request.input)?;
     let bound_inputs = match resolve_inputs(state, assignment, &request).await {
         Ok(inputs) => inputs,
         Err(reply) => return Ok(reply),
@@ -30,6 +44,12 @@ pub async fn dispatch(
     }
     let plan: LayeredPlan = serde_json::from_value(request["plan"].clone())?;
     let step = plan.node(&op.node_id).context("dispatch step missing")?;
+    if plan.shared_workspace && cap.kind != ExecutionKind::Operator {
+        return Ok(RpcReply::error(
+            422,
+            "shared workspace requires Operator capabilities",
+        ));
+    }
     if cap.kind == ExecutionKind::Brain {
         let mut child_inputs = cap.definition["plan"]["inputs"]
             .as_object()
@@ -44,10 +64,17 @@ pub async fn dispatch(
             "parent":{"run_id":run.run_id,"operation_id":op.operation_id,"node_id":op.node_id,"layer":op.layer}
         })).await);
     }
-    let prompt = execution_prompt(cap, step, &bound_inputs)?;
+    let mut prompt = execution_prompt(cap, step, &bound_inputs)?;
+    if plan.shared_workspace {
+        prompt.push_str("\nThis run shares a workspace. Read OPENCODER_RUN_CONTEXT for the frozen inputs, shared root and this activation's evidence directory. Preserve earlier activation evidence; use exact commits for repair and independent verification.\n");
+    }
     let mut input = json!({"schema_version":LAYERED_SCHEMA_VERSION,"brain_layered":{"run_id":run.run_id,"operation_id":op.operation_id,"layer":op.layer,"round":op.round,"activation":op.activation,"node_id":op.node_id,"attempt":op.attempt,"capability":super::view::capability_metadata(cap)},"bindings":bindings,"layered_inputs":bound_inputs,"prompt":prompt,"definition":cap.definition});
+    super::io::mark(&mut input, io_version);
     if op.execution_kind == ExecutionKind::Todos {
         input["spec"] = cap.definition.clone();
+    }
+    if plan.shared_workspace {
+        input["brain_workspace"] = json!(true);
     }
     Ok(executions::submit(
         state,
@@ -56,9 +83,13 @@ pub async fn dispatch(
             kind: op.execution_kind,
             target: Some(cap.target.clone()),
             input,
-            // Preserve only the caller's physical-node constraint. The root's
-            // selected index and the plan's logical node ID are not constraints.
-            node_id: root.request.node_id.clone(),
+            // Shared files require the root's owner; other runs retain only
+            // the caller's explicit physical-node constraint.
+            node_id: if plan.shared_workspace {
+                Some(root.index.node_id.clone())
+            } else {
+                root.request.node_id.clone()
+            },
         },
     )
     .await)
@@ -81,7 +112,11 @@ async fn resolve_inputs(
                 .get(reference)
                 .cloned()
                 .ok_or_else(|| RpcReply::error(422, format!("unknown artifact {reference}")))?,
-            BrainInputBinding::Execution { execution_id, path } => {
+            BrainInputBinding::Execution {
+                execution_id,
+                path,
+                source,
+            } => {
                 let index = state
                     .fleet
                     .index(execution_id)
@@ -95,7 +130,7 @@ async fn resolve_inputs(
                             ),
                         )
                     })?;
-                super::read::output(state, &index, path)
+                super::read::output(state, &index, path, *source)
                     .await
                     .map_err(|reply| {
                         RpcReply::error(
@@ -127,8 +162,8 @@ fn execution_prompt(
          Input contract: {}\nOutput contract: {}\nRequired output fields: {}\n\
          Return concise evidence within {BRAIN_EVIDENCE_MAX_BYTES} JSON bytes, including every required field. \
          When required fields are configured, the final result must be a JSON object with those top-level fields. \
-         Use artifact references for large files and reports. Other executions have separate workspaces; \
-         deliver explicit code versions, patches or artifact references when another task needs your changes.\n\
+         Use artifact references for large files and reports. Deliver explicit code versions, patches \
+         or artifact references when another task needs your changes.\n\
          The Brain owns dispatching other nodes, layer barriers, collecting sibling execution IDs, \
          and deciding completion of the root objective. Those duties are not part of this node task. \
          Do not wait for sibling executions or repeat the root scheduling plan. \

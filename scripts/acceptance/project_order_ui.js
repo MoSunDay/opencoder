@@ -101,6 +101,7 @@ async function main() {
     await page.getByRole('button', { name: '项目排序验收', exact: true }).click();
     let drawer = page.getByRole('dialog', { name: '项目 · 项目排序验收' });
     await history(drawer.getByLabel('当前概述', { exact: true }).getByRole('button', { name: '修改记录' }), '项目初版');
+    await drawer.getByRole('tab', { name: '专项', exact: true }).click();
     let inner = table('项目内专项表格');
     await history(inner.locator(`tr[data-row-key="${ids[0]}"]`).getByRole('button', { name: '概述历史' }), '专项初版');
     for (const width of [1920, 1280, 768, 390]) {
@@ -137,10 +138,12 @@ async function main() {
     console.log('PASS filtered mouse drag and failed-save rollback');
     await drawer.locator('.ant-drawer-close').click(); await drawer.waitFor({ state: 'hidden' });
     await page.getByRole('button', { name: '项目排序验收', exact: true }).click();
+    await drawer.getByRole('tab', { name: '专项', exact: true }).click();
     await inner.getByRole('button', { name: '清除全部列筛选' }).click();
     assert.deepEqual(await inner.locator('tr[data-row-key]').evaluateAll((rows) => rows.map((row) => row.dataset.rowKey)), expected);
     await page.reload({ waitUntil: 'networkidle' });
     await page.getByRole('button', { name: '项目排序验收', exact: true }).click();
+    await drawer.getByRole('tab', { name: '专项', exact: true }).click();
     await inner.locator('tr[data-row-key]').first().waitFor();
     assert.deepEqual(await inner.locator('tr[data-row-key]').evaluateAll((rows) => rows.map((row) => row.dataset.rowKey)), expected);
     const handle = inner.locator(`tr[data-row-key="${ids[0]}"] .project-row-drag`);

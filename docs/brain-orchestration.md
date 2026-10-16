@@ -41,9 +41,36 @@
 
 首轮为第 1 轮，正常前进不增加轮数。默认预算 5 轮，允许 1–32 轮；预算耗尽进入 `blocked`，不创建新执行。暂停或阻塞时可用 `set_round_budget` 增加预算，再 `resume`。每次派发增加 `activation`，operation/execution ID 包含激活身份，迟到和重复回执不推进当前决策。
 
-输入绑定支持根输入、注册产物、终态 execution 输出的 JSON pointer，以及 `{kind:"value",value:...}` 的具体任务输入。能力只接收本节点任务与绑定输入；全局方法论、反思和转移决策留在大脑。模型上下文保留各层最近一次激活及有界摘要，完整历史留在日志中。非法决策最多自动纠正两次，仍不合法则阻塞；恢复时上次校验错误会反馈给模型。
+输入绑定支持根输入、注册产物、终态 execution 的 JSON pointer，以及 `{kind:"value",value:...}` 的具体任务输入。普通及共享目录计划都只接受本次运行中该逻辑节点最新 activation 的终态引用，最新失败结果可以传给整改任务。能力只接收本节点任务与绑定输入；全局方法论、反思和转移决策留在大脑。模型上下文保留各层最近一次激活及有界摘要，完整历史留在日志中。非法决策最多自动纠正两次，仍不合法则阻塞；恢复时上次校验错误会反馈给模型。
 
 限制：1–32 层、总共 1–256 个执行节点、每层 1–32 个节点、每节点一个能力。新计划不接受旧节点重试策略和旧 `edges` 连线。
+
+## 能力输入、输出与文件交接
+
+一次根 run 管理独立的 context 和执行索引，包含各层、返工和恢复；各能力默认使用自己的工作区。DAG 内部仍是单节点、单容器，同一 DAG 的全部步骤共享它自己的运行空间。
+
+执行输入绑定可选 `source: "output" | "artifacts"`，省略时读取结构化输出。`path` 是 JSON Pointer；空字符串读取整体，`/` 读取名称为空的属性。文件引用同样通过 JSON Pointer 绑定：
+
+```json
+{
+  "output": {"kind":"execution","execution_id":"dag-example","path":"/build/revision"},
+  "files": {"kind":"execution","execution_id":"dag-example","source":"artifacts","path":""}
+}
+```
+
+子执行明细保存 `scheduler_output`、`scheduler_artifacts`。决策 context 的 `execution_artifacts` 按 execution ID 保存文件引用，每项包含 `execution`、`step`、可选 `index`、`file`、`bytes` 和 `sha256`。DAG 的索引包含声明的业务文件、步骤输出及元数据，也包含动态实例文件。其他叶子能力只纳入自己工作区声明的文件；没有文件时返回空数组。
+
+文件通过 `GET /api/executions/{execution.id}/artifact?step={step}&file={file}` 读取；动态实例另传 `index`。消费者核对引用的执行身份、字节数和 SHA-256，文件仍保存在其所属节点。路径逃逸、软链接、文件缺失和声明不符都返回实际错误。
+
+叶子能力的结构化输出与文件引用合计最多 16 KiB。较大的索引与嵌套 Brain 使用 `step: "brain-result"` 的清单引用，下载后读取 `{"schema_version":1,"execution":...,"artifacts":[...]}`，按其中的引用继续取文件。清单文件名包含自身摘要，恢复不覆盖旧清单；它只压缩索引，不裁剪成功输出，证据仍超限时执行失败。
+
+`brain-result` 属于运行时产物接口的保留步骤名称，新 DAG 不能将它作为业务步骤名，避免与清单下载冲突。
+
+DAG 的静态二进制、Agent 与动态实例都取得完整的冻结命名输入。只读 `OPENCODER_STEP_CONTEXT` 包含 `run_id`、`inputs` 和声明依赖的 `steps`；动态实例另有 `instance: {index,input}`。恢复使用原输入和身份，已保存输入漂移时拒绝执行。
+
+新 DAG 和采用 `execution_io_version: 1` 的根 Brain、托管子执行要求节点声明 `execution_io_v1`。根协议在受理时固定，子执行与嵌套计划继承；缺少标记的历史根继续发送原 context，不能使用 `source: artifacts`。新 Worker 收到旧协议上下文时也不会生成新绑定。
+
+先发布 IO reader 过渡版本，再启用 writer；后续回滚使用支持新绑定的过渡版本。发布包及七个二进制的 `execution_io.reader/writer` 必须一致，发布工具在启动候选前检查回滚基线，并拒绝激活无法读取保留 Runtime 协议的旧 Server。旧任务仍按原 Runtime 归属执行，重试复用原 Assignment 的完整请求，不改写历史数据或派发指纹。
 
 ## 查询与历史
 
@@ -55,3 +82,11 @@
 - `POST /api/brain/runs/:id/inputs`：`{text}`，记录人工输入并唤醒大脑；不直接向子执行发送命令。
 
 运行主视图展示画布与当前轮次、层级状态。右侧详情抽屉按轮次展开每条执行记录，包含理由与输入绑定；点击执行 ID 复用 `ExecutionView` 查询明细，人工输入也在该抽屉内提交。历史 schema 4/5/6 计划与已结束运行只读；编辑旧计划显式创建 schema 7 新版本，不改写旧数据。升级和回滚前检查未结束运行，不支持的运行须在原 Runtime 收敛；历史运行仍由所属 Runtime 提供查询。
+
+## Operator 共享工作区
+
+计划可设置 `shared_workspace: true` 和 `adjacent_only: true`。前者只接受 Operator，固定到根 Brain 节点并共享一次运行的目录；后者禁止返工跨越上一层。Operator HOME 仍独立。运行目录和各 activation 目录由 Worker 受理时固定，通过 `OPENCODER_RUN_CONTEXT` 读取 root、step、run_id、execution_id、activation 及绑定 inputs。输入和计划在共享根目录冻结，旧 activation 证据保留。
+
+环境恢复时先让根运行保持 paused/blocked，再 resume 原失败 Operator；Worker 接收同一执行更高序号的新终态，保留目录和轮次。待结果恢复后显式 resume 根运行。改变任务或修复方案则属于返工，需要新 activation。共享目录归属为节点自有字段，普通 annotate 不能修改或删除。
+
+下载证据使用 `GET /api/executions/{id}/artifact?step=workspace&file=artifacts.json`，再按清单逐文件下载；Brain ID 指向共享根，Operator ID 指向该 activation。额外文件须声明 bytes 和 sha256，接口核验内容并拒绝软链接及目录逃逸。此模式要求节点声明 `brain_workspace_v1`。

@@ -1,5 +1,5 @@
 //! Read-only evidence collection. The caller authors and PATCHes the overview.
-mod paging;
+pub(super) mod paging;
 
 use crate::{
     ctx::Ctx,
@@ -40,9 +40,9 @@ pub(super) async fn read(ctx: &Ctx, plan: RequestPlan) -> Result<Value> {
 }
 
 #[derive(Debug)]
-struct ReadError {
-    status: u16,
-    message: String,
+pub(super) struct ReadError {
+    pub(super) status: u16,
+    pub(super) message: String,
 }
 impl std::fmt::Display for ReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -88,8 +88,15 @@ pub async fn collect(ctx: &Ctx, kind: &str, id: &str) -> Result<Value> {
     let mut executions = BTreeMap::<String, Value>::new();
     if kind == "initiative" {
         for todo in record["todos"].as_array_mut().context("missing TODOs")? {
-            let todo_id = todo["id"].as_str().context("TODO has no id")?;
-            let path = format!("/api/project/todos/{}/executions", http::urlencode(todo_id));
+            let todo_id = todo["id"].as_str().context("TODO has no id")?.to_owned();
+            match super::comments::all(ctx, &todo_id).await {
+                Ok(comments) => todo["comments"] = comments,
+                Err(error) => issues.push(json!({"source":format!("/api/project/todos/{}/comments", http::urlencode(&todo_id)),"error":error.to_string()})),
+            }
+            let path = format!(
+                "/api/project/todos/{}/executions",
+                http::urlencode(&todo_id)
+            );
             match read(ctx, RequestPlan::get(&path)).await {
                 Ok(links) => {
                     let assignments = links["assignments"]
@@ -151,14 +158,16 @@ pub async fn run(ctx: &Ctx, kind: &str, id: &str) -> Result<i32> {
             out::json(&value);
             Ok(0)
         }
-        Err(error) => {
-            if let Some(error) = error.downcast_ref::<ReadError>() {
-                out::fail(error.status, &error.message);
-                Ok(http::exit_code(error.status))
-            } else {
-                out::fail_transport(&error.to_string());
-                Ok(1)
-            }
-        }
+        Err(error) => Ok(fail(&error)),
+    }
+}
+
+pub(super) fn fail(error: &anyhow::Error) -> i32 {
+    if let Some(error) = error.downcast_ref::<ReadError>() {
+        out::fail(error.status, &error.message);
+        http::exit_code(error.status)
+    } else {
+        out::fail_transport(&error.to_string());
+        1
     }
 }

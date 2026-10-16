@@ -1,6 +1,7 @@
 //! Artifact download streaming (`/api/executions/:id/artifact`): control-side
 //! gating, zero/multi-chunk protocol reassembly, filename sanitization, and
 //! the inconsistent-metadata 502 / mid-stream abort rules for raw node chunks.
+mod managed;
 
 use base64::Engine;
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus, RpcReply};

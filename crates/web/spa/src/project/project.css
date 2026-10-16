@@ -76,13 +76,6 @@
 .project-progress { min-width: 0; width: 100%; max-width: 320px; }
 .project-progress .ant-progress { margin-bottom: 0; }
 .project-progress .ant-progress-text { font-size: 12px; }
-.project-board-columns { display: grid; grid-template-columns: repeat(4, minmax(210px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
-.project-board-lane { min-height: 220px; min-width: 0; border-radius: 8px; padding: 10px; background: var(--oc-bg-layout); border: 1px solid var(--oc-border); }
-.project-board-lane-over { border-color: var(--oc-primary); }
-.project-todo-card { margin-top: 10px; }
-.project-todo-card .ant-card-head-title { min-width: 0; }
-.project-todo-card .ant-card-head { padding-inline: 10px; }
-.project-todo-card .ant-card-body { padding: 10px; }
 @media (max-width: 800px) {
   .project-table .ant-table-cell-fix-end { position: static !important; }
   .project-table .ant-table-cell-fix-end::after { display: none; }

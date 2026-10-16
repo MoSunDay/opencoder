@@ -35,6 +35,7 @@ pub(crate) const AGENTS_MOUNT: &str = "/workspace/agent";
 /// Pure per-step execution context handed to the executors.
 pub struct StepCtx {
     pub run_id: String,
+    pub inputs: Value,
     pub instance: Option<usize>,
     pub instance_input: Option<Value>,
     pub spec: DagSpec,
@@ -77,7 +78,13 @@ impl StepCtx {
     /// whose path arrives via `OPENCODER_STEP_CONTEXT`). Only declared
     /// upstream steps leak.
     pub fn context(&self) -> Value {
-        render_context(&self.spec, &self.step.name, &self.states, &self.outputs)
+        let mut context = render_context(&self.spec, &self.step.name, &self.states, &self.outputs);
+        context["run_id"] = Value::String(self.run_id.clone());
+        context["inputs"] = self.inputs.clone();
+        if let Some(index) = self.instance {
+            context["instance"] = serde_json::json!({"index":index,"input":self.instance_input});
+        }
+        context
     }
 }
 

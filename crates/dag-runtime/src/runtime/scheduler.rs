@@ -29,6 +29,7 @@ pub(super) async fn schedule(
     sink: &RunEventSink,
     mut cancel_rx: watch::Receiver<bool>,
     resume: bool,
+    input: Value,
 ) -> Result<(StepStates, BTreeMap<String, String>, bool)> {
     let mut states = StepStates::new();
     let mut outputs = StepOutputs::new();
@@ -36,12 +37,6 @@ pub(super) async fn schedule(
     if resume {
         crate::checkpoint::restore(root, run, &mut states, &mut outputs)?;
     }
-    let input_path = root.join(&run.run_id).join("input.json");
-    let input: Value = match std::fs::read(input_path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
-        Err(e) => return Err(e.into()),
-    };
     for step in &run.spec.steps {
         if !states.contains_key(&step.name) {
             opencoder_core::agent::scope::with_root_sync(
@@ -197,6 +192,7 @@ pub(super) async fn schedule(
                 executable.kind = kind;
                 let ctx = StepCtx {
                     run_id: run.run_id.clone(),
+                    inputs: input.clone(),
                     instance,
                     instance_input,
                     spec: run.spec.clone(),

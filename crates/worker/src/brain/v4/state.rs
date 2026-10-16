@@ -88,24 +88,40 @@ pub fn result(snapshot: &LayeredSnapshot) -> LayeredRunResult {
     }
 }
 
-pub fn outcome(snapshot: &LayeredSnapshot) -> (ExecutionStatus, Value) {
+pub async fn outcome(
+    worker: &Worker,
+    snapshot: &LayeredSnapshot,
+) -> Result<(ExecutionStatus, Value)> {
     let status = match snapshot.run.phase {
         LayeredPhase::Completed => ExecutionStatus::Done,
         LayeredPhase::Failed => ExecutionStatus::Error,
         LayeredPhase::Cancelled => ExecutionStatus::Cancelled,
         _ => ExecutionStatus::Idle,
     };
-    (status, json!(result(snapshot)))
+    let mut result = result(snapshot);
+    let io_version = {
+        let journal = worker.inner.journal.lock().await;
+        let record = journal
+            .records
+            .get(&snapshot.run.run_id)
+            .context("root execution missing")?;
+        opencoder_core::brain::execution_io_version(&record.assignment.request.input)?
+    };
+    if snapshot.run.phase == LayeredPhase::Completed && io_version != 0 {
+        result.scheduler_artifacts =
+            json!(super::super::output::index::root(worker, snapshot).await?);
+    }
+    Ok((status, json!(result)))
 }
 
 /// Publish terminal root state into the journal, unless the root is running.
 pub async fn settle(worker: &Worker, snapshot: &LayeredSnapshot) -> Result<()> {
     let id = &snapshot.run.run_id;
     if snapshot.run.phase.terminal() && !worker.inner.active.lock().await.contains_key(id) {
+        let (status, result) = outcome(worker, snapshot).await?;
         let mut journal = worker.inner.journal.lock().await;
         let record = journal.records.get(id).context("root execution missing")?;
         if !record.assignment.index.status.terminal() {
-            let (status, result) = outcome(snapshot);
             journal.finalize(id, status, result, snapshot.run.error.clone())?;
             opencoder_session::loop_registry::notify_change();
         }

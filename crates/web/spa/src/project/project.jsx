@@ -21,7 +21,7 @@ function ProjectPage({ onNotice }) {
   const shared = { overview, refresh, onNotice };
   const tabs = [
     { key: 'projects', label: '项目', children: <ProjectsTab {...shared} openProject={setProjectId} /> },
-    { key: 'initiatives', label: '专项', children: <InitiativesTab {...shared} openInitiative={setInitiativeId} /> },
+    { key: 'initiatives', label: '子项', children: <InitiativesTab {...shared} openInitiative={setInitiativeId} /> },
     { key: 'todos', label: 'TODO', children: <TodosTab {...shared} openTodo={setTodoId} /> },
   ];
   return <PageShell page="project">

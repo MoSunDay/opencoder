@@ -117,6 +117,8 @@ def resource_upgrade(settings, bundle, operations):
         shutil.chown(path, user=settings.server_user)
     binary = settings.state_dir / 'services/opencoder-resources'
     atomic_bytes(binary, (bundle / 'bin/opencoder-server').read_bytes(), 0o755)
+    from ..storage import allow_server_traversal
+    allow_server_traversal(settings, binary.parent)
     data = settings.state_dir / 'resources'
     data.mkdir(exist_ok=True)
     shutil.chown(data, user=settings.server_user)
@@ -124,8 +126,7 @@ def resource_upgrade(settings, bundle, operations):
                              '--data-dir', data, '--port', settings.resource_port,
                              '--token-file', settings.token_file],
                             'OpenCoder independent resource service', user=settings.server_user,
-                            workdir=settings.server_workdir)
-    content = content.replace(' remote-fs.target opencoder-resources.service', '')
+                            workdir=settings.server_workdir, resource=True)
     content = content.replace('Type=simple', 'Type=simple\n' +
                              units.inherited_environment(settings, settings.legacy_server_unit))
     atomic_bytes(settings.systemd_dir / 'opencoder-resources.service', content.encode(), 0o644)

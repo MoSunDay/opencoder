@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { apiGet } from '../../api.js';
 
-export function useCapabilities() {
+export function useCapabilities({ enabled = true } = {}) {
   const [state, setState] = useState({ capabilities: [], loading: true, error: '' });
   const [revision, setRevision] = useState(0);
   useEffect(() => {
+    if (!enabled) return;
     const request = new AbortController();
     setState((old) => ({ ...old, loading: true, error: '' }));
     apiGet('/api/brain/library', { signal: request.signal }).then((body) => {
@@ -13,7 +14,7 @@ export function useCapabilities() {
       if (!request.signal.aborted) setState({ capabilities: [], loading: false, error: error.message });
     });
     return () => request.abort();
-  }, [revision]);
+  }, [revision, enabled]);
   return { ...state, reload: () => setRevision((value) => value + 1) };
 }
 

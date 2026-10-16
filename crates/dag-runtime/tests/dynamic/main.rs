@@ -17,7 +17,7 @@ async fn agent_inputs_enter_distinct_how_copies_and_outputs_keep_input_order() {
         if text.contains("downstream") {
             assert!(text.contains("zero") && text.contains("one"));
         }
-        let zero = text.contains("ITEM-ZERO");
+        let zero = text.contains("common-how\n\nITEM-ZERO");
         (
             Duration::from_millis(if zero { 100 } else { 1 }),
             Ok(json!({"item":if zero {"zero"} else {"one"}}).to_string()),
@@ -43,13 +43,15 @@ async fn agent_inputs_enter_distinct_how_copies_and_outputs_keep_input_order() {
         json!([{"item":"zero"},{"item":"one"}])
     );
     let requests = client.requests.lock().unwrap();
-    assert!(requests.iter().any(|r| r.contains("ITEM-ZERO")
-        && r.contains("common-how")
-        && r.contains("common-prompt")
-        && !r.contains("ITEM-ONE")));
     assert!(requests
         .iter()
-        .any(|r| r.contains("ITEM-ONE") && !r.contains("ITEM-ZERO")));
+        .any(|r| r.contains("common-how\n\nITEM-ZERO")
+            && r.contains("common-how")
+            && r.contains("common-prompt")
+            && !r.contains("common-how\n\nITEM-ONE")));
+    assert!(requests
+        .iter()
+        .any(|r| r.contains("common-how\n\nITEM-ONE") && !r.contains("common-how\n\nITEM-ZERO")));
     assert_ne!(
         f.json(&run, "process/instances/0/session.json")["session_id"],
         f.json(&run, "process/instances/1/session.json")["session_id"]
@@ -98,7 +100,7 @@ async fn four_slots_round_robin_and_failed_group_do_not_cancel_independent_branc
         {"name":"blocked","depends_on":["process"],"kind":{"type":"agent","prompt":"must-not-run"}}
     ]), json!({"items":["FAIL-INSTANCE","slow-1","slow-2","not-dispatched-3","not-dispatched-4"]}));
     let client = Scripted::new(|text| {
-        if text.contains("FAIL-INSTANCE") {
+        if text.contains("common-how\n\nFAIL-INSTANCE") {
             (Duration::from_millis(50), Err("instance failed".into()))
         } else if text.contains("independent-branch") {
             (Duration::from_millis(200), Ok("{}".into()))
@@ -121,7 +123,7 @@ async fn four_slots_round_robin_and_failed_group_do_not_cancel_independent_branc
         .lock()
         .unwrap()
         .iter()
-        .any(|r| r.contains("not-dispatched") || r.contains("must-not-run")));
+        .any(|r| r.contains("common-how\n\nnot-dispatched") || r.contains("must-not-run")));
     let events = f.events.0.lock().unwrap();
     let mut live = 0;
     let mut max = 0;

@@ -1,4 +1,4 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 # core 模块
 
@@ -25,8 +25,9 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 - [net.rs](../../crates/core/src/net.rs) — HTTP 客户端统一解析显式代理及大小写环境变量；读取 `NO_PROXY`（未设置时读取 `no_proxy`），并保留固定的回环地址例外。容器沿用配置中的代理，额外传入这两项排除变量；纯规则构造入口供测试与调用方避免读进程环境。
 - `src/data_dir.rs` — 按工作目录隔离的数据目录
 - `src/fleet/protocol.rs` — Server/Node 协议（PROTOCOL_VERSION = 10）
-- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，数据格式固定为 8；schema v37 保存项目与专项概述，旧格式 1–7 升级须走维护发布，不能与新格式重叠运行。
-- `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议。节点只有一句话任务、能力 ID 和重试策略。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
+- [fleet/release.rs](../../crates/core/src/fleet/release.rs) — 发布交接协议为 1，存储 schema 为 v39；reader 过渡版留在数据格式 9，IO writer 用格式 10 标记新持久化绑定。当前发布工具只在读取能力匹配时允许 9/10 重叠，旧脚本也会因格式不同拒绝危险回滚。格式 1–8 仍须维护升级。
+- [brain/io.rs](../../crates/core/src/brain/io.rs) — 缺少 IO 标记的请求固定为旧协议；显式版本必须是已支持的整数。[version.rs](../../crates/core/src/version.rs) 将 reader/writer 能力编入七个二进制，发布包据此校验启用与回滚顺序。
+- `src/brain/` — 保存计划版本、能力描述与产物引用；`layered/` 是唯一分层计划及运行协议，schema 7 的每个节点绑定一个能力。`BrainInputBinding::Execution` 可选 `source: output | artifacts`，历史绑定默认 output；`ArtifactRef` 保留执行、步骤、可选实例 index、文件名、大小与 SHA-256。`execution_io_v1` 标识完整输入和文件索引传递能力。调度见 [brain](../brain/index.md)，执行面见 [worker](../worker/index.md)。
 
 ## 私有任务文件
 

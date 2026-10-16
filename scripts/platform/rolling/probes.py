@@ -197,6 +197,27 @@ def ready(settings, record, node_id, operations, seconds):
     operations.wait(complete_index, seconds)
 
 
+def activated_host(record, operations, seconds):
+    """The activated Host must finish its report on this Server before ingress."""
+    host = operations.http(f"http://127.0.0.1:{record['host_port']}", "/status")
+    node_id = host["node"]["id"]
+    generation = host["snapshot"]["generation"]
+    if not node_id or not generation.startswith("host-"):
+        raise ValueError("activated Host lacks a node identity or generation")
+    endpoint = f"http://127.0.0.1:{record['server_port']}"
+
+    def synced():
+        nodes = operations.http(endpoint, "/api/nodes")["nodes"]
+        node = next((value for value in nodes if value["id"] == node_id), None)
+        snapshot = (node.get("snapshot") or {}) if node else {}
+        if (not node or not node["online"] or not snapshot.get("ready")
+                or snapshot.get("generation") != generation):
+            return False
+        return operations.http(endpoint, "/api/ready")["ready_nodes"] >= 1
+
+    operations.wait(synced, seconds)
+
+
 def public(settings, record, operations, seconds):
     # Sending HUP confirms the reload request; the new workers may still be
     # starting. Verify the public version within the readiness budget.

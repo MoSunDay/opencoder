@@ -242,6 +242,118 @@ async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
 #[test]
 fn brain_v4_tables_do_not_increment_current_schema_version() {
     // v4 tables bootstrap unconditionally, so they must not move the
-    // database watermark: 33 removes project execution caches.
-    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 38);
+    // The layered tables remain additive at the current schema watermark.
+    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 39);
+}
+
+fn recovery_change(old: &LayeredSnapshot) -> LayeredChange {
+    let mut change = LayeredChange {
+        expected_generation: Some(old.run.generation),
+        run: old.run.clone(),
+        operations: old.operations.clone(),
+        events: vec![event("operation_terminal", &old.run)],
+    };
+    change.run.generation += 1;
+    change.operations[0].status = LayeredOperationStatus::Done;
+    change.operations[0].source_sequence = Some(6);
+    change.events[0].execution_id = Some(change.operations[0].execution_id.clone());
+    change.events[0].source_sequence = Some(6);
+    change
+}
+
+async fn stored_error(
+    phase: LayeredPhase,
+    activation: u64,
+    cancelled: bool,
+) -> (opencoder_store::LibsqlStore, LayeredSnapshot) {
+    let store = opencoder_store::LibsqlStore::open_memory().await.unwrap();
+    let mut initial = created();
+    initial.run.phase = phase;
+    initial.run.layer = 1;
+    initial.run.activation = 4;
+    let mut op = operation(1, LayeredOperationStatus::Error, Some(4));
+    op.activation = activation;
+    op.cancel_requested = cancelled;
+    initial.operations.push(op);
+    let snapshot = store.commit_brain_layered(&initial).await.unwrap();
+    (store, snapshot)
+}
+
+#[tokio::test]
+async fn current_error_recovery_commits_only_while_stopped() {
+    for phase in [LayeredPhase::Paused, LayeredPhase::Blocked] {
+        let (store, old) = stored_error(phase, 4, false).await;
+        let committed = store
+            .commit_brain_layered(&recovery_change(&old))
+            .await
+            .unwrap();
+        assert_eq!(committed.run.phase, phase);
+        assert_eq!(committed.run.activation, 4);
+        assert_eq!(committed.run.generation, old.run.generation + 1);
+        assert_eq!(committed.run.last_event_seq, old.run.last_event_seq + 1);
+        assert_eq!(committed.operations[0].status, LayeredOperationStatus::Done);
+        assert_eq!(committed.operations[0].source_sequence, Some(6));
+        assert_eq!(
+            store.brain_layered(&old.run.run_id).await.unwrap(),
+            Some(committed)
+        );
+    }
+}
+
+#[tokio::test]
+async fn current_error_recovery_rejects_invalid_state_sequence_or_identity() {
+    for (phase, activation, cancelled) in [
+        (LayeredPhase::Waiting, 4, false),
+        (LayeredPhase::Paused, 3, false),
+        (LayeredPhase::Paused, 4, true),
+    ] {
+        let (store, old) = stored_error(phase, activation, cancelled).await;
+        assert!(store
+            .commit_brain_layered(&recovery_change(&old))
+            .await
+            .is_err());
+        assert_eq!(
+            store.brain_layered(&old.run.run_id).await.unwrap(),
+            Some(old)
+        );
+    }
+    let (store, old) = stored_error(LayeredPhase::Paused, 4, false).await;
+    for variant in 0..14 {
+        let mut change = recovery_change(&old);
+        match variant {
+            0 => change.operations[0].source_sequence = Some(4),
+            1 => change.operations[0].source_sequence = Some(3),
+            2 => change.operations[0].source_sequence = None,
+            3 => change.operations[0].status = LayeredOperationStatus::Cancelled,
+            4 => change.operations[0].cancel_requested = true,
+            5 => change.operations[0].execution_id.push_str("-forged"),
+            6 => change.operations[0].activation += 1,
+            7 => change.run.phase = LayeredPhase::Ready,
+            8 => change.run.activation += 1,
+            9 => change.expected_generation = Some(old.run.generation + 1),
+            10 => change.operations[0].operation_id.push_str("-forged"),
+            11 => change.run.layer += 1,
+            12 => change.run.round += 1,
+            _ => change.run.valid_layers += 1,
+        }
+        assert!(
+            store.commit_brain_layered(&change).await.is_err(),
+            "variant {variant}"
+        );
+        assert_eq!(
+            store.brain_layered(&old.run.run_id).await.unwrap(),
+            Some(old.clone())
+        );
+    }
+    let success = store
+        .commit_brain_layered(&recovery_change(&old))
+        .await
+        .unwrap();
+    let mut overwrite = recovery_change(&success);
+    overwrite.operations[0].status = LayeredOperationStatus::Error;
+    assert!(store.commit_brain_layered(&overwrite).await.is_err());
+    assert_eq!(
+        store.brain_layered(&old.run.run_id).await.unwrap(),
+        Some(success)
+    );
 }

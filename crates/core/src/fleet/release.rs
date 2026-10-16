@@ -3,9 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const HANDOFF_PROTOCOL: u32 = 1;
-// Initiative schema v38 cannot be reopened by older Servers.
-// Upgrade through maintenance before permitting any overlapping runtime.
-pub const HANDOFF_DATA_FORMAT: u32 = 9;
+// Both formats use schema v39. The reader bridge stays at 9; the IO writer
+// marks its new durable bindings as 10 so even legacy controllers refuse an
+// unsafe rollback. The current controller permits 9 <-> 10 only with a reader.
+pub const HANDOFF_DATA_FORMAT: u32 = if crate::brain::EXECUTION_IO_WRITER_VERSION == 0 {
+    9
+} else {
+    10
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -62,7 +67,13 @@ mod tests {
     #[test]
     fn initiative_schema_requires_maintenance_from_previous_formats() {
         let current = ReleaseCompatibility::current();
-        assert_eq!(current.data_format, CompatibleRange { min: 9, max: 9 });
+        assert_eq!(
+            current.data_format,
+            CompatibleRange {
+                min: HANDOFF_DATA_FORMAT,
+                max: HANDOFF_DATA_FORMAT
+            }
+        );
         assert!(current.compatible(&current));
         for version in 1..=8 {
             let mut previous = current.clone();

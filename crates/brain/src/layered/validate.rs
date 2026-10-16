@@ -6,6 +6,36 @@ use anyhow::{ensure, Result};
 use opencoder_core::brain::layered::*;
 use std::collections::BTreeSet;
 
+/// A new Worker serving a legacy Server must never publish a new binding wire.
+pub fn validate_execution_io(version: u32, decision: &LayeredDecision) -> Result<()> {
+    use opencoder_core::brain::{
+        BrainExecutionSource, BrainInputBinding, EXECUTION_IO_READER_VERSION,
+    };
+    ensure!(
+        version <= EXECUTION_IO_READER_VERSION,
+        "unsupported execution IO version"
+    );
+    if let LayeredDecision::DispatchLayer { assignments, .. } = decision {
+        ensure!(
+            version != 0
+                || assignments
+                    .iter()
+                    .flat_map(|a| a.inputs.values())
+                    .all(|binding| {
+                        !matches!(
+                            binding,
+                            BrainInputBinding::Execution {
+                                source: BrainExecutionSource::Artifacts,
+                                ..
+                            }
+                        )
+                    }),
+            "artifact bindings require execution_io_version 1 frozen at admission"
+        );
+    }
+    Ok(())
+}
+
 pub fn validate_plan(plan: &LayeredPlan) -> Result<()> {
     ensure!(
         plan.schema_version == LAYERED_SCHEMA_VERSION,
@@ -83,7 +113,7 @@ pub(crate) fn evidence(ids: &[String], ops: &[LayeredOperation]) -> Result<()> {
 }
 
 /// Binding rules: required inputs present, references resolvable, and every
-/// execution binding points at a successful **ancestor** of the node.
+/// execution binding points at a terminal, latest activation within this run.
 pub(crate) fn bindings(
     assignment: &LayeredAssignment,
     capability: &opencoder_core::brain::BrainCapabilityDescriptor,
@@ -110,8 +140,20 @@ pub(crate) fn bindings(
                 request.inputs.contains_key(name) || plan.inputs.contains_key(name),
                 "unknown root input {name}"
             ),
-            opencoder_core::brain::BrainInputBinding::Execution { execution_id, path } => {
+            opencoder_core::brain::BrainInputBinding::Execution {
+                execution_id, path, ..
+            } => {
                 evidence(std::slice::from_ref(execution_id), ops)?;
+                let source = ops
+                    .iter()
+                    .find(|op| &op.execution_id == execution_id)
+                    .unwrap();
+                ensure!(
+                    ops.iter()
+                        .filter(|op| op.node_id == source.node_id)
+                        .all(|op| op.activation <= source.activation),
+                    "cannot bind an obsolete activation; use the latest stage result"
+                );
                 ensure!(
                     path.is_empty() || path.starts_with('/'),
                     "output path must be a JSON pointer"

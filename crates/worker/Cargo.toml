@@ -66,3 +66,7 @@ path = "tests/durable_lifecycle/main.rs"
 [[test]]
 name = "internal_session_index"
 path = "tests/internal_session_index/main.rs"
+
+[[test]]
+name = "brain_io"
+path = "tests/brain_io/main.rs"

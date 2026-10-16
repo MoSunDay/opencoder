@@ -135,7 +135,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   }, [id, kind, hasMessages, index?.status, loadMessages, messageWindow]);
   const nextMessages = () => {
     if (!messages.nextCursor) return;
-    const lastLarge = messages.large?.at(-1);
+    const lastLarge = messages.large?.[messages.large.length - 1];
     const sameMessage = lastLarge && messages.nextCursor.seq === lastLarge.seq;
     const next = { cursor: messages.nextCursor, leading: sameMessage ? lastLarge.tail : new Uint8Array() };
     const windows = messageWindows.slice(0, messageWindow + 1).concat(next);
@@ -211,7 +211,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       {canEdit && <Select aria-label="发送方式" value={delivery} onChange={setDelivery} options={[{ value: 'steer', label: '指导当前执行 / 继续对话' }, { value: 'queue', label: '加入队列' }]} />}
       <ConversationInput value={prompt} onChange={setPrompt} disabled={busy || unavailable} loading={busy}
         placeholder="继续会话" onSubmit={() => { if (prompt.trim()) command(delivery, { prompt }); }} />
-      <QueuePanel sessionId={id} refreshSignal={`${revision}-${events.at(-1)?.seq || 0}`} />
+      <QueuePanel sessionId={id} refreshSignal={`${revision}-${events[events.length - 1]?.seq || 0}`} />
       {canEdit && <QuestionModal sessionId={id} active={index?.status === 'running'} />}
     </Space>}
     {canEdit && allowGuidance && onGuidance && (managed || kind === 'team') && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>

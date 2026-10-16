@@ -31,6 +31,9 @@ async fn submit_mode(
     private_context: Option<PrivateExecutionContext>,
     dispatch_resources: bool,
 ) -> RpcReply {
+    if let Err(error) = opencoder_core::brain::execution_io_version(&request.input) {
+        return RpcReply::error(400, error.to_string());
+    }
     if let Err(message) = super::private_context::validate(&request, private_context.as_ref()) {
         return RpcReply::error(400, message);
     }
@@ -97,6 +100,17 @@ async fn submit_inner(
     let started = Instant::now();
     let _request_lock = state.fleet.request_lock("execution", &request.id).await?;
     let key = dispatch_key(&request).to_owned();
+    if opencoder_core::brain::EXECUTION_IO_WRITER_VERSION == 0
+        && request.kind == ExecutionKind::Brain
+        && opencoder_core::brain::execution_io_version(&request.input)? != 0
+        && request.input["layered_request"]["parent"].is_null()
+        && state.fleet.receipt("execution", &key).await?.is_none()
+    {
+        return Ok(RpcReply::error(
+            409,
+            "reader bridge does not admit new execution IO roots; enable the writer release first",
+        ));
+    }
     let fingerprint = if private_context.is_some() {
         opencoder_core::token_hash(&serde_json::to_string(&(&request, &private_context))?)
     } else {
@@ -267,6 +281,11 @@ async fn submit_inner(
         && serde_json::to_vec(&assignment)?.len() + 4096 > MAX_FRAME_BYTES
     {
         return Ok(RpcReply::error(413, "Brain assignment exceeds transport capacity; reduce frozen inputs or configuration before starting"));
+    }
+    if let Err(error) =
+        crate::api::resource_admission::providers::freeze(state, &assignment.request).await
+    {
+        return Ok(RpcReply::error(400, error.to_string()));
     }
     let managed = assignment.request.input.get("_resource_request").is_some();
     if !managed {

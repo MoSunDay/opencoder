@@ -1,6 +1,6 @@
 import { EditButton, useCanEdit } from '../../ui/permissions.jsx';
 import { Button, Card, Collapse, Input, Segmented, Select, Space, Typography } from 'antd';
-import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCorners, pointerWithin, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCorners, pointerWithin, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useRef, useState } from 'react';
 import { apiDel, apiPut } from '../../api.js';
@@ -20,10 +20,11 @@ function boardCollision(args) {
 function Lane({ group, status, title, rows, ...props }) {
   const { setNodeRef, isOver } = useDroppable({ id: `lane:${JSON.stringify([group, status])}`, data: { status } });
   return <section ref={setNodeRef} aria-label={`${props.groupTitle || ''} ${title}`.trim()} className={`project-board-lane${isOver ? ' project-board-lane-over' : ''}`}>
-    <Typography.Text strong>{title} · {rows.length}</Typography.Text>
+    <div className={`project-board-lane-heading project-board-lane-heading--${status}`}><span className="project-board-lane-dot" /><Typography.Text strong>{title}</Typography.Text><span className="project-board-lane-count">{rows.length}</span></div>
     <SortableContext items={rows.map((todo) => cardId(group, todo.id))} strategy={verticalListSortingStrategy}>
       {rows.map((todo) => <TodoCard key={todo.id} todo={todo} group={group} {...props} />)}
     </SortableContext>
+    {!rows.length && <div className="project-board-empty">暂无任务</div>}
   </section>;
 }
 export function TodoBoard({ initiative, overview, refresh, onNotice, openTodo }) {
@@ -43,7 +44,9 @@ export function TodoBoard({ initiative, overview, refresh, onNotice, openTodo })
   const activeTagIds = resolveTagFilter(tags, tagFilter);
   const shown = all.filter((todo) => matchesText(query, todo.title, todo.draft) && (!activeTagIds.length || activeTagIds.some((id) => (todo.tag_ids || []).includes(id))));
   const groups = tagGroups(shown, tags.filter((tag) => !activeTagIds.length || activeTagIds.includes(tag.id)), grouped);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const remove = async (todo) => {
     try { await apiDel(`/api/project/todos/${encodeURIComponent(todo.id)}`); await refresh(); onNotice(ok('TODO 已删除')); }
     catch (error) { onNotice(err(error.message)); }
@@ -67,7 +70,7 @@ export function TodoBoard({ initiative, overview, refresh, onNotice, openTodo })
     rows={ordered(group.rows.filter((todo) => laneOf(todo) === status))} overview={overview} onOpen={openTodo} onDelete={remove} disabled={!canEdit || busy} />)}</div>;
   return <Space orientation="vertical" size={12} style={{ width: '100%' }}>
     <Space wrap><EditButton type="primary" onClick={() => setCreating(true)}>新建 TODO</EditButton>
-      <Input.Search aria-label="搜索专项 TODO" placeholder="搜索标题或说明" value={query} onChange={(e) => setQuery(e.target.value)} allowClear style={{ width: 220 }} />
+      <Input.Search aria-label="搜索子项 TODO" placeholder="搜索标题或说明" value={query} onChange={(e) => setQuery(e.target.value)} allowClear style={{ width: 220 }} />
       <Select mode="multiple" showSearch optionFilterProp="label" aria-label="筛选 Tag" placeholder="全部 Tag" value={activeTagIds} onChange={(ids) => setTagFilter(tags.filter((tag) => ids.includes(tag.id)).map(({ id, name }) => ({ id, name })))} allowClear style={{ minWidth: 180, maxWidth: '100%' }} options={tags.map((tag) => ({ label: tag.name, value: tag.id }))} />
       <Segmented aria-label="卡片分组" value={grouped} onChange={setGrouped} options={[{ label: '不分组', value: false }, { label: '按 Tag 分组', value: true }]} />
     </Space>

@@ -2,7 +2,7 @@ import argparse
 import contextlib
 import json
 from pathlib import Path
-from . import backup, config, deployment, migration, maintenance
+from . import backup, config, deployment, migration, maintenance, storage
 from .maintenance.recovery import capacity
 from .maintenance import services
 from .io import Operations
@@ -23,6 +23,8 @@ def main():
     actions.add_argument("--migration-receipt", action="store_true", help="print the concrete migration scope without stopping services")
     actions.add_argument("--rollback", action="store_true")
     actions.add_argument("--status", action="store_true")
+    actions.add_argument("--storage-plan", action="store_true", help="show paths derived from the single persistent root")
+    actions.add_argument("--prepare-storage", action="store_true", help="prepare service configs and mount units without starting services")
     actions.add_argument("--backup", type=Path, help="independent online database backups")
     actions.add_argument("--stage", action="store_true", help="verify and retain a candidate for a later SIGUSR2")
     actions.add_argument("--recover-capacity", action="store_true",
@@ -30,13 +32,24 @@ def main():
     args = parser.parse_args()
     if args.wait_seconds <= 0:
         parser.error("--wait-seconds must be positive")
-    if args.signal and (args.migrate or args.migration_receipt or args.backup or args.status or args.stage or args.recover_capacity):
+    if args.signal and (args.migrate or args.migration_receipt or args.backup or args.status or args.stage or args.recover_capacity or args.storage_plan or args.prepare_storage):
         parser.error("--signal supports deploy or --rollback only")
     if args.rollback and args.bundle:
         parser.error("--rollback does not accept --bundle")
-    if args.maintenance and (args.migrate or args.migration_receipt or args.backup or args.status or args.rollback or args.recover_capacity):
+    if args.maintenance and (args.migrate or args.migration_receipt or args.backup or args.status or args.rollback or args.recover_capacity or args.storage_plan or args.prepare_storage):
         parser.error('--maintenance supports deploy or --stage only; --rollback detects maintenance recovery')
     settings = config.load(args.config)
+    if args.storage_plan or args.prepare_storage:
+        if args.bundle:
+            parser.error("storage preparation does not accept --bundle")
+        declaration = json.loads(args.config.read_text())
+        if args.prepare_storage:
+            with locked(settings.state_dir):
+                result = storage.prepare(settings, declaration)
+        else:
+            result = storage.plan(settings, declaration)
+        print(json.dumps(result, indent=2))
+        return
     if args.status:
         print(json.dumps({**Journal(settings.state_dir).data, "signals": controller.status(settings)}, indent=2))
         return

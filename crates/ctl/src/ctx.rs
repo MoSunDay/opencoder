@@ -10,7 +10,8 @@ use crate::http;
 pub struct Ctx {
     /// Server base URL, normalized without a trailing slash.
     pub server: String,
-    pub token: String,
+    /// None means that no Authorization header is sent.
+    pub token: Option<String>,
     pub verbose: bool,
     pub http: reqwest::Client,
 }
@@ -61,7 +62,7 @@ pub fn resolve_with_env(
         match env("OPENCODER_SERVER_TOKEN") {
             Some(value) => token_value(value, "OPENCODER_SERVER_TOKEN")?,
             None => anyhow::bail!(
-                "bearer token required: configure ctl.json, pass --token/--token-file, or set OPENCODER_SERVER_TOKEN"
+                "bearer token required: configure ctl.json, pass --token/--token-file, or set OPENCODER_SERVER_TOKEN; use --no-auth only when server authentication is disabled"
             ),
         }
     };
@@ -73,6 +74,7 @@ pub fn resolve(
     server: Option<&str>,
     token: Option<&str>,
     token_file: Option<PathBuf>,
+    no_auth: bool,
     verbose: bool,
 ) -> Result<Ctx> {
     let env = |key: &str| std::env::var(key).ok().filter(|v| !v.trim().is_empty());
@@ -80,13 +82,28 @@ pub fn resolve(
     let defaults = crate::connection::load(client_config, path.as_deref())?;
     let options =
         crate::connection::merge(server, token, token_file.as_deref(), verbose, defaults, env);
-    let (server, token) = resolve_with_env(
-        options.server.as_deref(),
-        options.token.as_deref(),
-        options.token_file.as_deref(),
-        options.verbose,
-        |_| None,
-    )?;
+    anyhow::ensure!(
+        !no_auth || (token.is_none() && token_file.is_none()),
+        "--no-auth conflicts with --token and --token-file"
+    );
+    let (server, token) = if no_auth || !options.auth_enabled {
+        (
+            clean_url(
+                options.server.as_deref().context("server URL required")?,
+                "server",
+            )?,
+            None,
+        )
+    } else {
+        let (server, token) = resolve_with_env(
+            options.server.as_deref(),
+            options.token.as_deref(),
+            options.token_file.as_deref(),
+            options.verbose,
+            |_| None,
+        )?;
+        (server, Some(token))
+    };
     Ok(Ctx {
         server,
         token,

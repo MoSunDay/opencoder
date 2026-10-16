@@ -6,6 +6,8 @@ from ..state import atomic_bytes
 
 
 def unit(plan):
+    # Start the exporter before mounting, but retain clients across its maintenance.
+    # Requires/BindsTo would propagate an exporter stop to mounted Runtime units.
     port = plan['port']
     path = str(plan['path'])
     if not path.startswith('/') or any(c in path for c in '\n\r'):

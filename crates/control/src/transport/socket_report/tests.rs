@@ -1,6 +1,5 @@
 use super::*;
 use crate::transport::SocketCommand;
-use futures::StreamExt;
 use opencoder_core::fleet::*;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
@@ -89,7 +88,12 @@ async fn full_rpc_queue_does_not_block_initial_host_handoff() {
     })
     .await
     .unwrap();
-    let (mut writer, mut written) = futures::channel::mpsc::unbounded();
+    let (writer, mut written) = mpsc::channel::<super::super::socket_io::Acknowledgement>(1);
+    let delivery = tokio::spawn(async move {
+        let ack = written.recv().await.unwrap();
+        ack.done.send(Ok(())).unwrap();
+        ack.message
+    });
     assert!(tokio::time::timeout(
         Duration::from_secs(2),
         finish(
@@ -98,13 +102,13 @@ async fn full_rpc_queue_does_not_block_initial_host_handoff() {
             generation,
             2,
             &report(true),
-            &mut writer,
+            &writer,
         )
     )
     .await
     .expect("handoff must not wait for its own full RPC queue")
     .unwrap());
-    let Message::Text(text) = written.next().await.unwrap() else {
+    let Message::Text(text) = delivery.await.unwrap() else {
         panic!("expected handoff frame")
     };
     let ServerFrame::Call { operation, .. } = serde_json::from_str(&text).unwrap();
@@ -143,17 +147,17 @@ async fn subsequent_report_does_not_repeat_handoff() {
         .unwrap();
     let generation = "host-00000000000000000001-progress";
     let (_tx, _rx) = attach(&state, generation).await;
-    let (mut writer, mut written) = futures::channel::mpsc::unbounded();
+    let (writer, mut written) = mpsc::channel(1);
     assert!(finish(
         &state,
         "node-report-progress",
         generation,
         2,
         &report(false),
-        &mut writer
+        &writer
     )
     .await
     .unwrap());
     drop(writer);
-    assert!(written.next().await.is_none());
+    assert!(written.recv().await.is_none());
 }

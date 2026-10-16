@@ -4,6 +4,44 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { App, LoginModal, bootUrlCredential, clearCredentials, embeddedBase, getState, setCredentials, setState, HEADERLESS_REASONS, NAV_CATEGORIES, ConfigProvider, Popconfirm, zhCN, dayjs, theme, installFetchRouter, jsonResponse, deprecationHits, mountApp } from './test/appShell.jsx';
 
 describe('App shell navigation and layout', () => {
+  it('opens an execution link before restoring a saved project page', async () => {
+    window.history.replaceState(null, '', '/?execution=agent-history&execution_kind=agent');
+    localStorage.setItem('oc_nav_page', JSON.stringify('project'));
+    setCredentials('smoke-token', '');
+    await mountApp();
+    await screen.findByText('smoke · 管理员');
+    expect(getState().page).toBe('topics');
+    expect(screen.getByRole('menuitem', { name: /全部执行/ }).classList.contains('ant-menu-item-selected')).toBe(true);
+    expect(screen.getByText('agent-history', { selector: '.ant-drawer-title' }).closest('[role="dialog"]')).toBeTruthy();
+  });
+
+  it('keeps an ID-only execution route ahead of later homepage state restoration', async () => {
+    window.history.replaceState(null, '', '/#execution=operator-history');
+    localStorage.setItem('oc_nav_page', JSON.stringify('project'));
+    setCredentials('smoke-token', '');
+    await mountApp();
+    await screen.findByText('smoke · 管理员');
+    act(() => setState({ page: 'project' }));
+    expect(screen.getByText('operator-history', { selector: '.ant-drawer-title' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /全部执行/ }).classList.contains('ant-menu-item-selected')).toBe(true);
+    fireEvent.click(within(document.querySelector('.fleet-sidebar')).getByRole('tab', { name: '项目', exact: true }));
+    await waitFor(() => expect(window.location.hash).toBe(''));
+    expect(getState().page).toBe('project');
+  });
+
+  it('opens a generic execution ID when navigation arrives after the homepage mounted', async () => {
+    localStorage.setItem('oc_nav_page', JSON.stringify('project'));
+    setCredentials('smoke-token', '');
+    await mountApp();
+    await screen.findByText('smoke · 管理员');
+    act(() => {
+      window.history.pushState(null, '', '/#execution=late-history');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(await screen.findByText('late-history', { selector: '.ant-drawer-title' })).toBeTruthy();
+    expect(getState().page).toBe('topics');
+  });
+
   it('renders antd built-ins in zh-CN under the shell ConfigProvider', async () => {
     // main.jsx wraps the whole shell (login Modal included) in
     // <ConfigProvider theme={theme} locale={zhCN}>. Its default zh-CN button

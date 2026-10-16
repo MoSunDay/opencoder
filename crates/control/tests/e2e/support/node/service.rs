@@ -84,7 +84,7 @@ impl NodeService for MockNode {
             NodeOperation::Brain { action, .. } if action == "capability_probe" => {
                 t.capability_reply.clone().unwrap_or_else(|| {
                     RpcReply::ok(json!({
-                        "compatible": true, "features": ["dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3"]
+                        "compatible": true, "features": ["execution_io_v1", "dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3"]
                     }))
                 })
             }

@@ -1,7 +1,9 @@
 use super::NodeService;
+mod report;
 use anyhow::{bail, Context, Result};
 use futures::{FutureExt, SinkExt, StreamExt};
 use opencoder_core::fleet::*;
+use report::{begin_report, ReportFrames};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
@@ -44,13 +46,34 @@ async fn connection(
     service: Arc<dyn NodeService>,
     capacity: Arc<tokio::sync::Semaphore>,
 ) -> Result<()> {
+    connection_with_period(
+        url,
+        token,
+        service,
+        capacity,
+        std::time::Duration::from_millis(HEARTBEAT_MS),
+    )
+    .await
+}
+
+async fn connection_with_period(
+    url: &str,
+    token: &str,
+    service: Arc<dyn NodeService>,
+    capacity: Arc<tokio::sync::Semaphore>,
+    period: std::time::Duration,
+) -> Result<()> {
     let mut request = url.into_client_request()?;
     request.headers_mut().insert(
         reqwest::header::AUTHORIZATION,
         format!("Bearer {token}").parse()?,
     );
-    let (socket, _) =
+    let (socket, response) =
         tokio::time::timeout(std::time::Duration::from_secs(15), connect_async(request)).await??;
+    let flow_controlled = response
+        .headers()
+        .get(INDEX_REPORT_ACK_HEADER)
+        .is_some_and(|value| value == "1");
     let (mut writer, mut reader) = socket.split();
     send(
         &mut writer,
@@ -77,8 +100,8 @@ async fn connection(
     let mut reports = tokio::task::JoinSet::new();
     let mut report_inflight = false;
     let mut report_pending = false;
+    let mut publishing: Option<ReportFrames> = None;
     report_trigger.try_send(())?;
-    let period = std::time::Duration::from_millis(HEARTBEAT_MS);
     let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
     let mut changes = service.changes();
     let mut next_report_id = 1u64;
@@ -86,7 +109,8 @@ async fn connection(
         tokio::select! {
             _ = tick.tick() => {
                 if service.retiring() && capacity.available_permits() == 128
-                    && admission_capacity.available_permits() == 128 && rx.is_empty() {
+                    && admission_capacity.available_permits() == 128 && rx.is_empty()
+                    && publishing.is_none() {
                     writer.send(Message::Close(None)).await?;
                     return Ok(());
                 }
@@ -116,12 +140,44 @@ async fn connection(
                 }
             }
             Some(prepared) = reports.join_next(), if report_inflight => {
-                report_inflight = false;
-                publish_report(&mut writer, prepared??, next_report_id).await?;
-                next_report_id = next_report_id.checked_add(1).context("index report id overflow")?;
-                if report_pending {
+                match prepared.context("node inventory worker failed")? {
+                    Ok(report) => {
+                        publishing = Some(begin_report(&mut writer, report, next_report_id, flow_controlled).await?);
+                    }
+                    Err(error) => {
+                        report_inflight = false;
+                        tracing::warn!(%error, "node inventory unavailable; control channel retained");
+                        // Preserve known load and indexes, but never advertise
+                        // readiness or an empty complete report after a failed
+                        // collection. The next heartbeat/change retries it.
+                        let mut snapshot = service.snapshot();
+                        snapshot.ready = false;
+                        snapshot.resource_error = Some(error.to_string());
+                        send(&mut writer, &NodeFrame::Snapshot { snapshot }).await?;
+                    }
+                }
+                if !report_inflight && report_pending {
                     report_pending = false;
                     request_report(&report_trigger);
+                }
+            }
+            _ = std::future::ready(()), if publishing.as_ref().is_some_and(ReportFrames::ready) => {
+                let report = publishing.as_mut().expect("active report");
+                if let Some(frame) = report.next() {
+                    send(&mut writer, &frame).await?;
+                    report.sent()?;
+                    // Ready socket writes are not guaranteed to yield. Let RPC
+                    // handlers enqueue their replies before the next batch.
+                    tokio::task::yield_now().await;
+                } else {
+                    report.log_sent();
+                    publishing = None;
+                    report_inflight = false;
+                    next_report_id = next_report_id.checked_add(1).context("index report id overflow")?;
+                    if report_pending {
+                        report_pending = false;
+                        request_report(&report_trigger);
+                    }
                 }
             }
             Some(frame) = rx.recv() => send(&mut writer, &frame).await?,
@@ -130,6 +186,15 @@ async fn connection(
                 match frame? {
                     Message::Text(text) if text.len() <= MAX_FRAME_BYTES => match serde_json::from_str::<ServerFrame>(&text)? {
                         ServerFrame::Call { request_id, operation } => {
+                            if let NodeOperation::Maintenance { command } = &operation {
+                                if command.action == INDEX_REPORT_ACK_ACTION && flow_controlled {
+                                    let report_id = command.input["report_id"].as_u64().context("report acknowledgement id missing")?;
+                                    let sequence = command.input["sequence"].as_u64().context("report acknowledgement sequence missing")?;
+                                    anyhow::ensure!(request_id == format!("report-ack-{report_id}-{sequence}"), "invalid transport acknowledgement identity");
+                                    if let Some(report) = publishing.as_mut() { report.acknowledge(report_id, sequence)?; }
+                                    continue;
+                                }
+                            }
                             if matches!(&operation, NodeOperation::Admission { .. }) {
                                 let permit = admission_capacity.clone().try_acquire_owned()
                                     .context("node admission capacity exhausted")?;
@@ -231,50 +296,13 @@ async fn prepare_report(service: &dyn NodeService) -> Result<PreparedReport> {
 }
 
 async fn prepare_owned_report(service: Arc<dyn NodeService>) -> Result<PreparedReport> {
-    prepare_report(service.as_ref()).await
-}
-
-async fn publish_report<S>(writer: &mut S, report: PreparedReport, report_id: u64) -> Result<()>
-where
-    S: futures::Sink<Message> + Unpin,
-    S::Error: std::error::Error + Send + Sync + 'static,
-{
-    // The control plane releases placement reservations after applying the
-    // report. Publish the matching load snapshot first so accepted work is
-    // never absent from both the snapshot and the reservation count.
-    send(
-        writer,
-        &NodeFrame::Snapshot {
-            snapshot: report.snapshot,
-        },
-    )
-    .await?;
-    send(
-        writer,
-        &NodeFrame::IndexReport {
-            report: IndexReportEnvelope::begin(report_id),
-        },
-    )
-    .await?;
-    for batch in report.records.chunks(INDEX_REPORT_BATCH_SIZE) {
-        send(
-            writer,
-            &NodeFrame::IndexReport {
-                report: IndexReportEnvelope::batch(report_id, batch.to_vec()),
-            },
-        )
-        .await?;
+    let started = std::time::Instant::now();
+    let result = prepare_report(service.as_ref()).await;
+    if started.elapsed().as_millis() >= 250 {
+        tracing::info!(node_id = %service.registration().id, elapsed_ms = started.elapsed().as_millis(),
+            succeeded = result.is_ok(), "node inventory collection timing");
     }
-    for frame in &report.brain {
-        send(writer, frame).await?;
-    }
-    send(
-        writer,
-        &NodeFrame::IndexReport {
-            report: IndexReportEnvelope::end(report_id),
-        },
-    )
-    .await
+    result
 }
 
 async fn send<S>(writer: &mut S, frame: &NodeFrame) -> Result<()>

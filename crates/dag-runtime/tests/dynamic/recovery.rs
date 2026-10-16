@@ -19,7 +19,7 @@ async fn resume_freezes_inputs_skips_success_and_never_appends_twice() {
     step["kind"]["template"]["agent"] = json!("probe");
     let run = f.run(json!([step]), json!({"items":["DONE-ITEM","RETRY-ITEM"]}));
     let client = Scripted::new(|text| {
-        if text.contains("RETRY-ITEM") {
+        if context(text)["instance"]["input"] == "RETRY-ITEM" {
             (Duration::from_millis(100), Err("retry me".into()))
         } else {
             (Duration::ZERO, Ok("{\"saved\":true}".into()))
@@ -48,8 +48,31 @@ async fn resume_freezes_inputs_skips_success_and_never_appends_twice() {
     std::fs::write(pool.join("v1/how.md"), "edited after first attempt").unwrap();
     // Frozen resources survive even loss of the original source during recovery.
     f.config.agent.agents_dir = Some(f.tmp.path().join("unavailable"));
+    let refused = Scripted::new(|_| panic!("input drift must be rejected before running a step"));
+    let (_, rx) = tokio::sync::watch::channel(false);
+    assert_eq!(
+        resume_run(f.deps(refused.clone()), run.clone(), rx)
+            .await
+            .unwrap(),
+        DagRunStatus::Error
+    );
+    assert!(refused.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        f.json(&run, "inputs.json"),
+        json!({"items":["DONE-ITEM","RETRY-ITEM"]})
+    );
+    std::fs::write(
+        f.root.join(&run.run_id).join("input.json"),
+        json!({"items":["DONE-ITEM","RETRY-ITEM"]}).to_string(),
+    )
+    .unwrap();
     let client = Scripted::new(|text| {
         assert!(text.contains("original-how") && text.contains("RETRY-ITEM"));
+        assert_eq!(
+            context(text)["inputs"],
+            json!({"items":["DONE-ITEM","RETRY-ITEM"]})
+        );
+        assert_eq!(context(text)["instance"]["input"], "RETRY-ITEM");
         assert!(!text.contains("CHANGED") && !text.contains("edited after"));
         (Duration::ZERO, Ok("{\"recovered\":true}".into()))
     });
@@ -82,6 +105,29 @@ async fn resume_freezes_inputs_skips_success_and_never_appends_twice() {
     .unwrap();
     assert!(loaded.prompt.contains("RETRY-ITEM"));
     assert_eq!(loaded.prompt.matches("RETRY-ITEM").count(), 1);
+}
+
+#[tokio::test]
+async fn resume_rejects_missing_frozen_inputs_without_running_a_step() {
+    let f = Fixture::new().await;
+    let run = f.run(json!([dynamic_agent()]), json!({"items":["retry"]}));
+    let first = Scripted::new(|_| (Duration::ZERO, Err("retry later".into())));
+    let (_, rx) = tokio::sync::watch::channel(false);
+    assert_eq!(
+        execute_run(f.deps(first), run.clone(), rx).await.unwrap(),
+        DagRunStatus::Error
+    );
+    std::fs::remove_file(f.root.join(&run.run_id).join("inputs.json")).unwrap();
+    let refused = Scripted::new(|_| panic!("missing frozen input must not recreate a snapshot"));
+    let (_, rx) = tokio::sync::watch::channel(false);
+    assert_eq!(
+        resume_run(f.deps(refused.clone()), run.clone(), rx)
+            .await
+            .unwrap(),
+        DagRunStatus::Error
+    );
+    assert!(refused.requests.lock().unwrap().is_empty());
+    assert!(!f.root.join(&run.run_id).join("inputs.json").exists());
 }
 
 #[tokio::test]

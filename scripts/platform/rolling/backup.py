@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 from .state import write
 from .native import ontology
-from .backup_files import tree
+from .backup_files import opaque, scope, tree
 
 
 def database(source, target):
@@ -45,16 +45,27 @@ def roots(settings, runtime_data=True):
     return result
 
 
-def databases(root, output):
-    """Visit every directory once; do not follow resource symlinks."""
+def databases(root, output, runtime=False, opaque_files=None, process_files=False):
+    """Snapshot actual DBs; online Runtime views omit immutable inputs only."""
     def failed(error):
         raise error
 
-    for directory, _, files in os.walk(root, onerror=failed, followlinks=False):
+    selected = scope.RuntimeScope(root) if runtime else None
+    for directory, directories, files in os.walk(root, onerror=failed, followlinks=False):
+        if selected:
+            selected.prune(directory, directories, files)
         for name in files:
             source = Path(directory) / name
             if name.endswith('.db') and not source.is_symlink():
-                database(source, output / source.relative_to(root))
+                relative = source.relative_to(root)
+                if ((runtime or process_files) and opaque.process_path(relative)
+                        and not opaque.sqlite_header(source)):
+                    copied = opaque.copy_stable(source, output / relative)
+                    if opaque_files is not None:
+                        opaque_files[relative.as_posix()] = copied
+                else:
+                    database(source, output / relative)
+    return selected.excluded if selected else {}
 
 
 def snapshot(settings, output, stopped=False, runtime_data=True):
@@ -77,11 +88,14 @@ def snapshot(settings, output, stopped=False, runtime_data=True):
     # Each database still has its own pinned read transaction and quick_check.
     # Bound parallel roots so cold historical directories cannot serialize the
     # entire backup; finish every copy before verifying or publishing output.
+    opaque_files = {name: {} for name in selected}
     with ThreadPoolExecutor(max_workers=4) as executor:
-        pending = [executor.submit(databases, root, output / name)
-                   for name, root in selected.items()]
-        for future in pending:
-            future.result()
+        pending = {name: executor.submit(databases, root, output / name,
+                   not stopped and (name == 'legacy-node' or name.startswith('runtimes/')),
+                   opaque_files[name], name == 'legacy-node' or name.startswith('runtimes/'))
+                   for name, root in selected.items()}
+        excluded = {f'{name}/{path}': reason for name, future in pending.items()
+                    for path, reason in future.result().items()}
     # Copy files after the pinned DB snapshot: immutable versions referenced by
     # that snapshot already exist. NFS path bindings must match their hashes too.
     ontology_root = ontology.files_root(output / 'server')
@@ -108,6 +122,9 @@ def snapshot(settings, output, stopped=False, runtime_data=True):
         "kind": "stopped-consistent-copy" if stopped else "independent-online-database-backups",
         "cross_database_snapshot": stopped, "files": files,
         "data_roots": {name: str(path) for name, path in selected.items()},
+        "excluded_database_trees": excluded,
+        "opaque_process_database_files": {f'{name}/{path}': metadata
+            for name, copied in opaque_files.items() for path, metadata in copied.items()},
         "runtime_data_included": runtime_data,
         "ontology_files_root": str(ontology_root) if ontology_root else None})
     os.rename(output, destination)

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Connect to the configured 43 server without sending its traffic to a proxy.
+set -eu
+NO_PROXY="${NO_PROXY:+$NO_PROXY,}10.199.79.43"
+export NO_PROXY
+opencoder_cli="${OPENCODER_CLI_BIN:-opencoder-cli}"
+if [ -z "${OPENCODER_CLI_BIN:-}" ] && [ -x /usr/local/lib/opencoder-cli/current/opencoder-cli ]; then
+  opencoder_cli=/usr/local/lib/opencoder-cli/current/opencoder-cli
+fi
+exec "$opencoder_cli" \
+  --client-config "${OPENCODER79_CONFIG:-/root/.config/opencoder/ctl-79.json}" \
+  --server http://10.199.79.43:18081 "$@"

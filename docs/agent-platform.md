@@ -21,7 +21,7 @@ opencoder-agent --remote https://opencoder.internal.example --name worker-a \
 
 Server 与 Node 都要求 `--token`、`--token-file` 或既有 `OPENCODER_SERVER_TOKEN` 三者之一；生产服务使用 `--token-file`，token 不进入 URL、进程参数或日志。节点主动建立携带 Bearer 凭据的 WebSocket，无需开放节点 HTTP 入站端口。节点工作目录中的 `opencoder.json` 配置执行用的模型与凭据；Server 配置中的模型用于大脑。大脑未配置模型时仍可管理节点及派发普通任务，调用大脑时返回具体配置错误。
 
-`--data-dir` 是已有的持久化目录参数。Server 的参数指定控制面数据，执行过程、资源快照和产物由所属 Node 的同名参数指定；两端都应显式设置。按版本部署时，还需设置 [发布配置](smooth-release.md) 的 `deployment.state_dir` 和 `deployment.server_data`，运行目录与维护备份才会一起写入指定磁盘。配置前创建目录并赋予对应服务账号读写权限；确认 `/data00` 已挂载到数据磁盘。
+`--data-dir` 是独立启动 Server/Node 时的持久化目录参数。按版本部署时，只配置 [发布配置](smooth-release.md) 的 `deployment.state_dir`：部署工具自动派生 Server、Host、资源、Runtime、发布包、备份、镜像与服务工作目录，再传入各进程的 `--data-dir`。`--storage-plan` 可预览实际目录，`--prepare-storage` 可生成根内配置与只读挂载 unit；外部源工作区仍独立声明并保持只读。确认根目录位于本机数据磁盘，并赋予服务账号所需权限。
 
 仓库提供 [Server unit](../deploy/systemd/opencoder-server.service)、[Agent unit](../deploy/systemd/opencoder-agent.service) 和 [Nginx HTTPS/WSS/SSE 样例](../deploy/nginx/opencoder.conf)。部署前分别创建 `/etc/opencoder/server.token` 和 `/etc/opencoder/agent.token`，写入同一 Bearer token 并设为 `0600`，owner 必须是对应服务用户；unit 只把文件路径传给 `--token-file`，不会把 token 内容放入参数、环境变量或日志。样例 Agent 以 root 运行以支持当前真实 runc 路径，并使用 `KillMode=mixed`，保证停止时只有 Agent 先收到 TERM，已有任务可自然 drain；若禁用 runc，可在验证目录、进程树和 NFS 权限后改用专用用户。内网 CA 的完整证书链必须安装到每个 Node 和管理员浏览器的系统信任库；Agent 的 HTTP 与 WebSocket 客户端都使用系统 CA，不提供跳过证书校验的降级开关。
 
@@ -115,7 +115,7 @@ sudo systemctl daemon-reload
 
 ## API
 
-所有管理 HTTP、SSE 与 Node WebSocket 使用 `Authorization: Bearer <token>`。token 区分大小写；缺失或错误凭据返回 401。合法请求不依赖时间同步、nonce 或签名重放缓存，401 也不会自动重放修改请求。`GET /api/time` 仅保留为普通兼容端点。
+默认管理 HTTP、SSE 与 Node WebSocket 使用 `Authorization: Bearer <token>`。Token 区分大小写；缺失或错误凭据返回 401。Server 可显式设置 `--auth-enabled false`，部署配置对应 `deployment.auth_enabled:false`：公共 API 无需凭据并使用 admin 身份，网页跳过登录；原用户与 Token 保留，机器凭据和独立资源服务继续使用原设置。`GET /api/auth/status` 公开返回开关，`GET /api/time` 为公开兼容端点。401 不自动重放修改请求；用法见 [项目 CLI](project-cli.md)。
 
 | 操作 | API |
 | --- | --- |

@@ -1,4 +1,4 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 # worker 模块
 
@@ -7,6 +7,7 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类在准入时拒绝，不装配 DAG/runc/NFS。依赖与实现通过平台模块隔开；原生验收入口见 [windows_operator.rs](../../crates/worker/tests/windows_operator.rs)，用户边界见 [Windows](../../features/windows/index.md)。
 
 ## 索引
+- [brain/v4/api.rs](../../crates/worker/src/brain/v4/api.rs) — context 的 IO 版本须与冻结请求一致；旧运行不开放产物绑定提示，决策校验拒绝生成新协议。旧输入输出适配保留在 [output/legacy.rs](../../crates/worker/src/brain/output/legacy.rs)，新 Worker 可继续服务旧 Server 的请求。
 - `crates/worker/src/service.rs` — 根执行与会话清单
 - `crates/worker/src/workloads/` — agent/team/dag/todos/project 适配器
 - 普通 Agent/Operator 共用宿主机后台会话路径，按 Server 固定的 Agent 身份、资源与 Harness 执行；DAG 容器仍由 [dag-runtime](../dag-runtime/index.md) 管理。
@@ -15,6 +16,7 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 - [workloads/agent.rs](../../crates/worker/src/workloads/agent.rs) — Agent/Operator 宿主会话首轮使用队列投递，保留用户输入原文；Operator 默认规则由 [session](../session/index.md) 按会话类型构建，Maintenance 首轮附加维护指令。托管 Codex 设置由 Server 冻结。
 - [workloads/agent/initialization.rs](../../crates/worker/src/workloads/agent/initialization.rs) — 首轮投递前补齐 Harness、启动环境、展示策略及 Server 模型设置；已有 session 行也执行该步骤。恢复保留已启动的 Codex 线程和冻结设置，Operator HOME 最后覆盖输入与托管环境。
 - `crates/worker/src/operations/` — 准入/launch/维护命令/查询（含 `query/instances/`、`artifacts.rs`、`operator_env.rs` Operator 隔离快照、`operator_config.rs` 节点级 Operator 配置平面）
+- [operations/command.rs](../../crates/worker/src/operations/command.rs) 在同一次 journal guard 内保存取消意图和停止中的 TODO 重跑状态，然后立即发送取消信号，避免持久化后再次排在库存/调度读取之后；阶段计时仅记录执行 ID 和耗时，不记录输入或凭据。定向回归见 [stop_signal.rs](../../crates/worker/src/operations/admission/tests/stop_signal.rs)，包含排队锁竞争与零模型真实 runc 清理。
 - [operations/create/preflight_agents.rs](../../crates/worker/src/operations/create/preflight_agents.rs) — 项目 Agent、Team、DAG 的 Agent 依赖提取纯函数；DAG 仅收集 Agent 步骤。
 - `crates/worker/src/state.rs`、`src/layout.rs`、`src/journal/` — runtime.db、执行布局与原子落盘（layout 含 `<data>/operator/<id>/{home,workspace}` 预留）
 - `crates/worker/src/runtime/`、`src/resources.rs` — Runtime 归属与资源快照；Runtime 启动完成遗留 runc 清理和 journal 恢复后，容量恢复还要证明当前进程属于受管 systemd Runtime 且同一 cgroup 没有其他进程，并确认本进程没有托管子进程，才逐票据释放遗留 `running` reservation；无法证明时 fail-closed。
@@ -41,7 +43,7 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 - [operations/query/dag_context.rs](../../crates/worker/src/operations/query/dag_context.rs) — DAG Inspect 从 journal 的冻结定义和原受理目录读取资源快照，校验步骤身份、版本与摘要后投影只读 `context`。未固定为 `preparing`，非待受理运行缺少快照为 `unavailable`，损坏快照明确报错；公开结果不返回宿主路径或 Agent 依赖摘要。
 - DAG 的 how 追加由 dag-runtime 写入本地副本；普通 Agent 会话资源追加由 `agent_how.rs` 管理。
 - Brain：仅 `brain/v4/`，根节点持有运行、操作与事件投影；`layer` 是已派发层。每层并行执行，全部终态后唤醒决策；人工输入也唤醒一次决策，并取消正在生成的旧决策。层屏障未满足时只可 `guide`，引导动作经 `layered_guidance` outbox 按事件序列投递和确认；模型可依据证据选择正常前进或任一已执行层，内部路径约束由计划准入补齐，回退消耗轮次；末层达标收口。generation 栅栏保障恢复与重复回执幂等。
-- [brain/v4/output.rs](../../crates/worker/src/brain/v4/output.rs) 校验冻结的必填输出，保留完整结构化决策证据；[brain/v4/api.rs](../../crates/worker/src/brain/v4/api.rs) 将不可重试的派发拒绝和具体原因原子写入根投影。[workloads/dag.rs](../../crates/worker/src/workloads/dag.rs) 从 Brain 的 `layered_inputs` 读取参数。约定及原生循环测试见 [brain](../brain/index.md)。
+- [brain/v4/output.rs](../../crates/worker/src/brain/v4/output.rs) 校验冻结的必填输出，保存 `scheduler_output`、`scheduler_artifacts` 并限制两者合计 16 KiB；[brain/output](../../crates/worker/src/brain/output.rs) 为 DAG 步骤、动态实例及其他能力工作区建立文件引用，核对声明大小与 SHA-256，较大索引与嵌套 Brain 使用不可覆盖的清单引用。[operations/artifacts.rs](../../crates/worker/src/operations/artifacts.rs) 提供所属执行文件及清单读取，拒绝内容不符与路径逃逸。[brain/v4/api.rs](../../crates/worker/src/brain/v4/api.rs) 校验 context 中的文件执行归属，并将不可重试的派发拒绝和具体原因原子写入根投影。[workloads/dag.rs](../../crates/worker/src/workloads/dag.rs) 冻结 Brain 的完整 `layered_inputs`，恢复拒绝输入漂移。约定及原生循环测试见 [brain](../brain/index.md)。
 - Team 的 `steer` 命令按 `input_id` 去重并写入执行 journal，保留最近 32 条引导；[workloads/team.rs](../../crates/worker/src/workloads/team.rs) 在下一次成员发问时读取，正在生成的成员回答不会被打断。每次讨论回答关闭任务完成后的本地记忆维护，避免为中间发言额外启动模型轮次。
 - 上限（`opencoder_brain::layered` 纯域校验）：`LAYERED_MAX_NODES=256`、`LAYERED_MAX_LAYER_WIDTH`=32/层、`LAYERED_MAX_DEPTH=3`、每节点恰好一个能力。Worker 持有模型决策、投影及 generation 栅栏；Control 解析上下文并执行准入。伪造或越权派发帧被拒绝，迟到回执不推进当前尝试。
 

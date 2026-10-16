@@ -56,3 +56,5 @@ exec "$@"
 ```
 
 需要在正常结束后清理时，可以用 `"$@"` 启动并等待，记录其退出码，执行清理后返回该退出码。跨平台脚本可显式配置解释器，例如 `["C:\\Python\\python.exe", "C:\\scripts\\codex_start.py"]`；OpenCoder 不隐式选择 shell。
+
+支持稳定外部命令身份的启动脚本可启用[运行中输入协议](external-harness-control.md)，让实时补充指令送达原轮次并保持主观察器运行。

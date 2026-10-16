@@ -1,3 +1,4 @@
+pub(crate) mod control;
 pub mod decode;
 mod launch;
 mod process;

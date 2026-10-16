@@ -1,4 +1,4 @@
-Commit: 7687b5f581254ee6d826d8644789e7d498e761ba
+Commit: a388f28a2e631e962c01d554419cd4fc90476078
 
 # Agent Harness
 
@@ -20,3 +20,5 @@ runc 需要预置原生 Codex CLI 及运行依赖，直接挂载节点登录目�
 - [agents/core](../../agents/core/index.md) — Harness 类型与 Codex 设置
 - [agents/session](../../agents/session/index.md) — 运行契约消费方
 - [agents/local](../../agents/local/index.md)、[agents/tui](../../agents/tui/index.md)、[agents/web](../../agents/web/index.md)、[agents/worker](../../agents/worker/index.md)
+
+支持[外部输入协议](../../docs/external-harness-control.md)的启动脚本可接收同轮次实时指令，运行中的原任务保持观察。重复请求沿用原身份，结果不明先查询，轮次结束冲突明确拒绝；排队消息仍等待下一轮。旧配置和已经冻结的执行保持原行为。

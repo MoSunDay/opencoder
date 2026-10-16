@@ -2,6 +2,12 @@
 use opencoder_brain::layered::*;
 use opencoder_core::brain::{layered::*, BrainCapabilityDescriptor};
 use serde_json::json;
+#[path = "milestone/adjacent.rs"]
+mod adjacent;
+#[path = "milestone/bindings.rs"]
+mod bindings;
+#[path = "milestone/recovery.rs"]
+mod recovery;
 fn request() -> LayeredRequest {
     serde_json::from_value(json!({"schema_version":7,"plan":{"schema_version":7,"title":"delivery","objective":"ship verified change","max_rounds":5,
       "layers":[{"layer_id":"coding","title":"Coding","task":"implement and document","objective":"implement and document","success_criteria":"change works"},{"layer_id":"testing","title":"Test","task":"verify","objective":"verify","success_criteria":"tests pass"}],

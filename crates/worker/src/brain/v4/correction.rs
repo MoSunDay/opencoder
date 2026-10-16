@@ -107,12 +107,16 @@ pub(super) async fn decide(
             }
             Err(error) => return Err(error),
         };
-        match layered::decide(
-            snapshot,
-            &context.request,
-            &context.capabilities,
-            &decision,
-            opencoder_core::message::now_ms(),
+        match layered::validate_execution_io(context.execution_io_version, &decision).and_then(
+            |_| {
+                layered::decide(
+                    snapshot,
+                    &context.request,
+                    &context.capabilities,
+                    &decision,
+                    opencoder_core::message::now_ms(),
+                )
+            },
         ) {
             Ok(_) => return Ok(decision),
             Err(error) => {

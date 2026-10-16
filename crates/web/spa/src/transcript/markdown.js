@@ -36,7 +36,7 @@ function lines(spans) {
   for (const part of spans) {
     part.text.split('\n').forEach((text, i) => {
       if (i) rows.push([]);
-      if (text) rows.at(-1).push({ ...part, text });
+      if (text) rows[rows.length - 1].push({ ...part, text });
     });
   }
   return rows;
@@ -85,12 +85,15 @@ function blocks(tokens, depth = 0, style = {}) {
 
 export function markdownRows(text) {
   const rows = blocks(marked.lexer(String(text || ''), { gfm: true }));
-  while (rows.length && !rowText(rows.at(-1)).trim()) rows.pop();
+  while (rows.length && !rowText(rows[rows.length - 1]).trim()) rows.pop();
   return rows;
 }
 
 export function textRows(text, streaming = false) {
-  return streaming ? String(text || '').split('\n').map((line) => [span(line)]) : markdownRows(text);
+  const plain = () => String(text || '').split('\n').map((line) => [span(line)]);
+  if (streaming) return plain();
+  try { return markdownRows(text); }
+  catch { return plain(); }
 }
 
 export function sayPresentation(parts, streaming = false) {

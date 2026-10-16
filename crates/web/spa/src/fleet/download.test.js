@@ -2,7 +2,7 @@
 import '../test/setup-dom.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { clearCredentials, setCredentials } from '../store.js';
+import { clearCredentials, setCredentials, setState } from '../store.js';
 import { artifactPath, downloadArtifact } from './download.js';
 
 class TestChannel {
@@ -21,6 +21,20 @@ afterEach(() => {
 });
 
 describe('bounded artifact downloads', () => {
+  it('allows an anonymous download only after authentication is disabled', async () => {
+    clearCredentials();
+    await expect(downloadArtifact('dag-run', 'build', 'output.txt')).rejects.toThrow('请先登录');
+    setState({ authEnabled: false });
+    const posted = [];
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { controller: {
+      postMessage: (record, ports) => { posted.push(record); ports[0].postMessage({ ok: true }); },
+    } } });
+    vi.stubGlobal('MessageChannel', TestChannel);
+    vi.stubGlobal('crypto', { randomUUID: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    vi.spyOn(window, 'open').mockReturnValue({ location: { replace: vi.fn() } });
+    await downloadArtifact('dag-run', 'build', 'output.txt');
+    expect(posted[0].token).toBe('');
+  });
   it('registers one bearer request and clicks an opaque URL without buffering', async () => {
     setCredentials('secret-token', '');
     const posted = [];

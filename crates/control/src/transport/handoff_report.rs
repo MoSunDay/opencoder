@@ -9,17 +9,32 @@ pub(super) async fn apply(
     sequence: u64,
     complete: &CompleteReport,
 ) -> anyhow::Result<bool> {
-    let recovered = state
-        .fleet
-        .apply_index_report_fenced(
-            id,
-            &complete.records,
-            complete.pending_at_begin.as_deref(),
-            generation
-                .starts_with("host-")
-                .then_some((generation, sequence)),
-        )
-        .await?;
+    let fleet = state.fleet.clone();
+    let node = id.to_owned();
+    let epoch = generation.to_owned();
+    let records = complete.records.clone();
+    let pending = complete.pending_at_begin.clone();
+    let storage_started = std::time::Instant::now();
+    let recovered = super::socket_io::storage(async move {
+        fleet
+            .apply_index_report_fenced(
+                &node,
+                &records,
+                pending.as_deref(),
+                epoch
+                    .starts_with("host-")
+                    .then_some((epoch.as_str(), sequence)),
+            )
+            .await
+    })
+    .await?;
+    if storage_started.elapsed().as_millis() >= 250 {
+        tracing::info!(node_id = %id, report_id = complete.report_id,
+            records = complete.records.len(), elapsed_ms = storage_started.elapsed().as_millis(),
+            "control index report storage timing");
+    }
+    // Storage may finish after the socket closes. Only its still-running
+    // connection future can promote readiness or acknowledge the handoff.
     // A newer Host can complete its report while this older report awaits
     // storage. Keep the old socket alive for replies to its in-flight calls;
     // its report must not change the new connection's acceptance accounting.

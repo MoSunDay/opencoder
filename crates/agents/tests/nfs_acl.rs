@@ -48,6 +48,69 @@ fn value(response: &[u8], position: usize) -> u32 {
     u32::from_be_bytes(response[position..position + 4].try_into().unwrap())
 }
 
+fn opaque(bytes: &[u8]) -> Vec<u8> {
+    let mut encoded = vec![];
+    word(&mut encoded, bytes.len() as u32);
+    encoded.extend_from_slice(bytes);
+    encoded.resize(encoded.len().next_multiple_of(4), 0);
+    encoded
+}
+
+#[test]
+fn old_opaque_handle_is_stale_until_fresh_lookup_and_shared_acl_can_read_it() {
+    let root = tempfile::tempdir().unwrap();
+    let filename = "a-resource-filename-that-is-longer-than-sixty-bytes-and-needs-an-opaque-handle";
+    std::fs::write(root.path().join(filename), "source").unwrap();
+    let opts = NfsServerOpts {
+        export_root: root.path().into(),
+        host: "127.0.0.1".into(),
+        port: 0,
+        read_only: true,
+    };
+    let lookup = |port| {
+        let mut body = opaque(b"/");
+        body.extend_from_slice(&opaque(filename.as_bytes()));
+        let response = rpc(port, 100003, 3, 3, &body);
+        assert_eq!(value(&response, 24), 0);
+        let len = value(&response, 28) as usize;
+        assert!(len <= 64);
+        response[32..32 + len].to_vec()
+    };
+    let server = spawn_nfs_server(&opts).unwrap();
+    let old = lookup(server.local_addr().unwrap().port());
+    server.shutdown();
+
+    let server = spawn_nfs_server(&opts).unwrap();
+    let port = server.local_addr().unwrap().port();
+    let mut acl = opaque(&old);
+    word(&mut acl, 5);
+    assert_eq!(value(&request(port, 1, &acl), 24), 70); // STALE, not a tree scan.
+    assert_eq!(value(&rpc(port, 100003, 3, 1, &opaque(&old)), 24), 70);
+    assert_eq!(rpc(port, 100003, 3, 0, &[]).len(), 24);
+    assert_eq!(request(port, 0, &[]).len(), 24);
+
+    assert_eq!(lookup(port), old);
+    assert_eq!(value(&request(port, 1, &acl), 24), 0);
+    assert_eq!(value(&rpc(port, 100003, 3, 1, &opaque(&old)), 24), 0);
+    let mut read = opaque(&old);
+    read.extend_from_slice(&0u64.to_be_bytes());
+    word(&mut read, 100);
+    let response = rpc(port, 100003, 3, 6, &read);
+    assert_eq!(value(&response, 24), 0);
+    assert_eq!(&response[response.len() - 8..response.len() - 2], b"source");
+
+    let mut malformed = old;
+    malformed.pop();
+    let mut acl = opaque(&malformed);
+    word(&mut acl, 5);
+    assert_eq!(value(&request(port, 1, &acl), 24), 10001); // BADHANDLE.
+    assert_eq!(
+        value(&rpc(port, 100003, 3, 1, &opaque(&malformed)), 24),
+        10001
+    );
+    server.shutdown();
+}
+
 #[test]
 fn readonly_acl_service_returns_file_permissions_and_rejects_all_writes() {
     let root = tempfile::tempdir().unwrap();

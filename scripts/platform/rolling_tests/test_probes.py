@@ -8,10 +8,42 @@ from unittest.mock import patch
 from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.io import HttpFailure
-from rolling.probes import candidate_locked, probe_id, public, ready, spec, submit_probe
+from rolling.probes import activated_host, candidate_locked, probe_id, public, ready, spec, submit_probe
 
 
 class ReadyProbeTests(unittest.TestCase):
+    def test_activated_host_waits_for_its_generation_and_durable_ready_index(self):
+        class Operations:
+            def __init__(self):
+                self.attempts = 0
+                self.ready_calls = 0
+
+            def http(self, base, path):
+                if path == "/status":
+                    return {"node": {"id": "node-test"}, "snapshot": {"generation": "host-2"}}
+                if path == "/api/nodes":
+                    self.attempts += 1
+                    return {"nodes": [
+                        {"id": "other", "online": True, "snapshot": {"ready": True, "generation": "host-2"}},
+                        {"id": "node-test", "online": self.attempts > 1,
+                         "snapshot": {"ready": self.attempts != 3,
+                                      "generation": "host-1" if self.attempts < 3 else "host-2"}}]}
+                if path == "/api/ready":
+                    self.ready_calls += 1
+                    return {"ready_nodes": 2}
+                raise AssertionError(path)
+
+            def wait(self, check, seconds):
+                for _ in range(4):
+                    if check():
+                        return
+                raise TimeoutError("Host generation did not sync")
+
+        operations = Operations()
+        activated_host({"host_port": 3101, "server_port": 3100}, operations, 1)
+        self.assertEqual(operations.attempts, 4)
+        self.assertEqual(operations.ready_calls, 1)
+
     def test_retired_runtime_error_on_old_host_allows_ready_candidate_host(self):
         record = {"id": "rel-new", "server_port": 3100, "host_port": 3101,
                   "runtime_port": 3102}

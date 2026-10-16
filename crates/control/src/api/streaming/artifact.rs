@@ -24,13 +24,37 @@ pub async fn download(
 ) -> Response {
     let file = query.file.unwrap_or_else(|| "output.txt".into());
     let index = match state.fleet.index(&id).await {
-        Ok(Some(index)) if matches!(index.kind, ExecutionKind::Dag | ExecutionKind::Project) => {
-            index
-        }
-        Ok(Some(_)) => return response(RpcReply::error(400, "artifacts require a DAG execution")),
+        Ok(Some(index)) => index,
         Ok(None) => return response(RpcReply::error(404, "execution id not found")),
         Err(error) => return response(RpcReply::error(500, format!("index: {error:#}"))),
     };
+    let supported = matches!(
+        index.kind,
+        ExecutionKind::Dag
+            | ExecutionKind::Project
+            | ExecutionKind::Brain
+            | ExecutionKind::Operator
+    );
+    let managed = if matches!(
+        index.kind,
+        ExecutionKind::Agent | ExecutionKind::Team | ExecutionKind::Todos
+    ) {
+        match state.fleet.assignment(&id).await {
+            Ok(Some(assignment)) => {
+                matches!(
+                    assignment.request.input["schema_version"].as_u64(),
+                    Some(4..=7)
+                ) && assignment.request.input["brain_layered"].is_object()
+            }
+            Ok(None) => false,
+            Err(error) => return response(RpcReply::error(500, format!("assignment: {error:#}"))),
+        }
+    } else {
+        false
+    };
+    if !supported && !managed {
+        return response(RpcReply::error(400, "execution does not expose artifacts"));
+    }
     let first = fetch(&state, &index, &query.step, query.index, &file, 0, None).await;
     let first = match decode_reply(first, 0, None, None) {
         Ok(chunk) => chunk,

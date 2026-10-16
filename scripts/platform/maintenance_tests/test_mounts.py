@@ -1,3 +1,4 @@
+import configparser
 import json
 from pathlib import Path
 import tempfile
@@ -9,6 +10,19 @@ from fixtures import Fixture
 
 
 class MountTests(unittest.TestCase):
+    def test_resource_mounts_pull_in_exporter_without_propagating_its_stop(self):
+        for port in (2049, 2050, 2051):
+            with self.subTest(port=port):
+                unit = configparser.ConfigParser(interpolation=None)
+                unit.read_string(mounts.unit({'path': f'/mnt/resource-{port}', 'port': port}))
+                resource = 'opencoder-resources.service'
+                self.assertIn(resource, unit['Unit']['Wants'].split())
+                self.assertIn(resource, unit['Unit']['After'].split())
+                for relationship in ('Requires', 'BindsTo', 'PartOf', 'Requisite'):
+                    self.assertNotIn(resource, unit['Unit'].get(relationship, '').split())
+                self.assertEqual(unit['Mount']['What'], '127.0.0.1:/')
+                self.assertIn(f'port={port}', unit['Mount']['Options'].split(','))
+
     def test_identical_stacked_read_only_mounts_are_accepted_but_conflicts_rejected(self):
         operations = Mock()
         row = {'target': '/mnt/agents', 'source': '127.0.0.1:/', 'fstype': 'nfs', 'options': 'ro,port=2049'}

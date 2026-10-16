@@ -38,7 +38,7 @@ pub(super) fn advertise_v4(h: &Harness) {
     h.node
         .set_capability_reply(opencoder_core::fleet::RpcReply::ok(json!({
             "compatible": true,
-            "features": ["dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7", "brain_contracts_v1", "brain_context_budget_v1"]
+            "features": ["execution_io_v1", "dag_container_v1", "dag_dynamic_v1", "brain_scheduler_v3", "brain_scheduler_v7", "brain_contracts_v1", "brain_context_budget_v1"]
         })));
 }
 

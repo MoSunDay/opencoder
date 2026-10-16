@@ -133,7 +133,9 @@ pub fn spawn_nfs_server(opts: &NfsServerOpts) -> anyhow::Result<NfsServerHandle>
 /// before the `done` flag flips.
 fn spawn_listener(root: PathBuf, opts: &NfsServerOpts) -> anyhow::Result<NfsServerHandle> {
     let fs: ReadOnlyAgentsFs = agents_fs(root.clone());
-    let transport_root = root.clone();
+    // ACL RPCs receive the opaque handles returned by the NFS backend. Share
+    // its registry so resolving those handles never scans the exported tree.
+    let transport_fs = fs.clone();
     let bind = format!("{}:{}", opts.host, opts.port);
     let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<SocketAddr>>();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
@@ -174,7 +176,7 @@ fn spawn_listener(root: PathBuf, opts: &NfsServerOpts) -> anyhow::Result<NfsServ
                 tokio::select! {
                     biased;
                     _ = shutdown_rx.changed() => {}
-                    res = transport::serve(frontend, backend, transport_root) => {
+                    res = transport::serve(frontend, backend, transport_fs) => {
                         if let Err(error) = res { tracing::warn!(%error, "NFS ACL transport terminated"); }
                     }
                     res = listener.handle_forever() => {

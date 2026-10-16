@@ -165,6 +165,9 @@ pub(super) fn render(
                 if !mounts.iter().any(|mount| mount["destination"] == guest) {
                     bind(&rootfs, &mut mounts, &launch.home, guest, true)?;
                 }
+                if let Some(startup) = &launch.startup {
+                    startup.prepare(root, &step.name, &rootfs, &mut mounts)?;
+                }
             }
         }
     }

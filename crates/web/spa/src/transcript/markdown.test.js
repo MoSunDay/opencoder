@@ -37,4 +37,14 @@ describe('TUI Say preview and body use the same rendered lines', () => {
     expect(texts(markdownRows('<script>alert(1)</script>\n\n**safe**'))).toEqual(['safe']);
     expect(document.querySelector('script')).toBeNull();
   });
+  it('retains readable Session text when the Markdown parser lacks browser APIs', () => {
+    const at = Object.getOwnPropertyDescriptor(Array.prototype, 'at');
+    Object.defineProperty(Array.prototype, 'at', { configurable: true, value: undefined });
+    try {
+      const p = sayPresentation(say('# 会话记录\n**执行细节**\n<script>alert(1)</script>'));
+      expect(p.preview).toContain('会话记录');
+      expect(texts(p.rows).join('\n')).toContain('执行细节');
+      expect(document.querySelector('script')).toBeNull();
+    } finally { Object.defineProperty(Array.prototype, 'at', at); }
+  });
 });

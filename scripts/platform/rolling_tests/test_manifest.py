@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.config import Settings
-from rolling.manifest import resources, brain_preflight, compatible, verify
+from copy import deepcopy
+from rolling.manifest import resources, brain_preflight, compatible, verify, execution_io, writer_preflight, _installer
 import json
 
 
@@ -58,7 +59,7 @@ class ResourceTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             record = {'assignment': {'request': {'id': 'active', 'kind': 'dag'}, 'index': {'status': 'running'}}}
             path.write_text(json.dumps(record))
-            settings = Settings(root, root, root, root, root / 'token')
+            settings = Settings(root, root / 'token')
             original = path.read_bytes()
             with self.assertRaisesRegex(ValueError, 'DAG migration blocked.*active'):
                 brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(root)}])
@@ -85,7 +86,7 @@ class ResourceTests(unittest.TestCase):
             path.write_text(json.dumps({'annotations': None, 'assignment': {
                 'request': {'id': 'stale', 'kind': 'dag'}, 'index': {'status': 'interrupted'}}}))
             original = path.read_bytes()
-            settings = Settings(root, root, root, root, root / 'token', legacy_agent_data=legacy)
+            settings = Settings(root, root / 'token', legacy_agent_data=legacy)
             brain_preflight(settings, {'protocol_version': 10}, [{'runtime_data': str(runtime)}])
             self.assertEqual(path.read_bytes(), original)
             for releases in ([], [{'runtime_data': str(legacy)}]):
@@ -97,7 +98,7 @@ class ResourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             runtime = root / 'runtime'
-            settings = Settings(root, root, root, root, root / 'token')
+            settings = Settings(root, root / 'token')
             originals = {}
             for version in (4,):
                 for status in ('pending', 'running', 'idle'):
@@ -118,7 +119,7 @@ class ResourceTests(unittest.TestCase):
             root = Path(directory)
             path = root / 'brain' / 'brain-v4' / 'execution.json'
             path.parent.mkdir(parents=True)
-            settings = Settings(root, root, root, root, root / 'token')
+            settings = Settings(root, root / 'token')
             for legacy in ({'_brain': {'schema_version': 1}}, {'_brain': {'schema_version': 2}},
                            {'brain_scheduler': {}},
                            {'brain_receipt': {}}, {'playbook_receipt': {}}):
@@ -139,7 +140,7 @@ class ResourceTests(unittest.TestCase):
             runtime = root / 'runtime'
             path = runtime / 'brain' / 'brain-old' / 'execution.json'
             path.parent.mkdir(parents=True)
-            settings = Settings(root, root, root, root, root / 'token')
+            settings = Settings(root, root / 'token')
             for version in (1, 2, 3, 5, None):
                 record = {'assignment': {'request': {'id': 'brain-old', 'kind': 'brain', 'input': {'schema_version': version}}, 'index': {'status': 'idle'}}}
                 path.write_text(json.dumps(record))
@@ -156,7 +157,7 @@ class ResourceTests(unittest.TestCase):
             root = Path(directory)
             path = root / 'brain' / 'brain-retained' / 'execution.json'
             path.parent.mkdir(parents=True)
-            settings = Settings(root, root, root, root, root / 'token')
+            settings = Settings(root, root / 'token')
             for candidate, active in ((5, 4), (4, 5), (6, 5), (5, 6)):
                 record = {'assignment': {'request': {'id': 'brain-retained', 'kind': 'brain',
                     'input': {'schema_version': active}}, 'index': {'status': 'idle'}}}
@@ -176,7 +177,7 @@ class ResourceTests(unittest.TestCase):
     def test_every_reported_mount_must_be_verified_local_storage(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            settings = Settings(root, root, root, root, root / 'token', min_memory_mb=1)
+            settings = Settings(root, root / 'token', min_memory_mb=1)
             with patch('rolling.manifest.shutil.disk_usage', return_value=SimpleNamespace(free=2**40)):
                 for output in ['ext4\n', 'ext4\next4\n', 'ext4\nxfs\n']:
                     with self.subTest(output=output), patch('subprocess.run', return_value=SimpleNamespace(stdout=output)):
@@ -185,6 +186,72 @@ class ResourceTests(unittest.TestCase):
                     with self.subTest(output=output), patch('subprocess.run', return_value=SimpleNamespace(stdout=output)):
                         with self.assertRaisesRegex(ValueError, 'verified local storage'):
                             resources(settings, {'release_id': 'candidate', 'files': {}})
+
+
+def release(identifier, io=None):
+    value = {
+        'release_id': identifier, 'protocol_version': 10, 'brain_schema_version': 7,
+        'compatibility': {'protocol': {'min': 1, 'max': 1}, 'data_format': {'min': 9, 'max': 9}},
+    }
+    if io is not None:
+        value['execution_io'] = io
+        if io.get('writer') == 1:
+            value['compatibility']['data_format'] = {'min': 10, 'max': 10}
+    return value
+
+
+class ExecutionIoTests(unittest.TestCase):
+    def setUp(self):
+        self.legacy = release('legacy')
+        self.bridge = release('bridge', {'reader': 1, 'writer': 0})
+        self.writer = release('writer', {'reader': 1, 'writer': 1})
+
+    def test_forward_requires_a_reader_baseline_before_writer(self):
+        writer_preflight(self.bridge, self.legacy)
+        with self.assertRaisesRegex(ValueError, 'reader bridge'):
+            writer_preflight(self.writer, self.legacy)
+        writer_preflight(self.writer, self.bridge)
+        compatible(self.writer, [self.legacy, self.bridge])
+
+    def test_rollback_bridge_reads_new_intents_but_legacy_target_is_rejected(self):
+        retained = [self.legacy, self.bridge, self.writer]
+        compatible(self.bridge, retained)
+        with self.assertRaisesRegex(ValueError, 'cannot read execution IO'):
+            compatible(self.legacy, retained)
+        compatible(self.legacy, [self.legacy, self.bridge])
+
+    def test_legacy_resources_remain_compatible(self):
+        compatible(self.writer, [release('resource-service')])
+
+    def test_new_writer_cannot_mislabel_its_durable_format_for_legacy_tools(self):
+        forged = deepcopy(self.writer)
+        forged['compatibility']['data_format'] = {'min': 9, 'max': 9}
+        with self.assertRaisesRegex(ValueError, 'handoff format 10'):
+            compatible(forged, [self.bridge])
+        forged = deepcopy(self.writer)
+        forged.pop('execution_io')
+        with self.assertRaisesRegex(ValueError, 'format 10 requires'):
+            compatible(self.bridge, [forged])
+
+    def test_bad_or_invented_protocol_metadata_fails_closed(self):
+        self.assertEqual(execution_io(self.legacy), {'reader': 0, 'writer': 0})
+        for value in [None, {}, {'reader': True, 'writer': 0}, {'reader': 0, 'writer': 1},
+                      {'reader': 2, 'writer': 1}, {'reader': 1, 'writer': '0'}]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                execution_io(release('bad', value) if value is not None else {'execution_io': None})
+
+    def test_manifest_must_match_the_compiled_protocol_metadata(self):
+        info = {'release_compatibility': self.bridge['compatibility'],
+                'brain_schema_version': 7, 'execution_io': self.bridge['execution_io']}
+        with patch.object(_installer, 'verify_bundle', return_value=self.bridge), \
+                patch.object(_installer, 'bundle_names', return_value=_installer.NAMES), \
+                patch.object(_installer, 'build_info', return_value=info):
+            self.assertEqual(verify(Path('bridge')), self.bridge)
+            forged = deepcopy(self.bridge)
+            forged['execution_io']['writer'] = 1
+            with patch.object(_installer, 'verify_bundle', return_value=forged), \
+                    self.assertRaisesRegex(ValueError, 'compiled binary'):
+                verify(Path('bridge'))
 
 
 if __name__ == '__main__':

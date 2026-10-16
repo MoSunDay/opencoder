@@ -32,6 +32,6 @@ export function SortableRow({ style, ...props }) {
 export function RowDragHandle({ title }) {
   const { attributes, listeners, setActivatorNodeRef, disabled } = useContext(Handle);
   return <Button {...attributes} {...listeners} ref={setActivatorNodeRef} disabled={disabled} type="text" size="small"
-    className="project-row-drag" aria-label={`拖动专项 ${title}`} title="拖动调整专项顺序" icon={<HolderOutlined />}
+    className="project-row-drag" aria-label={`拖动子项 ${title}`} title="拖动调整子项顺序" icon={<HolderOutlined />}
     onClick={(event) => event.stopPropagation()} />;
 }

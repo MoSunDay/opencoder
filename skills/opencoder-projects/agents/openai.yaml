@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenCoder 项目管理"
+  short_description: "使用原生 CLI 管理 OpenCoder 项目、专项和 TODO，读取关联执行上下文"
+  default_prompt: "使用 $opencoder-projects 查看和维护项目、专项及 TODO，并按需读取关联执行的 Session 上下文。"

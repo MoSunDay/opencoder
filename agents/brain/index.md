@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 # brain 模块
 
@@ -12,7 +12,11 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 
 [Control gateway](../../crates/control/src/api/brain_runs/v4/gateway.rs) 解析实际输入，缺失引用或字段以 422 回执结束该次派发，原因与操作终态一同持久化并重新唤醒大脑；临时不可用继续重试。[Worker 输出适配](../../crates/worker/src/brain/v4/output.rs) 向大脑传递完整结构化结果，`summary` 不能覆盖其他字段。叶子能力的成功决策证据限 16 KiB；缺失必填输出或超限转为 Error，完整结果保留在子执行，失败上下文明确标记省略部分。Done 仅表示能力执行结束，里程碑是否达标由大脑判断。
 
-Brain 管理的执行各有工作区，见 [工作区解析](../../crates/worker/src/brain/workdir.rs)；跨执行的代码版本和产物需要显式传递。DAG 从 `layered_inputs` 取得命名输入及二进制参数。原生闭环与版本传递见 [brain_closed_loop.rs](../../crates/worker/tests/brain_closed_loop.rs)，输出和拒绝回执见 [brain_contracts.rs](../../crates/worker/tests/brain_contracts.rs)、[brain_dispatch_failures.rs](../../crates/worker/tests/brain_dispatch_failures.rs)。
+一次根 run 独立保存 context 和执行索引，各能力用自己的工作区并通过输入、输出与文件引用交接。[引用校验](../../crates/brain/src/layered/validate.rs) 对普通及共享目录计划统一要求本次 run 中该逻辑节点最新 activation 的终态，失败证据也可绑定。执行绑定默认读取 output，`source: artifacts` 读取文件索引；两者都使用 JSON Pointer。Control 从所属节点读取完整结果及引用并放入 `summaries`、`execution_artifacts`，Worker 校验引用的执行归属并计入容量。
+
+叶子输出与文件引用合计限 16 KiB；[Worker 索引](../../crates/worker/src/brain/output/index.rs) 将较大索引保存为带内容摘要的清单引用，嵌套 Brain 通过清单交接子文件。清单只压缩索引，保留结构化成功证据；无文件时为空数组，缺失、摘要不符、路径逃逸或软链接会形成执行错误。完整链路见 [brain_io](../../crates/worker/tests/brain_io/main.rs)。
+
+Brain 默认各执行独立工作区；计划 `shared_workspace: true` 时仅允许 Operator，在根节点共享任务目录并按 activation 留存证据，`adjacent_only: true` 则强制只退回相邻上一层或本层。路径与归属由 [共享工作区](../../crates/worker/src/brain/workspace/mod.rs) 在受理时冻结，见 [工作区解析](../../crates/worker/src/brain/workdir.rs)；跨执行的代码版本和产物需要显式传递。DAG 从 `layered_inputs` 取得完整命名输入及二进制参数，恢复拒绝保存输入漂移。新根 Brain 和托管子执行要求 `execution_io_v1`，先升级 Worker 再启用 Server。原生闭环与版本传递见 [brain_closed_loop.rs](../../crates/worker/tests/brain_closed_loop.rs)，输出和拒绝回执见 [brain_contracts.rs](../../crates/worker/tests/brain_contracts.rs)、[brain_dispatch_failures.rs](../../crates/worker/tests/brain_dispatch_failures.rs)。
 
 - `crates/core/src/brain/layered/`：计划、运行、操作与决策协议。
 - `crates/core/src/brain/capability.rs`：能力描述及输入引用。

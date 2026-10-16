@@ -20,6 +20,8 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
+mod declarations;
+pub use declarations::parse_declarations;
 
 /// Cap for output text carried inside `step_done` event payloads (UI
 /// preview only; full artifacts stay on the node).
@@ -47,6 +49,7 @@ pub fn reserved_step_name(name: &str) -> bool {
             | "rootfs-upper"
             | "rootfs-work"
             | "resources"
+            | "brain-result"
     )
 }
 
@@ -230,6 +233,18 @@ mod tests {
         // Traversal attempts fail BEFORE any path is built.
         assert!(step_dir(root, "01R", "../escape").is_err());
         assert!(run_root(root, "../etc").is_err());
+    }
+
+    #[test]
+    fn managed_manifest_step_name_cannot_shadow_business_step_artifacts() {
+        assert!(reserved_step_name("brain-result"));
+        let spec: crate::DagSpec = serde_json::from_value(json!({"name":"conflicting-step",
+            "steps":[{"name":"brain-result","kind":{"type":"agent","prompt":"work"}}]}))
+        .unwrap();
+        assert!(crate::validate(&spec)
+            .unwrap_err()
+            .iter()
+            .any(|error| error.contains("reserved")));
     }
 
     #[test]

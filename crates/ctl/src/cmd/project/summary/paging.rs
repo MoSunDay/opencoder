@@ -172,9 +172,20 @@ fn save(result: Result<Value>, source: &str, issues: &mut Vec<Value>) -> Value {
     }
 }
 
-pub(super) async fn execution(ctx: &Ctx, id: &str, kind: &str, issues: &mut Vec<Value>) -> Value {
+pub(in crate::cmd::project) async fn execution(
+    ctx: &Ctx,
+    id: &str,
+    kind: &str,
+    issues: &mut Vec<Value>,
+) -> Value {
     let base = format!("/api/executions/{}", http::urlencode(id));
     let detail = save(read(ctx, RequestPlan::get(&base)).await, &base, issues);
+    let resolved_kind = detail["execution"]["kind"]
+        .as_str()
+        .or_else(|| detail["request"]["kind"].as_str())
+        .unwrap_or(kind)
+        .to_owned();
+    let kind = resolved_kind.as_str();
     let result_path = format!("{base}/result");
     let conclusion = save(
         read(ctx, RequestPlan::get(&result_path)).await,
@@ -201,7 +212,7 @@ pub(super) async fn execution(ctx: &Ctx, id: &str, kind: &str, issues: &mut Vec<
             }
         }
     }
-    let mut evidence = json!({"detail":detail,"conclusion":conclusion,"events":events});
+    let mut evidence = json!({"kind":kind,"detail":detail,"conclusion":conclusion,"events":events});
     if matches!(kind, "agent" | "operator") {
         evidence["messages"] = save(
             messages(ctx, &base).await,

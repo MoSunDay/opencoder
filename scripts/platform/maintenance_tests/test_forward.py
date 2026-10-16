@@ -55,12 +55,15 @@ class ForwardTests(unittest.TestCase):
             fixture.candidate = bundle_manifest('fix', 2)
             fixture.ingress_workers = lambda: []
             with fixture.patches(), patch.object(deployment.probes, 'ready'), \
+                    patch.object(deployment.probes, 'activated_host') as activated, \
                     patch.object(deployment, 'retire_server'), \
                     patch.object(controller.manifest._installer, 'stage_bundle', return_value=fixture.bundle):
                 intent = controller.stage(fixture.settings, fixture.bundle, maintenance=True)
                 self.assertEqual(intent['release_id'], 'fix')
                 result = runner.run(fixture.settings, 'deploy--new', fixture)
                 self.assertEqual(result['phase'], 'complete')
+                activated.assert_called_once()
+                self.assertEqual(activated.call_args.args[0]['id'], 'fix')
             journal = Journal(fixture.settings.state_dir).data
             self.assertEqual(journal['current'], 'fix')
             self.assertEqual(journal['maintenance']['target'], 'new')

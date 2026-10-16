@@ -21,26 +21,10 @@ pub struct Provider {
     pub token_file: PathBuf,
 }
 
-async fn provider(state: &AppState) -> anyhow::Result<Provider> {
-    let value = state
-        .fleet
-        .definition(NAMESPACE, "current")
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("resource admission provider is not configured"))?;
-    Ok(serde_json::from_value(value)?)
-}
+pub mod providers;
 
 pub async fn save(State(state): State<Arc<AppState>>, Json(value): Json<Provider>) -> Response {
-    if !value.token_file.is_absolute()
-        || !reqwest::Url::parse(&value.endpoint).is_ok_and(|url| {
-            matches!(url.scheme(), "http" | "https")
-                && url.host_str().is_some()
-                && url.username().is_empty()
-                && url.password().is_none()
-                && url.query().is_none()
-                && url.fragment().is_none()
-        })
-    {
+    if !providers::valid(&value) {
         return api::error_400("invalid resource provider configuration".into());
     }
     match state
@@ -60,8 +44,8 @@ pub async fn get(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-async fn call(state: &AppState, body: Value) -> anyhow::Result<Value> {
-    let config = provider(state).await?;
+async fn call(state: &AppState, id: &str, body: Value) -> anyhow::Result<Value> {
+    let config = providers::resolve(state, id).await?;
     let token = tokio::fs::read_to_string(config.token_file).await?;
     let response = reqwest::Client::builder()
         .no_proxy()
@@ -94,6 +78,7 @@ pub(crate) async fn ready(state: &AppState, assignment: &Assignment) -> anyhow::
     anyhow::ensure!(request.is_object(), "resource request must be an object");
     let value = call(
         state,
+        &assignment.index.id,
         json!({"action":"acquire", "execution_id":assignment.index.id,
         "request":request}),
     )
@@ -143,7 +128,7 @@ async fn invoke(state: Arc<AppState>, id: String, mut input: Value) -> Response 
         input["execution_terminal"] = json!(true);
     }
     input["execution_id"] = json!(assignment.index.id);
-    match call(&state, input).await {
+    match call(&state, &assignment.index.id, input).await {
         Ok(value) => Json(value).into_response(),
         Err(_) => api::response(RpcReply::error(
             503,
@@ -177,7 +162,7 @@ pub(crate) async fn cancel_waiting(
     if receipt.phase != "prepared" {
         return Ok(None);
     }
-    let value = call(state, json!({"action":"inspect","execution_id":id})).await?;
+    let value = call(state, id, json!({"action":"inspect","execution_id":id})).await?;
     if value["allocated"] != false {
         return Ok(None);
     }

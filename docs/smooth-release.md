@@ -1,4 +1,4 @@
-Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
+Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 # 平滑发布
 
@@ -13,24 +13,41 @@ Commit: 347a6bdfee28570f5c5cf9e2e1891d563cdf1bb7
 ```json
 {
   "deployment": {
-    "state_dir": "/data00/opencoder/platform",
-    "server_workdir": "/etc/opencoder/server",
-    "server_data": "/data00/opencoder/server",
+    "state_dir": "/data00/opencoder-platform",
     "server_user": "opencoder-server",
-    "agent_workdir": "/srv/opencoder",
     "legacy_agent_data": "/var/lib/opencoder-node",
     "token_file": "/etc/opencoder/server.token",
     "node_name": "worker-a",
     "max_runs": 20,
     "public_url": "http://127.0.0.1:18081",
     "listen": "0.0.0.0:18081"
-  }
+  },
+  "dag": {"workspace_dir": "/data00/workspace"}
 }
 ```
 
 默认 Host 本地入口为 `127.0.0.1:18082`，资源管理服务为 `127.0.0.1:18084`，版本实例端口从 `3000` 分配。版本端口应位于主机临时客户端端口范围之外，避免预热或休眠期间被客户端连接占用。SQLite 和锁文件必须放在本机本地磁盘。保留现有服务环境配置及原凭证文件，配置和发布清单不包含凭证明文。
 
-`server_data` 传给 Server 的 `--data-dir`；`state_dir` 包含 `host/`、`resources/`、`runtimes/<版本>/`、`releases/` 和 `backups/`。发布工具把每个 Runtime 目录传给 Agent 的 `--data-dir`，DAG 过程文件位于该目录的 `dag/runs/`。两个配置项都应指向已挂载的数据磁盘，并提前设置服务账号权限。已有部署不能仅修改路径后启动空目录：应迁移完整数据、保留节点身份及锁文件，并保持已接受执行记录中的旧路径可访问。
+`deployment.state_dir` 是版本部署唯一的持久化根目录。Server 的数据库固定在 `server/`，服务工作目录和配置固定在 `workspaces/server/`、`workspaces/agent/`；Host、资源服务、Runtime、发布包和备份分别位于 `host/`、`resources/`、`runtimes/<版本>/`、`releases/`、`backups/`。DAG 过程文件继续位于所属 Runtime 的 `dag/runs/`。`server_data`、`server_workdir`、`agent_workdir` 不再接受重复配置。
+
+Server 的环境、工具和 TODO 模板目录通过角色配置 `agent.share_dir` 固定为 `server/.opencoder/share`，由 Server 用户读写。能力列表同样读取这里；部署不依赖 `/var/lib/<服务用户>/.opencoder/share`。准备命令拒绝直接覆盖指向其他目录的配置，已有数据应先核验并迁移，不能只改路径后将空列表视作恢复。
+
+Agent、二进制和 Ontology 正文池位于 `exports/agents/`、`exports/binaries/`、`exports/ontology/`；Node 的只读 NFS 客户端挂载位于 `mounts/agents/`、`mounts/binaries/`、`mounts/workspace/`。源镜像默认位于 `images/dag-rootfs/`，每个 Runtime 仍固定自己的镜像。外部 DAG 源工作区是只读输入，必须已存在并与持久化根分开，不能自动搬入根目录。
+
+受控自定义启动器的运行状态位于 `runners/<启动器>/`。例如 Codex 启动器的锁、账户占用账本与执行回执属于 `runners/codex/`；启动器通过 `deployment_config` 读取同一 `deployment.json` 并派生该路径，不另存一个 `state_dir`。启动器、外部 Codex 安装、凭据目录、账号策略、代理文件和现有 Codex SQLite 库仍是显式外部输入；平台准备命令不会移动或修改它们。迁移已有启动器状态须先暂停新任务，等待所有持有占用记录的进程退出，再整体移动原目录并核对 inode；不能在活动进程仍持有锁时创建另一套账本。
+
+首次置备可先预览，再生成配置与只读挂载 unit：
+
+```bash
+scripts/platform/deploy.sh --config /etc/opencoder/server/opencoder.json --storage-plan
+scripts/platform/deploy.sh --config /etc/opencoder/server/opencoder.json --prepare-storage
+```
+
+预览只输出路径；准备命令只创建根内目录、唯一 `deployment.json`、`workspaces/*/opencoder.json` 与 `install/systemd/*.mount`，不启动服务、不安装或挂载资源、不迁移数据库，也不覆盖已有的不同文件。角色配置不保存 `deployment` 段。先准备完整镜像和资源，核对后安装生成的 mount units。后续使用根下的 `deployment.json` 作为 `--config`，或让 `/etc/opencoder/server/opencoder.json` 软链接到它。已有角色配置提供已设置的模型与外部源工作区，因此部署配置不必再次声明这些路径。即使原根目录为 0700 或进程 umask 为 077，应用需要的根内父目录也会补齐遍历权限；配置文件仍为 0600，Runtime 私有目录不会因此公开。
+
+已有部署不能仅修改 `state_dir` 后启动空目录。迁移必须排空并停止全部写入服务，保存一致性备份，完整迁移数据库及 WAL、Node ID、Host/Runtime 归属、不可变资源、发布包和镜像；已受理任务中固定的绝对路径须保持可访问。不要批量替换执行快照或鉴权数据。Ontology 数据库另有持久化的正文目录绑定：先核验所有 ready `text_revisions` 的文件、大小与 SHA-256，再显式迁移目录绑定。准备命令发现绑定不一致会拒绝，不会自动改库。
+
+实际目录已经符合新布局时，只需从原 `deployment` 声明删除三个重复键，保留原监听、账号、凭证文件和容量，使用同一 `state_dir` 安装新的信号控制器。此操作不修改 `release-state.json`、当前版本、数据库或运行目录，也不要求重启应用。配置不能继续指向已删除的旧根；默认 `/etc` 入口和信号控制器必须同时引用根下同一配置。
 
 ```bash
 # 没有 Nginx 时执行一次；不会启动服务监听。
@@ -52,7 +69,7 @@ scripts/platform/deploy.sh --status
 scripts/platform/deploy.sh --signal --rollback --wait-seconds 300
 ```
 
-Linux 发布包包含四个应用二进制及 `dag-runner`、`agent-step-runner`，附带摘要、`release_id`、协议及数据兼容范围。发布工具核验所有仍运行的版本，取得互斥锁，检查磁盘和可用内存，再依次执行：
+Linux 发布包包含四个应用二进制及 `dag-runner`、`agent-step-runner`、`agent-session-runner`，附带摘要、`release_id`、协议及数据兼容范围。发布工具核验所有仍运行的版本，取得互斥锁，检查磁盘和可用内存，再依次执行：
 
 1. **校验、预热：**启动候选 Runtime，执行确定 ID 的 Linux 二进制探针；启动候选 Host 和 Server，连接并同步完整索引，核验资源可读且导出只读。
 2. **就绪、切换：**先落盘切换意图，再激活 Runtime/Host，graceful reload Nginx。Host 通道按递增交接编号切换；旧 Host 等待各 Server 的完整索引确认及入口确认。
@@ -62,9 +79,13 @@ Linux 发布包包含四个应用二进制及 `dag-runner`、`agent-step-runner`
 
 切换前失败保留当前服务；切换后验证失败回到上一兼容版本。回滚或再发布保留版本时，都启动额外 Server/Host 实例，不等待仍在处理请求的旧实例退出；同一操作中断续跑保持实例和探针身份。已被新版本接收的任务留在新 Runtime。回滚不恢复数据库，不撤销已发生的工具副作用。不兼容版本直接拒绝平滑发布。
 
+执行 IO 的新绑定不改变数据库 schema v39，但需要按 reader → writer 顺序启用。发布包的 `execution_io` 与编译信息一致；先发布格式 9、`{reader:1,writer:0}` 的过渡版本，再发布格式 10、`{reader:1,writer:1}`。格式 10 同时让旧发布脚本拒绝危险回滚。直接从没有 reader 的旧版本启用 writer 会在启动候选前拒绝。保留 writer Runtime 时可以回滚到 reader 过渡版，不能回滚到缺少 reader 的旧 Server；历史 Runtime 不要求重启或迁移。
+
+跨版本定向验收使用 `python3 scripts/acceptance/execution_io_upgrade/main.py --old <旧发布包> --bridge <过渡包> --writer <新包> --rootfs <原生镜像> --legacy-controller <旧代码的scripts/platform/rolling/manifest.py> --data-parent <证据目录>`。它在私有环境运行真实三版本进程，检查旧 context、Create 已接收但回执丢失时的同 ID 重放、新产物绑定跨回滚的实际下载及旧脚本的拒绝行为，不操作线上数据。
+
 ## 不兼容版本的维护发布
 
-当前发布数据契约为 9，存储 schema v38 移除专项自身状态，TODO 看板状态、归属及进度规则保持不变；schema v37 的项目、专项当前概述和概述更新时间继续保留；schema v36 的项目、专项和 TODO 人员关系继续保留；schema v35 的用户与 Token 分表继续保留。迁移保留现有 Token 摘要和创建时间，不设置过期时间、不撤销 Token；旧 `user`、`root` 角色转为只读 `viewer`。项目 TODO 执行关联只保存能力与执行引用，原生 DAG 与独立 Ontology 存储继续使用。旧 Server 不能打开升级后的数据库，格式 1–8 升级到 9 必须走维护发布，不能让新旧 Server 同时写入。普通滚动发布和暂存会在启动候选进程前拒绝从旧格式直接升级。已完成首次迁移的单机安装可用 `--migration-receipt` 查看维护范围，使用 `--migrate` 执行；信号发布可使用维护模式：
+当前存储 schema 为 v39；数据契约 9/10 的 IO 过渡不新增数据库迁移。schema v38 移除专项自身状态，TODO 看板状态、归属及进度规则保持不变；schema v37 的项目、专项当前概述和概述更新时间继续保留；schema v36 的项目、专项和 TODO 人员关系继续保留；schema v35 的用户与 Token 分表继续保留。迁移保留现有 Token 摘要和创建时间，不设置过期时间、不撤销 Token；旧 `user`、`root` 角色转为只读 `viewer`。项目 TODO 执行关联只保存能力与执行引用，原生 DAG 与独立 Ontology 存储继续使用。旧 Server 不能打开升级后的数据库，格式 1–8 升级到 9 必须走维护发布，不能让新旧 Server 同时写入。普通滚动发布和暂存会在启动候选进程前拒绝从旧格式直接升级。已完成首次迁移的单机安装可用 `--migration-receipt` 查看维护范围，使用 `--migrate` 执行；信号发布可使用维护模式：
 
 ```bash
 scripts/platform/deploy.sh --maintenance --stage --bundle /srv/releases/opencoder-native
@@ -88,7 +109,7 @@ Ontology 正文使用第四个只读导出，默认关闭。首次启用时在�
 
 重新开放写入前，`--rollback` 可以停止候选，恢复维护前的项目表、索引和 schema 版本，再恢复资源服务、Host 状态、配置、控制器和入口；已经执行迁移也可以恢复。Server 和资源库的认证表与数据库 inode 保持原值，资源控制文件恢复不覆盖数据库；Ontology 库与正文一起恢复。不一致或备份校验失败时停止恢复。旧 Server 通过项目读写检查和 admission 复开验证后才恢复公共入口。
 
-记录 `writes_open=true` 后拒绝旧备份恢复，避免覆盖新写入。若公共验证失败，可用新的不可变发布 ID，通过 `--maintenance --stage` 或 `--maintenance --signal` 发布与当前协议及数据格式一致的修复版本；修复沿用普通滚动流程，保留最初的封存备份和配置快照。修复中断后须重试已记录的修复候选。维护完成后的滚动发布与回滚仅接受数据契约 9、schema v38 的兼容版本，已停止的旧格式版本不再参与。
+记录 `writes_open=true` 后拒绝旧备份恢复，避免覆盖新写入。若公共验证失败，可用新的不可变发布 ID，通过 `--maintenance --stage` 或 `--maintenance --signal` 发布与当前协议及数据格式一致的修复版本；修复沿用普通滚动流程，保留最初的封存备份和配置快照。修复中断后须重试已记录的修复候选。维护完成后的滚动发布与回滚仅接受当前 schema v39 的兼容版本；数据契约 9/10 还须满足上述 IO reader/writer 检查，已停止的旧格式版本不再参与。
 
 Server 的源工作区必须预先存在，并允许实际资源服务账号读取和进入；预检及资源服务升级都会检查这项权限。维护工具不创建源目录、不修改源目录所有者或权限，也不移动源路径。二进制池、客户端挂载、服务配置文件和会备份恢复的状态目录不能与源工作区重合，也不能互相包含。只有应用管理的二进制池和服务状态目录会自动准备权限。
 
@@ -140,7 +161,11 @@ Project 会话保持稳定的 `project-<todo id>` 归属，首次受理回执按
 scripts/platform/deploy.sh --backup /srv/backups/opencoder-online-001
 ```
 
-在线备份逐库使用 SQLite backup API 并检查完整性，明确标记为独立数据库备份，不能当成跨库同一时刻快照。首次维护窗口另行保存停服后的完整一致性备份，包括嵌套数据库。中断的备份保留在独立 staging 目录；重试不覆盖已有备份。
+在线备份逐库使用 SQLite backup API 并检查完整性，明确标记为独立数据库备份，不能当成跨库同一时刻快照。Server、Host、资源服务与 Runtime 的实际数据库，以及执行 HOME、workspace、写层、会话和项目中的嵌套数据库均保留；Ontology 正文另按数据库绑定复制并验证。在线备份不是完整执行文件或资源池备份。
+
+在线扫描仅在 Runtime 的受管布局内排除固定资源副本、`dag/rootfs` 镜像，以及具有容器回执和 `root.path=rootfs`、`readonly=true` 配置的 DAG `bundle/rootfs`、`rootfs-upper`、`rootfs-work`。真实工作区和 `upper` 写层继续扫描。已知 `.cleared-executions-*` 归档采用相同布局判定，其他目录不能凭同名或深度被排除。清单的 `excluded_database_trees` 记录实际排除范围，避免知识挂载中的历史数据副本被重复遍历。
+
+首次维护窗口另行保存停服后的完整一致性备份，包括执行记录、完整文件树、固定资源和全部嵌套数据库；停服备份不使用在线排除规则。中断的备份保留在独立 staging 目录；重试不覆盖已有备份。
 
 旧 OCI 目录里的字符设备、块设备和管道只复制类型、设备编号及权限，不读取其内容；备份校验和恢复同样核对这些元信息。容量计算按元信息所需空间计入，不能将 `/dev/full` 等设备复制成字节文件。无法归档的 socket 在关闭入口前的容量预检中拒绝。
 

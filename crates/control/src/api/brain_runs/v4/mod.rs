@@ -3,6 +3,7 @@ mod api;
 pub(super) mod catalog;
 pub(crate) mod delivery;
 mod gateway;
+mod io;
 pub(super) mod read;
 mod request;
 pub(crate) mod runtime;

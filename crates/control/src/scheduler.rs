@@ -16,7 +16,8 @@
 //! idempotent end to end. On catch-up only the most recent missed tick
 //! fires — older ticks are recorded as `missed`. Creation, edits and re-enabling
 //! start a new scheduling baseline; ticks before it are never backfilled.
-//! An errored fire retries for up to one hour while its definition is unchanged.
+//! Unresolved errors retry for up to one hour while the definition is unchanged;
+//! durable dispatch rejections retain their failure and wait for the next tick.
 
 use crate::{api, AppState};
 use opencoder_core::{
@@ -152,7 +153,19 @@ async fn fire_due(state: &Arc<AppState>, def: &ScheduleDefRecord) -> anyhow::Res
         }
     }
 
-    let Some(due) = timing::plan_due(&expr, def, last.as_ref(), now) else {
+    // A rejected receipt is final for this execution ID. Replaying it can
+    // only return the saved rejection, even after the node has recovered.
+    let retry_error = match &last {
+        Some(last) if last.status == SCHEDULE_RUN_ERROR && job.kind != ScheduleKind::Brain => {
+            !state
+                .fleet
+                .receipt("execution", &tick_execution_id(job, last.scheduled_for_ms))
+                .await?
+                .is_some_and(|receipt| receipt.phase == "rejected")
+        }
+        _ => true,
+    };
+    let Some(due) = timing::plan_due(&expr, def, last.as_ref(), now, retry_error) else {
         return Ok(());
     };
     if let Some(missed) = due.missed_for_ms {
@@ -164,7 +177,7 @@ async fn fire_due(state: &Arc<AppState>, def: &ScheduleDefRecord) -> anyhow::Res
 
 /// Fire one tick: submit through the existing entry and persist the ledger
 /// row (fired / error). A submission failure lands as an `error` row and
-/// retries on later scans (see `fire_due`); the error also propagates so
+/// retries unless durably rejected (see `fire_due`); the error also propagates so
 /// the manual-fire endpoint (`POST /api/schedules/:id/run`) can surface it.
 async fn fire_tick(
     state: &Arc<AppState>,
@@ -173,7 +186,7 @@ async fn fire_tick(
     now: i64,
 ) -> anyhow::Result<String> {
     state.lifecycle.scheduler.fire_attempt();
-    let execution_id = format!("{}-{}-{}", job.kind.as_str(), job.id, for_ms);
+    let execution_id = tick_execution_id(job, for_ms);
     let (status, failure) = match dispatch(state, job, &execution_id, for_ms).await {
         Ok(()) => (SCHEDULE_RUN_FIRED.to_string(), None),
         Err(error) => (SCHEDULE_RUN_ERROR.to_string(), Some(error.to_string())),
@@ -199,6 +212,10 @@ async fn fire_tick(
         }
         None => Ok(execution_id),
     }
+}
+
+fn tick_execution_id(job: &ScheduleJob, for_ms: i64) -> String {
+    format!("{}-{}-{}", job.kind.as_str(), job.id, for_ms)
 }
 
 /// Manual fire (`POST /api/schedules/:id/run`): submit one tick NOW and

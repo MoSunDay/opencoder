@@ -120,21 +120,26 @@ pub(crate) async fn submit(state: Arc<AppState>, value: Value) -> RpcReply {
         .iter()
         .map(super::view::capability_metadata)
         .collect::<Vec<_>>();
-    let input = json!({"schema_version":LAYERED_SCHEMA_VERSION,"layered_request":request,"layered_intent":value,"plan":value.get("plan"),"capability_scope":scope,"frozen_capabilities":capabilities});
-    let reply = crate::api::executions::submit(
-        &state,
-        CreateExecution {
-            id: id.clone(),
-            kind: ExecutionKind::Brain,
-            target: None,
-            input,
-            node_id: value
-                .get("node_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-        },
-    )
-    .await;
+    let io_version = match super::io::admitted_version(&state, &value).await {
+        Ok(version) => version,
+        Err(error) => return RpcReply::error(400, error.to_string()),
+    };
+    let mut input = json!({"schema_version":LAYERED_SCHEMA_VERSION,"layered_request":request,"layered_intent":value,"plan":value.get("plan"),"capability_scope":scope,"frozen_capabilities":capabilities});
+    super::io::mark(&mut input, io_version);
+    let mut execution = CreateExecution {
+        id: id.clone(),
+        kind: ExecutionKind::Brain,
+        target: None,
+        input,
+        node_id: value
+            .get("node_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    };
+    if let Err(error) = super::io::preserve_claim(&state, &mut execution).await {
+        return RpcReply::error(409, error.to_string());
+    }
+    let reply = crate::api::executions::submit(&state, execution).await;
     run_receipt(&id, reply)
 }
 

@@ -148,6 +148,35 @@ async fn resource_service_publishes_native_versions_to_its_exported_pool() {
             resource_service,
         })
         .unwrap();
+    let anonymous = opencoder_control::build_app_with_auth(
+        server.clone(),
+        Some(token.into()),
+        None,
+        false,
+        false,
+    );
+    let downloaded = call(
+        &anonymous,
+        "GET",
+        "/api/dag/binaries/tool/versions/1/binary.bin",
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(downloaded.0, StatusCode::OK);
+    assert_eq!(downloaded.1, bytes);
+    let denied = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap()
+        .get(format!(
+            "{}/api/dag/binaries",
+            server.lifecycle.platform.get().unwrap().resource_service
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
     let server = opencoder_control::build_app(server, Some(token.into()), false);
     let uploaded = call(
         &server,

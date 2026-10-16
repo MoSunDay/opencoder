@@ -7,6 +7,12 @@ use tokio_tungstenite::accept_async;
 #[path = "tests/heartbeat.rs"]
 mod heartbeat;
 
+#[path = "tests/report_failure.rs"]
+mod report_failure;
+
+#[path = "tests/publication.rs"]
+mod publication;
+
 struct Service {
     records: Vec<ExecutionIndex>,
     indexes_sampled: AtomicBool,
@@ -74,7 +80,10 @@ async fn frames(records: Vec<ExecutionIndex>) -> Vec<NodeFrame> {
     };
     let (mut writer, reader) = futures_mpsc::unbounded();
     let report = prepare_report(&service).await.unwrap();
-    publish_report(&mut writer, report, 7).await.unwrap();
+    let cursor = begin_report(&mut writer, report, 7, false).await.unwrap();
+    for frame in cursor {
+        send(&mut writer, &frame).await.unwrap();
+    }
     drop(writer);
     reader
         .map(|message| match message {
@@ -94,7 +103,8 @@ async fn empty_report_orders_snapshot_begin_and_end() {
         NodeFrame::IndexReport {
             report: IndexReportEnvelope {
                 report_id: 7,
-                part: IndexReportPart::Begin
+                part: IndexReportPart::Begin,
+                ..
             }
         }
     ));
@@ -103,7 +113,8 @@ async fn empty_report_orders_snapshot_begin_and_end() {
         NodeFrame::IndexReport {
             report: IndexReportEnvelope {
                 report_id: 7,
-                part: IndexReportPart::End
+                part: IndexReportPart::End,
+                ..
             }
         }
     ));

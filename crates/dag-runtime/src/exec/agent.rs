@@ -59,7 +59,7 @@ pub(crate) fn build_prompt_with_knowledge(
     };
     let context = serde_json::to_string_pretty(&ctx.context()).unwrap_or_else(|_| "{}".into());
     format!(
-        "{}\n\n上游步骤输出（JSON）：\n{}\n\n{}\n\n如果本步骤需要产出结构化结果，请在最终回复的末尾追加一个 ```json 围栏代码块（fenced code block）包含该 JSON。",
+        "{}\n\n本次运行输入与上游步骤输出（JSON）：\n{}\n\n{}\n\n如果本步骤需要产出结构化结果，请在最终回复的末尾追加一个 ```json 围栏代码块（fenced code block）包含该 JSON。",
         prompt,
         context,
         knowledge_hint(knowledge)

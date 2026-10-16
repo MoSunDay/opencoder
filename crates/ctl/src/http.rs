@@ -130,8 +130,11 @@ fn request(ctx: &Ctx, plan: &RequestPlan) -> reqwest::RequestBuilder {
     let builder = ctx
         .http
         .request(plan.method.clone(), plan.url(&ctx.server))
-        .bearer_auth(&ctx.token)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
+    let builder = match &ctx.token {
+        Some(token) => builder.bearer_auth(token),
+        None => builder,
+    };
     match &plan.body {
         Some(body) => builder.body(serde_json::to_vec(body).expect("serialize body")),
         None => builder,

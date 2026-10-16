@@ -1,4 +1,6 @@
 //! Real Server/Node channel stays live without completing an inventory report.
+mod report_flow;
+mod report_storage;
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use std::sync::{

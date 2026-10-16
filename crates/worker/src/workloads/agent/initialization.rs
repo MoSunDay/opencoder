@@ -19,7 +19,10 @@ pub(super) async fn ensure(
         .get("harness")
         .map(|v| serde_json::from_value(v.clone()))
         .transpose()?;
-    let envs = launch_environment(input, how_append, config_home)?;
+    let mut envs = launch_environment(input, how_append, config_home)?;
+    if let Some(record) = worker.inner.journal.lock().await.records.get(id) {
+        envs.extend(crate::brain::workspace::envs(record)?);
+    }
     opencoder_core::agent::scope::with_root(
         config.agent.agents_dir.clone(),
         opencoder_session::harness::initialize(

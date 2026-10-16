@@ -2,25 +2,44 @@
 use super::report::CompleteReport;
 use crate::AppState;
 use axum::extract::ws::Message;
-use futures::{Sink, SinkExt};
 use opencoder_core::fleet::{ExecutionCommand, NodeOperation, ServerFrame};
 
-pub(super) async fn finish<S>(
+pub(super) async fn acknowledge(
+    sender: &tokio::sync::mpsc::Sender<super::socket_io::Acknowledgement>,
+    report_id: u64,
+    sequence: u64,
+) -> anyhow::Result<()> {
+    let frame = ServerFrame::Call {
+        request_id: format!("report-ack-{report_id}-{sequence}"),
+        operation: NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: opencoder_core::fleet::INDEX_REPORT_ACK_ACTION.into(),
+                input: serde_json::json!({"report_id":report_id,"sequence":sequence}),
+            },
+        },
+    };
+    super::socket_io::acknowledge(sender, Message::Text(serde_json::to_string(&frame)?)).await
+}
+
+pub(super) async fn finish(
     state: &AppState,
     id: &str,
     generation: &str,
     sequence: u64,
     complete: &CompleteReport,
-    writer: &mut S,
-) -> anyhow::Result<bool>
-where
-    S: Sink<Message> + Unpin,
-    S::Error: std::error::Error + Send + Sync + 'static,
-{
+    acknowledgements: &tokio::sync::mpsc::Sender<super::socket_io::Acknowledgement>,
+) -> anyhow::Result<bool> {
     if !super::handoff_report::apply(state, id, generation, sequence, complete).await? {
         return Ok(false);
     }
-    if complete.initial && generation.starts_with("host-") {
+    if let Some(message) = handoff(state, generation, complete.initial)? {
+        super::socket_io::acknowledge(acknowledgements, message).await?;
+    }
+    Ok(true)
+}
+
+fn handoff(state: &AppState, generation: &str, initial: bool) -> anyhow::Result<Option<Message>> {
+    if initial && generation.starts_with("host-") {
         let server = state
             .lifecycle
             .platform
@@ -36,21 +55,16 @@ where
                 },
             },
         };
-        // Applying the report makes this node schedulable. Concurrent RPCs
-        // may already fill the outgoing queue, whose sole consumer is our
-        // socket loop. Awaiting an enqueue here would deadlock that consumer.
+        // This separate bounded channel bypasses a full RPC queue and waits
+        // for the transport's actual write before finishing the report.
         let text = serde_json::to_string(&frame)?;
         anyhow::ensure!(
             text.len() <= opencoder_core::fleet::MAX_FRAME_BYTES,
             "server frame exceeds limit"
         );
-        tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            writer.send(Message::Text(text)),
-        )
-        .await??;
+        return Ok(Some(Message::Text(text)));
     }
-    Ok(true)
+    Ok(None)
 }
 
 #[cfg(test)]

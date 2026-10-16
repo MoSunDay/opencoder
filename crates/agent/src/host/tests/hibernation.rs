@@ -1,6 +1,134 @@
 use super::*;
 
 #[tokio::test]
+async fn sleeping_inventory_does_not_probe_a_reused_endpoint_or_clear_its_marker() {
+    let root = tempfile::tempdir().unwrap();
+    let host = Host::open(&root.path().join("host"), "node".into(), "test".into(), 2)
+        .await
+        .unwrap();
+    let model = Arc::new(MockChatClient::new());
+    let (asleep_worker, asleep_http) = runtime(&host, root.path(), "asleep", model.clone()).await;
+    host.store.activate_runtime("asleep").await.unwrap();
+    let (active, active_http) = runtime(&host, root.path(), "active", model).await;
+    host.store.activate_runtime("active").await.unwrap();
+    let asleep = host.runtime("asleep").await.unwrap();
+    let mut inventory = host.inventory(&asleep, false).await.unwrap();
+    inventory.indexes.push(ExecutionIndex {
+        id: "dag-historical".into(),
+        node_id: host.registration.id.clone(),
+        kind: ExecutionKind::Dag,
+        status: ExecutionStatus::Done,
+        created_at: 1,
+    });
+    let saved = serde_json::to_value(inventory).unwrap();
+    host.store
+        .put_definition("runtime_sleep", "asleep", &saved)
+        .await
+        .unwrap();
+    asleep_http.abort();
+    let _ = asleep_http.await;
+    let endpoint = asleep.config["endpoint"].as_str().unwrap();
+    let listener = tokio::net::TcpListener::bind(endpoint.trim_start_matches("http://"))
+        .await
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    // The historical port now belongs to another service. Its response must
+    // not be queried to rediscover an explicitly sleeping Runtime.
+    let app = axum::Router::new().route(
+        "/inventory",
+        axum::routing::get(move || {
+            let observed = observed.clone();
+            async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                (
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "different service",
+                )
+            }
+        }),
+    );
+    let unrelated = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let indexes = host.sync_inventory().await.unwrap();
+    assert!(indexes
+        .iter()
+        .any(|index| index.id == "dag-historical" && index.status == ExecutionStatus::Done));
+    assert_eq!(
+        host.store
+            .owner("dag-historical")
+            .await
+            .unwrap()
+            .unwrap()
+            .runtime_id,
+        "asleep"
+    );
+    assert_eq!(
+        host.store
+            .definition("runtime_sleep", "asleep")
+            .await
+            .unwrap(),
+        Some(saved)
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "sleeping endpoints must never be probed"
+    );
+    assert!(host.snapshot().ready);
+    unrelated.abort();
+    active_http.abort();
+    asleep_worker.shutdown().await.unwrap();
+    active.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn unavailable_live_inventory_still_fails_readiness_without_a_sleep_marker() {
+    let root = tempfile::tempdir().unwrap();
+    let host = Host::open(&root.path().join("host"), "node".into(), "test".into(), 2)
+        .await
+        .unwrap();
+    let (worker, http) = runtime(
+        &host,
+        root.path(),
+        "active",
+        Arc::new(MockChatClient::new()),
+    )
+    .await;
+    host.store.activate_runtime("active").await.unwrap();
+    let saved =
+        serde_json::to_value(super::super::runtime::inventory_of(&worker).await.unwrap()).unwrap();
+    http.abort();
+    let _ = http.await;
+    assert!(host.indexes().await.is_err());
+    assert!(!host.snapshot().ready);
+    assert!(host.snapshot().resource_error.is_some());
+    assert!(host
+        .store
+        .definition("runtime_sleep", "active")
+        .await
+        .unwrap()
+        .is_none());
+    host.store
+        .put_definition("runtime_sleep", "active", &saved)
+        .await
+        .unwrap();
+    let error = host.indexes().await.unwrap_err();
+    assert!(error.to_string().contains("requires a retired runtime"));
+    assert!(
+        !host.snapshot().ready,
+        "an active Runtime cannot use final history"
+    );
+    assert_eq!(
+        host.store
+            .definition("runtime_sleep", "active")
+            .await
+            .unwrap(),
+        Some(saved)
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn admission_changes_leave_hibernated_runtimes_stopped() {
     let root = tempfile::tempdir().unwrap();
     let host = Host::open(

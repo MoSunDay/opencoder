@@ -1,10 +1,12 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: a4e0d53645cede306c71663f839ba6e989c21cc3
 
 # project 模块
 
-项目数据与旧执行链的领域模块。`ProjectStore` 保存项目、专项、TODO 看板字段、Tag 定义与关联及 TODO 指派记录。层级为 TODO → 可选专项 → 可选项目；专项使用 `project_initiatives`，TODO 通过 `initiative_id` 关联。每条关联只保存 TODO ID、执行 ID、能力 ID、类型、名称和创建时间；会话、状态与结论由所属执行节点提供。旧 `ProjectService` 的 plan/execute 路径仍属于本模块，不是看板指派入口。
+项目数据与旧执行链的领域模块。`ProjectStore` 保存项目、专项、TODO 看板字段、Tag 定义与关联、TODO 指派记录及独立评论。层级为 TODO → 可选专项 → 可选项目；专项使用 `project_initiatives`，TODO 通过 `initiative_id` 关联。每条关联只保存 TODO ID、执行 ID、能力 ID、类型、名称和创建时间；会话、状态与结论由所属执行节点提供。旧 `ProjectService` 的 plan/execute 路径仍属于本模块，不是看板指派入口。
 
 - 专项没有自身状态；`ProjectInitiativeRecord/Patch` 不含 `status`，完成比例仅按 TODO `board_status` 计算。
+
+网页显示“子项”对应专项 `initiative`，“目标”对应 `detail_md`，“现状”对应 `current_summary`。折叠只在 Web 组件中维护，字段、归属与存储读取沿用现有接口；前端结构见 [web 模块](../web/index.md)。
 
 ## 索引
 - `crates/project/src/` — 旧项目执行入口与领域服务
@@ -16,6 +18,8 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 - [project_links.rs](../../crates/control/src/api/project_links.rs)、[project_links/](../../crates/control/src/api/project_links/) — 关联既有执行并核验能力身份；派发适配器通过既有 Fleet 回执固定能力和请求，复用原生执行入口，无项目执行循环。
 - [executions/results/](../../crates/control/src/api/executions/results/) — 按需从所属节点读取当前结论；离线返回错误，DAG 产物由步骤明细读取。
 - [完成前提](../../crates/store/src/project/acceptance.rs)、[事务核验](../../crates/store/src/libsql_store/project/acceptance.rs) — 验证读取时的任务、能力、执行和依赖仍有效，再修改看板；前提过期由 API 返回 409。
+
+- [评论数据](../../crates/store/src/project/comments.rs)、[评论存储](../../crates/store/src/libsql_store/project/comments.rs) — schema 39 使用递增序号分页，按 TODO、提交用户与请求 ID 保证事务追加幂等；同时核验任务及执行关联，更新任务时间。正文与署名快照不引用用户、能力的可变名称；TODO 删除触发同事务清理，评论不作为执行结果缓存。
 
 ## 相关
 - [项目模块约定](../../rules/07-project-module-contract.md) — 归属、看板、执行关联、实时结果读取与进度规则

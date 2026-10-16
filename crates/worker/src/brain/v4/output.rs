@@ -6,7 +6,7 @@
 use super::parent;
 use crate::{journal::Record, Worker};
 use anyhow::{ensure, Context, Result};
-use opencoder_core::brain::BRAIN_EVIDENCE_MAX_BYTES;
+use opencoder_core::brain::{BrainExecutionSource, BRAIN_EVIDENCE_MAX_BYTES};
 use opencoder_core::fleet::*;
 use serde_json::{json, Value};
 
@@ -20,18 +20,50 @@ pub async fn normalize(
     if !matches!(status, ExecutionStatus::Done | ExecutionStatus::Idle) {
         return Ok((status, result));
     }
+    if !result.is_object() {
+        result = json!({"native_result":result});
+    }
     let (mut output, artifacts) =
-        super::super::output::native_output(worker, record, &result).await?;
+        match super::super::output::native_output(worker, record, &result).await {
+            Ok(values) => values,
+            Err(error) => {
+                result["scheduler_error"] = json!(format!(
+                    "capability output or artifact indexing failed: {error:#}"
+                ));
+                return Ok((ExecutionStatus::Error, result));
+            }
+        };
     if let Some(text) = output.as_str() {
         if let Ok(structured) = serde_json::from_str(text) {
             output = structured;
         }
     }
-    if !result.is_object() {
-        result = json!({"native_result":result});
-    }
     result["scheduler_output"] = output;
-    result["scheduler_artifacts"] = json!(artifacts);
+    if opencoder_core::brain::execution_io_version(&record.assignment.request.input)? == 0 {
+        result["scheduler_artifacts"] = json!(artifacts);
+    } else {
+        match super::super::output::index::bounded(
+            worker,
+            record,
+            &result["scheduler_output"],
+            artifacts.clone(),
+        ) {
+            Ok(files) => result["scheduler_artifacts"] = json!(files),
+            Err(error) => {
+                result["scheduler_artifacts"] = if artifacts.is_empty() {
+                    json!([])
+                } else {
+                    json!([super::super::output::index::publish(
+                        worker,
+                        &record.assignment.index.execution_ref(),
+                        &artifacts
+                    )?])
+                };
+                result["scheduler_error"] = json!(error.to_string());
+                return Ok((ExecutionStatus::Error, result));
+            }
+        }
+    }
     let required: Vec<String> = serde_json::from_value(
         record.assignment.request.input["brain_layered"]["capability"]
             .get("required_outputs")
@@ -85,6 +117,8 @@ pub async fn query(
     } else {
         &record.result
     };
+    let empty = json!([]);
+    let artifacts = record.result.get("scheduler_artifacts").unwrap_or(&empty);
     if action.ends_with("_summary") {
         let text = if record.assignment.index.status != ExecutionStatus::Done {
             failure_evidence(
@@ -101,11 +135,21 @@ pub async fn query(
         // Large leaf outputs are rejected during normalization, and a nested
         // plan's bounded receipt is returned intact as well.
         return Ok(RpcReply::ok(
-            json!({"execution_id":reference.id,"summary":text,"truncated":false}),
+            json!({"execution_id":reference.id,"summary":text,"truncated":false,"artifacts":artifacts}),
         ));
     }
     let path = input["path"].as_str().context("output path required")?;
-    let Some(value) = output.pointer(path) else {
+    let source: BrainExecutionSource = input
+        .get("source")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default();
+    let selected = match source {
+        BrainExecutionSource::Output => output,
+        BrainExecutionSource::Artifacts => artifacts,
+    };
+    let Some(value) = selected.pointer(path) else {
         return Ok(RpcReply::error(
             422,
             format!("output path {path:?} missing"),

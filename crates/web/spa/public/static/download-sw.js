@@ -19,7 +19,7 @@ self.addEventListener('message', (event) => {
   const data = event.data || {};
   const source = event.source;
   if (data.type !== 'opencoder-download' || !source || !data.id
-      || !data.token || !validArtifactPath(data.path, self.location.origin)) {
+      || typeof data.token !== 'string' || !validArtifactPath(data.path, self.location.origin)) {
     event.ports[0]?.postMessage({ ok: false, error: 'invalid download registration' });
     return;
   }
@@ -55,7 +55,7 @@ self.addEventListener('fetch', (event) => {
     }
     return fetch(record.path, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${record.token}` },
+      headers: record.token ? { Authorization: `Bearer ${record.token}` } : {},
       cache: 'no-store',
       credentials: 'same-origin',
       redirect: 'error',

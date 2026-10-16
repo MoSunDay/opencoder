@@ -7,5 +7,7 @@ pub use run::*;
 pub mod resources;
 
 mod capability;
+mod io;
 pub mod layered;
 pub use capability::*;
+pub use io::*;

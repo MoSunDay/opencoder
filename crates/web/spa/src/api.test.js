@@ -6,7 +6,7 @@
 // (store.js touches localStorage at import time; jsdom provides it.)
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiPost, authFetch } from './api.js';
-import { clearCredentials, getState, setCredentials } from './store.js';
+import { clearCredentials, getState, setCredentials, setState } from './store.js';
 
 const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
 vi.stubGlobal('fetch', fetchMock);
@@ -18,6 +18,13 @@ afterEach(() => {
 });
 
 describe('authFetch base routing', () => {
+  it('omits Authorization when the server has disabled authentication', async () => {
+    setCredentials('previous-token', '');
+    setState({ authEnabled: false });
+    await apiPost('/api/project/goals', { title: 'project' });
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    expect(getState().token).toBe('previous-token');
+  });
   it('prefixes the configured server base onto the fetched URL', async () => {
     setCredentials('tok', 'http://10.0.0.9:8080');
     await authFetch('POST', '/api/sessions/s1/prompt', { prompt: 'hi' });

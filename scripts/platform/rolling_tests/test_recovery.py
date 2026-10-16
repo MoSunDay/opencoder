@@ -44,7 +44,7 @@ class RecoveryTests(unittest.TestCase):
         def exercise(fault):
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                settings = Settings(root,root/'work',root/'server',root/'agent',root/'token',
+                settings = Settings(root, root / 'token',
                     bin_dir=root/'bin',systemd_dir=root/'units')
                 journal = Journal(root)
                 journal.data.update(current='r1',phase='complete',releases={
@@ -77,13 +77,13 @@ class RecoveryTests(unittest.TestCase):
     def test_stopped_backup_preserves_nested_databases_and_retry_never_reuses_partial(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            server = root/'server'
+            server = root / 'state/server'
             nested = server/'nested/runtime.db'
             nested.parent.mkdir(parents=True)
             with sqlite3.connect(nested) as connection:
                 connection.execute('CREATE TABLE evidence(value TEXT)')
                 connection.execute("INSERT INTO evidence VALUES ('preserved')")
-            settings = Settings(root/'state',root/'work',server,root/'agent',root/'token')
+            settings = Settings(root / 'state', root / 'token')
             output = root/'backups/recovery'
             with patch('rolling.backup.database',side_effect=OSError('interrupted copy')):
                 with self.assertRaises(OSError):

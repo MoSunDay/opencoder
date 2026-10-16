@@ -24,7 +24,7 @@ export function ProjectsTab({ overview, refresh, onNotice, openProject }) {
     } catch (error) { onNotice(err(error.message)); return false; }
   };
   const remove = async (row) => {
-    try { await apiDel(`/api/project/goals/${encodeURIComponent(row.id)}`); await refresh(); onNotice(ok('项目已删除，专项已转为独立专项')); }
+    try { await apiDel(`/api/project/goals/${encodeURIComponent(row.id)}`); await refresh(); onNotice(ok('项目已删除，子项已转为独立子项')); }
     catch (error) { onNotice(err(error.message)); }
   };
   const toggle = async (row) => {
@@ -34,7 +34,7 @@ export function ProjectsTab({ overview, refresh, onNotice, openProject }) {
   const columns = [
     { title: '项目', key: 'title', width: 220, searchValue: (r) => r.title, render: (_, r) => <Button type="link" className="project-name" onClick={(e) => { e.stopPropagation(); openProject(r.id); }}><TableText>{r.title}</TableText></Button> },
     { title: '状态', key: 'status', width: 100, kind: 'enum', searchValue: (r) => r.status === 'archived' ? '已归档' : '进行中', render: (_, r) => <Tag>{r.status === 'archived' ? '已归档' : '进行中'}</Tag> },
-    { title: '专项数', key: 'groups', width: 90, kind: 'number', searchValue: (r) => r.initiatives?.length || 0, render: (_, r) => r.initiatives?.length || 0 },
+    { title: '子项数', key: 'groups', width: 90, kind: 'number', searchValue: (r) => r.initiatives?.length || 0, render: (_, r) => r.initiatives?.length || 0 },
     { title: 'TODO 数', key: 'todos', width: 100, kind: 'number', searchValue: (r) => r.progress.total, render: (_, r) => r.progress.total },
     { title: '总进度', key: 'progress', width: 170, kind: 'number', searchValue: (r) => r.progress.percent, render: (_, r) => <TodoProgress progress={r.progress} /> },
     ...peopleColumns(),
@@ -44,7 +44,7 @@ export function ProjectsTab({ overview, refresh, onNotice, openProject }) {
       <SummaryHistory compact collection="goals" record={row} refresh={refresh} /><Dropdown menu={{ items: [
       { key: 'edit', label: '编辑', onClick: () => { setEditing(row); setOpen(true); } },
       { key: 'archive', label: row.status === 'archived' ? '激活' : '归档', onClick: () => toggle(row) },
-      { key: 'delete', label: '删除', danger: true, onClick: () => modal.confirm({ title: '删除该项目？', content: '专项变为独立专项，TODO 和执行记录保留；项目 Tag 会重新匹配。', onOk: () => remove(row) }) },
+      { key: 'delete', label: '删除', danger: true, onClick: () => modal.confirm({ title: '删除该项目？', content: '子项变为独立子项，TODO 和执行记录保留；项目 Tag 会重新匹配。', onOk: () => remove(row) }) },
     ] }} trigger={['click']}><EditButton size="small">操作</EditButton></Dropdown></Space> },
   ];
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>

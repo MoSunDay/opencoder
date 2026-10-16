@@ -34,8 +34,7 @@ def bundle_manifest(identifier, version):
 
 class Fixture:
     def __init__(self, root):
-        self.settings = Settings(root / 'state', root / 'server-work', root / 'server',
-                                 root / 'agent-work', root / 'token', server_user='root',
+        self.settings = Settings(root / 'state', root / 'token', server_user='root',
                                  systemd_dir=root / 'units', nginx_include=root / 'nginx.conf',
                                  bin_dir=root / 'bin', min_memory_mb=1)
         self.settings.state_dir.mkdir()
@@ -70,7 +69,7 @@ class Fixture:
         (self.rootfs / 'usr/bin').mkdir(parents=True)
         (self.rootfs / 'workspace').mkdir()
         for workdir in (self.settings.agent_workdir, self.settings.server_workdir):
-            workdir.mkdir()
+            workdir.mkdir(parents=True)
             (workdir / 'opencoder.json').write_text(json.dumps({'dag': {'binary_dir': '/old/binaries'},
                 'llm': {'api_key': 'private-fixture-credential'}}))
         self.desired = ({'dag': {'rootfs_dir': str(self.rootfs), 'binary_dir': '/mnt/binary',

@@ -59,6 +59,8 @@ def deploy(settings, bundle, operations, seconds=90):
         if not permitted(journal.data, candidate['release_id']):
             raise ValueError('unfinished maintenance requires --maintenance resume, corrective release or --rollback before writes reopen')
     candidate = manifest.verify(bundle)
+    if journal.data.get("current"):
+        manifest.writer_preflight(candidate, journal.record(journal.data["current"])["manifest"])
     manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
     manifest.compatible(candidate, manifest.overlapping(journal.data))
     probes.resource_service(settings, candidate, operations)
@@ -126,6 +128,7 @@ def deploy(settings, bundle, operations, seconds=90):
             journal.phase("switching")
             operations.http(f"http://127.0.0.1:{record['host_port']}", f"/runtimes/{identifier}/activate", "POST", {})
             operations.http(f"http://127.0.0.1:{record['host_port']}", "/activate-host", "POST", {})
+            probes.activated_host(record, operations, seconds)
             units.switch_ingress(settings, record, operations)
             operations.http(f"http://127.0.0.1:{record['host_port']}", "/commit-host", "POST", {})
             journal.phase("verifying")
@@ -280,6 +283,7 @@ def rollback(settings, operations, seconds=90):
     journal.save()
     operations.http(host_url, f"/runtimes/{previous}/activate", "POST", {})
     operations.http(host_url, "/activate-host", "POST", {})
+    probes.activated_host(old, operations, seconds)
     journal.data.update(current=previous, candidate=None)
     journal.save()
     units.switch_ingress(settings, old, operations)

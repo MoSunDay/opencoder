@@ -11,11 +11,11 @@ import { ProjectInitiatives } from './initiatives.jsx';
 import { ProjectsTab } from '../projectsTab.jsx';
 import { InitiativesTab } from '../initiativesTab.jsx';
 
-const rows = ['a', 'hidden', 'b'].map((id) => ({ id, title: id === 'hidden' ? '隐藏专项' : `可见专项 ${id}`,
+const rows = ['a', 'hidden', 'b'].map((id) => ({ id, title: id === 'hidden' ? '隐藏子项' : `可见子项 ${id}`,
   todos: [], progress: { total: 0, done: 0, percent: 0 }, goal_title: '项目', summary_updated_at: 1000 }));
 const props = () => ({ projectId: 'p', rows, refresh: vi.fn(), onNotice: vi.fn(), openInitiative: vi.fn() });
 const drag = (active, over) => dnd.end({ active: { id: active }, over: over ? { id: over } : null });
-const order = () => [...screen.getByLabelText('项目内专项表格').querySelectorAll('tr[data-row-key]')].map((row) => row.dataset.rowKey);
+const order = () => [...screen.getByLabelText('项目内子项表格').querySelectorAll('tr[data-row-key]')].map((row) => row.dataset.rowKey);
 beforeEach(() => {
   vi.resetAllMocks(); setIdentity({ name: 'editor', role: 'editor' });
   apiPut.mockResolvedValue({ ok: true });
@@ -26,8 +26,8 @@ it('saves a filtered drag with the full order and prevents repeated saves', asyn
   let finish;
   apiPut.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
   const p = props(); const view = render(<ProjectInitiatives {...p} />);
-  fireEvent.click(screen.getAllByLabelText('筛选专项')[0]);
-  fireEvent.change(screen.getByRole('textbox', { name: '搜索专项' }), { target: { value: '可见' } });
+  fireEvent.click(screen.getAllByLabelText('筛选子项')[0]);
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索子项' }), { target: { value: '可见' } });
   fireEvent.click(screen.getByRole('button', { name: /搜\s*索/ }));
   expect(order()).toEqual(['a', 'b']);
   await act(async () => { drag('a', 'b'); });
@@ -51,7 +51,7 @@ it('restores the original order after failure and ignores cancelled or read-only
   expect(order()).toEqual(['a', 'hidden', 'b']);
   expect(p.onNotice).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('write rejected') }));
   act(() => setIdentity({ name: 'viewer', role: 'viewer' }));
-  for (const handle of screen.getAllByRole('button', { name: /^拖动专项/ })) expect(handle.disabled).toBe(true);
+  for (const handle of screen.getAllByRole('button', { name: /^拖动子项/ })) expect(handle.disabled).toBe(true);
   await act(async () => drag('b', 'a'));
   expect(apiPut).toHaveBeenCalledOnce();
 });
@@ -63,8 +63,8 @@ it.each(['projects', 'initiatives', 'project-initiatives'])('opens history from 
   render(kind === 'projects' ? <ProjectsTab overview={overview} refresh={p.refresh} onNotice={p.onNotice} openProject={open} />
     : kind === 'initiatives' ? <InitiativesTab overview={overview} refresh={p.refresh} onNotice={p.onNotice} openInitiative={open} />
       : <ProjectInitiatives {...p} rows={[rows[0]]} openInitiative={open} />);
-  fireEvent.click(screen.getByRole('button', { name: '概述历史' }));
-  const history = await screen.findByRole('dialog', { name: '概述修改记录' });
+  fireEvent.click(screen.getByRole('button', { name: '现状历史' }));
+  const history = await screen.findByRole('dialog', { name: '现状修改记录' });
   expect(await within(history).findByText('历史正文')).toBeTruthy();
   fireEvent.click(within(history).getByText('历史正文'));
   expect(open).not.toHaveBeenCalled();

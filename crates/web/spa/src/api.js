@@ -11,7 +11,8 @@ function token() {
 export async function authFetch(method, pathAndQuery, bodyObj, opts = {}) {
   const m = String(method).toUpperCase();
   const bodyText = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
-  const headers = { Authorization: 'Bearer ' + token() };
+  const headers = {};
+  if (getState().authEnabled !== false && token()) headers.Authorization = 'Bearer ' + token();
   if (bodyText) {
     headers['content-type'] = 'application/json';
   }

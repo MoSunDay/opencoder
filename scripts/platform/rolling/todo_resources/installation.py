@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import pwd
 import socket
-from ..state import atomic_bytes, write
+from ..state import Journal, atomic_bytes, write
 from ..storage import allow_server_traversal, todos
 from ..units import service
 from .policy import contract, update_config
@@ -142,6 +142,10 @@ def restore(settings, operations):
     policy = settings.state_dir / 'todo-files-policy.json'
     if policy.exists() and json.loads(policy.read_text())['minimum_contract']:
         raise ValueError('TODO uploads were enabled; retain the service and use compatible rollback')
+    journal = Journal(settings.state_dir)
+    current = journal.data.get('current')
+    if current and contract(journal.record(current)['manifest']):
+        raise ValueError('roll back the active TODO Server before restoring its first service installation')
     root = Path(record['after']['files_dir'])
     if root.exists() and any(p.is_file() for p in root.rglob('*')):
         raise ValueError('TODO files exist; installation cannot be removed')

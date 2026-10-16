@@ -15,7 +15,7 @@ export function CreateTodo({ open, overview, initiativeId, onClose, onCreated, o
   const submitting = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState('');
-  const [close, holder] = useCloseGuard({ dirty, busy: saving, onClose });
+  const [close, holder] = useCloseGuard({ dirty, busy: saving, onClose, active: open });
   const create = async (values) => {
     if (!canEdit || submitting.current) return;
     submitting.current = true; setSaving(true); setError('');

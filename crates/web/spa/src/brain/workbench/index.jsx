@@ -7,6 +7,7 @@ import { StatusTag } from '../../ui/statusTag.jsx';
 import { Launch } from './launch.jsx';
 import { Plans } from './plans.jsx';
 import { BrainRunView } from './run.jsx';
+import { replaceLocation } from '../../fleet/navigation/history.js';
 import './style.css';
 export function BrainWorkbench({ onNotice }) {
   const [tab, setTab] = useState('workspace'); const [runCursor, setRunCursor] = useState(null); const [plans, setPlans] = useState([]); const [runs, setRuns] = useState([]); const [capabilities, setCapabilities] = useState([]); const [error, setError] = useState(''); const [runId, setRunId] = useState(() => new URLSearchParams(location.search).get('brain_run')); const [launch, setLaunch] = useState(false); const [initialPlan, setInitialPlan] = useState(null);
@@ -14,7 +15,7 @@ export function BrainWorkbench({ onNotice }) {
   useEffect(() => { reload(); }, [reload, tab]);
   const olderRuns = async () => { try { const page = await apiGet(`/api/brain/runs?cursor_created_at=${runCursor.created_at}&cursor_id=${encodeURIComponent(runCursor.id)}`); setRuns(page.runs); setRunCursor(page.next_cursor || null); } catch (e) { setError(e.message); } };
   const executePlan = (plan) => { setInitialPlan(plan); setLaunch(true); };
-  const back = () => { setRunId(null); const query = new URLSearchParams(location.search); query.delete('brain_run'); history.replaceState(null, '', `${location.pathname}${query.size ? `?${query}` : ''}${location.hash}`); reload(); };
+  const back = () => { setRunId(null); const query = new URLSearchParams(location.search); query.delete('brain_run'); replaceLocation(`${location.pathname}${query.size ? `?${query}` : ''}${location.hash}`); reload(); };
   return <PageShell page="brain">{runId ? <BrainRunView key={runId} id={runId} onBack={back} onNotice={onNotice} /> : <>
     {error && <Alert type="error" showIcon title={error} action={<Button onClick={reload}>重试</Button>} />}
     <Tabs activeKey={tab} onChange={setTab} items={[

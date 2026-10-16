@@ -15,6 +15,7 @@ const snapshot = {
   backlog: [{ id: 't3', title: '未归属任务', draft: '', board_status: 'backlog', tag_ids: [] }],
 };
 beforeEach(() => {
+  window.history.replaceState(null, '', '/');
   Object.values(api).forEach((method) => method.mockReset());
   api.apiGet.mockImplementation((path) => Promise.resolve(path === '/api/project/overview' ? snapshot : path === '/api/project/people' ? { people: [] } : { assignments: [] }));
   api.apiPost.mockResolvedValue({ id: 'created' }); api.apiPatch.mockResolvedValue({ ok: true }); api.apiDel.mockResolvedValue({ deleted: true });

@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_manifest_step_name_cannot_shadow_business_step_artifacts() {
+    fn managed_manifest_step_name_cannot_shadow_custom_step_artifacts() {
         assert!(reserved_step_name("brain-result"));
         let spec: crate::DagSpec = serde_json::from_value(json!({"name":"conflicting-step",
             "steps":[{"name":"brain-result","kind":{"type":"agent","prompt":"work"}}]}))

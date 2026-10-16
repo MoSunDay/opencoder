@@ -1,8 +1,10 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
 
 # OpenCoder 逻辑地图
 
 Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder-cli`（远程管理）、`opencoder-server`（控制面）、`opencoder-agent`（节点执行）。
+
+仓库只保留通用基建实现和说明；具体任务及其上下文通过运行时接入，遵循 [仓库范围约定](rules/08-infrastructure-scope.md)。
 
 抽象口子：`Arc<dyn Store>`、`Arc<dyn ChatStream>`。细节见各模块索引，代码是最终事实。
 
@@ -43,3 +45,4 @@ OpenCoder 能力入口见 [features/index.md](features/index.md)。
 - [rules/04-dag-execution-contract.md](rules/04-dag-execution-contract.md) — DAG 单节点单容器与原生步骤执行约定
 - [rules/06-brain-scheduling-contract.md](rules/06-brain-scheduling-contract.md) — 大脑整层调度、结果评估、返工与恢复约定
 - [rules/07-project-module-contract.md](rules/07-project-module-contract.md) — 项目、专项、TODO 的归属、看板、执行关联与进度约定
+- [rules/08-infrastructure-scope.md](rules/08-infrastructure-scope.md) — 代码、样例、提示词与文档只保留通用基建内容

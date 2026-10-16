@@ -1,4 +1,4 @@
-//! Shared, pure validation of declared business artifacts.
+//! Shared, pure validation of declared task artifacts.
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
 use std::path::{Component, Path};

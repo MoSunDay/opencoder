@@ -1,4 +1,4 @@
-Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
+Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
 
 # OpenCoder 仓库规则索引
 
@@ -13,6 +13,7 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 | 05 | [ui-acceptance.md](05-ui-acceptance.md) | 按改动范围验证页面功能、屏宽、相关 TUI 与成套构建 |
 | 06 | [brain-scheduling-contract.md](06-brain-scheduling-contract.md) | 大脑分层并行、整层评估、返工预算、节点选择、人工引导及恢复约定 |
 | 07 | [project-module-contract.md](07-project-module-contract.md) | 项目、专项、TODO 的归属、看板、执行关联、实时结果读取、进度与标签约定 |
+| 08 | [infrastructure-scope.md](08-infrastructure-scope.md) | 仓库只保留通用基建能力，代码、样例与文档不得带入具体业务信息 |
 
 ## 快速检查清单（每次 PR / commit 前）
 
@@ -21,4 +22,5 @@ Commit: 8bf74a10109dc16c0d087df23e1ea829ed1dd259
 - [ ] 新增 / 修改的公共函数有对应测试（规则 01）
 - [ ] 新增功能在 changelog 中附「功能 → 测试名」映射（规则 02）
 - [ ] 无硬编码密钥 / 凭证
+- [ ] 代码、注释、样例、提示词与文档只描述通用基建，没有具体业务信息或专用逻辑（规则 08）
 - [ ] 新增文件 ≤ 400 行；迭代中文件 ≤ 800 行

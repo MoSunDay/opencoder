@@ -1,9 +1,9 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: a388f28a2e631e962c01d554419cd4fc90476078
 
 # session 模块
 
 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
-接缝：只依赖 `Arc<dyn Store>` 与 `Arc<dyn ChatStream>`，不做 HTTP/终端 IO；steer 打断进行中 turn、queue 等 idle。
+接缝：只依赖 `Arc<dyn Store>` 与 `Arc<dyn ChatStream>`，不做 HTTP/终端 IO；原生 steer 打断进行中 turn、queue 等 idle；启用外部控制协议的启动脚本通过独立控制调用投递 steer，保持主观察器运行。
 
 ## 索引
 - [harness/codex/launch.rs](../../crates/session/src/harness/codex/launch.rs)、[process.rs](../../crates/session/src/harness/codex/process.rs) — 解析启动入口并逐项追加 Codex 参数；每轮通过 `OPENCODER_HARNESS_CONTEXT` 传递会话、线程、输入和工作目录。脚本可准备 Codex PATH，与 Codex 共用取消和超时管理，启动失败不回退；接口见 [启动脚本](../../docs/codex-startup-script.md)。
@@ -24,3 +24,5 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 - [fork.rs](../../crates/session/src/fork.rs) — 派生会话复制类型、消息与 Harness；指定新工作目录时更新目录标识并重建运行资源，Codex 保留来源线程引用。
 - `tests/` — 集成回归（`bash_guard_plan_mode.rs`、`subagent.rs`、`compaction_*` 等），需登录式环境（`HOME`/`SHELL`）
 - [windows_native.rs](../../crates/session/tests/windows_native.rs) — 原生 Windows PowerShell、进程树、Codex 续会话与 junction 搜索去重；支持边界见 [Windows](../../features/windows/index.md)。
+
+- [harness/codex/control/](../../crates/session/src/harness/codex/control/mod.rs) — 可选外部输入协议，持久记录每条实时输入、原父输入和回执。恢复先核对外部发送结果，已转发消息不再进入普通提示词；拒绝明确展示，队列保持轮次边界。

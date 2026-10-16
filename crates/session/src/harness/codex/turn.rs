@@ -21,7 +21,7 @@ pub async fn run_turn(
     };
     let users: Vec<_> = session.messages[offset..]
         .iter()
-        .filter(|m| m.role == Role::User)
+        .filter(|m| m.role == Role::User && !super::control::forwarded(&m.id))
         .cloned()
         .collect();
     if users.is_empty() {
@@ -69,15 +69,28 @@ pub async fn run_turn(
         .as_ref()
         .and_then(|t| t.lock().ok().map(|t| t.clone()))
         .unwrap_or_default();
+    let live_control = super::control::enabled(session);
+    let mut pending = super::control::Pending::default();
+    let mut control_tick = tokio::time::interval(std::time::Duration::from_secs(1));
+    let mut last_event = tokio::time::Instant::now();
     let result: Result<bool> = async {
         loop {
             let line = tokio::select! {
                 biased;
-                _ = hard.cancelled() => return Ok(true),
-                _ = steer.cancelled() => return Ok(true),
-                line = tokio::time::timeout(session.config.stream_idle_timeout(), process.lines.next_line()) => line.context("Codex event stream idle timeout")??,
+                _ = hard.cancelled() => {
+                    if live_control { super::control::cancel(session, on_event).await?; }
+                    return Ok(true);
+                },
+                _ = steer.cancelled(), if !live_control => return Ok(true),
+                _ = control_tick.tick(), if live_control => {
+                    pending.poll(session, on_event).await?;
+                    continue;
+                },
+                _ = tokio::time::sleep_until(last_event + session.config.stream_idle_timeout()) => bail!("Codex event stream idle timeout"),
+                line = process.lines.next_line() => line?,
             };
             let Some(line) = line else { break; };
+            last_event = tokio::time::Instant::now();
             ensure!(line.len() <= 16 * 1024 * 1024, "Codex event exceeds 16 MiB");
             let (next, projection) = decode::decode(decoder.clone(), &line)?;
             decoder = next;
@@ -99,6 +112,13 @@ pub async fn run_turn(
             }
             apply(session, projection, on_event).await?;
             if let Some(error) = &decoder.failed { bail!("Codex: {error}"); }
+        }
+        if live_control {
+            loop {
+                pending.poll(session, on_event).await?;
+                if pending.is_empty() { break; }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
         }
         let (status, mut stderr) = tokio::time::timeout(session.config.stream_idle_timeout(), process.finish()).await.context("Codex exit timed out")??;
         for value in session.harness.envs.values().filter(|v| !v.is_empty()) { stderr = stderr.replace(value, "[redacted]"); }

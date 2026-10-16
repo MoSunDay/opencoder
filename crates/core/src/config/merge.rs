@@ -8,7 +8,8 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         Some(o) => o,
         None => return false,
     };
-    if obj.contains_key("ontology")
+    if obj.contains_key("project")
+        || obj.contains_key("ontology")
         || obj.contains_key("model")
         || obj.contains_key("opencoder_server")
         || obj.contains_key("small_model")
@@ -330,6 +331,13 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 if let Some(parsed) = merge_fields(&cfg.agent.nfs, n) {
                     cfg.agent.nfs = parsed;
                 }
+            }
+        }
+        if let Some(project) = obj.get("project") {
+            let mut merged = serde_json::to_value(&cfg.project).unwrap_or_default();
+            super::project::merge(&mut merged, project);
+            if let Ok(value) = serde_json::from_value(merged) {
+                cfg.project = value;
             }
         }
         if let Some(ontology) = obj.get("ontology") {

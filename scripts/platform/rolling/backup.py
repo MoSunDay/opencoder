@@ -9,6 +9,7 @@ import sqlite3
 import tempfile
 from .state import write
 from .native import ontology
+from .storage import todos
 from .backup_files import opaque, scope, tree
 
 
@@ -69,6 +70,11 @@ def databases(root, output, runtime=False, opaque_files=None, process_files=Fals
 
 
 def snapshot(settings, output, stopped=False, runtime_data=True):
+    with todos.backup_lock(settings.server_data) as todo_root:
+        return _snapshot(settings, output, stopped, runtime_data, todo_root)
+
+
+def _snapshot(settings, output, stopped, runtime_data, todo_root):
     if not runtime_data and not stopped:
         raise ValueError("shared-data maintenance backup requires stopped writers")
     if output.exists():
@@ -79,6 +85,15 @@ def snapshot(settings, output, stopped=False, runtime_data=True):
     destination = output
     output = Path(tempfile.mkdtemp(prefix=f".{output.name}.incomplete-", dir=output.parent))
     selected = roots(settings, runtime_data)
+    # The independent service has no database; preserve ownership and rollback
+    # metadata without placing the token file in this metadata copy.
+    todo_service = settings.state_dir / 'services/todo-resources/installation.json'
+    for name, source in [('installation.json', todo_service),
+                         ('policy.json', settings.state_dir / 'todo-files-policy.json')]:
+        if source.exists():
+            target = output / 'todo-service' / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tree.copy_leaf(source, target)
     for name, root in selected.items():
         if output.is_relative_to(root):
             raise ValueError("backup output cannot be inside a source tree")
@@ -104,6 +119,15 @@ def snapshot(settings, output, stopped=False, runtime_data=True):
             raise ValueError('backup output cannot be inside Ontology files')
         tree.copy_tree(ontology_root, output / 'ontology-files')
         ontology.verify_files(output / 'server/ontology.db', output / 'ontology-files')
+    if todo_root is not None:
+        if output.is_relative_to(todo_root):
+            raise ValueError('backup output cannot be inside TODO files')
+        tree.copy_tree(todo_root, output / 'todo-files')
+        # Online DB backups omit ordinary files; retain this binding explicitly.
+        target = output / 'server/todo-storage.json'
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tree.copy_leaf(settings.server_data / 'todo-storage.json', target)
     files = {}
     for path in output.rglob("*"):
         item = tree.metadata(path)
@@ -126,7 +150,8 @@ def snapshot(settings, output, stopped=False, runtime_data=True):
         "opaque_process_database_files": {f'{name}/{path}': metadata
             for name, copied in opaque_files.items() for path, metadata in copied.items()},
         "runtime_data_included": runtime_data,
-        "ontology_files_root": str(ontology_root) if ontology_root else None})
+        "ontology_files_root": str(ontology_root) if ontology_root else None,
+        "todo_files_root": str(todo_root) if todo_root else None})
     os.rename(output, destination)
     with_parent = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:

@@ -71,15 +71,17 @@ def resource_paths(settings):
 
 def resources(settings, operations):
     config = json.loads((settings.server_workdir / "opencoder.json").read_text())
+    config["todo_storage"] = config.get("project", {}).get("todo_storage", {})
     for section, key, endpoint in (("agent", "nfs", "/api/agents/nfs"),
             ("dag", "nfs", "/api/dag/binaries/nfs"), ("dag", "workspace_nfs", "/api/dag/workspace/nfs"),
-            ("ontology", "nfs", "/api/ontology/nfs")):
+            ("ontology", "nfs", "/api/ontology/nfs"), ("todo_storage", "nfs", "/api/project/todos/nfs")):
         expected = config.get(section, {}).get(key, {})
         if not expected.get("enabled"):
             continue
         if expected.get("read_only", True) is not True:
             raise ValueError("smooth releases require read-only resource exports")
-        status = operations.http(settings.resource_url, endpoint)
+        base = settings.todo_resource_url if section == 'todo_storage' else settings.resource_url
+        status = operations.http(base, endpoint)
         status = status.get("status", status)
         if not status.get("running") or not status.get("read_only"):
             raise ValueError(f"resource export is unavailable or writable: {section}")

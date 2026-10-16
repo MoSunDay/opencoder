@@ -59,6 +59,8 @@ def deploy(settings, bundle, operations, seconds=90):
         if not permitted(journal.data, candidate['release_id']):
             raise ValueError('unfinished maintenance requires --maintenance resume, corrective release or --rollback before writes reopen')
     candidate = manifest.verify(bundle)
+    from . import todo_resources
+    todo_resources.require_candidate(settings, candidate)
     if journal.data.get("current"):
         manifest.writer_preflight(candidate, journal.record(journal.data["current"])["manifest"])
     manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
@@ -104,6 +106,7 @@ def deploy(settings, bundle, operations, seconds=90):
     try:
         if journal.data["phase"] in ("validated", "warming", "failed"):
             journal.phase("warming")
+            todo_resources.prepare(settings, bundle, candidate, operations)
             units.prepare(settings, bundle, record)
             units.validate(settings, record, operations)
             operations.run("systemctl", "daemon-reload")
@@ -225,6 +228,10 @@ def _retire_server(settings, journal, operations, disable):
 
 def rollback(settings, operations, seconds=90):
     journal = Journal(settings.state_dir)
+    from .todo_resources import require_candidate, set_uploads
+    target = journal.data.get('previous')
+    if target:
+        require_candidate(settings, journal.record(target)['manifest'])
     state = journal.data.get('maintenance')
     if state and state['stage'] != 'repairing' and (state['stage'] not in ('complete', 'rolled_back') or
                   (journal.data['current'] == state['target'] and journal.data['previous'] in (None, state['origin']))):
@@ -238,6 +245,8 @@ def rollback(settings, operations, seconds=90):
     if not previous:
         raise ValueError("no compatible previous release is recorded")
     old = journal.record(previous)
+    if (settings.state_dir / 'todo-files-policy.json').exists():
+        set_uploads(settings, False, operations)
     manifest.compatible(old["manifest"], manifest.overlapping(journal.data))
     probes.resource_service(settings, old['manifest'], operations)
     resuming = journal.data["phase"] == "rolling_back" or (

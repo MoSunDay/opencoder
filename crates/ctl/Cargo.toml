@@ -9,6 +9,7 @@ name = "opencoder-cli"
 path = "src/main.rs"
 
 [dependencies]
+tokio-util = { workspace = true, features = ["io"] }
 base64.workspace = true
 opencoder-core.workspace = true
 opencoder-brain.workspace = true

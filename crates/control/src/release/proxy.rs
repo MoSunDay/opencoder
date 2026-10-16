@@ -13,6 +13,7 @@ async fn forward(
     method: reqwest::Method,
     path: &str,
     body: Vec<u8>,
+    bounded: bool,
 ) -> anyhow::Result<Response> {
     let url = reqwest::Url::parse(base)?;
     anyhow::ensure!(
@@ -24,8 +25,13 @@ async fn forward(
         .credential
         .get()
         .ok_or_else(|| anyhow::anyhow!("service credential unavailable"))?;
-    let mut response = reqwest::Client::builder()
-        .no_proxy()
+    let mut client = reqwest::Client::builder().no_proxy();
+    if bounded {
+        client = client
+            .connect_timeout(std::time::Duration::from_secs(2))
+            .timeout(std::time::Duration::from_secs(10));
+    }
+    let mut response = client
         .build()?
         .request(method, format!("{}{path}", base.trim_end_matches('/')))
         .bearer_auth(token)
@@ -67,13 +73,29 @@ pub async fn forward_resources(
     if !binary
         && !matches!(
             path,
-            "/api/agents/nfs" | "/api/dag/workspace/nfs" | "/api/ontology/nfs"
+            "/api/agents/nfs"
+                | "/api/dag/workspace/nfs"
+                | "/api/ontology/nfs"
+                | "/api/project/todos/nfs"
         )
     {
         return next.run(request).await;
     }
-    let Some(platform) = state.lifecycle.platform.get() else {
-        return next.run(request).await;
+    let todo = path == "/api/project/todos/nfs";
+    let base = if todo {
+        match opencoder_core::Config::load(&state.workdir) {
+            Ok(config) => match config.project.todo_storage.nfs_service_url {
+                Some(url) => url,
+                None if state.lifecycle.platform.get().is_none() => return next.run(request).await,
+                None => return unavailable("TODO resource service is not configured"),
+            },
+            Err(error) => return unavailable(&error.to_string()),
+        }
+    } else {
+        let Some(platform) = state.lifecycle.platform.get() else {
+            return next.run(request).await;
+        };
+        platform.resource_service.clone()
     };
     let path = request
         .uri()
@@ -91,10 +113,20 @@ pub async fn forward_resources(
         Ok(body) => body.to_vec(),
         Err(error) => return crate::api::error_400(error.to_string()),
     };
-    match forward(&state, &platform.resource_service, method, &path, body).await {
+    match forward(&state, &base, method, &path, body, todo).await {
         Ok(response) => response,
+        Err(error) if todo => unavailable(&format!("TODO resource service: {error:#}")),
         Err(error) => crate::api::error_500(format!("resource service: {error:#}")),
     }
+}
+
+fn unavailable(message: &str) -> Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        axum::Json(serde_json::json!({"error":message})),
+    )
+        .into_response()
 }
 
 pub async fn status(State(state): State<Arc<AppState>>) -> Response {
@@ -104,7 +136,7 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Response {
         };
         let bytes = tokio::fs::read(platform.state_dir.join("release-state.json")).await?;
         let release: serde_json::Value = serde_json::from_slice(&bytes)?;
-        let response = forward(&state,&platform.host_service,reqwest::Method::GET,"/status",Vec::new()).await?;
+        let response = forward(&state,&platform.host_service,reqwest::Method::GET,"/status",Vec::new(),false).await?;
         anyhow::ensure!(response.status().is_success(), "host status query failed");
         let host: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024).await?)?;
         Ok::<_,anyhow::Error>(serde_json::json!({"instance_release":platform.release_id,"release":release,"host":host,"signal_protocol":if cfg!(unix) { 1 } else { 0 },"retirement_protocol":if cfg!(target_os="linux") { 2 } else { 1 },"retiring":state.lifecycle.retiring.load(std::sync::atomic::Ordering::SeqCst)}))

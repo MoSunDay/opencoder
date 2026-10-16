@@ -25,6 +25,8 @@ def endpoint(record):
 def deploy(settings, bundle, operations, seconds=90):
     journal = Journal(settings.state_dir)
     candidate = manifest.verify(bundle)
+    from ..todo_resources import require_candidate
+    require_candidate(settings, candidate)
     state = journal.data.get('maintenance')
     if state and state['stage'] not in ('complete', 'rolled_back'):
         if state['stage'] == 'repairing' or state['target'] != candidate['release_id']:
@@ -185,6 +187,13 @@ def rollback(settings, operations, seconds=90):
     state = journal.data.get('maintenance')
     if not state:
         raise ValueError('no maintenance upgrade is recorded')
+    from ..todo_resources import require_candidate
+    require_candidate(settings, journal.record(state['origin'])['manifest'])
+    policy = settings.state_dir / 'todo-files-policy.json'
+    if policy.exists():
+        import json
+        if json.loads(policy.read_text())['minimum_contract']:
+            raise ValueError('TODO uploads have been enabled; old database restoration is forbidden')
     if state['writes_open']:
         raise ValueError('writes may have reopened; old backup restoration is forbidden; repair with a new release')
     if state['stage'] == 'rolled_back':

@@ -10,13 +10,15 @@ import tempfile
 PHASES = ("validated", "warming", "ready", "switching", "verifying", "complete")
 
 
-def atomic_bytes(path, data, mode=0o600):
+def atomic_bytes(path, data, mode=0o600, owner=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
             os.fchmod(stream.fileno(), mode)
+            if owner is not None:
+                os.fchown(stream.fileno(), *owner)
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())

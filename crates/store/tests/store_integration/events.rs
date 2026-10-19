@@ -34,6 +34,42 @@ async fn events_append_and_after_replay() {
 }
 
 #[tokio::test]
+async fn single_event_failure_does_not_poison_following_durable_appends() {
+    use opencoder_store::{EventKind, SessionEventRecord, TursoStore};
+    let (dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+    let mut event = SessionEventRecord {
+        session_id: "missing".into(),
+        kind: EventKind::TextDelta,
+        payload: serde_json::json!({"text": "persisted"}),
+        ts: 1,
+        seq: None,
+        sse_kind: Some("text".into()),
+    };
+    assert!(store.append_events(&[event.clone()]).await.is_err());
+    event.session_id = "s".into();
+    let first = store.append_events(&[event.clone()]).await.unwrap();
+    let next = store
+        .append_events(&[event.clone(), event.clone()])
+        .await
+        .unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(next.len(), 2);
+    assert!(first[0] < next[0] && next[0] < next[1]);
+    drop(store);
+    let reopened = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let saved = reopened.events_after("s", 0).await.unwrap();
+    assert_eq!(saved.len(), 3);
+    assert_eq!(
+        saved.iter().map(|row| row.seq.unwrap()).collect::<Vec<_>>(),
+        vec![first[0], next[0], next[1]]
+    );
+    assert!(saved
+        .iter()
+        .all(|row| row.payload == event.payload && row.sse_kind == event.sse_kind));
+}
+
+#[tokio::test]
 async fn backend_name_reports_turso() {
     let (_dir, store) = fresh().await;
     assert_eq!(store.backend_name(), "turso");

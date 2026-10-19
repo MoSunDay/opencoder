@@ -210,7 +210,7 @@ impl Database {
             }
         };
         if !write {
-            conn.execute("BEGIN", ()).await?;
+            conn.prepare_cached("BEGIN").await?.execute(()).await?;
         }
         let result = work(conn.clone()).await;
         // Keep the shared guard through transaction cleanup, including COMMIT.
@@ -232,7 +232,10 @@ impl Database {
         // active write transaction is rolled back and rejected, never pooled dirty.
         let active = !conn.is_autocommit()?;
         let cleanup = if active {
-            conn.execute(finish, ()).await.map(|_| ())
+            match conn.prepare_cached(finish).await {
+                Ok(mut statement) => statement.execute(()).await.map(|_| ()),
+                Err(error) => Err(error),
+            }
         } else {
             Ok(())
         };

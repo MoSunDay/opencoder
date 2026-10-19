@@ -60,7 +60,7 @@ async fn scan(state: &AppState, name: &str, dag: bool, agent: bool) -> Result<Ve
     if let Some(root) = config
         .agent
         .agents_dir
-        .or_else(|| agent.then(opencoder_core::agent::agents_dir).flatten())
+        .or_else(opencoder_core::agent::agents_dir)
     {
         let name = name.to_owned();
         found.extend(tokio::task::spawn_blocking(move || files(&root, &name, dag, agent)).await??);

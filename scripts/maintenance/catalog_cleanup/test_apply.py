@@ -32,7 +32,8 @@ class ApplyTests(unittest.TestCase):
                 return 200, objects[name], '"current"'
 
         with tempfile.TemporaryDirectory() as directory, patch(
-                'scripts.maintenance.catalog_cleanup.apply.inventory', return_value=fresh):
+                'scripts.maintenance.catalog_cleanup.apply.inventory', return_value=fresh), patch(
+                'scripts.maintenance.catalog_cleanup.apply.time.sleep') as yield_readers:
             receipts = apply(plan, directory, Client())
             self.assertEqual([r['status'] for r in receipts], ['skipped', 'skipped', 'deleted'])
             self.assertTrue(receipts[-1]['verified_missing'])
@@ -40,6 +41,8 @@ class ApplyTests(unittest.TestCase):
             self.assertEqual(json.loads(backup.read_text()), objects['removed'])
             apply(plan, directory, Client())
             self.assertEqual(attempts, [('refused', '"current"'), ('removed', '"current"'), ('refused', '"current"')])
+            self.assertEqual(yield_readers.call_count, 3)
+            self.assertTrue(all(call[0] == (0.2,) for call in yield_readers.call_args_list))
 
     def test_old_server_is_refused_before_reading_or_deleting_data(self):
         class Client:

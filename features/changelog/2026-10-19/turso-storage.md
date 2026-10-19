@@ -2,7 +2,7 @@ Commit: ae321b750ec55df92bfe4aedd48661013fad990d
 
 # Turso 存储与本机引擎切换
 
-Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异步 Rust API，保留现有上层接口及 schema 39。每个文件复用独立读连接和单写连接；完整操作持有同一连接，读操作使用快照。数据库任务在独立执行线程运行，应用请求取消后，已接收的写入仍完成提交或回滚。持久化使用 WAL 和 `synchronous=FULL`，不启用 MVCC。
+Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异步 Rust API，保留现有上层接口及 schema 39。每个文件在接收操作前准备 4 个读连接和 1 个写连接；重建异常连接时等待活动事务结束，避免初始化 WAL 时干扰已有读锁。正常操作复用独立读连接和单写连接；完整操作持有同一连接，读操作使用快照。数据库任务在独立执行线程运行，应用请求取消后，已接收的写入仍完成提交或回滚。持久化使用 WAL 和 `synchronous=FULL`，不启用 MVCC。
 
 会话列表沿活跃时间索引筛选和分页，再读取消息预览；消息、事件和队列操作复用预编译 SQL。混合负载工具使用同一份数据库快照，对比旧引擎默认持久化、旧引擎 FULL 和 Turso FULL，分别记录吞吐、延迟、内存及应用运行时等待。
 
@@ -32,6 +32,7 @@ Fleet 从 JSON 清单关联历史任务时，显式将 ID 转为文本，让 Tur
 | 原生维护事务、只读限制、BLOB 与路径转义 | `rolling_tests/test_native_database.py` |
 | Store/ProjectStore SQL 兼容 | `store_integration`、`store_migrations`、`project_store` 及相应分页、队列、节点、调度用例 |
 | 现有 schema 的索引补齐及分页、历史保留 | `existing_schema_reopens_with_activity_pagination_and_unchanged_history`、`list_activity_order` |
+| 文件数据库读事务与并发连接 | `new_connections_preserve_an_existing_file_reader` |
 | 单项延迟与混合吞吐 | `store_perf`、`examples/storage_mixed.rs` |
 | 大批量节点上报期间的心跳与取消回复 | `slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply` |
 | 历史归属索引查找及两万条清单校验 | `inventory_owner_lookup_uses_primary_key_search`、`large_inventory_preserves_owners_across_activation_and_duplicate_ids` |

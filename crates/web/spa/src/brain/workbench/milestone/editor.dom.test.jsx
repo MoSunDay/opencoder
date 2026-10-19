@@ -68,3 +68,14 @@ it('多层计划自动显示顺序，保存时无需决策条件', async () => {
   fireEvent.click(screen.getByText('下一步：计划信息'));
   expect(await screen.findByText('计划信息与提交')).toBeTruthy();
 });
+it('隐藏的新建选项仍保留旧节点的能力 ID 并可保存', async () => {
+  const stored = { ...cap, id: 'stored-coding', version: 'stored' };
+  const saved = vi.fn(); apiPost.mockResolvedValue({ id: version.id, version: 2 });
+  const { container } = render(<PlanEditor version={version} cacheKey="legacy-selection" capabilities={[cap, stored]} selectionIds={['stored-coding']} onSaved={saved} onClose={() => {}} />);
+  fireEvent.click(container.querySelector('.react-flow__node-execution'));
+  expect(screen.getByLabelText('绑定能力')).toBeTruthy();
+  fireEvent.click(screen.getByText('下一步：计划信息'));
+  fireEvent.click(await screen.findByText('保存计划版本'));
+  await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+  expect(apiPost.mock.calls[1][1].plan.nodes[0].capability_id).toBe('coding');
+});

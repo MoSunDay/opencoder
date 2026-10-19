@@ -57,3 +57,18 @@ pub struct BrainVectorWrite {
     /// Millisecond timestamp for the vector row's updated_at.
     pub embedded_at: i64,
 }
+
+/// Content fingerprint for optimistic updates, including ordered examples.
+impl BrainCapabilityDetail {
+    pub fn content_version(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let bytes = serde_json::to_vec(self).expect("capability contains only JSON data");
+        format!("{:x}", Sha256::digest(bytes))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("brain capability changed; reload before updating: {id}")]
+pub struct BrainContentConflict {
+    pub id: String,
+}

@@ -94,8 +94,10 @@ fn map_brain_error(op: &str, err: anyhow::Error) -> Response {
 /// the nested `Detail` shape, single-resource responses flatten it so callers
 /// never need `capability.capability.id`.
 fn detail_json(detail: BrainCapabilityDetail) -> serde_json::Value {
+    let content_version = detail.content_version();
     json!({
         "ok": true,
+        "content_version": content_version,
         "capability": detail.capability,
         "eng_inputs": detail.eng_inputs,
     })
@@ -144,20 +146,33 @@ pub async fn get_capability(
     }
 }
 
+#[derive(Deserialize)]
+pub struct CapabilityUpdate {
+    #[serde(flatten)]
+    pub input: CapabilityInput,
+    pub expected_content_version: Option<String>,
+}
+
 /// PUT /api/brain/capabilities/:id — replace content + re-embed. Unknown id
 /// → 404 (the runtime's typed `BrainNotFound` marker), payload → 400, embed
 /// → 502.
 pub async fn update_capability(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(input): Json<CapabilityInput>,
+    Json(body): Json<CapabilityUpdate>,
 ) -> Response {
+    let input = body.input;
     if let Err(e) = opencoder_brain::domain::validate(&input) {
         return error_400(e.to_string());
     }
     match state
         .brain
-        .update_capability(&id, &input, opencoder_core::message::now_ms())
+        .update_capability_if_version(
+            &id,
+            &input,
+            opencoder_core::message::now_ms(),
+            body.expected_content_version.as_deref(),
+        )
         .await
     {
         Ok(detail) => (StatusCode::OK, Json(detail_json(detail))).into_response(),
@@ -171,6 +186,15 @@ pub async fn update_capability(
                 .is_some()
             {
                 error_502(format!("{e:#}"))
+            } else if e
+                .downcast_ref::<opencoder_store::BrainContentConflict>()
+                .is_some()
+            {
+                (
+                    StatusCode::CONFLICT,
+                    Json(json!({"ok":false,"error":e.to_string()})),
+                )
+                    .into_response()
             } else if e.downcast_ref::<opencoder_brain::BrainNotFound>().is_some() {
                 error_404(&format!("{e:#}"))
             } else {

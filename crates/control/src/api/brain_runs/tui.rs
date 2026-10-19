@@ -19,8 +19,19 @@ pub fn project(values: Vec<Value>) -> Vec<ServerCapability> {
 }
 
 pub async fn list(State(state): State<Arc<AppState>>) -> Response {
-    match catalog::capabilities(&state).await {
-        Ok(values) => Json(json!({"capabilities":project(values)})).into_response(),
+    match catalog::load(&state).await {
+        Ok(library) => {
+            let values = library
+                .capabilities
+                .into_iter()
+                .filter(|value| {
+                    value["id"].as_str().is_some_and(|id| {
+                        library.selection_ids.iter().any(|selected| selected == id)
+                    })
+                })
+                .collect();
+            Json(json!({"capabilities":project(values)})).into_response()
+        }
         Err(error) => error_500(error.to_string()),
     }
 }

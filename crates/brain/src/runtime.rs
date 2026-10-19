@@ -90,6 +90,19 @@ impl Runtime {
         input: &CapabilityInput,
         now_ms: i64,
     ) -> Result<BrainCapabilityDetail> {
+        self.update_capability_if_version(id, input, now_ms, None)
+            .await
+    }
+
+    /// Optional content precondition checked before embedding and atomically
+    /// again when persisting, covering edits made while embedding is running.
+    pub async fn update_capability_if_version(
+        &self,
+        id: &str,
+        input: &CapabilityInput,
+        now_ms: i64,
+        expected: Option<&str>,
+    ) -> Result<BrainCapabilityDetail> {
         domain::validate(input)?;
         // Unknown id is a typed 404-class marker (the web layer downcasts on
         // the type); the POST-write contexts below ("not found after
@@ -100,6 +113,9 @@ impl Runtime {
             .get_brain_capability(id)
             .await?
             .ok_or_else(|| anyhow::Error::new(BrainNotFound { id: id.to_string() }))?;
+        if expected.is_some_and(|version| version != existing.content_version()) {
+            return Err(opencoder_store::BrainContentConflict { id: id.to_owned() }.into());
+        }
         let emb = self.embed_one(&domain::compose_embed_text(input))?;
         let record = capability_record(id, input, existing.capability.created_at, now_ms);
         let eng_inputs = eng_input_records(id, input);
@@ -110,7 +126,7 @@ impl Runtime {
             embedded_at: now_ms,
         };
         self.store
-            .update_brain_capability_with_vector(&record, &eng_inputs, &vector)
+            .update_brain_capability_if_version(&record, &eng_inputs, &vector, expected)
             .await?;
         self.get_capability(id)
             .await?

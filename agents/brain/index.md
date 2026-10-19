@@ -1,4 +1,4 @@
-Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
+Commit: 060b4a24
 
 # brain 模块
 
@@ -33,3 +33,5 @@ Brain 默认各执行独立工作区；计划 `shared_workspace: true` 时仅允
 新计划和运行入口要求 schema 7；历史 schema 4/5/6 只读；`v4/` 是现存实现目录名，历史读取逻辑保留在代码中。历史数据清理使用 `scripts/maintenance/brain_cleanup/` 的审阅清单、行摘要校验、备份与重复复核；清理范围必须同时覆盖运行数据、Server 索引及 Host 休眠索引，避免节点同步恢复已删除的 ID。清理不在存储初始化中自动执行。
 
 [调度规则](../../rules/06-brain-scheduling-contract.md) · [运行协议](../../docs/brain-orchestration.md) · [工作台](../../features/brain/index.md)
+
+能力更新可携带内容版本：Runtime 在 embedding 前检查一次，Store 在提交事务内再次检查，覆盖计算期间的并发编辑。旧调用兼容，embedding 失败不修改已有文字、样例和向量。见 [runtime](../../crates/brain/src/runtime.rs)。

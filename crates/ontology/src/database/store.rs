@@ -36,6 +36,23 @@ impl Store {
         Ok(values)
     }
 
+    pub(super) async fn entity_values(
+        &self,
+        table: &str,
+        env: i64,
+        entity: Uuid,
+    ) -> Result<Vec<Value>, AppError> {
+        let mut rows = self.connection.query(
+            &format!("SELECT body FROM {table} WHERE env_num=?1 AND json_extract(body,'$.entity_id')=?2 ORDER BY id"),
+            params![env, entity.to_string()],
+        ).await?;
+        let mut items = Vec::new();
+        while let Some(row) = rows.next().await? {
+            items.push(decode(&row.get::<String>(0)?)?);
+        }
+        Ok(items)
+    }
+
     pub(super) async fn get<T: DeserializeOwned>(
         &self,
         table: &str,

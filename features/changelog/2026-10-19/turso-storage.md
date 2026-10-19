@@ -13,6 +13,7 @@ Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异
 历史 Runtime 中已废弃的 DAG 配置字段只从新程序的配置副本中移除，原配置及资源保留。关闭接收前，候选程序逐个检查这些配置副本，避免历史 Runtime 唤醒时才发现配置不兼容。
 
 历史数据目录使用挂载别名时，新程序优先通过已确认指向同一目录的统一路径准备镜像。跨挂载无法建立硬链接时复制文件，并保留镜像内部的硬链接关系；其他文件权限或写入错误继续中止发布，旧镜像保持不变。
+准备历史镜像前，按每个 Runtime 数据目录所在的磁盘核算完整复制所需空间，不依赖硬链接节省容量。
 
 在线维护查询、事务与备份通过原生 CLI 使用 Turso。SQLite 仅用于旧引擎或已停止的数据库和完成的离线备份。原生备份校验后才发布目标文件，保留已有鉴权数据。
 
@@ -32,6 +33,7 @@ Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异
 | 历史 Runtime 程序关联保留旧镜像与配置 | `maintenance_tests/engine/test_programs.py` |
 | 跨挂载镜像复制、内部硬链接及错误保留 | `rolling_tests/test_native.py` 的 `test_retained_image_copies_across_mounts_and_preserves_internal_links`、`test_retained_image_does_not_hide_link_permission_errors` |
 | 历史数据库备份容量 | `test_engine_cutover_budgets_retained_runtime_databases_and_wal` |
+| 历史程序在各磁盘上的完整复制容量 | `test_retained_programs_reserve_full_copies_on_the_data_directory_disk` |
 | 离线 SQLite 资源的编码、引用与 WAL 保留 | `catalog_guard::binary_resources` |
 
 关联说明：[Store](../../../agents/store/index.md)、[Ontology](../../../agents/ontology/index.md)、[节点平台](../../agent-platform/index.md)、[发布流程](../../../docs/smooth-release.md)。

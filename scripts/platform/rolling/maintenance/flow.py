@@ -78,6 +78,9 @@ def deploy(settings, bundle, operations, seconds=90):
         if engine_switch:
             registered = programs.registrations(settings)
             scope['registered'] = registered
+            from .planning import capacity
+            scope['program_capacity'] = capacity.check(
+                capacity.retained_programs(candidate, rootfs, original, registered))
             scope['programs'] = programs.stage(settings, bundle, candidate, original, registered, rootfs, operations)
             scope['engine_databases'] = [str(path) for path in engine_files.managed(settings, registered)]
         # Execute both packaged runners inside the release image before any

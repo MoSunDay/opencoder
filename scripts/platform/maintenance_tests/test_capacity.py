@@ -14,6 +14,26 @@ from rolling.state import Journal
 
 
 class CapacityTests(unittest.TestCase):
+    def test_retained_programs_reserve_full_copies_on_the_data_directory_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fallback = root / 'new-image'
+            fallback.mkdir()
+            with (fallback / 'resource').open('wb') as stream:
+                stream.truncate(512 * 1024 * 1024)
+            old = root / 'separate-data'
+            old.mkdir()
+            records = {name: {'runtime_data': str(old / name)} for name in ('one', 'two')}
+            candidate = {'release_id': 'new', 'files': {'bin/opencoder-agent': {'bytes': 100}}}
+            budget = capacity.retained_programs(candidate, fallback, {'releases': records}, records)
+            self.assertEqual(len(budget['filesystems']), 1)
+            item = budget['filesystems'][0]
+            self.assertEqual(item['path'], str(old))
+            self.assertGreaterEqual(item['required'], capacity.MARGIN + 2 * (512 * 1024 * 1024 + 100))
+            with patch.object(capacity.shutil, 'disk_usage', return_value=SimpleNamespace(free=item['required'] - 1)):
+                with self.assertRaisesRegex(ValueError, 'insufficient space'):
+                    capacity.check(budget)
+
     def test_new_image_backup_controls_and_packages_are_budgeted_together(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory))

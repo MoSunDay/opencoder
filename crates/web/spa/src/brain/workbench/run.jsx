@@ -13,5 +13,5 @@ export function BrainRunBody({ id, onNotice, header = null }) {
 }
 export function BrainRunView({ id, onBack, onNotice }) {
   useEffect(() => { const params = new URLSearchParams(location.search); params.set('brain_run', id); replaceLocation(`${location.pathname}?${params}${location.hash}`); }, [id]);
-  return <BrainRunBody id={id} onNotice={onNotice} header={<Button className="brain-run-back" aria-label="返回工作台" icon={<ArrowLeftOutlined />} onClick={onBack} />} />;
+  return <BrainRunBody id={id} onNotice={onNotice} header={<Button className="brain-run-back" aria-label="返回运行历史" icon={<ArrowLeftOutlined />} onClick={onBack} />} />;
 }

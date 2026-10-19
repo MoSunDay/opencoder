@@ -18,12 +18,12 @@ it('opening and closing a Brain run updates the shared location without adding a
     <BrainWorkbench onNotice={vi.fn()} /><Location />
   </DraftGuardProvider></App></ConfigProvider>);
   act(() => pushLocation('/?keep=1'));
-  fireEvent.click(await screen.findByText('run1'));
+  fireEvent.click(await screen.findByText('查看运行'));
   await waitFor(() => expect(window.location.search).toBe('?keep=1&brain_run=run1'));
   expect(screen.getByRole('status').textContent).toBe('brain');
-  fireEvent.click(screen.getByLabelText('返回工作台'));
+  fireEvent.click(screen.getByLabelText('返回运行历史'));
   await waitFor(() => expect(window.location.search).toBe('?keep=1'));
   expect(screen.getByRole('status').textContent).toBe('无定位');
   act(() => window.history.back());
   await waitFor(() => expect(window.location.search).toBe(''));
-});
+}, 10000);

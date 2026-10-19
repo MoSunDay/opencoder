@@ -1,4 +1,4 @@
-Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
+Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
 
 # OpenCoder 能力地图
 ## 平台与编排
@@ -9,7 +9,7 @@ Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。
 - [项目管理](project/index.md) — 项目与专项表格、TODO 状态看板、Tag 管理，通过执行 ID 关联原生能力。
 - [版本化 Agent 与 NFS](../agents/agents/index.md) — 资源版本、共享池与只读导出。
-- [大脑调度工作台](brain/index.md)、[大脑能力库](../agents/brain/index.md) — step/连线计划、分层能力调度与固定版本子计划。
+- [大脑调度与运行历史](brain/index.md)、[大脑能力库](../agents/brain/index.md) — step/连线计划、分层能力调度与固定版本子计划。
 - [远程管理 CLI](../agents/ctl/index.md) — 对接 Server API 与退出码契约。
 ## 会话与交互
 - [会话运行时](../agents/session/index.md) — act/plan、压缩、subagent、恢复。

@@ -69,6 +69,8 @@ Commit: f6768ad434907a739f0271f52cdc3f9c991a40aa
 
 TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；任务删除须先核验没有文件。只读 NFS 生命周期由专用 `opencoder-todo-resources.service` 管理，Server 仅转发管理接口，HTTP 文件操作使用同一绑定目录。见 [任务文件](../../docs/project-files.md)。
 
+- [brain_runs/runs.rs](../../crates/control/src/api/brain_runs/runs.rs) 的运行历史支持 `limit`（默认 20）和原有游标，通过执行名称批量查询增加可选 `name`。通用执行列表和单条索引使用同一冻结计划名称，不访问当前计划库或 Worker；五字段执行索引协议不变。
+
 能力目录区分内置、登记、自动生成和计划来源。`GET /api/brain/library` 返回完整 `capabilities` 及新选择使用的 `selection_ids`；仅执行类型、目标、解析定义和必填输入输出集合相同的自动项让位于登记项。TUI 使用同一规则，准入仍读取完整目录。见 [catalog](../../crates/control/src/api/brain_runs/catalog.rs)。
 
 ## 目录写入与清理

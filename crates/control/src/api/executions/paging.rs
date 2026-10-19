@@ -87,12 +87,15 @@ pub(crate) fn display_name(kind: ExecutionKind, names: &ExecutionNames) -> Optio
         | ExecutionKind::Project
         | ExecutionKind::Maintenance
         | ExecutionKind::Operator => names.target.clone(),
-        // Brain/System carry no kind-unique target id.
-        ExecutionKind::Brain | ExecutionKind::System => None,
+        ExecutionKind::Brain => names
+            .plan_name
+            .clone()
+            .filter(|name| !name.trim().is_empty()),
+        ExecutionKind::System => None,
     }
 }
 
-async fn named_page(
+pub(crate) async fn named_page(
     state: &AppState,
     page: ExecutionPage<ExecutionIndex>,
 ) -> Result<Value, String> {
@@ -135,18 +138,9 @@ pub async fn index(State(state): State<Arc<AppState>>, Path(id): Path<String>) -
         Err(error) => return super::super::error_500(error.to_string()),
     };
     let mut value = json!(index);
-    let mut name = names
+    let name = names
         .get(&index.id)
         .and_then(|names| display_name(index.kind, names));
-    if name.is_none() && index.kind == ExecutionKind::Brain {
-        name = match state.fleet.assignment(&index.id).await {
-            Ok(Some(assignment)) => assignment.request.input["layered_request"]["plan"]["title"]
-                .as_str()
-                .map(str::to_owned),
-            Ok(None) => None,
-            Err(error) => return super::super::error_500(error.to_string()),
-        };
-    }
     if let Some(name) = name {
         value["name"] = json!(name);
     }
@@ -298,6 +292,7 @@ mod tests {
             target: target.map(str::to_owned),
             definition_name: definition.map(str::to_owned),
             spec_name: spec.map(str::to_owned),
+            plan_name: None,
         }
     }
 
@@ -353,6 +348,18 @@ mod tests {
             display_name(ExecutionKind::Maintenance, &names(Some("fix"), None, None)),
             Some("fix".into())
         );
+    }
+
+    #[test]
+    fn brain_name_uses_only_the_frozen_plan() {
+        let mut snapshot = names(Some("unrelated"), None, None);
+        snapshot.plan_name = Some("Frozen plan".into());
+        assert_eq!(
+            display_name(ExecutionKind::Brain, &snapshot),
+            Some("Frozen plan".into())
+        );
+        snapshot.plan_name = Some("  ".into());
+        assert_eq!(display_name(ExecutionKind::Brain, &snapshot), None);
     }
 
     #[test]

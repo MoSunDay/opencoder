@@ -1,10 +1,8 @@
-import { EditButton } from '../../../ui/permissions.jsx';
 import { MilestoneRunBody } from '../milestone/run.jsx';
 // run.jsx — the v4 workbench body: layered canvas, layer barrier progress,
 // layer decisions and the v4 event journal. v3 runs never reach this module.
 import { Alert, Button, Collapse, Drawer, Select, Progress, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
-import { apiPost } from '../../../api.js';
 import { KIND_LABELS } from '../../../fleet/model.js';
 import { ExecutionView } from '../../../fleet/detail.jsx';
 import { TimeText } from '../../../ui/timeText.jsx';
@@ -29,20 +27,14 @@ function CapabilityList({ capabilities = [] }) {
 }
 
 function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
-  const [busy, setBusy] = useState(false); const [commandError, setCommandError] = useState(''); const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState(null);
   const [executionId, setExecutionId] = useState(null);
   const operations = view.operations || [];
   const execution = operations.find((op) => op.execution_id === executionId);
   const selectNode = (nodeId) => { setSelected(nodeId); const op = operations.filter((op) => op.node_id === nodeId).sort((a, b) => b.attempt - a.attempt)[0]; setExecutionId(op?.execution_id || null); };
   const run = view.run || {}; const plan = planOf(view); const phase = layeredPhase(view); const progress = barrier(view);
-  const command = async (action) => {
-    setBusy(true); setCommandError('');
-    try { await apiPost(`/api/brain/runs/${encodeURIComponent(id)}/commands`, { action }); await refresh(); }
-    catch (error) { setCommandError(error.message); }
-    finally { setBusy(false); }
-  };
   return <>
-    {(commandError || view.error) && <Alert type="error" showIcon title={commandError || view.error} />}
+    {view.error && <Alert type="error" showIcon title={view.error} />}
     {run.error && ['blocked', 'failed'].includes(phase) && <Alert type="error" showIcon title="运行阻塞或失败" description={run.error} />}
     <div className="brain-run-header">
       <div>
@@ -58,10 +50,7 @@ function LegacyRunBody({ view, id, connection, refresh, onNotice }) {
           <TimeText ts={run.updated_at} />
         </Space>
       </div>
-      <Space>
-        <Button disabled={busy || terminalPhase(phase)} onClick={() => command(phase === 'paused' ? 'resume' : 'pause')}>{phase === 'paused' ? '继续调度' : '暂停调度'}</Button>
-        <EditButton danger disabled={busy || terminalPhase(phase)} onClick={() => command('cancel')}>取消调度</EditButton>
-      </Space>
+      <Tag>历史版本 · 只读</Tag>
     </div>
     <section className="brain-layer-barrier" aria-label="层屏障进度">
       <Progress percent={progress.percent} size="small" format={() => progress.label} />

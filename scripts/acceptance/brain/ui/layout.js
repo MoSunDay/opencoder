@@ -18,6 +18,10 @@ const entries = [entry,
   { ...entry, capability: { ...entry.capability, id: 'workflow', capability_type: 'todos' } },
 ];
 const capability = { id: 'coding', kind: 'agent', target: 'Coder', summary, input_desc: '任务', output_desc: '结果', definition: {}, version: '1' };
+const catalog = [capability,
+  { ...capability, id: 'review', kind: 'operator', target: 'GenericExecutionTargetWithoutSeparators'.repeat(6) },
+  { ...capability, id: 'workflow', kind: 'todos', target: '通用工作流完整名称需要在本列自动换行'.repeat(8) },
+];
 const version = { id: 'delivery', version: 2, changelog: '调整计划', plan: {
   schema_version: 7, title: '交付计划', objective: '交付经过验证的变更', inputs: { revision: 'main' }, max_rounds: 5,
   layers: [{ layer_id: 'code', title: '开发', task: '实现需求', objective: '完成变更', success_criteria: '测试通过' }],
@@ -30,7 +34,7 @@ const responses = {
   '/api/brain/plan-defs': { plans: [{ id: version.id, title: version.plan.title, latest_version: 2, schema_version: 7 }] },
   '/api/brain/plan-defs/delivery/versions/2': version,
   '/api/brain/plan-defs/delivery/versions': { versions: [version] },
-  '/api/brain/library': { capabilities: [capability] },
+  '/api/brain/library': { capabilities: catalog },
   '/api/brain/capabilities': { capabilities: entries },
   '/api/brain/capabilities/coding': entry,
   '/api/brain/capabilities/coding/target': { target: { kind: 'agent', target: 'Coder' } },
@@ -51,23 +55,25 @@ async function measure(page, name, results) {
         inside: box.left >= cell.left && box.right <= cell.right,
         ellipsis: getComputedStyle(element).textOverflow };
     });
-    const types = [...document.querySelectorAll('tr[data-row-key] td:first-child .ant-tag')]
+    const bindings = [...document.querySelectorAll('.brain-capability-type, .brain-capability-name')]
       .filter((element) => element.getBoundingClientRect().width > 0).map((element) => {
         const box = element.getBoundingClientRect();
         const cell = element.closest('td');
         const bounds = cell.getBoundingClientRect();
         const style = getComputedStyle(cell);
-        return { width: box.width, scroll: element.scrollWidth, client: element.clientWidth,
+        const textStyle = getComputedStyle(element);
+        return { text: element.textContent, width: box.width, height: box.height,
+          scroll: element.scrollWidth, client: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight,
           inside: box.left >= bounds.left + parseFloat(style.paddingLeft) - 1
             && box.right <= bounds.right - parseFloat(style.paddingRight) + 1,
-          ellipsis: getComputedStyle(element).textOverflow,
-          completeTitle: element.title === element.textContent, long: element.textContent.length > 50 };
+          ellipsis: textStyle.textOverflow, whiteSpace: textStyle.whiteSpace, lineHeight: parseFloat(textStyle.lineHeight),
+          long: element.textContent.length > 50 };
       });
     const actions = [...document.querySelectorAll('tr[data-row-key] td:last-child')]
       .filter((element) => element.getBoundingClientRect().width > 0)
       .map((element) => getComputedStyle(element).position);
     return { width: innerWidth, documentWidth: document.documentElement.scrollWidth,
-      paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth, summaries, types, actions };
+      paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth, summaries, bindings, actions };
   });
   assert(geometry.documentWidth <= geometry.width + 1, `${name}: page overflow`);
   assert(geometry.paneScroll <= geometry.paneWidth + 1, `${name}: pane overflow`);
@@ -75,12 +81,14 @@ async function measure(page, name, results) {
     assert(text.inside && text.width <= 512, `${name}: summary escaped its cell or maximum width`);
     assert(text.scroll > text.client && text.ellipsis === 'ellipsis', `${name}: long text must be truncated`);
   }
-  for (const type of geometry.types) {
-    assert(type.inside, `${name}: execution type overlaps the next column`);
-    assert(type.completeTitle, `${name}: execution type must retain its full hover text`);
-    if (type.long) assert(type.scroll > type.client && type.ellipsis === 'ellipsis', `${name}: long execution type must be truncated`);
+  for (const binding of geometry.bindings) {
+    assert(binding.inside, `${name}: execution binding overlaps the next column`);
+    assert(binding.scroll <= binding.client + 1 && binding.scrollHeight <= binding.clientHeight + 1,
+      `${name}: execution binding must be fully visible`);
+    assert(binding.ellipsis !== 'ellipsis' && binding.whiteSpace === 'normal', `${name}: execution binding must wrap without ellipsis`);
+    if (binding.long) assert(binding.height > binding.lineHeight * 2, `${name}: long execution name must wrap over multiple lines`);
   }
-  if (geometry.width < 768 && geometry.types.length) {
+  if (geometry.width < 768 && geometry.bindings.length) {
     assert(geometry.actions.every((position) => position !== 'sticky'), `${name}: mobile actions must scroll with their row`);
   }
   results.push({ name, ...geometry });
@@ -104,9 +112,17 @@ async function checkWidth(browser, origin, width, results, errors) {
     await page.goto(origin);
     await page.getByRole('tab', { name: '能力库', exact: true }).click();
     await page.locator('.brain-capability-summary').first().waitFor();
+    await page.getByText(catalog[1].target, { exact: true }).waitFor();
+    assert.equal(await page.getByRole('columnheader', { name: '执行名称', exact: true }).count(), 1);
+    assert.deepEqual(await page.locator('.brain-capability-type').allTextContents(), ['Agent', 'Operator', 'TODO 工作流']);
+    assert.deepEqual(await page.locator('.brain-capability-name').allTextContents(), catalog.map((item) => item.target));
     for (const hidden of ['输入描述', '输出描述', '工程输入']) {
       assert.equal(await page.getByRole('columnheader', { name: hidden }).count(), 0);
     }
+    const pageSize = page.locator('.brain-capability-table .ant-pagination-options .ant-select');
+    await pageSize.click();
+    await page.locator('.ant-select-item-option[title="100 条/页"]').click();
+    assert((await pageSize.innerText()).includes('100'));
     await measure(page, `capabilities-${width}`, results);
     const scroller = page.locator('.ant-table:has(.brain-capability-summary) .ant-table-content');
     await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });

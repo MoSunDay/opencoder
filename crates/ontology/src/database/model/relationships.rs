@@ -12,6 +12,8 @@ use crate::{
 };
 use uuid::Uuid;
 
+const ANCHORED_RELATIONSHIPS_SQL: &str = "SELECT body FROM relationships WHERE env_num=?1 AND id IN (SELECT id FROM relationships WHERE env_num=?1 AND json_extract(body,'$.source_entity_id')=?2 UNION SELECT id FROM relationships WHERE env_num=?1 AND json_extract(body,'$.target_entity_id')=?2) AND (?3 OR NOT json_extract(body,'$.is_deleted')) ORDER BY id";
+
 impl Store {
     pub(crate) async fn relationship_types(
         &self,
@@ -141,7 +143,11 @@ impl Store {
         anchor: Option<Uuid>,
         deleted: bool,
     ) -> Result<Vec<Relationship>, AppError> {
-        let sql = "SELECT body FROM relationships WHERE env_num=?1 AND (?2 IS NULL OR json_extract(body,'$.source_entity_id')=?2 OR json_extract(body,'$.target_entity_id')=?2) AND (?3 OR NOT json_extract(body,'$.is_deleted')) ORDER BY id";
+        let sql = if anchor.is_some() {
+            ANCHORED_RELATIONSHIPS_SQL
+        } else {
+            "SELECT body FROM relationships WHERE env_num=?1 AND ?2 IS NULL AND (?3 OR NOT json_extract(body,'$.is_deleted')) ORDER BY id"
+        };
         let mut rows = self
             .connection
             .query(
@@ -196,7 +202,7 @@ impl Store {
             if source == ROOT_DIRECTORY_ID || target_entity.entity_type_id != DIRECTORY_TYPE_ID {
                 return Err(AppError::invalid("invalid directory membership"));
             }
-            let relations = self.relationships(env, None, false).await?;
+            let relations = self.relationships(env, Some(source), false).await?;
             if relations
                 .iter()
                 .any(|item| item.relationship_type_id == kind && item.source_entity_id == source)
@@ -205,12 +211,16 @@ impl Store {
                     "entity already belongs to a directory".into(),
                 ));
             }
-            let parents = relations
-                .into_iter()
-                .filter(|item| item.relationship_type_id == kind)
-                .map(|item| (item.source_entity_id, item.target_entity_id))
-                .collect::<std::collections::HashMap<_, _>>();
-            crate::domain::validate_directory_move(source, target, &parents)?;
+            if source_entity.entity_type_id == DIRECTORY_TYPE_ID {
+                let parents = self
+                    .relationships(env, None, false)
+                    .await?
+                    .into_iter()
+                    .filter(|item| item.relationship_type_id == kind)
+                    .map(|item| (item.source_entity_id, item.target_entity_id))
+                    .collect::<std::collections::HashMap<_, _>>();
+                crate::domain::validate_directory_move(source, target, &parents)?;
+            }
         }
         let item = Relationship {
             id: Uuid::new_v4(),
@@ -252,5 +262,32 @@ impl Store {
         self.audit(env, actor, "relationship.update", id, item.revision)
             .await?;
         Ok(item)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn anchored_relationship_query_uses_both_endpoint_indexes() {
+        let temp = tempfile::tempdir().unwrap();
+        let database =
+            crate::database::Database::open(&temp.path().join("db"), &temp.path().join("files"))
+                .await
+                .unwrap();
+        let store = database.store().await;
+        let mut rows = store
+            .connection
+            .query(
+                &format!("EXPLAIN QUERY PLAN {}", super::ANCHORED_RELATIONSHIPS_SQL),
+                libsql::params![1, uuid::Uuid::new_v4().to_string(), 0],
+            )
+            .await
+            .unwrap();
+        let mut plan = String::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            plan.push_str(&row.get::<String>(3).unwrap());
+        }
+        assert!(plan.contains("relationships_source_entity_id"), "{plan}");
+        assert!(plan.contains("relationships_target_entity_id"), "{plan}");
     }
 }

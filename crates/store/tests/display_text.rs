@@ -11,18 +11,18 @@
 //! v6 migration, the claim contract, and bundle export/import fidelity.
 
 use opencoder_store::{
-    export_bundle, import_bundle, read_bundle, write_bundle, Delivery, LibsqlStore, SessionInput,
-    SessionMeta, Store,
+    export_bundle, import_bundle, read_bundle, write_bundle, Delivery, SessionInput, SessionMeta,
+    Store, TursoStore,
 };
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
+async fn make_session(store: &TursoStore, id: &str, now: i64) {
     let meta = SessionMeta {
         id: id.to_string(),
         title: Some(format!("title-{id}")),
@@ -46,11 +46,15 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
     store.create_session(&meta).await.unwrap();
 }
 
-/// Open a raw libsql connection to a db file, bypassing `bootstrap`, so a test
-/// can hand-write an old-version schema before reopening via `LibsqlStore`.
-async fn raw_open(db_path: &std::path::Path) -> libsql::Connection {
-    use libsql::Builder;
-    let db = Builder::new_local(db_path).build().await.unwrap();
+/// Open a raw turso connection to a db file, bypassing `bootstrap`, so a test
+/// can hand-write an old-version schema before reopening via `TursoStore`.
+async fn raw_open(db_path: &std::path::Path) -> turso::Connection {
+    use turso::Builder;
+    let db = Builder::new_local((db_path).to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     db.connect().unwrap()
 }
 
@@ -177,7 +181,7 @@ async fn v5_to_v6_migration_adds_display_text() {
     }
 
     // Reopen: bootstrap() -> migrate(conn, 5) -> if from < 6.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // The display_text column physically exists (prepare fails if absent).
     {
@@ -192,7 +196,7 @@ async fn v5_to_v6_migration_adds_display_text() {
     // Old row keeps NULL display_text.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT display_text FROM session_inputs WHERE id = 'old-1'")
             .await
             .unwrap();
@@ -227,10 +231,10 @@ async fn v5_to_v6_migration_adds_display_text() {
     // Version bumped to the latest (SCHEMA_VERSION after the newest
     // migration step), and a second reopen is idempotent.
     drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
+    let store2 = TursoStore::open(&db_path).await.unwrap();
     {
         let conn = store2.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -238,8 +242,9 @@ async fn v5_to_v6_migration_adds_display_text() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 38,
-            "schema version must be 38 (latest) after v5 migration"
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must match the current watermark after v5 migration"
         );
     }
     let again = store2.pending_inputs("s1", Delivery::Queue).await.unwrap();
@@ -309,7 +314,7 @@ async fn bundle_roundtrip_preserves_display_text() {
     let restored = read_bundle(&mut cursor).unwrap();
 
     let dir2 = tempfile::tempdir().unwrap();
-    let store2 = LibsqlStore::open(dir2.path().join("test2.db"))
+    let store2 = TursoStore::open(dir2.path().join("test2.db"))
         .await
         .unwrap();
     import_bundle(&store2, &restored, None).await.unwrap();

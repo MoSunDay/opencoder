@@ -1,6 +1,6 @@
 use super::*;
 use crate::fleet::handoff::RuntimeRecord;
-use libsql::Builder;
+use turso::Builder;
 
 async fn register(store: &FleetStore, id: &str) {
     store
@@ -28,7 +28,10 @@ async fn large_inventory_preserves_owners_across_activation_and_duplicate_ids() 
     store.assign_runtime_inventory("old", &ids).await.unwrap();
     assert_eq!(store.assign_runtime("fresh", None).await.unwrap(), "new");
     let mut rows = store
-        .conn
+        .db
+        .connect()
+        .await
+        .unwrap()
         .query(
             "SELECT count(*) FROM runtime_owners WHERE runtime_id='old'",
             (),
@@ -88,16 +91,23 @@ async fn known_inventory_is_read_only_while_another_connection_holds_writer_lock
         .await
         .unwrap();
     store
-        .conn
+        .db
+        .connect()
+        .await
+        .unwrap()
         .execute_batch("PRAGMA busy_timeout=0")
         .await
         .unwrap();
-    let database = Builder::new_local(&path).build().await.unwrap();
-    let connection = database.connect().unwrap();
-    let _writer = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
+    let database = Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
         .await
         .unwrap();
+    let connection = database.connect().unwrap();
+    let _writer =
+        turso::transaction::Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)
+            .await
+            .unwrap();
     store
         .assign_runtime_inventory("old", &["one", "two", "one"])
         .await

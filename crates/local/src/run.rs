@@ -587,11 +587,9 @@ mod tests {
     #[tokio::test]
     async fn pick_resume_id_resolves_task_id_to_parent_session() {
         use clap::Parser;
-        use opencoder_store::{
-            LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord,
-        };
+        use opencoder_store::{SessionMeta, Store, SubagentStatus, SubagentTaskRecord, TursoStore};
 
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
 
         // Create a parent session.
         let parent_id = "parent-sess";
@@ -674,9 +672,9 @@ mod tests {
     #[tokio::test]
     async fn pick_resume_id_returns_real_session_as_is() {
         use clap::Parser;
-        use opencoder_store::{LibsqlStore, SessionMeta, Store};
+        use opencoder_store::{SessionMeta, Store, TursoStore};
 
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
 
         // Create a real session.
         let session_id = "real-sess";
@@ -728,9 +726,9 @@ mod tests {
     #[tokio::test]
     async fn continue_with_no_sessions_errors() {
         use clap::Parser;
-        use opencoder_store::{LibsqlStore, Store};
+        use opencoder_store::{Store, TursoStore};
 
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         // No sessions exist: --continue must error, not fall through to a
         // fresh-session creation.
         let cli = Cli::parse_from(["opencoder", "--continue"]);

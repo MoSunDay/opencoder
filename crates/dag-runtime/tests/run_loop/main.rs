@@ -18,7 +18,7 @@ use opencoder_dag_runtime::{execute_run, ExecDeps, RunDeps};
 use opencoder_llm::event::LlmEvent;
 use opencoder_llm::MockChatClient;
 use opencoder_node::uplink::Uplink;
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 use serde_json::json;
 use tokio::net::TcpListener;
 

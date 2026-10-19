@@ -87,6 +87,9 @@ def plan(settings, candidate, rootfs, original, scope):
                   for root in (settings.server_data, settings.state_dir / 'resources')]
     components = {'frozen_image': freeze, 'stopped_backup': backup, 'controls': control,
                   'packages': packages, 'margin': MARGIN}
+    if 'registered' in scope:
+        from ..engine.files import snapshot_bytes
+        components['runtime_databases'] = snapshot_bytes(scope['registered'])
     budgets = {}
     for path, amount in [(settings.state_dir, sum(components.values())),
                          *((root, size + MARGIN) for root, size in migrations if size)]:

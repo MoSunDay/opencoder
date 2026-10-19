@@ -206,7 +206,7 @@ impl ProjectStore for GetTodoFailingStore {
 async fn execute_reports_500_when_todo_store_fails() {
     let dir = tempfile::tempdir().unwrap();
     let inner: Arc<dyn ProjectStore> = Arc::new(
-        opencoder_store::LibsqlStore::open(dir.path().join("proj.db"))
+        opencoder_store::TursoStore::open(dir.path().join("proj.db"))
             .await
             .unwrap(),
     );

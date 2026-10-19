@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message};
 use opencoder_session::handoff::handoff_message;
-use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
+use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
 use opencoder_tui::chat::{ChatBlock, ChatView};
 use opencoder_tui::session_ui::replay_into_chat;
 
@@ -38,7 +38,7 @@ fn assistant_with_plan() -> Message {
 /// `handoff_plan`), the way the worker does when submitting the control
 /// command that switches agent / clears context.
 async fn setup_session(id: &str) -> Arc<dyn Store> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
 
     store
         .create_session(&SessionMeta {

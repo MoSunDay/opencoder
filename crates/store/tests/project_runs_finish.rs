@@ -1,4 +1,4 @@
-//! `finish_todo_run` 的终态回写语义（libsql 落地）：按 run kind 决定 todo
+//! `finish_todo_run` 的终态回写语义（turso 落地）：按 run kind 决定 todo
 //! 状态的归属——Plan 回 Planned（plan_md 落盘）、Execute 独占 todo 终态、
 //! Step（playbook 子尝试）永不回写 todo 状态，todo 生命周期由父
 //! playbook 的 Execute 行独占。幂等守卫（重复终结返回 false）一并覆盖。
@@ -6,15 +6,14 @@
 use std::sync::Arc;
 
 use opencoder_store::{
-    LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoPatch, ProjectTodoRecord,
-    ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus,
-    ProjectTodoStatus,
+    ProjectExecutorKind, ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind,
+    ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, TursoStore,
 };
 
-async fn fresh() -> Arc<dyn ProjectStore> {
+async fn fresh() -> (tempfile::TempDir, Arc<dyn ProjectStore>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(LibsqlStore::open(dir.path().join("test.db")).await.unwrap());
-    store
+    let store = Arc::new(TursoStore::open(dir.path().join("test.db")).await.unwrap());
+    (dir, store)
 }
 
 fn todo(id: &str, created_at: i64) -> ProjectTodoRecord {
@@ -78,7 +77,7 @@ fn terminal(status: ProjectTodoRunStatus, output: Option<&str>) -> ProjectTodoRu
 /// Plan 完成：todo 回 Planned，输出写进 plan_md（方案轨的落盘点）。
 #[tokio::test]
 async fn plan_finish_writes_back_planned_and_plan_md() {
-    let p = fresh().await;
+    let (_directory, p) = fresh().await;
     p.create_todo(&todo("t1", 1)).await.unwrap();
     p.patch_todo(
         "t1",
@@ -114,7 +113,7 @@ async fn plan_finish_writes_back_planned_and_plan_md() {
 /// Execute 完成：todo → Done；失败/取消同理映射（失败 → Failed）。
 #[tokio::test]
 async fn execute_finish_owns_the_todo_terminal_status() {
-    let p = fresh().await;
+    let (_directory, p) = fresh().await;
     p.create_todo(&todo("t2", 2)).await.unwrap();
     p.patch_todo(
         "t2",
@@ -148,7 +147,7 @@ async fn execute_finish_owns_the_todo_terminal_status() {
 /// 的 Execute 行稍后独占终态回写；重复终结返回 false（幂等守卫）。
 #[tokio::test]
 async fn step_finish_never_touches_the_todo() {
-    let p = fresh().await;
+    let (_directory, p) = fresh().await;
     p.create_todo(&todo("t3", 3)).await.unwrap();
     p.patch_todo(
         "t3",

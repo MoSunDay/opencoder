@@ -1,8 +1,8 @@
 //! Historical catalogs plus the deployment controller's project restore.
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 use std::{path::Path, process::Command};
 
-async fn scalar(conn: &libsql::Connection, sql: &str) -> String {
+async fn scalar(conn: &turso::Connection, sql: &str) -> String {
     conn.query(sql, ())
         .await
         .unwrap()
@@ -49,7 +49,7 @@ async fn migrate_and_restore(version: i64) {
         .parent()
         .unwrap();
     {
-        let store = LibsqlStore::open(&live).await.unwrap();
+        let store = TursoStore::open(&live).await.unwrap();
         let conn = store.conn().await.unwrap();
         conn.execute_batch(
             "DROP TABLE project_tags; DROP TABLE project_todo_tags; DROP TABLE project_initiatives;
@@ -72,13 +72,15 @@ async fn migrate_and_restore(version: i64) {
             .await
             .unwrap();
     }
-    python(root, &live, &saved, "import sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); from rolling.backup import database; database(Path(sys.argv[2]),Path(sys.argv[3]))");
+    opencoder_database::maintenance::backup(live.clone(), saved.clone())
+        .await
+        .unwrap();
     for _ in 0..2 {
-        let store = LibsqlStore::open(&live).await.unwrap();
+        let store = TursoStore::open(&live).await.unwrap();
         let conn = store.conn().await.unwrap();
         assert_eq!(
             scalar(&conn, "SELECT CAST(version AS TEXT) FROM schema_version").await,
-            "38"
+            opencoder_store::turso_store::schema_watermark().to_string()
         );
         assert_eq!(
             scalar(
@@ -109,7 +111,11 @@ async fn migrate_and_restore(version: i64) {
     python(root, &saved, &live, "import sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); from rolling.maintenance.archive import restore_projects; restore_projects(Path(sys.argv[2]),Path(sys.argv[3]))");
     // Old SQL reads/writes must work without reopening the current Store,
     // which would correctly migrate the restored database forward again.
-    let db = libsql::Builder::new_local(&live).build().await.unwrap();
+    let db = turso::Builder::new_local(live.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     assert_eq!(
         scalar(&conn, "SELECT CAST(version AS TEXT) FROM schema_version").await,

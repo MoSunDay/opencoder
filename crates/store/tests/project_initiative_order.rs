@@ -1,7 +1,7 @@
-use opencoder_store::{project::InitiativeOrderConflict, LibsqlStore, ProjectStore};
+use opencoder_store::{project::InitiativeOrderConflict, ProjectStore, TursoStore};
 use serde_json::json;
 
-async fn seed(store: &LibsqlStore) {
+async fn seed(store: &TursoStore) {
     for id in ["p", "other"] {
         store
             .create_goal(
@@ -29,7 +29,7 @@ async fn seed(store: &LibsqlStore) {
 fn ids(values: &[&str]) -> Vec<String> {
     values.iter().map(|id| id.to_string()).collect()
 }
-async fn order(store: &LibsqlStore) -> Vec<String> {
+async fn order(store: &TursoStore) -> Vec<String> {
     store
         .list_initiatives(Some("p"))
         .await
@@ -43,7 +43,7 @@ async fn order(store: &LibsqlStore) -> Vec<String> {
 async fn initiative_order_persists_and_rejects_stale_incomplete_or_foreign_lists() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("order.db");
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     seed(&store).await;
     let original = ids(&["a", "b", "c"]);
     let next = ids(&["c", "a", "b"]);
@@ -94,7 +94,7 @@ async fn initiative_order_persists_and_rejects_stale_incomplete_or_foreign_lists
         );
     }
     drop(store);
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     assert_eq!(order(&store).await, next);
 }
 
@@ -102,9 +102,13 @@ async fn initiative_order_persists_and_rejects_stale_incomplete_or_foreign_lists
 async fn initiative_order_write_failure_rolls_back_every_row() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("atomic.db");
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     seed(&store).await;
-    let db = libsql::Builder::new_local(&path).build().await.unwrap();
+    let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     db.connect().unwrap().execute("CREATE TRIGGER fail_order BEFORE UPDATE OF sort_key ON project_initiatives WHEN NEW.id = 'b' BEGIN SELECT RAISE(ABORT, 'order failed'); END", ()).await.unwrap();
     assert!(store
         .reorder_initiatives("p", &ids(&["a", "b", "c"]), &ids(&["c", "b", "a"]), 20)

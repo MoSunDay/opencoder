@@ -1,15 +1,14 @@
-use super::FleetStore;
+use super::{FleetConnection, FleetStore};
 use anyhow::{bail, Context, Result};
-use libsql::params;
 use opencoder_core::fleet::{
     ExecutionCursor, ExecutionIndex, ExecutionKind, ExecutionPage, NodeRegistration,
     EXECUTION_PAGE_MAX,
 };
 use serde_json::Value;
+use turso::params;
 
-impl FleetStore {
+impl FleetConnection {
     pub async fn register(&self, node: &NodeRegistration) -> Result<()> {
-        let _guard = self.gate.lock().await;
         self.conn.execute("INSERT INTO fleet_nodes VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET registration=excluded.registration",
             params![node.id.clone(), serde_json::to_string(node)?]).await?;
         Ok(())
@@ -17,7 +16,6 @@ impl FleetStore {
     /// Remove only the node registration; execution ownership and history
     /// remain in execution_index and in the node's own durable store.
     pub async fn unregister(&self, id: &str) -> Result<bool> {
-        let _guard = self.gate.lock().await;
         Ok(self
             .conn
             .execute("DELETE FROM fleet_nodes WHERE id=?1", params![id])
@@ -25,7 +23,6 @@ impl FleetStore {
             > 0)
     }
     pub async fn nodes(&self) -> Result<Vec<NodeRegistration>> {
-        let _guard = self.gate.lock().await;
         let mut rows = self
             .conn
             .query("SELECT registration FROM fleet_nodes ORDER BY id", ())
@@ -38,7 +35,6 @@ impl FleetStore {
     }
     /// Ownership and creation time are immutable, including after reconnect.
     pub async fn put_index(&self, record: &ExecutionIndex) -> Result<()> {
-        let _guard = self.gate.lock().await;
         if let Some(old) = read_index(&self.conn, &record.id).await? {
             if old.node_id != record.node_id
                 || old.created_at != record.created_at
@@ -66,7 +62,6 @@ impl FleetStore {
         if ids.is_empty() {
             return Ok(0);
         }
-        let _guard = self.gate.lock().await;
         self.conn
             .execute("BEGIN IMMEDIATE", ())
             .await
@@ -118,7 +113,6 @@ impl FleetStore {
         }
     }
     pub async fn index(&self, id: &str) -> Result<Option<ExecutionIndex>> {
-        let _guard = self.gate.lock().await;
         read_index(&self.conn, id).await
     }
     pub async fn indexes(
@@ -127,7 +121,6 @@ impl FleetStore {
         kind: Option<ExecutionKind>,
         limit: u32,
     ) -> Result<Vec<ExecutionIndex>> {
-        let _guard = self.gate.lock().await;
         let mut rows = self.conn.query("SELECT id,created_at,kind,node_id,status FROM execution_index WHERE (?1 IS NULL OR node_id=?1) AND (?2 IS NULL OR kind=?2) ORDER BY created_at DESC,id LIMIT ?3",
             params![node.map(str::to_owned), kind.map(|value| value.prefix().to_owned()), limit.clamp(1, 10000)]).await?;
         let mut result = vec![];
@@ -143,7 +136,6 @@ impl FleetStore {
         cursor: Option<&ExecutionCursor>,
         limit: u32,
     ) -> Result<ExecutionPage<ExecutionIndex>> {
-        let _guard = self.gate.lock().await;
         let limit = limit.clamp(1, EXECUTION_PAGE_MAX);
         let mut rows = self
             .conn
@@ -180,7 +172,6 @@ impl FleetStore {
         })
     }
     pub async fn definition(&self, kind: &str, id: &str) -> Result<Option<Value>> {
-        let _guard = self.gate.lock().await;
         self.definition_locked(kind, id).await
     }
     pub(super) async fn definition_locked(&self, kind: &str, id: &str) -> Result<Option<Value>> {
@@ -197,7 +188,6 @@ impl FleetStore {
             .transpose()
     }
     pub async fn definitions(&self, kind: &str) -> Result<Vec<Value>> {
-        let _guard = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(
@@ -212,7 +202,6 @@ impl FleetStore {
         Ok(result)
     }
     pub async fn delete_definition(&self, kind: &str, id: &str) -> Result<()> {
-        let _guard = self.gate.lock().await;
         self.conn
             .execute(
                 "DELETE FROM fleet_definitions WHERE kind=?1 AND id=?2",
@@ -222,7 +211,6 @@ impl FleetStore {
         Ok(())
     }
     pub async fn put_definition(&self, kind: &str, id: &str, body: &Value) -> Result<()> {
-        let _guard = self.gate.lock().await;
         self.put_definition_locked(kind, id, body).await
     }
     pub(super) async fn put_definition_locked(
@@ -237,7 +225,7 @@ impl FleetStore {
 }
 
 pub(super) async fn read_index(
-    conn: &libsql::Connection,
+    conn: &turso::Connection,
     id: &str,
 ) -> Result<Option<ExecutionIndex>> {
     let mut rows = conn
@@ -249,7 +237,7 @@ pub(super) async fn read_index(
     rows.next().await?.map(decode_index).transpose()
 }
 
-pub(super) fn decode_index(row: libsql::Row) -> Result<ExecutionIndex> {
+pub(super) fn decode_index(row: turso::Row) -> Result<ExecutionIndex> {
     Ok(ExecutionIndex {
         id: row.get(0)?,
         created_at: row.get(1)?,
@@ -259,6 +247,8 @@ pub(super) fn decode_index(row: libsql::Row) -> Result<ExecutionIndex> {
     })
 }
 
+#[path = "access/records.rs"]
+mod database_access;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,7 +277,10 @@ mod tests {
         assert_eq!(store.index("agent-x").await.unwrap().unwrap().node_id, "n1");
         assert!(store.index("missing").await.unwrap().is_none());
         let mut rows = store
-            .conn
+            .db
+            .connect()
+            .await
+            .unwrap()
             .query("PRAGMA table_info(execution_index)", ())
             .await
             .unwrap();

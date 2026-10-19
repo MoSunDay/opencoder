@@ -103,22 +103,36 @@ async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
         {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let db = libsql::Builder::new_local(root.path().join("data/control.db"))
-            .build()
-            .await
-            .unwrap();
+        let db = turso::Builder::new_local(
+            (root.path().join("data/control.db"))
+                .to_str()
+                .expect("UTF-8 database path"),
+        )
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
         let writer = db.connect().unwrap();
         writer.execute("BEGIN IMMEDIATE", ()).await.unwrap();
         inventory.changes.send(1).unwrap();
         while inventory.reports.load(Ordering::SeqCst) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        while tokio::time::timeout(Duration::from_millis(20), state.fleet.nodes())
-            .await
-            .is_ok()
-        {
-            tokio::task::yield_now().await;
-        }
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            state
+                .fleet
+                .put_definition("test", "writer-barrier", &serde_json::json!({})),
+        )
+        .await
+        .is_err());
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), state.fleet.nodes())
+                .await
+                .unwrap()
+                .unwrap()
+                .is_empty()
+        );
         let caller = state.clone();
         let cancel = tokio::spawn(async move {
             caller
@@ -171,6 +185,9 @@ async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
             reply.status, 200,
             "the reply must remain attached to its original call"
         );
+        while state.fleet.index("dag-flow-32999").await.unwrap().is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         let row = state.fleet.index("dag-flow-32999").await.unwrap().unwrap();
         assert_eq!(row.node_id, "node-flow");
         assert_eq!(row.status, ExecutionStatus::Done);
@@ -228,7 +245,12 @@ async fn acknowledged_report_detach_cannot_promote_or_ack_replacement_connection
     until(async || !fixture.state.hub.views().await[0].online).await;
     let mut new = fixture.open(10).await;
     writer.execute("COMMIT", ()).await.unwrap();
-    let _ = fixture.state.fleet.nodes().await.unwrap();
+    fixture
+        .state
+        .fleet
+        .put_definition("test", "register-barrier", &serde_json::json!({}))
+        .await
+        .unwrap();
     let view = fixture.state.hub.views().await.remove(0);
     assert!(view.online);
     assert!(!view.snapshot.as_ref().unwrap().ready);

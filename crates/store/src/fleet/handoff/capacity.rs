@@ -1,7 +1,8 @@
-use super::super::FleetStore;
+use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Context, Result};
-use libsql::{params, TransactionBehavior};
 use serde::Serialize;
+use turso::params;
+use turso::transaction::TransactionBehavior;
 
 // The optimistic read and transactional update must use the same FIFO fence.
 // Completed tickets remain durable history. Poll only the existing partial
@@ -20,13 +21,12 @@ pub struct CapacitySnapshot {
     pub queued: u64,
 }
 
-impl FleetStore {
+impl FleetConnection {
     pub async fn initialize_capacity(&self, max_runs: usize) -> Result<()> {
         ensure!(
             max_runs > 0 && max_runs <= i64::MAX as usize,
             "invalid host capacity"
         );
-        let _gate = self.gate.lock().await;
         self.conn
             .execute(
                 "INSERT INTO host_capacity VALUES (1,?1) ON CONFLICT(singleton) DO NOTHING",
@@ -40,13 +40,11 @@ impl FleetStore {
             max_runs > 0 && max_runs <= i64::MAX as usize,
             "invalid host capacity"
         );
-        let _gate = self.gate.lock().await;
         self.conn.execute("INSERT INTO host_capacity VALUES (1,?1) ON CONFLICT(singleton) DO UPDATE SET max_runs=excluded.max_runs", [max_runs as i64]).await?;
         Ok(())
     }
 
     pub async fn capacity(&self) -> Result<CapacitySnapshot> {
-        let _gate = self.gate.lock().await;
         let mut rows = self.conn.query("SELECT max_runs,
             (SELECT count(*) FROM capacity_queue INDEXED BY one_live_slot WHERE phase!='done' AND phase='running'),
             (SELECT count(*) FROM capacity_queue INDEXED BY one_live_slot WHERE phase!='done' AND phase='queued')
@@ -68,7 +66,6 @@ impl FleetStore {
         execution: &str,
         runtime: &str,
     ) -> Result<i64> {
-        let _gate = self.gate.lock().await;
         // Schedulers replay accepted tickets on every tick. An ignored INSERT
         // still writes SQLite's AUTOINCREMENT counter and can starve admission.
         if let Some(sequence) = self
@@ -113,7 +110,6 @@ impl FleetStore {
     /// Strict machine-wide FIFO, including retired runtimes. Heartbeat age is
     /// deliberately irrelevant: a missing host must never free live slots.
     pub async fn claim_capacity(&self, ticket: &str, runtime: &str) -> Result<bool> {
-        let _gate = self.gate.lock().await;
         let eligible = {
             let mut rows = self
                 .conn
@@ -131,10 +127,11 @@ impl FleetStore {
         if !eligible {
             return Ok(false);
         }
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         let changed = tx
             .execute(
                 &format!("UPDATE capacity_queue SET phase='running' WHERE {CLAIMABLE}"),
@@ -148,7 +145,6 @@ impl FleetStore {
     /// Only the owning runtime calls this after completion and durable writes.
     /// No timer, host retirement, or release rollback is allowed to call it.
     pub async fn finish_capacity(&self, ticket: &str, runtime: &str) -> Result<()> {
-        let _gate = self.gate.lock().await;
         let changed = self
             .conn
             .execute(
@@ -170,11 +166,11 @@ impl FleetStore {
         execution: &str,
         runtime: &str,
     ) -> Result<bool> {
-        let _gate = self.gate.lock().await;
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         let row = {
             let mut rows = tx
                 .query(
@@ -215,7 +211,6 @@ impl FleetStore {
     }
 
     pub async fn runtime_tickets(&self, runtime: &str) -> Result<Vec<(String, String, String)>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self.conn.query("SELECT ticket,execution_id,phase FROM capacity_queue INDEXED BY one_live_slot WHERE runtime_id=?1 AND phase!='done' ORDER BY sequence", [runtime]).await?;
         let mut tickets = Vec::new();
         while let Some(row) = rows.next().await? {
@@ -224,3 +219,6 @@ impl FleetStore {
         Ok(tickets)
     }
 }
+
+#[path = "access/capacity.rs"]
+mod database_access;

@@ -27,10 +27,10 @@ def idle(identifier, node, inventory):
 def capture(settings, operations):
     node = (settings.state_dir / 'host/node-id').read_text().strip()
     path = settings.state_dir / 'host/host.db'
-    with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as conn:
-        rows = conn.execute("SELECT r.id,r.config,d.body FROM host_runtimes r "
+    from ..storage.database import query
+    rows = query(path, "SELECT r.id,r.config,d.body FROM host_runtimes r "
                             "LEFT JOIN fleet_definitions d ON d.kind='runtime_sleep' AND d.id=r.id "
-                            "WHERE r.mode!='staged'").fetchall()
+                      "WHERE r.mode!='staged'")
     saved = {}
     for identifier, config, body in rows:
         inventory = json.loads(body) if body else None

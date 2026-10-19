@@ -62,7 +62,7 @@ async fn panic_convergence_after_run_done_still_fails_stuck_running_todo() {
 
 #[tokio::test]
 async fn start_execute_blocks_unregistered_plan_run_within_grace() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
     let service = ProjectService::new();
     service
@@ -92,7 +92,7 @@ async fn start_execute_blocks_unregistered_plan_run_within_grace() {
 
 #[tokio::test]
 async fn start_execute_converges_stale_plan_run_past_grace() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
     let service = ProjectService::new();
     service

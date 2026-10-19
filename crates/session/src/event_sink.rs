@@ -229,16 +229,16 @@ async fn flush(store: &Arc<dyn Store>, batch: &[SessionEventRecord]) {
 mod tests {
     use super::*;
     use opencoder_core::Message;
-    use opencoder_store::{Delivery, LibsqlStore, SessionMeta};
+    use opencoder_store::{Delivery, SessionMeta, TursoStore};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    async fn fresh() -> (tempfile::TempDir, Arc<LibsqlStore>) {
+    async fn fresh() -> (tempfile::TempDir, Arc<TursoStore>) {
         let dir = tempfile::TempDir::new().unwrap();
-        let store = Arc::new(LibsqlStore::open(dir.path().join("test.db")).await.unwrap());
+        let store = Arc::new(TursoStore::open(dir.path().join("test.db")).await.unwrap());
         (dir, store)
     }
 
-    async fn make_session(store: &Arc<LibsqlStore>, id: &str) {
+    async fn make_session(store: &Arc<TursoStore>, id: &str) {
         let meta = SessionMeta {
             id: id.into(),
             created_at: 1,
@@ -251,7 +251,7 @@ mod tests {
     /// Wraps a real store, counting `append_events` calls so we can assert the
     /// write count is O(turn) under a token storm while losing zero events.
     struct CountingStore {
-        inner: Arc<LibsqlStore>,
+        inner: Arc<TursoStore>,
         events_calls: Arc<AtomicUsize>,
     }
 

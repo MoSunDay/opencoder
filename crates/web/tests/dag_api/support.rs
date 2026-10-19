@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_llm::MockChatClient;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use tower::ServiceExt;
 
 /// Two binary steps with one dependency — the minimal valid workflow.
@@ -26,7 +26,7 @@ pub(super) struct Ctx {
 }
 
 pub(super) async fn app() -> Ctx {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),

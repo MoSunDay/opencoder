@@ -5,7 +5,7 @@
 //! The loop reuses the outbox pattern (`release::outbox::start`): an
 //! `AtomicBool` lifecycle guard makes double-start a no-op, a weak handle
 //! lets the server exit, and `lifecycle.retired()` breaks the sleep. Since
-//! schema v27 the libsql `schedules` table is the definition source of
+//! schema v27 the Turso `schedules` table is the definition source of
 //! truth (CRUD via `POST/PUT/PATCH/DELETE /api/schedules`); the legacy
 //! `schedules.json` is only a one-time bootstrap seed, and its
 //! `scan_interval_secs` stays the ops knob (hot-read every loop). This loop

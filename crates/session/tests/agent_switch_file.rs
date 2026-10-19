@@ -14,10 +14,10 @@ use common::agent_fixtures::{scoped_agent_roots, write_agent_card, write_full_ag
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn done_turn() -> Vec<LlmEvent> {

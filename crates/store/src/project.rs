@@ -1,7 +1,7 @@
-//! Project catalog and execution persistence over libsql.
+//! Project catalog and execution persistence over turso.
 //!
-//! Upper-layer code depends on `Arc<dyn ProjectStore>`; the concrete libsql
-//! implementation lives in `libsql_store::project` (+ `project_runs`).
+//! Upper-layer code depends on `Arc<dyn ProjectStore>`; the concrete turso
+//! implementation lives in `turso_store::project` (+ `project_runs`).
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -61,7 +61,7 @@ use crate::project_types::{
 ///   an invalid empty `SET`).
 /// - `delete_*` returns `false` when the id does not exist.
 /// - Goal deletion detaches initiatives; nonempty initiatives reject deletion.
-///   TODO deletion also removes its runs in the same libsql transaction.
+///   TODO deletion also removes its runs in the same turso transaction.
 /// - Status/kind strings round-trip exactly; an unrecognized status on read is
 ///   corruption and propagates as an error.
 #[async_trait]
@@ -205,7 +205,7 @@ pub trait ProjectStore: Send + Sync {
     /// `false` means the todo was absent or another attempt is running; no
     /// run row is written. Any insert/commit failure rolls the claim back.
     ///
-    /// The claim and run insertion share one libsql transaction.
+    /// The claim and run insertion share one turso transaction.
     async fn claim_todo_running_with_run(
         &self,
         rec: &ProjectTodoRunRecord,

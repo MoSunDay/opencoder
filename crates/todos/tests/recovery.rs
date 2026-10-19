@@ -7,7 +7,7 @@ use std::{path::Path, sync::Arc};
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
@@ -83,7 +83,7 @@ async fn kinds(store: &Arc<dyn Store>, id: &str) -> Vec<String> {
 
 #[tokio::test]
 async fn acceptance_crash_then_resume_self_heals() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     // The third parent call (acceptance verdict) finds the mock exhausted,
     // simulating a process dying between "todo_acceptance_started" and the
     // verdict — the crash window WP recovery must survive.
@@ -151,7 +151,7 @@ async fn acceptance_crash_then_resume_self_heals() {
 
 #[tokio::test]
 async fn parent_fail_decision_fails_workflow() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -184,7 +184,7 @@ async fn parent_fail_decision_fails_workflow() {
 
 #[tokio::test]
 async fn parent_suspend_decision_parks_workflow() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(done(r#"{"operation":"suspend","reason":"wait for input"}"#)),
@@ -210,7 +210,7 @@ async fn parent_suspend_decision_parks_workflow() {
 
 #[tokio::test]
 async fn persistence_list_returns_summaries_and_honors_limit() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workflow = spec();
     for id in ["wf-a", "wf-b", "wf-c"] {
         let mut state =
@@ -272,7 +272,7 @@ fn two_step_spec() -> WorkflowSpec {
 /// must continue instead of suspending on the first model hiccup.
 #[tokio::test]
 async fn unparseable_parent_decision_is_corrected_without_suspending() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(done("sorry, I cannot produce JSON right now"))
@@ -312,7 +312,7 @@ async fn unparseable_parent_decision_is_corrected_without_suspending() {
 /// correction instead of suspending the round through dispatch validation.
 #[tokio::test]
 async fn non_runnable_dispatch_is_corrected_without_suspending() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             // step-2 is not runnable while step-1 is still pending.
@@ -360,7 +360,7 @@ async fn non_runnable_dispatch_is_corrected_without_suspending() {
 /// workflow suspends and the underlying parse error stays visible.
 #[tokio::test]
 async fn three_unparseable_parent_decisions_suspend_with_error_preserved() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(done("nope one"))

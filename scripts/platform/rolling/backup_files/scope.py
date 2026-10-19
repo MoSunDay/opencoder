@@ -24,7 +24,7 @@ class RuntimeScope:
         if not parts:
             # Reserved DirectoryLayout resource roots, not the platform's
             # independent resources service or an execution's writable HOME.
-            for name in ('resources', 'project-resources'):
+            for name in ('resources', 'project-resources', 'programs'):
                 if name in directories:
                     self.exclude(directory / name, 'pinned execution resources')
         if parts == ('dag',) and 'rootfs' in directories:

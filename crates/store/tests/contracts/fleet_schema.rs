@@ -1,6 +1,6 @@
-use libsql::Builder;
 use opencoder_core::fleet::ExecutionKind;
 use opencoder_store::fleet::FleetStore;
+use turso::Builder;
 
 const LEGACY_SCHEMA: &str = "CREATE TABLE execution_index (
     id TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
@@ -11,7 +11,11 @@ async fn seed(path: &std::path::Path, id: &str) {
 }
 
 async fn seed_with_status(path: &std::path::Path, id: &str, status: &str) {
-    let db = Builder::new_local(path).build().await.unwrap();
+    let db = Builder::new_local((path).to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     conn.execute(LEGACY_SCHEMA, ()).await.unwrap();
     conn.execute(
@@ -23,7 +27,11 @@ async fn seed_with_status(path: &std::path::Path, id: &str, status: &str) {
 }
 
 async fn backup_exists(path: &std::path::Path) -> bool {
-    let db = Builder::new_local(path).build().await.unwrap();
+    let db = Builder::new_local((path).to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     let mut rows = conn
         .query(
@@ -36,7 +44,11 @@ async fn backup_exists(path: &std::path::Path) -> bool {
 }
 
 async fn table_count(path: &std::path::Path, table: &str) -> i64 {
-    let db = Builder::new_local(path).build().await.unwrap();
+    let db = Builder::new_local((path).to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     let mut rows = conn
         .query(&format!("SELECT count(*) FROM {table}"), ())
@@ -89,7 +101,11 @@ async fn unknown_legacy_status_rolls_back_without_replacing_table() {
 async fn near_match_schema_is_rejected_instead_of_stamped_current() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("control.db");
-    let db = Builder::new_local(&path).build().await.unwrap();
+    let db = Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     conn.execute(
         "CREATE TABLE execution_index (
@@ -113,7 +129,11 @@ async fn near_match_schema_is_rejected_instead_of_stamped_current() {
 async fn current_schema_with_unknown_kind_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("control.db");
-    let db = Builder::new_local(&path).build().await.unwrap();
+    let db = Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     conn.execute(
         "CREATE TABLE execution_index (
@@ -140,7 +160,11 @@ async fn current_schema_with_unknown_kind_is_rejected() {
 async fn current_schema_with_unknown_status_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("control.db");
-    let db = Builder::new_local(&path).build().await.unwrap();
+    let db = Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     conn.execute(
         "CREATE TABLE execution_index (

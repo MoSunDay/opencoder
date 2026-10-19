@@ -1,5 +1,5 @@
 //! One-time import of the legacy `schedules.json` definitions into the
-//! libsql `schedules` table (schema v27).
+//! Turso `schedules` table (schema v27).
 //!
 //! Since v27 the table is the scheduler's definition source of truth and
 //! the JSON file degrades to a seed input: on boot, ONLY when the table is

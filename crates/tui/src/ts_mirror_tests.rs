@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use opencoder_core::Message;
-use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store, TsRegistry};
+use opencoder_store::{SessionMeta, SessionPatch, Store, TsRegistry, TursoStore};
 use tokio::sync::Mutex;
 
 use super::{maybe_wrap_at, TsMirrorStore};
@@ -22,7 +22,7 @@ fn ts_meta(id: &str) -> SessionMeta {
 }
 
 async fn fixture() -> (TsMirrorStore, tempfile::TempDir, PathBuf) {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let tmp = tempfile::tempdir().unwrap();
     let workdir = tmp.path().join("project");
     tokio::fs::create_dir_all(&workdir).await.unwrap();
@@ -188,7 +188,7 @@ async fn clear_other_sessions_prunes_registry() {
 
 #[tokio::test]
 async fn maybe_wrap_gates_on_existing_registry() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let tmp = tempfile::tempdir().unwrap();
     let ts_db = tmp.path().join("ts.db");
     let workdir = tmp.path().join("project");

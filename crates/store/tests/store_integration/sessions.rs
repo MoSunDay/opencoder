@@ -2,7 +2,7 @@
 //! and handoff/skill field persistence.
 
 use crate::common::{conv, fresh, make_session};
-use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, SessionPatch, Store};
+use opencoder_store::{SessionFilter, SessionMeta, SessionPatch, Store, TursoStore};
 
 #[tokio::test]
 async fn create_get_update_delete_session_contract() {
@@ -158,7 +158,7 @@ async fn clear_other_sessions_keeps_current_and_cascades() {
 
 #[tokio::test]
 async fn session_handoff_and_skill_fields_round_trip() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let id = "rt-session";
     store
         .create_session(&SessionMeta {

@@ -19,6 +19,8 @@ def resource_service(settings, candidate, operations):
         raise ValueError('resource service lacks version metadata; maintenance upgrade is required')
     compatible(candidate, [{'release_id': 'resource-service',
                             'protocol_version': build.get('protocol_version'),
+                            'storage_engine': build.get('storage_engine', 'libsql'),
+                            'execution_io': build.get('execution_io', {'reader': 0, 'writer': 0}),
                             'compatibility': build['release_compatibility']}])
     # A healthy listener alone does not prove the native management API exists.
     operations.http(settings.resource_url, '/api/dag/binaries')

@@ -184,7 +184,7 @@ pub(crate) fn fire_subagent_turn_cancel(
 mod tests {
     use super::*;
     use crate::chat::{ChatBlock, ChatView};
-    use opencoder_store::{LibsqlStore, SessionMeta};
+    use opencoder_store::{SessionMeta, TursoStore};
     use tokio_util::sync::CancellationToken;
 
     fn make_subagent_block(done: bool, child_session_id: &str, task_id: &str) -> ChatBlock {
@@ -204,7 +204,7 @@ mod tests {
     }
 
     async fn memory_store() -> Arc<dyn Store> {
-        Arc::new(LibsqlStore::open_memory().await.unwrap())
+        Arc::new(TursoStore::open_memory().await.unwrap())
     }
 
     fn gates(task_id: &str) -> Arc<Mutex<HashMap<String, Arc<SubagentSteerGate>>>> {

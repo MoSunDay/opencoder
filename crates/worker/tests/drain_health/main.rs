@@ -202,6 +202,13 @@ async fn drain_persists_interrupt_and_restart_never_replays() {
             .status,
         200
     );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while client.call_count() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the request being interrupted must have started");
     first.drain_shutdown().await.unwrap();
     let detail = first
         .handle(NodeOperation::Inspect {

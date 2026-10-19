@@ -1,14 +1,13 @@
 //! Read-only candidates for catalog removal. Completed execution history is retained.
-use super::FleetStore;
+use super::{FleetConnection, FleetStore};
 use anyhow::Result;
 use serde_json::Value;
 
-impl FleetStore {
+impl FleetConnection {
     /// Conservative substring filtering happens in SQLite; callers inspect the JSON
     /// before treating a candidate as a reference. Missing indexes stay protected.
     pub async fn catalog_reference_candidates(&self, name: &str) -> Result<Vec<(String, Value)>> {
         anyhow::ensure!(!name.is_empty(), "catalog reference name is empty");
-        let _guard = self.gate.lock().await;
         // Escaped/non-ASCII identifiers can have several JSON spellings. In
         // that case inspect every candidate instead of risking a false negative.
         let needle = if name
@@ -34,3 +33,6 @@ impl FleetStore {
         Ok(result)
     }
 }
+
+#[path = "access/catalog.rs"]
+mod database_access;

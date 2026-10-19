@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use opencoder_session::SessionEvent;
-use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store};
+use opencoder_store::{EventKind, SessionEventRecord, SessionMeta, Store, TursoStore};
 use opencoder_web::handle::sse_from_session_event;
 
 /// Build representative SessionEvent variants (one of each display kind).
@@ -82,7 +82,7 @@ fn all_variants() -> Vec<SessionEvent> {
 
 #[tokio::test]
 async fn replay_kind_matches_live_kind_for_all_variants() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "replay-fid";
 
     // Create a session row so the FK on session_events is satisfied.

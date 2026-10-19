@@ -153,7 +153,7 @@ mod tests {
     use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
+    use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
 
     fn make_session(store: Option<Arc<dyn Store>>) -> SessionState {
         let working_dir = std::env::temp_dir().join("opencoder-skill-lifecycle-tests");
@@ -171,7 +171,7 @@ mod tests {
     }
 
     async fn mem_store_with_row() -> Arc<dyn Store> {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "sess-skill-lifecycle".into(),
@@ -255,7 +255,7 @@ mod tests {
     /// Store double for the retry contract: `update_session` fails the first
     /// `fail_first` calls, then delegates; every attempt is counted.
     struct RetryProbeStore {
-        inner: Arc<LibsqlStore>,
+        inner: Arc<TursoStore>,
         attempts: AtomicUsize,
         fail_first: usize,
     }
@@ -400,7 +400,7 @@ mod tests {
     }
 
     async fn probe_store(fail_first: usize) -> (Arc<RetryProbeStore>, Arc<dyn Store>) {
-        let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let inner = Arc::new(TursoStore::open_memory().await.unwrap());
         inner
             .create_session(&SessionMeta {
                 id: "sess-skill-lifecycle".into(),

@@ -84,7 +84,7 @@ fn operation(
 
 #[tokio::test]
 async fn layered_projection_is_atomic_and_generation_fenced() {
-    let store = opencoder_store::LibsqlStore::open_memory().await.unwrap();
+    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
     let first = store.commit_brain_layered(&created()).await.unwrap();
     assert_eq!(first.schema_version, LAYERED_SCHEMA_VERSION);
     assert_eq!(first.run.last_event_seq, 1);
@@ -118,7 +118,7 @@ async fn layered_projection_is_atomic_and_generation_fenced() {
 async fn terminal_attempt_is_immutable_and_survives_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("layered.db");
-    let store = opencoder_store::LibsqlStore::open(&path).await.unwrap();
+    let store = opencoder_store::TursoStore::open(&path).await.unwrap();
     store.commit_brain_layered(&created()).await.unwrap();
 
     let mut terminal = created();
@@ -174,7 +174,7 @@ async fn terminal_attempt_is_immutable_and_survives_reopen() {
     assert_eq!(completed.run.phase, LayeredPhase::Completed);
 
     drop(store);
-    let reopened = opencoder_store::LibsqlStore::open(&path).await.unwrap();
+    let reopened = opencoder_store::TursoStore::open(&path).await.unwrap();
     assert_eq!(
         reopened
             .brain_layered("brain-layered-store")
@@ -187,7 +187,7 @@ async fn terminal_attempt_is_immutable_and_survives_reopen() {
 
 #[tokio::test]
 async fn retry_attempts_are_stored_as_separate_operations() {
-    let store = opencoder_store::LibsqlStore::open_memory().await.unwrap();
+    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
     let mut retried = created();
     retried.run.phase = LayeredPhase::Waiting;
     retried.run.layer = 1;
@@ -218,7 +218,7 @@ async fn retry_attempts_are_stored_as_separate_operations() {
 
 #[tokio::test]
 async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
-    let store = opencoder_store::LibsqlStore::open_memory().await.unwrap();
+    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
     assert!(store
         .brain_layered("brain-missing")
         .await
@@ -243,7 +243,7 @@ async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
 fn brain_v4_tables_do_not_increment_current_schema_version() {
     // v4 tables bootstrap unconditionally, so they must not move the
     // The layered tables remain additive at the current schema watermark.
-    assert_eq!(opencoder_store::libsql_store::schema_watermark(), 39);
+    assert_eq!(opencoder_store::turso_store::schema_watermark(), 39);
 }
 
 fn recovery_change(old: &LayeredSnapshot) -> LayeredChange {
@@ -265,8 +265,8 @@ async fn stored_error(
     phase: LayeredPhase,
     activation: u64,
     cancelled: bool,
-) -> (opencoder_store::LibsqlStore, LayeredSnapshot) {
-    let store = opencoder_store::LibsqlStore::open_memory().await.unwrap();
+) -> (opencoder_store::TursoStore, LayeredSnapshot) {
+    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
     let mut initial = created();
     initial.run.phase = phase;
     initial.run.layer = 1;

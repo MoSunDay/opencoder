@@ -11,17 +11,17 @@
 //!   definition (no FK), and `last_schedule_run` keeps answering
 //! - fresh bootstrap creates the table; reopening is idempotent
 //!
-//! Runs against a real on-disk libsql file (tempdir) so WAL pragmas are
+//! Runs against a real on-disk turso file (tempdir) so WAL pragmas are
 //! exercised truthfully.
 
 use opencoder_core::config::{ScheduleJob, ScheduleKind, ScheduleOverlap};
-use opencoder_store::{LibsqlStore, Store, SCHEDULE_RUN_FIRED};
+use opencoder_store::{Store, TursoStore, SCHEDULE_RUN_FIRED};
 use std::collections::BTreeMap;
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
@@ -131,7 +131,7 @@ async fn delete_removes_the_definition_but_keeps_the_fire_ledger() {
 async fn bootstrap_creates_the_table_and_reopens_idempotently() {
     let (dir, store) = fresh().await;
     let conn = store.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedules'")
         .await
         .unwrap();
@@ -147,12 +147,12 @@ async fn bootstrap_creates_the_table_and_reopens_idempotently() {
     drop(store);
 
     // Reopening (idempotent bootstrap) must not fail nor drop definitions.
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     store
         .upsert_schedule(&job("survives"), 1_000)
         .await
         .unwrap();
     drop(store);
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     assert_eq!(store.list_schedules().await.unwrap().len(), 1);
 }

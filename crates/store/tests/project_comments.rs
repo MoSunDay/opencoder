@@ -1,9 +1,9 @@
 use opencoder_store::project::comments::{CommentError, CommentQuery, NewComment};
-use opencoder_store::{LibsqlStore, ProjectStore, Store};
+use opencoder_store::{ProjectStore, Store, TursoStore};
 use serde_json::json;
 
-async fn setup() -> LibsqlStore {
-    let s = LibsqlStore::open_memory().await.unwrap();
+async fn setup() -> TursoStore {
+    let s = TursoStore::open_memory().await.unwrap();
     s.create_todo(&serde_json::from_value(json!({"id":"t","title":"Task","draft":"body","status":"draft","agent":"act","created_at":1,"updated_at":1})).unwrap()).await.unwrap();
     s
 }
@@ -159,7 +159,7 @@ async fn execution_sources_are_verified_in_the_append_transaction() {
 async fn version_38_upgrade_preserves_tasks_and_authentication_rows() {
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("store.db");
-    let s = LibsqlStore::open(&file).await.unwrap();
+    let s = TursoStore::open(&file).await.unwrap();
     s.create_user(
         "migration-user",
         "fixture-token-digest",
@@ -191,7 +191,7 @@ async fn version_38_upgrade_preserves_tasks_and_authentication_rows() {
         .unwrap();
     drop(conn);
     drop(s);
-    let s = LibsqlStore::open(&file).await.unwrap();
+    let s = TursoStore::open(&file).await.unwrap();
     assert_eq!(s.get_todo("t").await.unwrap().unwrap().draft, "body");
     assert!(s
         .todo_comments("t", CommentQuery::default())

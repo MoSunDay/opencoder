@@ -3,7 +3,7 @@
 
 use crate::common::{conv, fresh, make_session};
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 /// v14 `messages.display` column: the verbatim echo text round-trips through
 /// SQLite, and legacy NULL rows load as `None` (fallback to blocks).
@@ -130,7 +130,7 @@ async fn jsonl_import_roundtrip() {
     tokio::fs::write(&path, text).await.unwrap();
 
     let db = dir.path().join("imp.db");
-    let store = LibsqlStore::open(&db).await.unwrap();
+    let store = TursoStore::open(&db).await.unwrap();
     let report = opencoder_store::import::import_jsonl_dir(&store, &jsonl_dir)
         .await
         .unwrap();

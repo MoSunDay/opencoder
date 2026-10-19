@@ -223,7 +223,7 @@ async fn import_bundle_inner(
 mod tests {
     use super::*;
     use crate::types::{EventKind, SubagentStatus};
-    use crate::LibsqlStore;
+    use crate::TursoStore;
     use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
     fn sample_bundle() -> SessionBundle {
@@ -328,7 +328,7 @@ mod tests {
     /// source seqs would otherwise dangle). Mirrors the jsonl importer.
     #[tokio::test]
     async fn import_bundle_resets_summary_handoff_seq() {
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
 
         let bundle = SessionBundle {
             meta: SessionMeta {
@@ -388,7 +388,7 @@ mod tests {
     /// row carries a workdir_hash.
     #[tokio::test]
     async fn import_bundle_preserves_child_workdir_hash_when_none() {
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
 
         // Child bundle carries its own workdir_hash.
         let child = SessionBundle {
@@ -491,7 +491,7 @@ mod tests {
     /// the idempotency guard does not permanently block retries.
     #[tokio::test]
     async fn import_bundle_rolls_back_on_failure() {
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
 
         // message ids are NOT unique in this schema, so a duplicate-id collision
         // cannot trigger a failure. Instead, craft an event whose session_id
@@ -571,7 +571,7 @@ mod tests {
     /// cyclic nesting). The guard fires at depth 33.
     #[tokio::test]
     async fn deeply_nested_bundle_exceeding_max_depth_is_rejected() {
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         // Build a chain 34 levels deep (root at depth 0, deepest child at
         // depth 33) by repeatedly wrapping in a single SubagentBundle.
         let mut bundle = sample_bundle();

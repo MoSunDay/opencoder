@@ -157,7 +157,7 @@ async fn heartbeat_delivers_control_while_busy() {
     // the LLM call parks, and under heavy test-machine load the busy
     // heartbeater could otherwise serve the fetch slice inside that startup
     // window, racing the assertion below on an empty transcript.
-    let local = opencoder_store::LibsqlStore::open(data.path().join("opencoder.db"))
+    let local = opencoder_store::TursoStore::open(data.path().join("opencoder.db"))
         .await
         .unwrap();
     let sid = task.session_id.clone();

@@ -189,7 +189,7 @@ async fn task_plan_unknown_subagent_type_error_omits_build() {
 async fn aborted_run_keeps_task_plan_completed_run_clears_it() {
     let dir = tempfile::tempdir().unwrap();
     let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+        Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(MockChatClient::new());
     let mut session = SessionState::new(
         "plan-strip-lifecycle",

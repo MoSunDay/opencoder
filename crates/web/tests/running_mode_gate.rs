@@ -15,7 +15,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{Delivery, LibsqlStore, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionMeta, Store, TursoStore};
 use tokio::sync::mpsc;
 use tower::ServiceExt;
 
@@ -186,7 +186,7 @@ async fn seed_sandbox_session(store: &Arc<dyn Store>, sid: &str) {
 #[tokio::test]
 async fn agent_field_and_dedicated_switch_paths_remain_409_while_running() {
     let tmp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "running-mode";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
@@ -250,7 +250,7 @@ async fn agent_field_and_dedicated_switch_paths_remain_409_while_running() {
 #[tokio::test]
 async fn queued_mode_command_admitted_while_running_applies_at_idle_boundary() {
     let tmp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "queued-mode";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
@@ -320,7 +320,7 @@ async fn queued_mode_command_admitted_while_running_applies_at_idle_boundary() {
 #[tokio::test]
 async fn steered_mode_command_admitted_while_running_applies_at_turn_boundary() {
     let tmp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "steered-mode";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
@@ -376,7 +376,7 @@ async fn steered_mode_command_admitted_while_running_applies_at_turn_boundary() 
 #[tokio::test]
 async fn steered_clear_context_on_act_session_keeps_agent() {
     let tmp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "steered-clear";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
@@ -478,7 +478,7 @@ async fn get_json(app: &axum::Router, uri: &str) -> (StatusCode, serde_json::Val
 #[tokio::test]
 async fn agent_switch_accepts_plan_and_rejects_legacy_sandbox() {
     let tmp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "switch-plan";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
@@ -584,7 +584,7 @@ async fn agent_switch_accepts_plan_and_rejects_legacy_sandbox() {
 #[tokio::test]
 async fn plan_session_emits_agent_switched_with_plan_value() {
     let tmp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "plan-frame";
     seed_session(&store, sid).await;
     let llm = Arc::new(HangingStream {
@@ -653,7 +653,7 @@ async fn plan_session_emits_agent_switched_with_plan_value() {
 #[tokio::test]
 async fn queued_clear_context_in_sandbox_session_converges_to_act() {
     let tmp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "queued-sandbox-clear";
     seed_sandbox_session(&store, sid).await;
     let llm = Arc::new(HangingStream {

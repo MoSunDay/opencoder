@@ -1,7 +1,7 @@
 //! Functional tests for the `post_subagent_steer` HTTP handler.
 //!
 //! These exercise the steer endpoint directly (no network) against a real
-//! libsql store, asserting the behavioral contracts:
+//! turso store, asserting the behavioral contracts:
 //! - `steer_running_subagent_returns_ok`: a Running task admits a steer to the
 //!   child session's pending queue and returns the `admitted_seq`.
 //! - `steer_{completed,failed,cancelled}_subagent_returns_409`: a non-running
@@ -21,13 +21,13 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord,
+    Delivery, SessionMeta, Store, SubagentStatus, SubagentTaskRecord, TursoStore,
 };
 
 /// Build a thin test router exposing only the subagent steer route over a
 /// shared in-memory store (mirrors the `app()` pattern in web_contract.rs).
 async fn app() -> (Router, Arc<opencoder_web::AppState>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir();
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,

@@ -1,4 +1,4 @@
-//! Regression test for the db_lock serialization fix (Phase 1).
+//! Concurrent transactions retain their own writer connection.
 //!
 //! Before the fix, libsql 0.9.x ran sync SQLite FFI directly on tokio worker
 //! threads with no serialization. Concurrent operations (multi-subagent
@@ -7,15 +7,15 @@
 //!
 //! This test fires 16 concurrent tasks that each interleave `append_events`
 //! (which opens a transaction), `append_message`, and `claim_next_queue`
-//! (IMMEDIATE transaction) against a single shared `LibsqlStore`. With the
-//! `db_lock` serialization in place, zero operations should error and all
+//! (IMMEDIATE transaction) against a single shared `TursoStore`. With the
+//! writer lane in place, zero operations should error and all
 //! data must be present and correct afterwards.
 
 use std::sync::{Arc, Mutex};
 
 use opencoder_core::Message;
 use opencoder_store::{
-    Delivery, EventKind, LibsqlStore, SessionEventRecord, SessionInput, SessionMeta, Store,
+    Delivery, EventKind, SessionEventRecord, SessionInput, SessionMeta, Store, TursoStore,
 };
 use tempfile::TempDir;
 
@@ -45,7 +45,7 @@ fn meta_for(id: &str) -> SessionMeta {
 async fn concurrent_store_ops_serialized() {
     let dir = TempDir::new().unwrap();
     let store = Arc::new(
-        LibsqlStore::open(dir.path().join("serialized.db"))
+        TursoStore::open(dir.path().join("serialized.db"))
             .await
             .unwrap(),
     );

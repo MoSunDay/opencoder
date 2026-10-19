@@ -31,7 +31,7 @@ async fn env() -> Env {
     let db = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
     let store: Arc<dyn opencoder_store::Store> = Arc::new(
-        opencoder_store::LibsqlStore::open(db.path().join("t.db"))
+        opencoder_store::TursoStore::open(db.path().join("t.db"))
             .await
             .unwrap(),
     );

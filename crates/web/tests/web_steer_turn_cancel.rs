@@ -21,7 +21,7 @@ use std::time::Duration;
 use opencoder_core::Config;
 use opencoder_core::ContentBlock;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{Delivery, LibsqlStore, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionMeta, Store, TursoStore};
 use tokio::sync::mpsc;
 
 // ---- BlockingFirstStream: first call hangs, subsequent calls reply ----
@@ -73,7 +73,7 @@ impl ChatStream for BlockingFirstStream {
 
 /// Fresh in-memory AppState (drain tests call fns directly, no router).
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

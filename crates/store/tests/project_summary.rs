@@ -1,5 +1,5 @@
 use opencoder_store::project::summary::SummaryScope;
-use opencoder_store::{LibsqlStore, ProjectStore};
+use opencoder_store::{ProjectStore, TursoStore};
 use serde_json::json;
 
 #[path = "project_summary/support.rs"]
@@ -8,7 +8,7 @@ use support::seed;
 
 #[tokio::test]
 async fn summaries_have_independent_timestamps_and_clear_without_changing_progress() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     seed(&store).await;
     assert!(store.list_goals().await.unwrap()[0]
         .summary
@@ -103,10 +103,14 @@ async fn summaries_have_independent_timestamps_and_clear_without_changing_progre
 async fn schema_36_upgrade_preserves_records_and_reopen_preserves_summaries() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("project.db");
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     seed(&store).await;
     drop(store);
-    let db = libsql::Builder::new_local(&path).build().await.unwrap();
+    let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     for table in ["project_goals", "project_initiatives"] {
         conn.execute(
@@ -130,7 +134,7 @@ async fn schema_36_upgrade_preserves_records_and_reopen_preserves_summaries() {
         .unwrap();
     drop(conn);
     drop(db);
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     let goal = store.list_goals().await.unwrap().remove(0);
     assert_eq!(goal.title, "Project");
     assert_eq!(goal.summary.current_summary, "");
@@ -153,7 +157,7 @@ async fn schema_36_upgrade_preserves_records_and_reopen_preserves_summaries() {
         .await
         .unwrap();
     drop(store);
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     assert_eq!(
         store.list_goals().await.unwrap()[0].summary.current_summary,
         "saved"

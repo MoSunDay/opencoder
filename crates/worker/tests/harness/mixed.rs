@@ -1,6 +1,6 @@
 use super::*;
 use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use std::{path::Path, sync::Arc};
 
 pub async fn all(root: &Path) {
@@ -63,7 +63,7 @@ async fn subagent(root: &Path) {
             }])
             .push_script(done("MATRIX_PARENT_DONE")),
     );
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let config = opencoder_core::Config::default();
     let mut session = opencoder_session::SessionState::new(
         "matrix-parent",

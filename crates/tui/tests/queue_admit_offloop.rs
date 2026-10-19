@@ -28,24 +28,24 @@ use anyhow::Result;
 use async_trait::async_trait;
 use opencoder_core::Message;
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 use opencoder_tui::queue_admitter::{self, AdmitDone, AdmitReconcile, AdmitUiState};
 
-/// A Store wrapper that delegates everything to an inner LibsqlStore EXCEPT
+/// A Store wrapper that delegates everything to an inner TursoStore EXCEPT
 /// `admit_input`, which sleeps `admit_delay` first — simulating the db_lock
 /// contention the actor exists to absorb. The atomics let the test observe
 /// whether the (blocking) store call was actually entered/finished.
 struct DelayStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
     admit_delay: Duration,
     admit_entered: AtomicBool,
     admit_finished: AtomicBool,
 }
 
 impl DelayStore {
-    fn new(inner: Arc<LibsqlStore>, admit_delay: Duration) -> Self {
+    fn new(inner: Arc<TursoStore>, admit_delay: Duration) -> Self {
         Self {
             inner,
             admit_delay,
@@ -164,7 +164,7 @@ fn ok_seq(done: &AdmitDone) -> i64 {
 
 /// In-memory store + session + DelayStore wrapper, shared by all three tests.
 async fn setup(admit_delay: Duration) -> Arc<DelayStore> {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     inner
         .create_session(&SessionMeta {
             id: "s1".into(),

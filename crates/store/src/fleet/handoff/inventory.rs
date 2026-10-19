@@ -1,9 +1,10 @@
 //! Validate a Runtime inventory without querying ownership once per history row.
-use super::super::FleetStore;
+use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
-use libsql::{params, Connection, TransactionBehavior};
+use turso::transaction::TransactionBehavior;
+use turso::{params, Connection};
 
-impl FleetStore {
+impl FleetConnection {
     /// Existing ownership is immutable and stays read-only. Newly discovered
     /// children are assigned atomically after rechecking under the writer lock.
     pub async fn assign_runtime_inventory(&self, runtime: &str, ids: &[&str]) -> Result<()> {
@@ -11,14 +12,14 @@ impl FleetStore {
             return Ok(());
         }
         let encoded = serde_json::to_string(ids)?;
-        let _gate = self.gate.lock().await;
         if !has_unassigned(&self.conn, runtime, &encoded).await? {
             return Ok(());
         }
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         let mut registered = tx
             .query("SELECT 1 FROM host_runtimes WHERE id=?1", [runtime])
             .await?;
@@ -57,5 +58,7 @@ async fn has_unassigned(conn: &Connection, runtime: &str, encoded: &str) -> Resu
     Ok(missing)
 }
 
+#[path = "access/inventory.rs"]
+mod database_access;
 #[cfg(test)]
 mod tests;

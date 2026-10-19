@@ -1,7 +1,7 @@
 //! Binary bundle export/import round-trip contract (incl. subagent links).
 
 use crate::common::conv;
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -11,7 +11,7 @@ async fn bundle_export_import_roundtrip() {
     };
 
     let dir = TempDir::new().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
 
     // Create parent session with messages.
     let parent_meta = SessionMeta {
@@ -96,7 +96,7 @@ async fn bundle_export_import_roundtrip() {
 
     // Import into a fresh store.
     let dir2 = TempDir::new().unwrap();
-    let store2 = LibsqlStore::open(dir2.path().join("test2.db"))
+    let store2 = TursoStore::open(dir2.path().join("test2.db"))
         .await
         .unwrap();
     let id = import_bundle(&store2, &restored, None).await.unwrap();

@@ -8,10 +8,10 @@
 //! Also covers the `create()` INSERT now binding `summary_images_json` (Fix 3):
 //! before that, a freshly-created session lost its image list on read-back.
 
-use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
+use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
 
-async fn mem() -> LibsqlStore {
-    LibsqlStore::open_memory().await.unwrap()
+async fn mem() -> TursoStore {
+    TursoStore::open_memory().await.unwrap()
 }
 
 /// A session carrying BOTH compaction and handoff metadata -- the dirty state

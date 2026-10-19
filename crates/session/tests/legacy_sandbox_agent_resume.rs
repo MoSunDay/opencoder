@@ -8,7 +8,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{LlmEvent, MockChatClient, Usage};
 use opencoder_session::{resume, run, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 fn config() -> Config {
     Config {
@@ -19,7 +19,7 @@ fn config() -> Config {
 
 #[tokio::test]
 async fn legacy_sandbox_row_resumes_as_plan_agent() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "legacy-sandbox".into(),

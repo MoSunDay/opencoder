@@ -1,4 +1,4 @@
-//! P0 functional tests for the libsql-backed Store.
+//! P0 functional tests for the Turso-backed Store.
 //!
 //! Each test asserts a *behavior contract*, not "the function runs":
 //! - create_get_update_delete_session_contract: full CRUD lifecycle
@@ -12,7 +12,7 @@
 //! - cancelled_transaction_*: future-cancellation must not panic and the store
 //!   stays usable/consistent afterwards
 //!
-//! These run against a real on-disk libsql file (tempdir) so WAL behaviour is
+//! These run against a real on-disk Turso file (tempdir) so WAL behaviour is
 //! exercised truthfully, not mocked. Concurrent-writer stress tests live in
 //! `store_concurrency.rs`, schema-migration tests in `store_migrations.rs`, and
 //! subagent-task tests in `subagent_status_counts.rs`.

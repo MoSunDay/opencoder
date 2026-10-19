@@ -237,7 +237,7 @@ async fn events_after_cursor_sees_only_newer_events() {
     let data_dir = opencoder_core::data_dir_for(workdir.path());
     tokio::fs::create_dir_all(&data_dir).await.unwrap();
     let store: std::sync::Arc<dyn opencoder_store::Store> = std::sync::Arc::new(
-        opencoder_store::LibsqlStore::open(data_dir.join("opencoder.db"))
+        opencoder_store::TursoStore::open(data_dir.join("opencoder.db"))
             .await
             .unwrap(),
     );

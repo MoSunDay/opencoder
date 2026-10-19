@@ -11,7 +11,7 @@ use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_session::{
     is_clear_context_handoff, is_clear_context_seed, SessionEvent, SessionState,
 };
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
@@ -33,7 +33,7 @@ async fn session_with_transcript(
     id: &str,
     msgs: Vec<Message>,
 ) -> (SessionState, Arc<MockChatClient>, Arc<dyn Store>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: id.into(),

@@ -1,4 +1,4 @@
-//! End-to-end topic flows over a tempdir "NFS" + real LibsqlStore, driven by
+//! End-to-end topic flows over a tempdir "NFS" + real TursoStore, driven by
 //! the scripted MockDispatcher. Every assertion reads final state from disk
 //! or the store — the same thing a resume or the web layer would see.
 

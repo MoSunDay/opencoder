@@ -1,6 +1,6 @@
 use opencoder_brain::{CapabilityInput, Runtime};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{BrainContentConflict, LibsqlStore, Store};
+use opencoder_store::{BrainContentConflict, Store, TursoStore};
 use std::sync::{Arc, Barrier};
 
 fn input(summary: &str) -> CapabilityInput {
@@ -32,7 +32,7 @@ impl ChatStream for PausedEmbed {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn concurrent_edit_during_embedding_is_rejected_at_commit() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let regular = Runtime::new(store.clone(), Arc::new(MockChatClient::new()), "test");
     let original = regular
         .upsert_capability(&input("original"), 1)

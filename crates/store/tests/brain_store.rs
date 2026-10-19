@@ -13,7 +13,7 @@
 //!   latest-by-digest, upsert keeps created_at, v24 → v25 migration
 
 use opencoder_store::{
-    BrainCapabilityRecord, BrainEngInputRecord, BrainVectorWrite, LibsqlStore, Store,
+    BrainCapabilityRecord, BrainEngInputRecord, BrainVectorWrite, Store, TursoStore,
 };
 use tempfile::TempDir;
 
@@ -44,9 +44,9 @@ fn le(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
-async fn scalar_i64(store: &LibsqlStore, sql: &str) -> i64 {
+async fn scalar_i64(store: &TursoStore, sql: &str) -> i64 {
     let conn = store.conn().await.unwrap();
-    let stmt = conn.prepare(sql).await.unwrap();
+    let mut stmt = conn.prepare(sql).await.unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
 }

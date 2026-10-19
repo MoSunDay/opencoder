@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use opencoder_core::Message;
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
 fn meta_for(id: &str) -> SessionMeta {
@@ -44,8 +44,8 @@ fn queue_input(id: &str) -> SessionInput {
 async fn cross_instance_admits_never_busy_error() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("cross_instance.db");
-    let a = Arc::new(LibsqlStore::open(&db_path).await.unwrap());
-    let b = Arc::new(LibsqlStore::open(&db_path).await.unwrap());
+    let a = Arc::new(TursoStore::open(&db_path).await.unwrap());
+    let b = Arc::new(TursoStore::open(&db_path).await.unwrap());
 
     a.create_session(&meta_for("s")).await.unwrap();
 
@@ -127,8 +127,8 @@ async fn cross_instance_admits_never_busy_error() {
 async fn cross_instance_claim_after_concurrent_admits() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("cross_claim.db");
-    let a = Arc::new(LibsqlStore::open(&db_path).await.unwrap());
-    let b = Arc::new(LibsqlStore::open(&db_path).await.unwrap());
+    let a = Arc::new(TursoStore::open(&db_path).await.unwrap());
+    let b = Arc::new(TursoStore::open(&db_path).await.unwrap());
 
     a.create_session(&meta_for("s")).await.unwrap();
 

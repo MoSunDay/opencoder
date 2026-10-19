@@ -1,9 +1,9 @@
 use opencoder_core::{fleet::MessageCursor, Message};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 #[tokio::test]
 async fn bounded_transcript_preserves_display_synthetic_usage_and_utf8() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_session(&SessionMeta {
             id: "transcript".into(),

@@ -3,7 +3,7 @@
 mod support;
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_worker::Worker;
 use serde_json::{json, Value};
 use std::sync::{atomic::Ordering, Arc};
@@ -143,7 +143,7 @@ async fn initial_reads(kind: ExecutionKind, cancel: bool) {
     } else {
         // Reproduce the gap after the durable session row is written but
         // before Harness initialization and the first background drain.
-        let store = LibsqlStore::open(root.path().join("node/runtime.db"))
+        let store = TursoStore::open(root.path().join("node/runtime.db"))
             .await
             .unwrap();
         store

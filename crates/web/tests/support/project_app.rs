@@ -1,6 +1,6 @@
 //! Shared harness for the `/api/project/*` integration tests: a full
 //! `build_app` router (signature middleware ON) over an initialized
-//! `ProjectService` backed by one in-memory libsql store and a script-queue
+//! `ProjectService` backed by one in-memory turso store and a script-queue
 //! `MockChatClient`, plus the authenticated oneshot call helper and run-polling
 //! utilities. Used by `tests/web_project.rs`, `tests/web_project_runs.rs`
 //! and `tests/web_project_mock_dataset.rs` (dataset seeding in
@@ -14,7 +14,7 @@ use std::{
 use axum::http::StatusCode;
 use axum::Router;
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, ProjectStore, Store};
+use opencoder_store::{ProjectStore, Store, TursoStore};
 use serde_json::{json, Value};
 
 use super::authed_req;
@@ -27,16 +27,16 @@ pub const TOKEN: &str = "project-test-token";
 pub struct Harness {
     pub app: Router,
     pub mock: Arc<MockChatClient>,
-    /// The same libsql Arc behind the app's `ProjectService`, exposed as the
+    /// The same turso Arc behind the app's `ProjectService`, exposed as the
     /// store trait so dataset seeding can write rows HTTP cannot express.
     pub projects: Arc<dyn ProjectStore>,
     _dir: tempfile::TempDir,
 }
 
 pub async fn harness() -> Harness {
-    let libsql = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let store: Arc<dyn Store> = libsql.clone();
-    let projects: Arc<dyn ProjectStore> = libsql.clone();
+    let turso = Arc::new(TursoStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = turso.clone();
+    let projects: Arc<dyn ProjectStore> = turso.clone();
     let mock = Arc::new(MockChatClient::new());
     let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();

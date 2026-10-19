@@ -4,11 +4,15 @@
 //! faithful v3 database, reopens it (triggering `migrate(conn, 3)`), and
 //! asserts the column + default + version bump.
 
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 
-async fn raw_open(db_path: &std::path::Path) -> libsql::Connection {
-    use libsql::Builder;
-    let db = Builder::new_local(db_path).build().await.unwrap();
+async fn raw_open(db_path: &std::path::Path) -> turso::Connection {
+    use turso::Builder;
+    let db = Builder::new_local((db_path).to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     db.connect().unwrap()
 }
 
@@ -56,7 +60,7 @@ async fn schema_v3_to_v4_adds_images_json_column() {
     }
 
     // Phase 2: reopen -> bootstrap -> migrate(conn, 3) runs only `if from < 4`.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // The pre-existing input reads back with empty images (column defaulted to
     // '[]'), proving backward compatibility and the DEFAULT clause.
@@ -91,7 +95,7 @@ async fn schema_v3_to_v4_adds_images_json_column() {
     // Schema migrated through the current version.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -99,28 +103,33 @@ async fn schema_v3_to_v4_adds_images_json_column() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 38,
-            "schema version must be latest (38) after v3 migration"
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after v3 migration"
         );
     }
 
     // Idempotent: reopening again does not error and the version stays current.
     drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
+    let store2 = TursoStore::open(&db_path).await.unwrap();
     let _ = store2
         .get_session("s1")
         .await
         .unwrap()
         .unwrap_or(SessionMeta::default());
     let conn = store2.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
         .await
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 38, "schema version stays 38 after idempotent re-open");
+    assert_eq!(
+        v,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema version stays current after idempotent re-open"
+    );
 }
 
 // ===========================================================================
@@ -190,7 +199,7 @@ async fn schema_v4_to_v5_adds_task_type_and_backfills_subagents() {
     }
 
     // Reopen: triggers bootstrap() -> migrate(conn, 4) -> if from < 5.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     let parent = store.get_session("parent").await.unwrap().unwrap();
     assert_eq!(
@@ -208,7 +217,7 @@ async fn schema_v4_to_v5_adds_task_type_and_backfills_subagents() {
     // Index present, version bumped.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_sessions_task_type'",
             )
@@ -219,7 +228,7 @@ async fn schema_v4_to_v5_adds_task_type_and_backfills_subagents() {
         let idx: i64 = r.get(0).unwrap();
         assert_eq!(idx, 1, "idx_sessions_task_type must exist after migration");
 
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -227,8 +236,9 @@ async fn schema_v4_to_v5_adds_task_type_and_backfills_subagents() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 38,
-            "schema version must be latest (38) after v4 migration"
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after v4 migration"
         );
     }
 }

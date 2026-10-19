@@ -1,11 +1,11 @@
 //! Stale-shape and session summary schema migrations.
 
-use opencoder_store::{LibsqlStore, SessionPatch, Store};
+use opencoder_store::{SessionPatch, Store, TursoStore};
 
 #[tokio::test]
 async fn schema_migration_is_idempotent_when_column_already_exists() {
-    use libsql::Builder;
     use opencoder_store::{EventKind, SessionEventRecord};
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("idempotent-migrate.db");
@@ -16,7 +16,11 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     // skill on sessions), but schema_version is stale at 1. A bare ADD COLUMN
     // in migrate() would fail with `duplicate column name: sse_kind`.
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -66,7 +70,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
 
     // Reopen — triggers bootstrap → migrate(1). Before the fix this errored:
     //   `migrate v2: add sse_kind column` / `duplicate column name: sse_kind`.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // The pre-existing sse_kind data is intact and reads back through the store.
     let events = store.events_after("s1", 0).await.unwrap();
@@ -80,14 +84,18 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     // schema_version bumped all the way to 3.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 38, "schema version must be latest (38) after migration");
+        assert_eq!(
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after migration"
+        );
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -108,16 +116,20 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
 
     // Idempotent: reopening again does not re-run migration or error.
     drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
+    let store2 = TursoStore::open(&db_path).await.unwrap();
     let conn = store2.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
         .await
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 38, "schema version stays (38) after idempotent re-open");
+    assert_eq!(
+        v,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema version stays current after idempotent re-open"
+    );
 }
 
 /// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
@@ -125,14 +137,18 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
 /// persisted, and pre-existing rows read back as an empty vec (NULL default).
 #[tokio::test]
 async fn schema_migration_v6_to_v7_adds_summary_images() {
-    use libsql::Builder;
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate-v7.db");
 
     // Phase 1: hand-write a v6 sessions table (no summary_images_json column).
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -161,7 +177,7 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
 
     // Phase 2: reopen — migrate(conn, 6) runs the `if from < 7` block, adding
     // summary_images_json to sessions.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // (1) Pre-existing row survives; the new column is NULL -> empty vec.
     let m0 = store.get_session("s6").await.unwrap().unwrap();
@@ -193,7 +209,7 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
     // (3) Schema version bumped to 9.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -201,8 +217,9 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 38,
-            "schema version must be latest (38) after v6->v7 migration"
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after v6->v7 migration"
         );
     }
 }

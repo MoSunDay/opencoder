@@ -1,6 +1,6 @@
 use super::*;
-use libsql::params;
 use opencoder_core::fleet::ExecutionIndex;
+use turso::params;
 
 #[tokio::test]
 async fn counts_all_active_states_and_kinds_beyond_one_page() {
@@ -60,7 +60,10 @@ async fn rejects_unknown_kind_and_status_even_for_inactive_records() {
     for (kind, status) in [("unknown", "done"), ("dag", "unknown")] {
         let store = FleetStore::open_memory().await.unwrap();
         store
-            .conn
+            .db
+            .connect()
+            .await
+            .unwrap()
             .execute(
                 "INSERT INTO execution_index VALUES ('invalid',1,?1,'node',?2)",
                 params![kind, status],
@@ -83,7 +86,10 @@ async fn rejects_invalid_stored_field_types_instead_of_reporting_drained() {
     ] {
         let store = FleetStore::open_memory().await.unwrap();
         store
-            .conn
+            .db
+            .connect()
+            .await
+            .unwrap()
             .execute(
                 &format!("INSERT INTO execution_index VALUES ({values})"),
                 (),

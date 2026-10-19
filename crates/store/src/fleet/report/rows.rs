@@ -1,6 +1,6 @@
 //! One atomic report uses three SQL statements, independent of inventory size.
 use anyhow::{bail, Result};
-use libsql::Connection;
+use turso::Connection;
 
 pub(super) async fn apply(conn: &Connection, encoded: &str) -> Result<()> {
     // Check every immutable field before changing any status. The caller owns

@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::json;
 use tokio::sync::Notify;
 use tower::ServiceExt;
@@ -20,7 +20,7 @@ struct Ctx {
 }
 
 async fn hanging_app(notify: Arc<Notify>) -> Ctx {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(

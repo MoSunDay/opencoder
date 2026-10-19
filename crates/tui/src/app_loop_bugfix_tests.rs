@@ -49,10 +49,9 @@ fn env_model_override_detects_silent_revert() {
 /// design relies on.
 #[tokio::test]
 async fn fold_stale_turndone_keeps_newer_turn_running() {
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
-    let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let mut running = true; // a newer turn is live
@@ -98,9 +97,9 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
 /// subsequent `TurnDone` restarts the drain loop instead of going idle.
 #[tokio::test]
 async fn done_with_pending_queue_arms_drain_pending() {
-    use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+    use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "drain-test".into(),
@@ -186,9 +185,9 @@ async fn done_with_pending_queue_arms_drain_pending() {
 /// `drain_pending` stays false and `running` goes to false (normal idle).
 #[tokio::test]
 async fn done_with_empty_store_goes_idle() {
-    use opencoder_store::{LibsqlStore, SessionMeta, Store};
+    use opencoder_store::{SessionMeta, Store, TursoStore};
 
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "idle-test".into(),
@@ -262,10 +261,9 @@ async fn done_with_empty_store_goes_idle() {
 /// — matching every other `start_turn` call site.
 #[tokio::test]
 async fn drain_pending_restart_with_dead_worker_quits() {
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
-    let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let mut running = true;

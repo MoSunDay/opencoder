@@ -5,7 +5,7 @@ mod support;
 
 use opencoder_core::{fleet::*, harness::HarnessRuntime};
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::{json, Value};
 use support::{assignment, mock, settled, worker};
 
@@ -71,7 +71,7 @@ async fn recover(seed: usize) {
     record["assignment"]["index"]["status"] = json!("running");
     record["result"] = Value::Null;
     std::fs::write(&journal, serde_json::to_vec(&record).unwrap()).unwrap();
-    let store = LibsqlStore::open(root.join("node/runtime.db"))
+    let store = TursoStore::open(root.join("node/runtime.db"))
         .await
         .unwrap();
     if seed == 0 {
@@ -168,7 +168,7 @@ async fn recover(seed: usize) {
         format!("{rules}\n\nfollow up @notes.md")
     );
     assert_eq!(records[1]["args"][1], "resume");
-    let store = LibsqlStore::open(root.join("node/runtime.db"))
+    let store = TursoStore::open(root.join("node/runtime.db"))
         .await
         .unwrap();
     assert!(

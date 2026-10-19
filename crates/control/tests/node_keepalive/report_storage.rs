@@ -78,22 +78,42 @@ impl Fixture {
         until(async || !self.state.fleet.nodes().await.unwrap().is_empty()).await;
         socket
     }
-    pub(super) async fn writer(&self) -> libsql::Connection {
-        let db = libsql::Builder::new_local(self.root.path().join("data/control.db"))
-            .build()
-            .await
-            .unwrap();
+    pub(super) async fn writer(&self) -> turso::Connection {
+        let db = turso::Builder::new_local(
+            (self.root.path().join("data/control.db"))
+                .to_str()
+                .expect("UTF-8 database path"),
+        )
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
         let writer = db.connect().unwrap();
         writer.execute("BEGIN IMMEDIATE", ()).await.unwrap();
         writer
     }
     pub(super) async fn blocked(&self) {
-        until(async || {
-            tokio::time::timeout(Duration::from_millis(20), self.state.fleet.nodes())
+        let body = serde_json::json!({"waiting": true});
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(20),
+                self.state
+                    .fleet
+                    .put_definition("test", "writer-barrier", &body),
+            )
+            .await
+            .is_err(),
+            "external transaction must block the writer"
+        );
+        // A read is no longer a writer barrier: the pool keeps WAL readers
+        // available while a report waits for an external write transaction.
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), self.state.fleet.nodes())
                 .await
-                .is_err()
-        })
-        .await;
+                .unwrap()
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 fn snapshot(sequence: u64) -> NodeSnapshot {
@@ -254,7 +274,12 @@ async fn disconnected_report_cannot_mark_a_reconnected_generation_ready() {
     );
     writer.execute("COMMIT", ()).await.unwrap();
     // Register follows the old transaction through the same writer gate.
-    let _ = fixture.state.fleet.nodes().await.unwrap();
+    fixture
+        .state
+        .fleet
+        .put_definition("test", "register-barrier", &serde_json::json!({}))
+        .await
+        .unwrap();
     let view = fixture.state.hub.views().await.remove(0);
     assert!(view.online);
     assert!(!view.snapshot.as_ref().unwrap().ready);

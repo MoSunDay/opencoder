@@ -1,5 +1,5 @@
 //! Functional tests for the project-module store API (goals / initiatives /
-//! todos / runs) against the libsql backend, exercised through the
+//! todos / runs) against the turso backend, exercised through the
 //! `Arc<dyn ProjectStore>` seam upper layers will use.
 //!
 //! Behavior contracts:
@@ -23,20 +23,20 @@
 //!   nonempty initiatives reject deletion; delete_todo removes its runs
 //! - reopen_is_idempotent_and_serves_v15: second `open` on the same file
 //!   migrates 14→15 cleanly and the project tables keep working
-//! - libsql_store_coerces_to_project_store: compile-level trait-object check
+//! - turso_store_coerces_to_project_store: compile-level trait-object check
 
 use std::sync::Arc;
 
 use opencoder_store::{
-    LibsqlStore, ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
+    ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
     ProjectInitiativePatch, ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch,
     ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus,
+    ProjectTodoRunStatus, ProjectTodoStatus, TursoStore,
 };
 
-async fn fresh() -> (tempfile::TempDir, Arc<LibsqlStore>, Arc<dyn ProjectStore>) {
+async fn fresh() -> (tempfile::TempDir, Arc<TursoStore>, Arc<dyn ProjectStore>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(LibsqlStore::open(dir.path().join("test.db")).await.unwrap());
+    let store = Arc::new(TursoStore::open(dir.path().join("test.db")).await.unwrap());
     let iface: Arc<dyn ProjectStore> = store.clone();
     (dir, store, iface)
 }
@@ -121,11 +121,11 @@ async fn run(store: &dyn ProjectStore, id: &str, todo_id: &str, created_at: i64)
 // Compile-level: the concrete store coerces to the trait object upper
 // layers hold (`Arc<dyn ProjectStore>`).
 #[allow(dead_code)]
-fn libsql_store_coerces_to_project_store(store: Arc<LibsqlStore>) -> Arc<dyn ProjectStore> {
+fn turso_store_coerces_to_project_store(store: Arc<TursoStore>) -> Arc<dyn ProjectStore> {
     store
 }
 
-// The v20 executor dimension must persist exactly through the libsql backend:
+// The v20 executor dimension must persist exactly through the turso backend:
 // a team todo keeps its executor_ref + inline executor_spec, and a dag run
 // claimed under it keeps brain provenance (capability_id/plan_id) and the
 // workflow artifact root (output_ref). Unknown kind text in the row is

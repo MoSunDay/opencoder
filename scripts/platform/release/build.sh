@@ -149,6 +149,7 @@ manifest = {
     "release_id": "rel-" + commit,
     "compatibility": info["release_compatibility"],
     "execution_io": info["execution_io"],
+    "storage_engine": info["storage_engine"],
     "todo_files_contract": info["todo_files_contract"],
     "schema_version": 1,
     "commit": commit,

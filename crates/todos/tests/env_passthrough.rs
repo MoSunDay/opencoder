@@ -8,7 +8,7 @@ use std::sync::Arc;
 use opencoder_core::Config;
 use opencoder_core::ContentBlock;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
@@ -102,7 +102,7 @@ async fn tool_result_texts(store: &Arc<dyn Store>, session_id: &str) -> Vec<Stri
 
 #[tokio::test]
 async fn stamped_env_vars_reach_bash_processes() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -155,7 +155,7 @@ async fn stamped_env_vars_reach_bash_processes() {
 
 #[tokio::test]
 async fn workflows_without_env_vars_run_clean() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))

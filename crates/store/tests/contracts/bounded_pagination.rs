@@ -6,10 +6,10 @@ use opencoder_core::{
     Message,
 };
 use opencoder_store::{
-    fleet::FleetStore, EventKind, LibsqlStore, ProjectExecutorKind, ProjectStore,
-    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus,
-    ProjectTodoStatus, SessionEventRecord, SessionMeta, Store, TodoEventRecord, TodoItemRecord,
-    TodoWorkflowRecord,
+    fleet::FleetStore, EventKind, ProjectExecutorKind, ProjectStore, ProjectTodoRecord,
+    ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
+    SessionEventRecord, SessionMeta, Store, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    TursoStore,
 };
 
 fn index(id: &str, created_at: i64) -> ExecutionIndex {
@@ -88,7 +88,7 @@ fn session(id: &str) -> SessionMeta {
 #[tokio::test]
 async fn huge_utf8_message_is_reassembled_from_bounded_sql_chunks() {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("runtime.db"))
+    let store = TursoStore::open(dir.path().join("runtime.db"))
         .await
         .unwrap();
     store.create_session(&session("session-a")).await.unwrap();
@@ -130,7 +130,7 @@ async fn huge_utf8_message_is_reassembled_from_bounded_sql_chunks() {
 #[tokio::test]
 async fn event_page_obeys_row_and_payload_budgets() {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("runtime.db"))
+    let store = TursoStore::open(dir.path().join("runtime.db"))
         .await
         .unwrap();
     store
@@ -195,7 +195,7 @@ async fn event_page_obeys_row_and_payload_budgets() {
 #[tokio::test]
 async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("runtime.db"))
+    let store = TursoStore::open(dir.path().join("runtime.db"))
         .await
         .unwrap();
     store.create_session(&session("parent")).await.unwrap();

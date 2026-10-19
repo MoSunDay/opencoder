@@ -4,7 +4,7 @@
 //! path uses to avoid reloading the (potentially huge) compacted head.
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
 fn msgs(seed: &str, n: usize) -> Vec<Message> {
@@ -28,9 +28,9 @@ fn msgs(seed: &str, n: usize) -> Vec<Message> {
         .collect()
 }
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     store
         .create_session(&SessionMeta {
             id: "s1".into(),

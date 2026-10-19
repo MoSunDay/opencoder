@@ -10,6 +10,7 @@ pub mod cmd;
 pub mod connection;
 pub mod ctx;
 pub mod http;
+pub mod maintenance;
 pub mod out;
 pub mod sse;
 
@@ -55,6 +56,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Inspect or back up an embedded Turso database on this machine.
+    #[command(subcommand)]
+    Storage(maintenance::StorageAction),
     /// Cluster health probe.
     Health,
     /// Readiness probe (honors the frozen drain mode).
@@ -118,6 +122,9 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         out::note("no command given; see `opencoder-cli --help`");
         return Ok(64);
     };
+    if let Command::Storage(action) = &command {
+        return maintenance::run(action).await;
+    }
     if let Command::Brain(cmd::brain::BrainCmd::ActivateLocal {
         context,
         config,
@@ -135,6 +142,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         cli.verbose,
     )?;
     match command {
+        Command::Storage(_) => unreachable!("local storage command handled before HTTP setup"),
         Command::Health => cmd::system::health(&ctx).await,
         Command::Ready => cmd::system::ready(&ctx).await,
         Command::Time => cmd::system::time(&ctx).await,

@@ -13,7 +13,7 @@ use axum::Router;
 use tower::ServiceExt;
 
 use opencoder_llm::{ChatStream, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -59,7 +59,7 @@ fn app(state: Arc<opencoder_web::AppState>) -> Router {
 }
 
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir().join(format!("oc-web-envs-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {

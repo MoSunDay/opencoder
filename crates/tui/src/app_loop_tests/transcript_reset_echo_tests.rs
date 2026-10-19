@@ -6,7 +6,7 @@ use super::*;
 
 use crate::chat::ChatBlock;
 use opencoder_session::SessionEvent;
-use opencoder_store::{LibsqlStore, SessionMeta};
+use opencoder_store::{SessionMeta, TursoStore};
 
 /// The user's regression: plan→act handoff (`/act_clear_context <tail>`
 // submitted while idle). The submit path echoes the tail locally and starts
@@ -16,7 +16,7 @@ use opencoder_store::{LibsqlStore, SessionMeta};
 /// boundary (steps read as accumulated into the previous turn, Says glued).
 #[tokio::test]
 async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "sess-reset-echo".into(),
@@ -175,7 +175,7 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
 // tail) must not resurrect the previous turn's prompt as a user block.
 #[tokio::test]
 async fn done_clears_pending_echo_so_later_bare_reset_does_not_resurrect_it() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "sess-bare-reset".into(),

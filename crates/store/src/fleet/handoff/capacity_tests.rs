@@ -1,5 +1,6 @@
 use super::super::FleetStore;
-use libsql::{Builder, Database, TransactionBehavior};
+use turso::transaction::TransactionBehavior;
+use turso::{Builder, Database};
 
 async fn full_host() -> (tempfile::TempDir, FleetStore, Database, i64) {
     let dir = tempfile::tempdir().unwrap();
@@ -17,11 +18,18 @@ async fn full_host() -> (tempfile::TempDir, FleetStore, Database, i64) {
         .unwrap();
     // Contention must fail immediately if either operation attempts a write.
     store
-        .conn
-        .execute_batch("PRAGMA busy_timeout=0")
+        .db
+        .write(|conn| async move {
+            conn.busy_timeout(std::time::Duration::ZERO)?;
+            Ok(())
+        })
         .await
         .unwrap();
-    let rival = Builder::new_local(&path).build().await.unwrap();
+    let rival = Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     (dir, store, rival, sequence)
 }
 
@@ -29,10 +37,10 @@ async fn full_host() -> (tempfile::TempDir, FleetStore, Database, i64) {
 async fn repeated_capacity_ticket_is_read_only_under_writer_contention() {
     let (_dir, store, rival, sequence) = full_host().await;
     let connection = rival.connect().unwrap();
-    let _writer = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .await
-        .unwrap();
+    let _writer =
+        turso::transaction::Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)
+            .await
+            .unwrap();
     assert_eq!(
         store
             .enqueue_capacity("pending", "second", "new")
@@ -50,10 +58,10 @@ async fn repeated_capacity_ticket_is_read_only_under_writer_contention() {
 async fn full_capacity_poll_is_read_only_under_writer_contention() {
     let (_dir, store, rival, _) = full_host().await;
     let connection = rival.connect().unwrap();
-    let writer = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .await
-        .unwrap();
+    let writer =
+        turso::transaction::Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)
+            .await
+            .unwrap();
     for _ in 0..3 {
         assert!(!store.claim_capacity("pending", "new").await.unwrap());
     }
@@ -67,15 +75,15 @@ async fn full_capacity_poll_is_read_only_under_writer_contention() {
 async fn live_capacity_preserves_cross_runtime_fifo_after_large_completed_history() {
     let store = FleetStore::open_memory().await.unwrap();
     store.initialize_capacity(2).await.unwrap();
-    store
-        .conn
-        .execute_batch(
-            "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)
-        INSERT INTO capacity_queue(ticket,execution_id,runtime_id,phase)
-        SELECT 'done-ticket-'||i,'done-execution-'||i,'old','done' FROM n;",
-        )
-        .await
-        .unwrap();
+    store.db.write(|conn| async move {
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let mut insert = conn.prepare_cached("INSERT INTO capacity_queue(ticket,execution_id,runtime_id,phase) VALUES (?1,?2,'old','done')").await?;
+        for i in 1..=20000 {
+            insert.execute(turso::params![format!("done-ticket-{i}"), format!("done-execution-{i}")]).await?;
+        }
+        conn.execute("COMMIT", ()).await?;
+        Ok(())
+    }).await.unwrap();
     // Execution-key order deliberately differs from FIFO sequence order.
     for (ticket, execution, runtime) in [
         ("first", "z-first", "old"),

@@ -1,8 +1,10 @@
-//! Publish a node's durable acceptance without replacing newer report status.
+use crate::fleet::FleetConnection;
+// Publish a node's durable acceptance without replacing newer report status.
 use super::super::{records::read_index, FleetStore};
 use anyhow::{ensure, Result};
-use libsql::{params, Connection, TransactionBehavior};
 use opencoder_core::fleet::{Assignment, ExecutionIndex};
+use turso::transaction::TransactionBehavior;
+use turso::{params, Connection};
 
 pub(super) async fn insert(
     conn: &Connection,
@@ -50,17 +52,20 @@ fn validate_owner(expected: &ExecutionIndex, actual: &ExecutionIndex) -> Result<
     Ok(())
 }
 
-impl FleetStore {
+impl FleetConnection {
     /// Both timely and late Create replies can confirm an execution. Node
     /// reports remain the authority for subsequent status changes.
     pub async fn accept_execution(&self, accepted: &ExecutionIndex) -> Result<()> {
-        let _guard = self.gate.lock().await;
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         insert(&tx, accepted, None).await?;
         tx.commit().await?;
         Ok(())
     }
 }
+
+#[path = "access/acceptance.rs"]
+mod database_access;

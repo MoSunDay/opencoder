@@ -1,11 +1,11 @@
 //! Early chat schema migrations.
 
-use opencoder_store::{LibsqlStore, SessionPatch, Store};
+use opencoder_store::{SessionPatch, Store, TursoStore};
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
@@ -13,26 +13,34 @@ async fn fresh() -> (TempDir, LibsqlStore) {
 async fn schema_migration_versioning() {
     let (_dir, store) = fresh().await;
     let conn = store.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
         .await
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 38, "schema_version must be latest (38) after bootstrap");
+    assert_eq!(
+        v,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema_version must be current watermark after bootstrap"
+    );
 }
 
 #[tokio::test]
 async fn schema_migration_v1_to_v2_adds_sse_kind() {
-    use libsql::Builder;
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate.db");
 
     // Phase 1: manually create a v1-style database (no sse_kind column).
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -74,7 +82,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     }
 
     // Phase 2: reopen — triggers bootstrap → migrate from v1 to v2.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // Old event record: sse_kind is None (column added by migration, was NULL).
     let events = store.events_after("s1", 0).await.unwrap();
@@ -87,14 +95,18 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     // Schema version bumped to 2.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 38, "schema version must be latest (38) after migration");
+        assert_eq!(
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after migration"
+        );
     }
 
     // New events can be stored with sse_kind and read back.
@@ -117,21 +129,25 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
 
     // Idempotent: reopening again does not re-run migration or error.
     drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
+    let store2 = TursoStore::open(&db_path).await.unwrap();
     let conn = store2.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
         .await
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 38, "schema version stays (38) after idempotent re-open");
+    assert_eq!(
+        v,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema version stays current after idempotent re-open"
+    );
 }
 
 #[tokio::test]
 async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
-    use libsql::Builder;
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate-v3.db");
@@ -141,7 +157,11 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     // has sse_kind — so on reopen migrate(conn, 2) skips the `if from < 2` block
     // and only runs the `if from < 3` block, isolating the v3 migration branch.
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -180,7 +200,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
 
     // Phase 2: reopen — triggers bootstrap → migrate(conn, 2), which runs only
     // the `if from < 3` branch (adds handoff_seq / handoff_plan / skill).
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // (1) The pre-existing row survives; the new columns are nullable, so the
     //     three v3 fields read back as None without data loss.
@@ -215,7 +235,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     // (3) Schema version bumped to 3.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -223,22 +243,27 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 38,
-            "schema version must be latest (38) after v2→v3 migration"
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after v2→v3 migration"
         );
     }
 
     // (4) Idempotent: reopening again does not re-run migration or error, and
     //     the version stays at 4.
     drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
+    let store2 = TursoStore::open(&db_path).await.unwrap();
     let conn = store2.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
         .await
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 38, "schema version stays (38) after idempotent re-open");
+    assert_eq!(
+        v,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema version stays current after idempotent re-open"
+    );
 }

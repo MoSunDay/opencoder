@@ -11,24 +11,24 @@
 //! - status_transition_grid_rejects_illegal_moves: state-machine enforcement,
 //!   terminal freeze, finished_at stamping, node slot release
 //!
-//! These run against a real on-disk libsql file (tempdir) so WAL semantics
+//! These run against a real on-disk turso file (tempdir) so WAL semantics
 //! are exercised truthfully.
 
 use std::sync::Arc;
 
-use opencoder_store::{LibsqlStore, NodeTaskStatus, Store, TASK_TYPE_NODE};
+use opencoder_store::{NodeTaskStatus, Store, TursoStore, TASK_TYPE_NODE};
 use tempfile::TempDir;
 
 const NODE_A: &str = "node-alpha";
 const NODE_B: &str = "node-beta";
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn register(store: &LibsqlStore, name: &str, now_ms: i64) -> opencoder_store::NodeRecord {
+async fn register(store: &TursoStore, name: &str, now_ms: i64) -> opencoder_store::NodeRecord {
     store
         .register_node(name, Some("v1"), Some("/tmp/wd"), None, now_ms)
         .await
@@ -36,7 +36,7 @@ async fn register(store: &LibsqlStore, name: &str, now_ms: i64) -> opencoder_sto
 }
 
 async fn dispatch(
-    store: &LibsqlStore,
+    store: &TursoStore,
     task_id: &str,
     session_seq: usize,
     node_id: &str,
@@ -207,7 +207,7 @@ async fn claim_is_fifo_single_active_and_per_node_isolated() {
     assert_eq!(node_a.last_status, "busy");
 }
 
-async fn claim_nothing(store: &LibsqlStore, node_id: &str) -> bool {
+async fn claim_nothing(store: &TursoStore, node_id: &str) -> bool {
     matches!(store.claim_next_node_task(node_id, 2050).await, Ok(None))
 }
 

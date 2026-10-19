@@ -1,7 +1,7 @@
 //! CLI dispatch for `config`, `models`, and `session` subcommands.
 //!
 //! `config show` / `models` are pure P1 (resolved-config display).
-//! `session list|show|delete` reads the libsql store — shared with P3 resume.
+//! `session list|show|delete` reads the turso store — shared with P3 resume.
 
 use std::path::{Path, PathBuf};
 
@@ -9,8 +9,8 @@ use anyhow::{anyhow, Context, Result};
 
 use opencoder_core::Config;
 use opencoder_store::{
-    export_bundle, import_bundle, read_bundle, write_bundle, LibsqlStore, SessionFilter,
-    SessionMeta, Store,
+    export_bundle, import_bundle, read_bundle, write_bundle, SessionFilter, SessionMeta, Store,
+    TursoStore,
 };
 
 use crate::{Cli, ConfigSub, SessionSub};
@@ -173,7 +173,7 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
 /// message blocks (Text/Reasoning/ToolUse/ToolResult) + subagent task records
 /// (status/result/ok). Extracted from `show_session_json` so the shape is
 /// unit-testable without capturing stdout.
-pub(crate) async fn build_session_json(store: &LibsqlStore, id: &str) -> Result<serde_json::Value> {
+pub(crate) async fn build_session_json(store: &TursoStore, id: &str) -> Result<serde_json::Value> {
     let meta = store
         .get_session(id)
         .await?
@@ -204,7 +204,7 @@ pub(crate) async fn build_session_json(store: &LibsqlStore, id: &str) -> Result<
 
 /// Emit full session state as JSON (see `build_session_json`). Machine-readable
 /// surface for deep e2e assertions, decoupled from storage internals.
-async fn show_session_json(store: &LibsqlStore, id: &str) -> Result<()> {
+async fn show_session_json(store: &TursoStore, id: &str) -> Result<()> {
     let body = build_session_json(store, id).await?;
     println!("{}", serde_json::to_string_pretty(&body)?);
     Ok(())
@@ -217,10 +217,10 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
     std::env::current_dir().context("get current dir")
 }
 
-pub(crate) async fn open_store(workdir: &Path) -> Result<LibsqlStore> {
+pub(crate) async fn open_store(workdir: &Path) -> Result<TursoStore> {
     let data_dir = opencoder_core::data_dir_for(workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
-    LibsqlStore::open(data_dir.join("opencoder.db")).await
+    TursoStore::open(data_dir.join("opencoder.db")).await
 }
 
 /// One transcript line for `session show`: role tag plus the message text.
@@ -420,9 +420,9 @@ mod tests {
     async fn build_session_json_emits_meta_messages_and_subagent_tasks() {
         use super::build_session_json;
         use opencoder_core::{ContentBlock, Message, Role};
-        use opencoder_store::{LibsqlStore, SessionMeta, Store};
+        use opencoder_store::{SessionMeta, Store, TursoStore};
 
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "s1".into(),
@@ -488,9 +488,9 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_redacts_clear_context_sentinel() {
         use super::build_session_json;
-        use opencoder_store::{LibsqlStore, SessionMeta, Store};
+        use opencoder_store::{SessionMeta, Store, TursoStore};
 
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "redact-s1".into(),
@@ -525,9 +525,9 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_errors_on_missing_session() {
         use super::build_session_json;
-        use opencoder_store::LibsqlStore;
+        use opencoder_store::TursoStore;
 
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         let err = build_session_json(&store, "does-not-exist").await;
         assert!(err.is_err(), "missing session must error, not empty output");
     }

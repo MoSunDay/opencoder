@@ -15,10 +15,10 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, ContentBlock, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{generate_title, resume, run, SessionState};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
-async fn mem_store() -> LibsqlStore {
-    LibsqlStore::open_memory().await.unwrap()
+async fn mem_store() -> TursoStore {
+    TursoStore::open_memory().await.unwrap()
 }
 
 fn config(model: &str) -> Config {
@@ -136,7 +136,7 @@ async fn cross_process_resume_reads_full_history() {
 
     // process 1: open file store, run a session
     {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open(&db_path).await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open(&db_path).await.unwrap());
         run_with_store(
             store,
             "cp-sess",
@@ -147,7 +147,7 @@ async fn cross_process_resume_reads_full_history() {
         .await;
     }
     // process 2: reopen the SAME file, resume
-    let store2: Arc<dyn Store> = Arc::new(LibsqlStore::open(&db_path).await.unwrap());
+    let store2: Arc<dyn Store> = Arc::new(TursoStore::open(&db_path).await.unwrap());
     let resumed = resume(
         store2.clone(),
         "cp-sess",

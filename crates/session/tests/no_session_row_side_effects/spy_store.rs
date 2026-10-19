@@ -1,5 +1,5 @@
 //! Test harness for the no-session-row-side-effects suite: a counting spy
-//! around a real in-memory `LibsqlStore` plus the shared fixtures (mirroring
+//! around a real in-memory `TursoStore` plus the shared fixtures (mirroring
 //! tests/control_cmd.rs / plain_skill_prompt.rs).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,16 +12,16 @@ use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{ChatStream, LlmEvent, Usage};
 use opencoder_session::SessionState;
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 pub const SESS: &str = "sess-under-test";
 
-/// Delegates every call to a real `LibsqlStore` and counts `create_session`
+/// Delegates every call to a real `TursoStore` and counts `create_session`
 /// (the only write whose absence the invariant asserts).
 pub struct SpyStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
     creates: Arc<AtomicUsize>,
 }
 
@@ -118,7 +118,7 @@ impl Store for SpyStore {
 /// either: the invariant compares counter deltas taken AFTER seeding, so
 /// fixture rows never pollute the measured window.
 pub async fn spy_store() -> (Arc<SpyStore>, Arc<dyn Store>) {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let spy = Arc::new(SpyStore {
         inner,
         creates: Arc::new(AtomicUsize::new(0)),

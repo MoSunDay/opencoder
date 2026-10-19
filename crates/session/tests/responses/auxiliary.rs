@@ -1,7 +1,7 @@
 use super::wire::*;
 use opencoder_core::{resolve_agent, ContentBlock};
 use opencoder_session::{run, SessionState};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ async fn child_tools_and_parent_continuation_use_responses_and_keep_separate_sta
     ])
     .await;
     let config = config(&server.url);
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut session = SessionState::new(
         "parent",
         resolve_agent("act").unwrap(),
@@ -92,7 +92,7 @@ async fn title_and_verify_route_to_responses_small_model_with_usable_output_budg
             ..Default::default()
         },
     );
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "aux".into(),

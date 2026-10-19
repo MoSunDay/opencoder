@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{run, SessionEvent, SessionState, SharedCancel};
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 use tokio_util::sync::CancellationToken;
 
 fn config() -> Config {
@@ -82,7 +82,7 @@ fn turn_cancel_helpers_work() {
 /// completion emitting `Done`.
 #[tokio::test]
 async fn turn_cancel_allows_loop_to_continue() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     // Two scripts: the first turn is interrupted (its script is still consumed
     // because chat_stream pops at call time, before turn_cancel wins the select),
     // the second turn runs normally.
@@ -158,7 +158,7 @@ async fn turn_cancel_allows_loop_to_continue() {
 /// before: a single text-only turn completes and emits `Done`.
 #[tokio::test]
 async fn turn_cancel_not_set_behaves_normally() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = MockChatClient::new().push_script(vec![text_done("normal response")]);
 
     let mut session = SessionState::new(

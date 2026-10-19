@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatStream, MockChatClient};
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 use opencoder_web::handle::SessionHandle;
 
 fn dummy_client() -> Arc<dyn ChatStream> {
@@ -24,7 +24,7 @@ fn dummy_client() -> Arc<dyn ChatStream> {
 }
 
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

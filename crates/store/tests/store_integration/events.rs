@@ -34,9 +34,9 @@ async fn events_append_and_after_replay() {
 }
 
 #[tokio::test]
-async fn backend_name_reports_libsql() {
+async fn backend_name_reports_turso() {
     let (_dir, store) = fresh().await;
-    assert_eq!(store.backend_name(), "libsql");
+    assert_eq!(store.backend_name(), "turso");
 }
 
 #[tokio::test]

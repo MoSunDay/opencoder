@@ -13,7 +13,7 @@ use std::time::Duration;
 use axum::extract::{Path, State};
 use opencoder_core::Config;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{Delivery, LibsqlStore, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionMeta, Store, TursoStore};
 use tokio::sync::mpsc;
 
 /// A `ChatStream` whose every call hangs forever (receiver never resolves):
@@ -36,7 +36,7 @@ impl ChatStream for HangingStream {
 }
 
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

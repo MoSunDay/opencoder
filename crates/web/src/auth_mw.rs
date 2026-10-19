@@ -190,7 +190,7 @@ mod tests {
     }
 
     async fn state_with(user: Option<(&str, &str, Role)>) -> AuthState {
-        let store = opencoder_store::LibsqlStore::open_memory().await.unwrap();
+        let store = opencoder_store::TursoStore::open_memory().await.unwrap();
         if let Some((name, token, role)) = user {
             store
                 .create_user(name, &token_hash(token), role, 1)

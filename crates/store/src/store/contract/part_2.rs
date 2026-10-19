@@ -133,6 +133,20 @@ macro_rules! store_contract_1 {
             self.backend_name()
         )
     }
+    /// Guard content and replace text/examples/vector in the same transaction.
+    /// Backends without atomic comparison must reject guarded updates.
+    async fn update_brain_capability_if_version(
+        &self,
+        capability: &BrainCapabilityRecord,
+        eng_inputs: &[BrainEngInputRecord],
+        vector: &BrainVectorWrite,
+        expected: Option<&str>,
+    ) -> Result<()> {
+        if expected.is_some() {
+            anyhow::bail!("guarded brain updates are not supported by {}", self.backend_name());
+        }
+        self.update_brain_capability_with_vector(capability, eng_inputs, vector).await
+    }
     /// Nearest-neighbour cosine-distance search over stored embeddings,
     /// scoped to one embedding model, ascending by distance.
     async fn search_brain_vectors(

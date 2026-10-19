@@ -18,7 +18,7 @@ export function PlanPreview({ plan, capabilities }) {
     return <LayerCanvas view={{ plan, layers: planLayers(plan), operations: [], run: {} }} />;
   } catch (error) { return <Alert type="error" title={error.message} />; }
 }
-export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, capabilities, onSaved, onClose }, ref) {
+export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, capabilities, selectionIds, onSaved, onClose }, ref) {
   const { draft, setDraft, error: cacheError, persist, clear, discard } = useDraft(cacheKey, version);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState(null); const [submitOpen, setSubmitOpen] = useState(false);
@@ -53,7 +53,7 @@ export const PlanEditor = forwardRef(function PlanEditor({ version, cacheKey, ca
       <MilestoneCanvas plan={plan} capabilities={caps} selection={selected} onSelect={setSelected} positions={draft.layout} onPositions={positions}
         onResetLayout={() => update({ type: 'reset_layout' })} onDelete={requestDelete} disabled={busy || !!deleting}
         onAddLayer={addMilestone} onAddNode={addExecution} />
-      <MilestoneInspector plan={plan} selection={selected} capabilities={caps} disabled={busy || !!deleting}
+      <MilestoneInspector plan={plan} selection={selected} capabilities={caps} selectionIds={selectionIds} disabled={busy || !!deleting}
         onLayerChange={(patch) => update({ type: 'layer', id: selected.id, patch })} onNodeChange={(capability) => update({ type: 'capability', id: selected.id, capability })}
         onMoveNode={(layerId) => attempt(() => update({ type: 'move', id: selected.id, layerId }))}
         onDelete={() => requestDelete([selected])} />

@@ -166,10 +166,13 @@ async fn list_inner(
         sql.push_str(" WHERE ");
         sql.push_str(&where_clauses.join(" AND "));
     }
+    // Short JSON needs no character-by-character substring copy. Preserve
+    // substr's character limit and embedded-NUL behavior for all other rows.
     sql.push_str(&format!(
         " ORDER BY {ACTIVITY_EXPR} DESC, s.id DESC LIMIT ?) \
          SELECT s.id, s.kind, s.title, s.agent, s.model, s.created_at, s.updated_at, \
-         (SELECT substr(m.blocks_json, 1, 8192) FROM messages m \
+         (SELECT CASE WHEN octet_length(m.blocks_json) <= 8192 AND instr(m.blocks_json, char(0)) = 0 \
+          THEN m.blocks_json ELSE substr(m.blocks_json, 1, 8192) END FROM messages m \
           WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.seq ASC LIMIT 1), s.skill \
          FROM page s ORDER BY {ACTIVITY_EXPR} DESC, s.id DESC"
     ));

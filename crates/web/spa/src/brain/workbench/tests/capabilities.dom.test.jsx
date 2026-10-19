@@ -24,7 +24,7 @@ beforeEach(() => {
   entries = [entry];
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/brain/plan-defs') return { plans: [] };
-    if (path === '/api/brain/runs') return { runs: [] };
+    if (path.startsWith('/api/brain/runs')) return { runs: [] };
     if (path === '/api/brain/library') return { capabilities: [...bindings] };
     if (path === '/api/brain/capabilities') return { capabilities: [...entries] };
     if (path === '/api/agents') return { agents: [{ name: 'new-agent' }] };
@@ -39,7 +39,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); });
 describe('brain workbench capability tab', () => {
   it('renders the brain page without a PageShell header', async () => {
     render(<BrainWorkbench onNotice={vi.fn()} />);
-    await screen.findByRole('tab', { name: '工作台' });
+    await screen.findByRole('tab', { name: '运行历史' });
     expect(screen.queryByRole('heading', { name: '大脑调度' })).toBeNull();
     expect(screen.queryByText('维护能力与版本化计划，观察并发执行和交付证据')).toBeNull();
     expect(screen.queryByText('创建并执行计划')).toBeNull();

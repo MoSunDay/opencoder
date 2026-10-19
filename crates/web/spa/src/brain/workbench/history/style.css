@@ -1,0 +1,8 @@
+.brain-history { min-width:0; display:flex; flex-direction:column; gap:16px; }
+.brain-history-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+.brain-history-identity { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.brain-history-name.ant-btn { padding:0; height:auto; text-align:left; white-space:normal; justify-content:flex-start; font-weight:600; }
+.brain-history-name > span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.brain-history-id { font-size:12px; font-family:var(--oc-font-mono, monospace); overflow-wrap:anywhere; }
+.brain-history-node { overflow-wrap:anywhere; }
+.brain-history-paging { align-self:flex-end; flex-wrap:wrap; }

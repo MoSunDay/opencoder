@@ -1,4 +1,4 @@
-Commit: 060b4a24
+Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
 
 # control 模块
 
@@ -68,5 +68,7 @@ Commit: 060b4a24
 协商后的报告按 Begin、批次、Brain 帧和 End 确认，End 仅在原子索引提交及连接代次栅栏通过后确认。一条连接最多保留一个报告提交任务；数据库等待时继续消费该连接的回复与负载快照。该任务属于连接，断线会取消等待，迟到的存储完成不能标记替代连接就绪或发送交接确认。旧 Node 不声明 `acknowledge` 时沿原顺序处理，不接收额外确认。确认复用独立的一项写出队列，不占 RPC 队列或改变配额。
 
 TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；任务删除须先核验没有文件。只读 NFS 生命周期由专用 `opencoder-todo-resources.service` 管理，Server 仅转发管理接口，HTTP 文件操作使用同一绑定目录。见 [任务文件](../../docs/project-files.md)。
+
+- [brain_runs/runs.rs](../../crates/control/src/api/brain_runs/runs.rs) 的运行历史支持 `limit`（默认 20）和原有游标，通过执行名称批量查询增加可选 `name`。通用执行列表和单条索引使用同一冻结计划名称，不访问当前计划库或 Worker；五字段执行索引协议不变。
 
 能力目录区分内置、登记、自动生成和计划来源。`GET /api/brain/library` 返回完整 `capabilities` 及新选择使用的 `selection_ids`；仅执行类型、目标、解析定义和必填输入输出集合相同的自动项让位于登记项。TUI 使用同一规则，准入仍读取完整目录。见 [catalog](../../crates/control/src/api/brain_runs/catalog.rs)。

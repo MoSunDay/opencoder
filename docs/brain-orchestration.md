@@ -75,6 +75,7 @@ DAG 的静态二进制、Agent 与动态实例都取得完整的冻结命名输�
 ## 查询与历史
 
 - `POST /api/brain/runs`：`{schema_version:7,id,plan:{id,version},inputs,node_id}`，也支持内联计划。顶层 `node_id` 是可选的物理执行节点约束，显式指定时普通子操作沿用冻结请求中的该值；省略时普通子操作各自选点，不绑定调度器选中的根节点。计划和 operation 中的 `node_id` 仅标识逻辑步骤。嵌套 Brain 仍跟随父 Brain 所属节点。相同 ID/意图重放回执，冲突返回 409。
+- `GET /api/brain/runs`：运行历史，支持 `limit`（默认 20）及成对传入的 `cursor_created_at`、`cursor_id`。返回 `runs` 和 `next_cursor`；每条记录的可选 `name` 取自执行时冻结的计划标题，缺失时不以当前计划补全。列表和通用执行索引使用相同名称来源，无需执行节点在线。
 - `GET /api/brain/runs/:id/layered`：冻结计划、层级、运行、操作索引、能力元数据和事件。
 - `GET /api/brain/runs/:id/layered/rounds/:layer?activation=:id`：指定层激活的 `visit`、历史 `visits`、层里程碑评估及各节点执行索引；省略 activation 返回最新一次。路径中的 `rounds` 是历史接口名称，参数仍为层号。
 - `GET /api/brain/runs/:id/events-page` 与事件流：运行日志。

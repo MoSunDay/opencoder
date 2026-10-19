@@ -145,6 +145,16 @@ pub async fn save_dag(State(state): State<Arc<AppState>>, Json(body): Json<Value
         Ok(previous) => previous,
         Err(error) => return error_500(error.to_string()),
     };
+    if previous.as_ref().is_some_and(|old| {
+        old["created_at"].is_i64() && old["updated_at"].is_i64() && old["spec"] == json!(spec)
+    }) {
+        return response(RpcReply::ok(previous.expect("existing definition")));
+    }
+    match crate::catalog_guard::duplicate_dag(&state, &spec).await {
+        Ok(Some(reply)) => return response(reply),
+        Ok(None) => {}
+        Err(error) => return error_500(error.to_string()),
+    }
     let definition = dag_definition(&spec, previous.as_ref(), opencoder_core::message::now_ms());
     match state
         .fleet

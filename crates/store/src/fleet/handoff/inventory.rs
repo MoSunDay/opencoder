@@ -4,6 +4,11 @@ use anyhow::{ensure, Result};
 use turso::transaction::TransactionBehavior;
 use turso::{params, Connection};
 
+// JSON virtual-table values have no declared affinity. An explicit TEXT type
+// lets Turso seek the ownership primary key instead of scanning it per ID.
+const OWNER_LOOKUP: &str = "SELECT owner.runtime_id FROM json_each(?1) requested
+    LEFT JOIN runtime_owners owner ON owner.execution_id=CAST(requested.value AS TEXT)";
+
 impl FleetConnection {
     /// Existing ownership is immutable and stays read-only. Newly discovered
     /// children are assigned atomically after rechecking under the writer lock.
@@ -31,7 +36,7 @@ impl FleetConnection {
             "INSERT INTO runtime_owners(execution_id,runtime_id)
              SELECT DISTINCT requested.value,?2 FROM json_each(?1) requested
              WHERE NOT EXISTS(SELECT 1 FROM runtime_owners owner
-                              WHERE owner.execution_id=requested.value)",
+                              WHERE owner.execution_id=CAST(requested.value AS TEXT))",
             params![encoded, runtime],
         )
         .await?;
@@ -41,13 +46,7 @@ impl FleetConnection {
 }
 
 async fn has_unassigned(conn: &Connection, runtime: &str, encoded: &str) -> Result<bool> {
-    let mut rows = conn
-        .query(
-            "SELECT owner.runtime_id FROM json_each(?1) requested
-             LEFT JOIN runtime_owners owner ON owner.execution_id=requested.value",
-            [encoded],
-        )
-        .await?;
+    let mut rows = conn.query(OWNER_LOOKUP, [encoded]).await?;
     let mut missing = false;
     while let Some(row) = rows.next().await? {
         match row.get::<Option<String>>(0)? {

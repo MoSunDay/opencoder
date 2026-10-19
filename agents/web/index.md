@@ -1,4 +1,4 @@
-Commit: 8c897b3086d540f5f66d5388f15c12b924bdcefd
+Commit: 17ca79c3b55e06c4a2b677a16302a9ec1ed81b19
 
 # web 模块
 
@@ -60,7 +60,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [milestone/canvas.jsx](../../crates/web/spa/src/brain/workbench/milestone/canvas.jsx)、[canvas/presentation.js](../../crates/web/spa/src/brain/workbench/milestone/canvas/presentation.js) — 节点成员与内容只由计划投影；本地状态只保留选择、测量和拖动过程。位置以增量写入草稿，React Flow 不直接删除计划节点。运行画布按可用宽度排列层级，编辑器保持纵向布局。
 - [scheduler/changes.js](../../crates/web/spa/src/brain/workbench/scheduler/changes.js)、[scheduler/draft.js](../../crates/web/spa/src/brain/workbench/scheduler/draft.js) — 编辑动作应用到同步保存的最新草稿，持久化读取同一份最新值；批量删除按层清理子节点及该层位置，迟到的位置事件不能恢复已删层。[scheduler/editor.jsx](../../crates/web/spa/src/brain/workbench/scheduler/editor.jsx) 统一按钮与键盘删除确认，只有显式整理布局才清空位置。
 - [brain/workbench/plans.jsx](../../crates/web/spa/src/brain/workbench/plans.jsx) — 新建计划、点击当前计划名称与修改操作共用 `PlanEditor`；历史版本预览独立打开，旧格式必须显式转换后编辑。读取请求用序号隔离，迟到响应不能覆盖新建表单。
-- [brainPanel.jsx](../../crates/web/spa/src/brainPanel.jsx)、[brain/library.css](../../crates/web/spa/src/brain/library.css) — 能力表格固定布局，执行类型标签限制在单元格内并保留完整悬停文本，一句话描述限制宽度并省略；手机上的操作列随表格横向滚动。输入、输出与工程示例由 `CapabilityEditor` 读取完整详情后展示，列表和搜索结果共用入口。
+- [brainPanel.jsx](../../crates/web/spa/src/brainPanel.jsx)、[brain/library.css](../../crates/web/spa/src/brain/library.css) — 能力表格管理当前页与每页条数；刷新、保存保留分页选择，搜索重置页码，删除后收敛到有效页。列表与搜索结果按能力 ID 关联工作台已加载的 `/api/brain/library`，展示实际绑定的执行类型与名称；刷新、保存和删除同时更新绑定目录，读取失败独立报错，过期请求不能覆盖新结果。类型与名称在本列完整换行，一句话描述限宽省略；手机上的操作列随表格横向滚动。输入、输出与工程示例由 `CapabilityEditor` 读取完整详情后展示。
 - `tests/` — 集成测试
 
 ## 接缝

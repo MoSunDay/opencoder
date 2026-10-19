@@ -1,12 +1,15 @@
-.brain-capability-type {
+.brain-capability-type,
+.brain-capability-name {
   display: block;
-  width: max-content;
   max-width: 100%;
   box-sizing: border-box;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.brain-capability-type {
+  width: max-content;
   margin-inline-end: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .brain-capability-summary {
@@ -18,6 +21,7 @@
 }
 
 @media (max-width: 767px) {
+  .brain-capability-table .ant-pagination-options { display: inline-block; }
   .brain-capability-table .ant-table-cell-fix-end { position: static !important; }
   .brain-capability-table .ant-table-cell-fix-end::after { display: none; }
 }

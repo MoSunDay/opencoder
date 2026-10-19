@@ -30,14 +30,20 @@ async function main() {
   const prefix = new URL(base).pathname.replace(/\/$/, '');
   const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'],
     ...(proxy ? { proxy: { server: proxy, bypass: '127.0.0.1,localhost' } } : {}) });
-  const errors = [], checks = [], downloads = [];
+  const errors = [], checks = [], downloads = [], recoveries = [];
   let selected;
   const capture = async (page, name) => {
     const geometry = await page.evaluate(() => ({ width: innerWidth, outer: document.documentElement.scrollWidth,
       panes: [...document.querySelectorAll('.fleet-content,.brain-detail-scroll')].filter((e) => e.clientWidth)
-        .map((e) => ({ width: e.clientWidth, scroll: e.scrollWidth })) }));
+        .map((e) => ({ width: e.clientWidth, scroll: e.scrollWidth })),
+      metadata: [...document.querySelectorAll('.ant-drawer .ant-descriptions-item-container')]
+        .map((e) => e.getBoundingClientRect()).filter((box) => box.width)
+        .map((box) => ({ width: box.width, height: box.height })) }));
     assert(geometry.outer <= geometry.width + 1, `${name}: outer overflow`);
     assert(geometry.panes.every((e) => e.scroll <= e.width + 1), `${name}: pane overflow`);
+    if (name.startsWith('child-') && geometry.width === 390) {
+      assert(geometry.metadata.length && geometry.metadata.every((e) => e.width >= 300), `${name}: cramped metadata`);
+    }
     await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
     checks.push({ name, ...geometry });
   };
@@ -83,7 +89,7 @@ async function main() {
         await page.locator('.brain-history tr[data-row-key]').first().waitFor();
         assert.equal(await page.locator('.brain-history tr[data-row-key]').count(), history.runs.length);
         for (const row of history.runs) {
-          const element = page.locator('.brain-history tr').filter({ hasText: row.id });
+          const element = page.locator(`.brain-history tr[data-row-key=${JSON.stringify(row.id)}]`);
           assert.equal(await element.locator('.brain-history-name').innerText(), row.name || '未记录计划名称');
         }
         await capture(page, `history-${width}`);
@@ -114,7 +120,7 @@ async function main() {
         }
         const operations = view.operations.filter((op) => op.execution_id && op.round === view.run.round);
         for (const op of operations.slice(0, 3)) {
-          const row = drawer.locator('tr[data-row-key]').filter({ hasText: op.execution_id });
+          const row = drawer.locator(`tr[data-row-key=${JSON.stringify(op.operation_id)}]`);
           await row.getByRole('button', { name: '查看执行详情', exact: true }).click();
           await drawer.getByRole('tab', { name: '结果', exact: true }).waitFor();
           const detail = await get(`/api/executions/${encodeURIComponent(op.execution_id)}`);
@@ -146,7 +152,18 @@ async function main() {
         await drawer.locator('.brain-event-card').first().waitFor();
         await capture(page, `events-${width}`);
         await drawer.getByRole('tab', { name: '输入与产物', exact: true }).click();
-        await drawer.getByText('本次实际输入', { exact: true }).waitFor();
+        const actualInput = drawer.getByText('本次实际输入', { exact: true });
+        const retryable = drawer.getByRole('alert').filter({ hasText: 'runtime request timed out; retry using the same execution id' });
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await Promise.race([actualInput.waitFor(), retryable.waitFor()]);
+          if (await actualInput.isVisible()) break;
+          recoveries.push({ id, width, attempt: attempt + 1, error: await retryable.innerText() });
+          await page.screenshot({ path: path.join(output, `input-timeout-${width}-${attempt + 1}.png`) });
+          assert(attempt < 2, 'Historical input did not recover using the same execution ID');
+          await retryable.getByRole('button', { name: '重试', exact: true }).click();
+          await retryable.waitFor({ state: 'hidden' });
+        }
+        await actualInput.waitFor();
         const frozen = await get(`/api/executions/${encodeURIComponent(id)}`);
         const actual = frozen.request?.input?.layered_request?.inputs;
         if (actual && typeof actual.request === 'string' && actual.request.length < 200) {
@@ -170,7 +187,7 @@ async function main() {
       } finally { await page.unrouteAll({ behavior: 'ignoreErrors' }); await page.close(); }
     }
     assert.deepEqual(errors, []);
-    fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ result: 'PASS', run_id: selected.id, commit, checks, downloads, errors }, null, 2));
+    fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ result: 'PASS', run_id: selected.id, commit, checks, downloads, errors, recoveries }, null, 2));
     console.log(JSON.stringify({ result: 'PASS', checks: checks.length, downloads: downloads.length }));
   } finally { await browser.close(); }
 }

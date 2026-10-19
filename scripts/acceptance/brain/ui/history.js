@@ -68,6 +68,10 @@ async function main() {
       await drawer.getByRole('button', { name: '查看执行详情', exact: true }).click();
       await drawer.getByText('执行输出已生成', { exact: true }).waitFor();
       await drawer.getByText('false', { exact: true }).waitFor();
+      if (width === 390) {
+        const sizes = await drawer.locator('.ant-descriptions-item-container').evaluateAll((items) => items.map((item) => item.getBoundingClientRect().width).filter((size) => size > 0));
+        assert(sizes.length && sizes.every((size) => size >= 300), `Narrow screen metadata must have readable width: ${sizes}`);
+      }
       await capture(page, `child-result-${width}`);
       await drawer.getByRole('tab', { name: '执行过程', exact: true }).click();
       await drawer.getByRole('heading', { name: '会话消息' }).waitFor();

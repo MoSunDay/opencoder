@@ -1,4 +1,4 @@
-Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+Commit: 7acb9aef422a95a5c0c249c4c4dacb085f907b10
 
 # Turso 存储与本机引擎切换
 
@@ -11,6 +11,8 @@ Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异
 发布数据格式升级到 11，并增加存储引擎标记，拒绝两个引擎同时打开同一份在线数据库。本机维护先关闭接收并等待任务完成，再停止写入、备份和切换程序；所有登记的历史 Runtime 保留 ID、数据、执行归属与资源快照，程序和镜像使用独立关联。开放写入前仅回退程序和路由，开放后使用修正版发布；引擎切换流程不恢复旧数据库。
 
 在线维护查询、事务与备份通过原生 CLI 使用 Turso。SQLite 仅用于旧引擎或已停止的数据库和完成的离线备份。原生备份校验后才发布目标文件，保留已有鉴权数据。
+
+外部资源文件的引用检查保留 SQLite 编码兼容：通过 rusqlite 只读检查临时副本，支持 UTF-16 和经校验的 WAL。它在资源检查的阻塞线程中执行，SQLite 连接只打开临时副本；应用存储和维护访问继续使用 Turso。
 
 | 功能 | 定向验证 |
 | --- | --- |
@@ -25,6 +27,7 @@ Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异
 | 本机切换与程序回退保留数据库 | `maintenance_tests/engine/test_engine.py` |
 | 历史 Runtime 程序关联保留旧镜像与配置 | `maintenance_tests/engine/test_programs.py` |
 | 历史数据库备份容量 | `test_engine_cutover_budgets_retained_runtime_databases_and_wal` |
+| 离线 SQLite 资源的编码、引用与 WAL 保留 | `catalog_guard::binary_resources` |
 
 关联说明：[Store](../../../agents/store/index.md)、[Ontology](../../../agents/ontology/index.md)、[节点平台](../../agent-platform/index.md)、[发布流程](../../../docs/smooth-release.md)。
 

@@ -16,6 +16,7 @@ impl Harness {
         let config = opencoder_core::config::scoped_config_home(dir.path().into());
         let work = dir.path().join("work");
         std::fs::create_dir_all(&work).unwrap();
+        std::fs::create_dir_all(dir.path().join("agents")).unwrap();
         std::fs::write(work.join("opencoder.json"),json!({"agent":{"agents_dir":dir.path().join("agents")},"dag":{"binary_dir":dir.path().join("binaries")}}).to_string()).unwrap();
         let state = opencoder_control::new_state(
             work,

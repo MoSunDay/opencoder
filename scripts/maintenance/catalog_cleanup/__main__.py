@@ -34,7 +34,10 @@ def main():
         path = Path(args.plan)
         receipts = apply(json.loads(path.read_text()), path.parent, Client(args.base_url, args.token_file))
         print(json.dumps({'deleted': sum(r['status'] == 'deleted' for r in receipts),
-                          'skipped': sum(r['status'] == 'skipped' for r in receipts)}))
+                          'skipped': sum(r['status'] == 'skipped' for r in receipts),
+                          'pending': sum(r['status'] == 'pending' for r in receipts)}))
+        if any(r['status'] == 'pending' for r in receipts):
+            raise SystemExit(2)
     else:
         path = Path(args.plan)
         receipts = json.loads((path.parent / 'receipts.json').read_text())

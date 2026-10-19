@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import tempfile
-from .apply import verify_pool
+from .backup import verify_pool, verify_receipt
 from .client import require, sync_tree, sync_directory
 
 
@@ -15,8 +15,7 @@ def restore(plan, receipt):
     require(receipt['status'] == 'deleted', 'only deleted objects can be restored')
     name, kind = receipt['name'], receipt['kind']
     backup = Path(receipt['backup'])
-    snapshot = json.loads((backup / 'snapshot.json').read_text())
-    require(snapshot.get('name', snapshot.get('id')) == name, 'backup name mismatch')
+    snapshot = verify_receipt(receipt)
     database = Path(plan['data_dir']) / 'control.db'
     lock_dir = database.with_suffix('.locks')
     require(lock_dir.is_dir(), 'server lock directory is missing')

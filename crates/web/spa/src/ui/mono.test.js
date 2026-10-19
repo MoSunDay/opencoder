@@ -1,14 +1,4 @@
-// mono.test.js — pure-node guard for the monospace single-source rule. Three
-// surfaces must agree on ONE stack, and this test reads the real other half
-// (app.css on disk) rather than re-reading theme.js — because theme.js
-// literally sets `'--oc-mono': MONO`, comparing MONO to cssVars['--oc-mono']
-// is a tautology (MONO === MONO) that guards nothing. What is actually pinned:
-//   1. MONO (the JS constant) <-> the --oc-mono declaration in app.css :root
-//      (raw CSS surfaces like .md-body code consume the property directly);
-//   2. MONO <-> theme.token.fontFamilyCode (antd's <Typography.Text code>
-//      face, which otherwise falls back to a Courier-bearing default);
-//   3. MONO_VAR resolves through the property with a bare generic fallback.
-
+// Check the font stack against actual CSS, antd tokens and MONO_VAR.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { MONO, MONO_VAR } from './mono.js';

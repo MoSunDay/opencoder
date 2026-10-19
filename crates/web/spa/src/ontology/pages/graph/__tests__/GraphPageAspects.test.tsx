@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import "../../../testSetup";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { apiMock, graphHandlers, graphMock, entityTypes, entities, relationshipTypes, graphNodes, aspect, edge, pageElement, finishSelection, expandFilters, renderPage, chooseScope } from "./pageFixture";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { apiMock, graphMock, entities, graphNodes, aspect, edge, pageElement, finishSelection, expandFilters, renderPage, chooseScope } from "./pageFixture";
 describe("GraphPage saved observation", () => {
   it("observes a saved aspect at three hops without requiring centers", async () => {
     apiMock.graphAspects.mockResolvedValue({ items: [aspect] });

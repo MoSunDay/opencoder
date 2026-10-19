@@ -1,5 +1,5 @@
 import { EditButton } from '../../ui/permissions.jsx';
-import { Button, Popconfirm, Space, Typography } from 'antd';
+import { Popconfirm, Space, Typography } from 'antd';
 import { useRef, useState } from 'react';
 import { apiDel, apiPatch, apiPost } from '../../api.js';
 import { err, ok } from '../../notice.js';

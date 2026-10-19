@@ -3,7 +3,7 @@ import { ConfigProvider } from "antd";
 import "../../testSetup";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp } from "antd";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
 import { EnvContext } from "../../env";
 import EntityTypesPage from "../EntityTypesPage";

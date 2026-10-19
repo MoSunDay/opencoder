@@ -68,7 +68,7 @@ beforeEach(() => {
   consoleLog.warn.length = 0;
   localStorage.clear();
   clearCredentials();
-  setState({ page: 'chat', preselectNode: 'node-1', nodes: [], conn: 'init' });
+  setState({ page: 'chat', nodes: [], conn: 'init' });
   installRouter();
   vi.spyOn(console, 'error').mockImplementation(record('error'));
   vi.spyOn(console, 'warn').mockImplementation(record('warn'));

@@ -20,7 +20,7 @@ const send = async (container, prompt) => {
 };
 beforeEach(() => {
   vi.resetAllMocks();
-  setState({ preselectNode: null, nodes: [] });
+  setState({ nodes: [] });
   apiGet.mockImplementation(async (path) => path === '/api/nodes' ? { nodes } : path.endsWith('/seq') ? { seq: 0 } : { dialogs: [] });
   apiPost.mockImplementation(async (path) => path === '/api/sessions' ? { id: 'operator-created' } : { ok: true });
 });

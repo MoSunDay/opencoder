@@ -1,7 +1,7 @@
 import { EditButton } from './ui/permissions.jsx';
 import { ClearOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Conversations } from '@ant-design/x';
-import { Button, Select, Spin } from 'antd';
+import { Select, Spin } from 'antd';
 import { dialogsToItems } from './conversationItems.js';
 import { explicitNodeOptions } from './fleet/model.js';
 

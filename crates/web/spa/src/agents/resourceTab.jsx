@@ -1,6 +1,6 @@
 import { EditButton } from '../ui/permissions.jsx';
 import {useState} from 'react';
-import {Alert, Button, Card, Collapse, Input, Select, Space, Switch, Typography} from 'antd';
+import { Alert, Card, Collapse, Input, Select, Space, Switch, Typography } from 'antd';
 import {Markdown} from '../project/markdown.jsx';
 import {ArchiveUpload} from './archiveUpload.jsx';
 import {ResourceFiles} from './resourceFiles.jsx';

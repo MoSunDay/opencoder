@@ -14,7 +14,7 @@ async fn release_subscriber_evicts_creator_handle_when_last_and_idle() {
     h.draining.store(false, Ordering::SeqCst);
     handles.lock().await.insert(id.clone(), h);
 
-    release_events_subscriber(handles.clone(), id.clone(), true);
+    release_events_subscriber(handles.clone(), id.clone());
 
     // The eviction runs in a spawned task; poll until it settles.
     for _ in 0..200 {
@@ -38,7 +38,7 @@ async fn release_subscriber_keeps_handle_while_draining() {
     h.draining.store(true, Ordering::SeqCst);
     handles.lock().await.insert(id.clone(), h);
 
-    release_events_subscriber(handles.clone(), id.clone(), true);
+    release_events_subscriber(handles.clone(), id.clone());
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
     assert!(
         handles.lock().await.contains_key(&id),
@@ -55,7 +55,7 @@ async fn release_subscriber_waits_for_idle_lifecycle_mutation() {
     handles.lock().await.insert(id.clone(), handle.clone());
     let lifecycle = handle.lifecycle.clone().lock_owned().await;
 
-    release_events_subscriber(handles.clone(), id.clone(), true);
+    release_events_subscriber(handles.clone(), id.clone());
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
     assert!(
         handles.lock().await.contains_key(&id),
@@ -86,7 +86,7 @@ async fn release_subscriber_keeps_handle_while_others_remain() {
     h.draining.store(false, Ordering::SeqCst);
     handles.lock().await.insert(id.clone(), h);
 
-    release_events_subscriber(handles.clone(), id.clone(), false);
+    release_events_subscriber(handles.clone(), id.clone());
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
     assert!(
         handles.lock().await.contains_key(&id),
@@ -94,11 +94,8 @@ async fn release_subscriber_keeps_handle_while_others_remain() {
     );
 }
 
-// Bug #4: eviction must not depend on the `created` flag. If the creator
-// disconnects first while a second (non-creator) subscriber remains, that
-// second subscriber must still evict the handle when it becomes the last
-// one leaving. The old `created &&` condition skipped eviction for the
-// non-creator, leaking the handle forever.
+// If the creator disconnects first, the remaining subscriber must still
+// evict the idle handle when it leaves.
 #[tokio::test]
 async fn session_handle_evicted_when_creator_leaves_first() {
     let handles = new_handle_map();
@@ -118,8 +115,8 @@ async fn session_handle_evicted_when_creator_leaves_first() {
         handle.subscribers.fetch_add(1, Ordering::SeqCst);
     }
 
-    // Creator A leaves first (created=true, prev=2 → not the last, kept).
-    release_events_subscriber(handles.clone(), id.clone(), true);
+    // Creator A leaves first (prev=2 → not the last, kept).
+    release_events_subscriber(handles.clone(), id.clone());
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     {
         let map = handles.lock().await;
@@ -129,8 +126,8 @@ async fn session_handle_evicted_when_creator_leaves_first() {
         );
     }
 
-    // Subscriber B leaves last (created=false, prev=1 → must be evicted).
-    release_events_subscriber(handles.clone(), id.clone(), false);
+    // Subscriber B leaves last (prev=1 → must be evicted).
+    release_events_subscriber(handles.clone(), id.clone());
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     {
         let map = handles.lock().await;
@@ -157,7 +154,7 @@ async fn release_subscriber_does_not_underflow_fresh_instance() {
     handles.lock().await.insert(id.clone(), h.clone());
 
     // A stale release for the old same-id instance fires on this handle.
-    release_events_subscriber(handles.clone(), id.clone(), true);
+    release_events_subscriber(handles.clone(), id.clone());
 
     // The release runs in a spawned task; poll until it settles (counter
     // either changed or the sleep guarantees the task ran).

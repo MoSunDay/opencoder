@@ -4,7 +4,6 @@ import {beforeEach,expect,it,vi} from 'vitest';
 import {fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {strToU8,zipSync} from 'fflate';
 import {ArchiveUpload} from './archiveUpload.jsx';
-import {b64DecodeText} from '../agentsItems.js';
 
 beforeEach(()=>{Range.prototype.getClientRects=()=>[];Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0});});
 
@@ -23,7 +22,7 @@ it('imports a zip into the draft, overwriting same-name files and keeping the re
   fireEvent.click(screen.getByRole('button',{name:'覆盖上传'}));
   await waitFor(()=>expect(onMerge).toHaveBeenCalled());
   const next=onMerge.mock.calls[0][0];
-  expect(b64DecodeText(next['note.md'].content_b64)).toBe('new');
+  expect(next['note.md'].content_b64).toBe(btoa('new'));
   expect(next['keep/deep.md']).toEqual(entry('keep/deep.md','deep'));
   expect(next['add/more.md'].mode).toBe(0o600);
 });

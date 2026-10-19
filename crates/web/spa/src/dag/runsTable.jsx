@@ -4,13 +4,12 @@
 // (runDetail.jsx). When a run id is focused (fresh dispatch / finished live
 // run), the detail view opens directly.
 
-import { Button, Input, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Input, Popconfirm, Space, Table, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { CANCELLABLE, NodeBadge, RunStatusTag } from './runBits.jsx';
-import { useStore } from '../store.js';
 import { RunDetail } from './runDetail.jsx';
 import { err } from '../notice.js';
 

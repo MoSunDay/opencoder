@@ -60,12 +60,3 @@ export function outputRows(frames, query = '') {
     ? rows.filter((row) => `${row.label} ${row.text}`.toLocaleLowerCase().includes(needle))
     : rows;
 }
-
-/// The last `step_finished` frame's data ({status, error, started_at_ms,
-/// finished_at_ms}), or null while the step has not reached a terminal state.
-export function finishedOf(frames) {
-  for (let i = frames.length - 1; i >= 0; i -= 1) {
-    if (frames[i] && frames[i].event === 'step_finished') return frames[i].data || null;
-  }
-  return null;
-}

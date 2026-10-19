@@ -9,7 +9,7 @@ import { EditButton } from './ui/permissions.jsx';
 // chat.jsx bumps `refreshSignal` on every queue_consumed/steer_consumed
 // frame — the refresh here is pull-only, never stream-coupled.
 
-import { Button, Tag, Typography } from 'antd';
+import { Tag, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost } from './api.js';
 

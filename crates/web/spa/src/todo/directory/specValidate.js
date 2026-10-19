@@ -1,32 +1,3 @@
-// specValidate.js — PURE client-side validation of a WorkflowSpec JSON
-// draft (mirror of crates/todos/src/domain.rs validate_spec rules) before
-// it is submitted to the server. Unlike dag/specValidate.js, problems are
-// STRUCTURED [{path, message}] so the directory editor can locate the task file:
-// path is 'workflow' for spec-level issues or `todos[<id>]` for a todo
-// (that is what drives the editor's red dot). [] means the draft may be
-// submitted — the server remains authoritative.
-
-export const BUILTIN_AGENTS = ['act', 'plan', 'command'];
-
-/// parseSpecDraft(text) → {spec} on success or {error} with a readable
-/// Chinese message (JSON.parse's own message is English/noisy).
-export function parseSpecDraft(text) {
-  const raw = String(text || '').trim();
-  if (!raw) {
-    return { error: '请输入工作流 JSON' };
-  }
-  let v;
-  try {
-    v = JSON.parse(raw);
-  } catch (e) {
-    return { error: 'JSON 解析失败: ' + (e && e.message ? e.message : String(e)) };
-  }
-  if (!v || typeof v !== 'object' || Array.isArray(v)) {
-    return { error: 'spec 必须是 JSON 对象' };
-  }
-  return { spec: v };
-}
-
 /// todoIdSet(spec) → Set of the raw string ids of every todo (mirror of
 /// the ids HashSet in validate_spec: duplicates collapse silently).
 function todoIdSet(spec) {
@@ -44,8 +15,7 @@ function todoIdSet(spec) {
 /// todos, id uniqueness, per-todo required fields, max_attempts, path-safe
 /// ids, depends_on references, required_tool_calls payloads, agent hints
 /// and dependency cycles. Unknown agent names are NOT rejected here —
-/// resolve_agent on the server is authoritative, BUILTIN_AGENTS is only
-/// advisory for the editor's dropdown.
+/// resolve_agent on the server is authoritative.
 export function validateSpec(spec) {
   const problems = [];
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {

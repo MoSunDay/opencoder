@@ -27,4 +27,4 @@ schema v38 在事务中移除 `project_initiatives.status`，保留归属、排�
 
 发布清单格式校验定向回归：`python3 -m unittest discover -s scripts/platform/rolling_tests -p test_manifest.py`，包括格式 9 的构建校验与禁止和格式 1–8 滚动混用。
 
-线上结果：已在原入口 `http://10.199.71.70:18081` 将本次修改合入现网版本 `b490f40b`，发布为 `fe01be20`。schema v38 已移除专项状态；项目、专项、TODO、关联和认证表逐行摘要比对通过。原 4 个节点恢复，四种屏宽的列表和表单通过线上复核。连续观察 903 秒、167 次状态与进度检查、15 次真实执行探测全部通过。最终回执：`/data00/workspace/artifacts/opencoder-initiative-without-status-20261010/final-receipt.json`。
+线上结果：已在原公共入口 将本次修改合入现网版本 `b490f40b`，发布为 `fe01be20`。schema v38 已移除专项状态；项目、专项、TODO、关联和认证表逐行摘要比对通过。原 4 个节点恢复，四种屏宽的列表和表单通过线上复核。连续观察 903 秒、167 次状态与进度检查、15 次真实执行探测全部通过。最终回执：`/data00/workspace/artifacts/opencoder-initiative-without-status-20261010/final-receipt.json`。

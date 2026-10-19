@@ -8,11 +8,10 @@
 // public reduceFrame export from an emptyStream start, with NO `seq` on any
 // frame (live broadcasts are emitted before the async flusher persists them,
 // so they never carry one - see reduce.js). The user echo of the admitted
-// prompt rides in via withUserTurn, exactly like chat.jsx's optimistic echo
-// (a fresh local run emits no steer/queue echo frame). Real-browser
-// verification stays manual; this file locks the fold semantics.
+// prompt arrives through steer_consumed, as in the live event stream.
+// This file verifies the event reducer; browser behavior has separate tests.
 import { describe, expect, it } from 'vitest';
-import { emptyStream, ensurePendingEcho, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
+import { emptyStream, ensurePendingEcho, reduceFrame, turnsFromMessages } from './reduce.js';
 
 const callIds = (ladder) => ladder.steps.flatMap((step) => step.calls.map((call) => call.id));
 const callCount = (ladder) => ladder.steps.reduce((n, step) => n + step.calls.length, 0);
@@ -21,7 +20,7 @@ const indexOfKind = (turns, kind, from = 0) => turns.findIndex((t, i) => i >= fr
 
 describe('(a) two rounds in one run alternate [N Steps + Say] x 2', () => {
   it('settles [user, steps(2 calls), say, steps(1 call), say] with both ladders frozen by their own Say', () => {
-    let s = withUserTurn(emptyStream(), 'ship the release');
+    let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'ship the release' } }, 0);
     expect(s.pendingEcho).toBe('ship the release');
 
     // Round 1: thinking -> call+result -> thinking -> call+result.
@@ -112,7 +111,7 @@ describe('(b) transcript_reset keeps the in-flight user echo', () => {
   ];
 
   it('preserves pendingEcho across the reset frame and the snapshot rebuild re-pushes the echo turn', () => {
-    let s = withUserTurn(emptyStream(), 'fix the login bug');
+    let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'fix the login bug' } }, 0);
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'repro first' } }, 1000);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'c1', name: 'bash', input: { cmd: 'curl -i' } } }, 1010);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'c1', name: 'bash', output: 'HTTP/1.1 401', is_error: false, duration_ms: 250 } }, 1260);
@@ -147,7 +146,7 @@ describe('(b) transcript_reset keeps the in-flight user echo', () => {
   });
 
   it('done retires the echo so a later bare reset cannot resurrect the old prompt', () => {
-    let s = withUserTurn(emptyStream(), 'fix the login bug');
+    let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'fix the login bug' } }, 0);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'partial say' } }, 1000);
     s = reduceFrame(s, { event: 'steer_consumed', data: { text: 'finish the summary' } }, 1010);
     s = reduceFrame(s, { event: 'transcript_reset', data: {} }, 1020);
@@ -169,7 +168,7 @@ describe('(b) transcript_reset keeps the in-flight user echo', () => {
 
 describe('(c) steer consumption opens a fresh ladder', () => {
   it('anchors the new ladder below the steer echo and leaves the round-1 ladder untouched', () => {
-    let s = withUserTurn(emptyStream(), 'audit the module');
+    let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'audit the module' } }, 0);
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'scan first' } }, 1000);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'c1', name: 'bash', input: { cmd: 'grep -r TODO' } } }, 1010);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'c1', name: 'bash', output: '3 hits', is_error: false, duration_ms: 60 } }, 1070);

@@ -1,67 +1,20 @@
-// agentsItems.test.js — pure-node rules for the Agent 配置 tab (no DOM, no
-// JSX). Guards the b64 text codec (UTF-8 roundtrip + dirty input), the
-// ref-card → cell mapping, pool/version option shaping and the NFS mount
-// hint line that agentsConfig / agentDetail / agentNfsCard render.
+// Agent resource encoding, references and NFS hints.
 
 import { describe, expect, it } from 'vitest';
-import {
-  REF_FIELDS, b64DecodeText, b64EncodeText, mountHint, refCells,
-  resolvedNames, resourceOptions, versionOptions,
-} from './agentsItems.js';
+import { REF_FIELDS, b64EncodeText, mountHint, resolvedNames } from './agentsItems.js';
 
 describe('b64 codecs', () => {
   it('round-trips ASCII and CJK text (UTF-8, not Latin-1)', () => {
     const samples = ['SOUL TEXT', '你是最强的 Rust 工程师', 'a\nb\tc'];
     samples.forEach((s) => {
-      expect(b64DecodeText(b64EncodeText(s))).toBe(s);
+      expect(Buffer.from(b64EncodeText(s), 'base64').toString('utf8')).toBe(s);
     });
   });
 
-  it('encodes empty like the server expects and decodes empty to empty', () => {
+  it('encodes missing text as empty', () => {
     expect(b64EncodeText('')).toBe('');
-    expect(b64DecodeText('')).toBe('');
-    expect(b64DecodeText(null)).toBe('');
-    expect(b64DecodeText(undefined)).toBe('');
-  });
-
-  it('degrades dirty b64 to empty instead of throwing', () => {
-    expect(b64DecodeText('!!!not-base64!!!')).toBe('');
-    expect(b64DecodeText('AAAAA')).toBe(''); // 长度非法（%4==1）
-  });
-});
-
-describe('refCells', () => {
-  it('maps a card current into four cells, unset ⇒ empty value', () => {
-    const cells = refCells({ prompt: 'base', tools: 'std' });
-    expect(cells.map((c) => c.field)).toEqual(['prompt', 'skills', 'tools', 'memory']);
-    expect(cells[0]).toEqual({ field: 'prompt', label: 'Prompt', value: 'base' });
-    expect(cells[1].value).toBe('');
-    expect(cells[2].value).toBe('std');
-    expect(cells[3].value).toBe('');
-  });
-
-  it('tolerates garbage current cards', () => {
-    expect(refCells(null).every((c) => c.value === '')).toBe(true);
-    expect(refCells('nope').every((c) => c.value === '')).toBe(true);
-  });
-});
-
-describe('resourceOptions / versionOptions', () => {
-  it('labels pool entries with their current version', () => {
-    expect(resourceOptions([{ name: 'base', current: 2, versions: [1, 2] }, { name: 'x', current: 0 }]))
-      .toEqual([
-        { value: 'base', label: 'base · v2' },
-        { value: 'x', label: 'x' },
-      ]);
-    expect(resourceOptions(null)).toEqual([]);
-  });
-
-  it('sorts versions descending for the rollback target', () => {
-    expect(versionOptions([1, 3, 2])).toEqual([
-      { value: 3, label: 'v3' },
-      { value: 2, label: 'v2' },
-      { value: 1, label: 'v1' },
-    ]);
+    expect(b64EncodeText(null)).toBe('');
+    expect(b64EncodeText(undefined)).toBe('');
   });
 });
 
@@ -93,8 +46,7 @@ describe('mountHint', () => {
 });
 
 describe('REF_FIELDS', () => {
-  it('keeps field ↔ pool category aligned (api path segments)', () => {
-    expect(REF_FIELDS.map((f) => f.cat)).toEqual(['prompts', 'skills', 'tools', 'memory']);
-    expect(REF_FIELDS.map((f) => f.field)).toEqual(['prompt', 'skills', 'tools', 'memory']);
+  it('keeps the reference display order', () => {
+    expect(REF_FIELDS).toEqual(['prompt', 'skills', 'tools', 'memory']);
   });
 });

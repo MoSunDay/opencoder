@@ -96,8 +96,7 @@ async fn release_events_subscriber_async(handles: HandleMap, id: String) {
 }
 
 /// Release an SSE subscriber and evict its idle handle when it was the last.
-#[allow(unused_variables)]
-pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created: bool) {
+pub(crate) fn release_events_subscriber(handles: HandleMap, id: String) {
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
         runtime.spawn(release_events_subscriber_async(handles, id));
     } else {

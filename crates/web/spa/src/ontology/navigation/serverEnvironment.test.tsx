@@ -3,7 +3,7 @@ import "../testSetup";
 import { App, ConfigProvider } from "antd";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { pagesOf } from "../../nav.js";
+import { NAV_CATEGORIES } from "../../nav.js";
 import { setState } from "../../store.js";
 import { OntologyTypesPanel } from "../panels";
 
@@ -29,7 +29,8 @@ it("reads and creates in the Server namespace despite a stale browser environmen
   await screen.findByText(type.name);
   expect(request).toHaveBeenCalledWith("GET", "/api/ontology/envs/debug/entity-types?include_deleted=true", undefined);
   expect(screen.queryByRole("combobox", { name: "Ontology 环境" })).not.toBeInTheDocument();
-  expect(pagesOf("ontology")).toEqual(["ontologyGraph", "ontologyEntities", "ontologyTypes", "ontologyRelationships"]);
+  expect(NAV_CATEGORIES.find((category: { key: string }) => category.key === "ontology").items.map((item: { page: string }) => item.page))
+    .toEqual(["ontologyGraph", "ontologyEntities", "ontologyTypes", "ontologyRelationships"]);
 
   fireEvent.click(screen.getByRole("button", { name: /新\s*增/ }));
   fireEvent.change(await screen.findByLabelText("类型 Key"), { target: { value: "new_type" } });

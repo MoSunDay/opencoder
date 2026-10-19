@@ -65,14 +65,13 @@ pub async fn get_events(
     // 只在 map 锁内拿 handle Arc 并占订阅位；ring 快照（`subscribe_recent`，
     // 持 handle 自己的 recent 锁）放到 map 锁释放之后做，避免嵌套持锁的
     // 锁序问题。
-    let (handle, created) = {
+    let handle = {
         let mut map = state.handles.lock().await;
-        let created = !map.contains_key(&id);
         let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
-        // Track this subscriber so the handle this request may have created is
-        // evicted (see `release_events_subscriber`) once everyone disconnects.
+        // Track this subscriber so the idle handle can be evicted once
+        // everyone disconnects (see `release_events_subscriber`).
         handle.subscribers.fetch_add(1, Ordering::SeqCst);
-        (Arc::clone(handle), created)
+        Arc::clone(handle)
     };
     let (rx, ring) = handle.subscribe_recent();
 
@@ -155,11 +154,10 @@ pub async fn get_events(
     });
 
     // Wrap in a drop guard so that when the client disconnects (or the stream
-    // ends) this request's subscriber slot is released and, if it created the
-    // handle and nothing remains, the handle is evicted — preventing unbounded
-    // handle-map growth on a long-running server.
+    // ends) this request's subscriber slot is released. The last subscriber
+    // evicts an idle handle, preventing unbounded handle-map growth.
     let guarded = crate::handle::DropGuardStream::new(merged, move || {
-        crate::handle::release_events_subscriber(state.handles.clone(), id, created)
+        crate::handle::release_events_subscriber(state.handles.clone(), id)
     });
 
     Sse::new(guarded)

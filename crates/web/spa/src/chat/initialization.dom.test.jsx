@@ -12,7 +12,7 @@ vi.mock('../sse.js', () => ({ openStream: vi.fn() }));
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
-  setState({ preselectNode: null, nodes: [] });
+  setState({ nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes: [{ id: 'n1', name: 'n1', online: true,
       kinds: ['operator', 'agent'], snapshot: { ready: true } }] };

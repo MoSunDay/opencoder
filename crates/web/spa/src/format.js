@@ -2,30 +2,6 @@
 
 import dayjs from 'dayjs';
 
-/// Compact relative heartbeat, e.g. "3s ago" / "2m ago" (dayjs-based diff).
-export function relTime(ts) {
-  if (ts === undefined || ts === null || ts === '') {
-    return '-';
-  }
-  const t = dayjs(Number(ts));
-  if (!t.isValid()) {
-    return '-';
-  }
-  const s = Math.max(0, Math.round(dayjs().diff(t, 'second', true)));
-  if (s < 60) {
-    return s + 's ago';
-  }
-  const m = Math.floor(s / 60);
-  if (m < 60) {
-    return m + 'm ago';
-  }
-  const h = Math.floor(m / 60);
-  if (h < 24) {
-    return h + 'h ago';
-  }
-  return Math.floor(h / 24) + 'd ago';
-}
-
 /// Absolute timestamp for Tooltips.
 export function absTime(ts) {
   const t = dayjs(Number(ts));

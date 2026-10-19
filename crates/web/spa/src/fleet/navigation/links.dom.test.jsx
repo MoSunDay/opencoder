@@ -43,6 +43,9 @@ it('follows ID-only links, hash changes and browser history without relying on t
   window.history.replaceState(null, '', '/?execution=legacy');
   window.dispatchEvent(new PopStateEvent('popstate'));
   expect(await screen.findByText('原生记录:legacy')).toBeTruthy();
+  window.history.replaceState(null, '', '/');
+  window.dispatchEvent(new PopStateEvent('popstate'));
+  await waitFor(() => expect(screen.queryByText('原生记录:legacy')).toBeNull());
 });
 
 it('keeps execution list clicks in the address so refresh opens the same record', async () => {

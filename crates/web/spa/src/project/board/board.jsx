@@ -1,5 +1,5 @@
 import { EditButton, useCanEdit } from '../../ui/permissions.jsx';
-import { Button, Card, Collapse, Input, Segmented, Select, Space, Typography } from 'antd';
+import { Card, Collapse, Input, Segmented, Select, Space, Typography } from 'antd';
 import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCorners, pointerWithin, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useRef, useState } from 'react';

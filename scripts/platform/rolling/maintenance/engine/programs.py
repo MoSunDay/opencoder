@@ -35,12 +35,22 @@ def stage(settings, bundle, candidate, original, registered, fallback, operation
         from ...manifest import _installer
         expected = _installer.build_info(bundle / 'bin/opencoder-agent')
         image = Path(result[identifier]['rootfs'])
-        names = units.image_programs(image)
-        for name in names:
-            actual = json.loads(operations.output('chroot', str(image), '/usr/bin/' + name, '--build-info'))
-            if actual != expected:
-                raise ValueError('retained Runtime image program differs from the candidate bundle')
+        verify_image(image, expected, operations)
     return result
+
+
+def verify_image(image, expected, operations):
+    names = units.image_programs(image)
+    # The main launcher resolves /proc/self/exe before parsing arguments.
+    # Match the native execution environment without mounting anything in the
+    # host namespace. The private proc mount disappears when this check exits.
+    script = ('mount -t proc proc "$1/proc"; root=$1; shift; '
+              'for program do chroot "$root" "/usr/bin/$program" --build-info; done')
+    output = operations.output('unshare', '--mount', '--propagation', 'private', '--',
+                               'sh', '-ec', script, 'image-check', str(image), *names)
+    actual = [json.loads(line) for line in output.splitlines() if line.strip()]
+    if len(actual) != len(names) or any(info != expected for info in actual):
+        raise ValueError('retained Runtime image program differs from the candidate bundle')
 
 
 def stage_one(settings, bundle, candidate, record, fallback):

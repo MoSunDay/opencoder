@@ -1,10 +1,12 @@
-Commit: 8eef2858b435e869c541d6ae8222d9d66687b839
+Commit: 366262fc8aa42ad2fe460a4f3c1d1ee5c9081ae4
 
 # Turso 存储与本机引擎切换
 
 Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异步 Rust API，保留现有上层接口及 schema 39。每个文件在接收操作前准备 4 个读连接和 1 个写连接；重建异常连接时等待活动事务结束，避免初始化 WAL 时干扰已有读锁。正常操作复用独立读连接和单写连接；完整操作持有同一连接，读操作使用快照。数据库任务在独立执行线程运行，应用请求取消后，已接收的写入仍完成提交或回滚。持久化使用 WAL 和 `synchronous=FULL`，不启用 MVCC。
 
 会话列表沿活跃时间索引筛选和分页，再读取消息预览；短 JSON 直接返回，减少逐字符截取和临时分配，长内容及含 NUL 的历史内容保留原规则。消息、事件和队列操作复用预编译 SQL，事务控制语句同样缓存。单条事件依靠 INSERT 原子提交，批量事件仍使用同一显式事务，失败后连接可继续正确写入。混合负载工具使用同一份数据库快照，对比旧引擎默认持久化、旧引擎 FULL 和 Turso FULL，分别记录吞吐、延迟、内存及应用运行时等待。
+
+队列领取把多次查询合并为一条 `UPDATE RETURNING`，仍在原立即事务内完成；保持最早输入、晋升序号和已记录标记的约束，结果解码失败时回滚领取。
 
 开发和测试构建单独优化 Turso 的 Rust 查询引擎，避免未优化的数据库执行耗尽应用心跳时限；应用自身仍保留调试构建设置。
 
@@ -35,6 +37,7 @@ Fleet 从 JSON 清单关联历史任务时，显式将 ID 转为文本，让 Tur
 | 文件数据库读事务与并发连接 | `new_connections_preserve_an_existing_file_reader` |
 | 单条事件失败后的连接复用、批量原子提交与重开持久化 | `single_event_failure_does_not_poison_following_durable_appends` |
 | 短预览、中文字符边界、超长与损坏 JSON | `list_preview_preserves_unicode_limits_and_malformed_json_behavior` |
+| 队列原子领取、字段保留及解码失败回滚 | `claim_decode_failure_rolls_back_promotion_before_retry`、`inputs_cross_instance_serialized`、`inputs_integration` |
 | 单项延迟与混合吞吐 | `store_perf`、`examples/storage_mixed.rs` |
 | 大批量节点上报期间的心跳与取消回复 | `slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply` |
 | 历史归属索引查找及两万条清单校验 | `inventory_owner_lookup_uses_primary_key_search`、`large_inventory_preserves_owners_across_activation_and_duplicate_ids` |

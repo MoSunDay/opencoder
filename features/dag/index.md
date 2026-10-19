@@ -1,4 +1,4 @@
-Commit: 93acdeaa53cd864e85760a2123efb20526d92051
+Commit: 0a9472601a636ddaa5e097b69e269fb04faa2396
 
 # DAG 工作流
 
@@ -39,3 +39,11 @@ Commit: 93acdeaa53cd864e85760a2123efb20526d92051
 - [必须遵守的执行规则](../../rules/04-dag-execution-contract.md)、[动态步骤 API](../../docs/dag-dynamic.md)
 - [dag](../../agents/dag/index.md)、[dag-runtime](../../agents/dag-runtime/index.md)、[dag-binary](../../agents/dag-binary/index.md)
 - [调度平台](../agent-platform/index.md)、[Harness](../harness/index.md)、[平滑发布](../../docs/smooth-release.md)
+
+## 目录去重与清理
+
+相同名称、相同内容的 DAG 保存与当前二进制重复上传保持原时间和版本；异名相同定义或已有相同二进制返回 409，附已有条目供复用。历史二进制版本须显式切换，不能通过重复上传增加版本。页面保留编辑内容，可打开冲突条目的详情。
+
+删除前检查全部版本引用、日程、TODO、能力、活动执行、待派发请求、配置及 Agent 文件；仍被引用返回 409，条件请求内容变化返回 412，不存在返回 404。运行历史、日志、产物和工作区保持。
+
+[维护命令](../../scripts/maintenance/catalog_cleanup/README.md) 先预览并逐项备份，再通过条件删除执行；独立无引用条目须在创建、更新及最近执行受理后均超过 7 天，完整重复的额外副本可直接列入候选。未知时间或引用检查失败保留，不定期自动清理。

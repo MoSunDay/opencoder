@@ -1,8 +1,9 @@
 import { EditButton } from '../../ui/permissions.jsx';
-import { Alert, Button, Form, Input, Modal, Space } from 'antd';
+import { Button, Form, Input, Modal, Space } from 'antd';
 import { useState } from 'react';
 import { apiPost, apiPut } from '../../api.js';
 import { encodeUpload, MAX_BINARY_BYTES } from './model.js';
+import { CatalogConflict } from '../catalog/conflict.jsx';
 
 export function BinaryEditor({ pool, onClose, onSaved }) {
   const [form] = Form.useForm();
@@ -20,12 +21,12 @@ export function BinaryEditor({ pool, onClose, onSaved }) {
       else await apiPost('/api/dag/binaries', { ...body, name: values.name.trim() });
       await onSaved();
       onClose();
-    } catch (failure) { setError(failure.message); }
+    } catch (failure) { setError(failure); }
     finally { setBusy(false); }
   };
   return <Modal open title={pool ? `追加二进制版本 · ${pool.name}` : '上传二进制资源'} onCancel={() => { if (!busy) onClose(); }} footer={null} destroyOnHidden>
     <Form form={form} layout="vertical" initialValues={{ name: pool?.name, description: pool?.description }} onFinish={save}>
-      {error && <Alert type="error" showIcon title={error} />}
+      <CatalogConflict error={error} />
       <Form.Item name="name" label="资源名称" rules={[{ required: true, message: '请输入资源名称' }, { pattern: /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,47}$/, message: '使用字母、数字、下划线、点或连字符，最多 48 字符，不能以点开头' }]}>
         <Input aria-label="二进制资源名称" disabled={!!pool || busy} />
       </Form.Item>

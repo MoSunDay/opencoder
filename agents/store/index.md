@@ -1,4 +1,4 @@
-Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
+Commit: f6768ad434907a739f0271f52cdc3f9c991a40aa
 
 # store 模块
 
@@ -42,3 +42,5 @@ Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
 - `fleet/handoff/receipts.rs` 的 `execution_names` 批量投影冻结 Assignment 中的目标、定义名称和 Brain 计划标题；名称不写回执行索引或已有运行数据。
 
 能力详情的 `content_version` 指纹包含记录和有序样例。带版本的更新在 `BEGIN IMMEDIATE` 内重读比较，再原子提交文字、样例和向量；冲突抛出 `BrainContentConflict`，不写任何一部分。见 [brain 持久化](../../crates/store/src/libsql_store/brain.rs)。
+
+[fleet/catalog.rs](../../crates/store/src/fleet/catalog.rs) 为目录删除提供只读候选：全部定义、不可变计划版本、非终态及缺少索引的 Assignment、未完成派发回执。SQL 先按名称筛选，Control 再按完整 JSON 校验引用；不删除执行历史。

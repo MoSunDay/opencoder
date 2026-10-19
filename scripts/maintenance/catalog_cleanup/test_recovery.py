@@ -33,7 +33,7 @@ class RecoveryTests(unittest.TestCase):
 
     def call(self, method, path, etag=None):
         if path == '/api/health':
-            return 200, {'catalog_guard': 1}, None
+            return 200, {'catalog_guard': 2}, None
         if method == 'DELETE':
             self.deletes += 1
             self.exists = False

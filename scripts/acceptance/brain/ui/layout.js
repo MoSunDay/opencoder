@@ -1,5 +1,5 @@
 // Deterministic display checks against a built SPA; no production services or data.
-// Usage: node scripts/acceptance/brain/ui/layout.js OUTPUT_DIR [SPA_DIST]
+// Usage: node scripts/acceptance/brain/ui/layout.js OUTPUT_DIR [SPA_DIST] [--only-capabilities]
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -8,10 +8,15 @@ const { chromium } = require('../../../../crates/web/spa/node_modules/playwright
 
 const output = process.argv[2];
 assert(output, 'OUTPUT_DIR required');
-const dist = path.resolve(process.argv[3] || 'crates/web/spa/dist');
+const dist = path.resolve(process.argv.slice(3).find((arg) => !arg.startsWith('--')) || 'crates/web/spa/dist');
+const capabilitiesOnly = process.argv.includes('--only-capabilities');
 const summary = '分析工程中的依赖关系并生成完整的构建验证结果。'.repeat(30);
-const entry = { capability: { id: 'coding', capability_type: 'agent', summary,
+const entry = { capability: { id: 'coding', capability_type: 'generic-capability/long-custom-execution-type'.repeat(4), summary,
   input_desc: '待分析的代码版本', output_desc: '结构化验证结果', updated_at: Date.now() }, eng_inputs: [{ content: 'revision=main' }] };
+const entries = [entry,
+  { ...entry, capability: { ...entry.capability, id: 'review', capability_type: '自定义执行类型需要保留完整名称'.repeat(8) } },
+  { ...entry, capability: { ...entry.capability, id: 'workflow', capability_type: 'todos' } },
+];
 const capability = { id: 'coding', kind: 'agent', target: 'Coder', summary, input_desc: '任务', output_desc: '结果', definition: {}, version: '1' };
 const version = { id: 'delivery', version: 2, changelog: '调整计划', plan: {
   schema_version: 7, title: '交付计划', objective: '交付经过验证的变更', inputs: { revision: 'main' }, max_rounds: 5,
@@ -19,17 +24,18 @@ const version = { id: 'delivery', version: 2, changelog: '调整计划', plan: {
   nodes: [{ node_id: 'coding', layer_id: 'code', title: '编码', objective: '实现需求', capability_id: 'coding' }],
 } };
 const responses = {
+  '/api/auth/status': { enabled: true },
   '/api/me': { name: 'layout-test', role: 'admin' },
   '/api/brain/runs': { runs: [] },
   '/api/brain/plan-defs': { plans: [{ id: version.id, title: version.plan.title, latest_version: 2, schema_version: 7 }] },
   '/api/brain/plan-defs/delivery/versions/2': version,
   '/api/brain/plan-defs/delivery/versions': { versions: [version] },
   '/api/brain/library': { capabilities: [capability] },
-  '/api/brain/capabilities': { capabilities: [entry] },
+  '/api/brain/capabilities': { capabilities: entries },
   '/api/brain/capabilities/coding': entry,
   '/api/brain/capabilities/coding/target': { target: { kind: 'agent', target: 'Coder' } },
   '/api/agents': { agents: [{ name: 'Coder' }] },
-  '/api/brain/search': { hits: [{ capability: entry.capability, distance: 0.125 }] },
+  '/api/brain/search': { hits: entries.map((item, index) => ({ capability: item.capability, distance: 0.125 + index / 10 })) },
 };
 
 async function measure(page, name, results) {
@@ -45,14 +51,37 @@ async function measure(page, name, results) {
         inside: box.left >= cell.left && box.right <= cell.right,
         ellipsis: getComputedStyle(element).textOverflow };
     });
+    const types = [...document.querySelectorAll('tr[data-row-key] td:first-child .ant-tag')]
+      .filter((element) => element.getBoundingClientRect().width > 0).map((element) => {
+        const box = element.getBoundingClientRect();
+        const cell = element.closest('td');
+        const bounds = cell.getBoundingClientRect();
+        const style = getComputedStyle(cell);
+        return { width: box.width, scroll: element.scrollWidth, client: element.clientWidth,
+          inside: box.left >= bounds.left + parseFloat(style.paddingLeft) - 1
+            && box.right <= bounds.right - parseFloat(style.paddingRight) + 1,
+          ellipsis: getComputedStyle(element).textOverflow,
+          completeTitle: element.title === element.textContent, long: element.textContent.length > 50 };
+      });
+    const actions = [...document.querySelectorAll('tr[data-row-key] td:last-child')]
+      .filter((element) => element.getBoundingClientRect().width > 0)
+      .map((element) => getComputedStyle(element).position);
     return { width: innerWidth, documentWidth: document.documentElement.scrollWidth,
-      paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth, summaries };
+      paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth, summaries, types, actions };
   });
   assert(geometry.documentWidth <= geometry.width + 1, `${name}: page overflow`);
   assert(geometry.paneScroll <= geometry.paneWidth + 1, `${name}: pane overflow`);
   for (const text of geometry.summaries) {
     assert(text.inside && text.width <= 512, `${name}: summary escaped its cell or maximum width`);
     assert(text.scroll > text.client && text.ellipsis === 'ellipsis', `${name}: long text must be truncated`);
+  }
+  for (const type of geometry.types) {
+    assert(type.inside, `${name}: execution type overlaps the next column`);
+    assert(type.completeTitle, `${name}: execution type must retain its full hover text`);
+    if (type.long) assert(type.scroll > type.client && type.ellipsis === 'ellipsis', `${name}: long execution type must be truncated`);
+  }
+  if (geometry.width < 768 && geometry.types.length) {
+    assert(geometry.actions.every((position) => position !== 'sticky'), `${name}: mobile actions must scroll with their row`);
   }
   results.push({ name, ...geometry });
   console.log(`PASS: ${name}`);
@@ -74,16 +103,20 @@ async function checkWidth(browser, origin, width, results, errors) {
   try {
     await page.goto(origin);
     await page.getByRole('tab', { name: '能力库', exact: true }).click();
-    await page.locator('.brain-capability-summary').waitFor();
+    await page.locator('.brain-capability-summary').first().waitFor();
     for (const hidden of ['输入描述', '输出描述', '工程输入']) {
       assert.equal(await page.getByRole('columnheader', { name: hidden }).count(), 0);
     }
     await measure(page, `capabilities-${width}`, results);
+    const scroller = page.locator('.ant-table:has(.brain-capability-summary) .ant-table-content');
+    await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+    await measure(page, `capabilities-scrolled-${width}`, results);
+    await scroller.evaluate((element) => { element.scrollLeft = 0; });
     await page.getByLabel('搜索能力', { exact: true }).fill('工程');
     await page.getByRole('button', { name: /^搜\s*索$/ }).click();
     await page.getByText('0.1250', { exact: true }).waitFor();
     await measure(page, `search-${width}`, results);
-    await page.locator('.brain-capability-summary').click();
+    await page.locator('.brain-capability-summary').first().click();
     await page.getByLabel('输入描述', { exact: true }).waitFor();
     await page.waitForFunction(() => document.querySelector('textarea[placeholder="一条示例输入"]')?.value === 'revision=main');
     assert.equal(await page.getByLabel('一句话描述', { exact: true }).inputValue(), summary);
@@ -92,6 +125,7 @@ async function checkWidth(browser, origin, width, results, errors) {
     await measure(page, `capability-detail-${width}`, results);
     await page.getByRole('button', { name: /^取\s*消$/ }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    if (capabilitiesOnly) return;
     await page.getByRole('tab', { name: '计划库', exact: true }).click();
     await page.getByRole('button', { name: '交付计划', exact: true }).click();
     await page.getByRole('dialog', { name: '修改计划', exact: true }).waitFor();

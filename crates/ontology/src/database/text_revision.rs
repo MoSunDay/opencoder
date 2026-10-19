@@ -41,15 +41,14 @@ impl Store {
         attribute: i64,
     ) -> Result<Vec<Value>, AppError> {
         let mut items = self
-            .list::<Value>("text_revisions", env)
+            .entity_values("text_revisions", env, entity)
             .await?
             .into_iter()
             .filter(|item| {
-                item["entity_id"] == entity.to_string()
-                    && item["attribute_definition_id"]
-                        .as_str()
-                        .and_then(|id| id.parse::<i64>().ok())
-                        == Some(attribute)
+                item["attribute_definition_id"]
+                    .as_str()
+                    .and_then(|id| id.parse::<i64>().ok())
+                    == Some(attribute)
             })
             .collect::<Vec<_>>();
         items.sort_by_key(|item| std::cmp::Reverse(item["revision"].as_i64().unwrap_or(0)));

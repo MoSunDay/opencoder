@@ -18,6 +18,9 @@ from rolling.state import Journal
 @contextmanager
 def prepared(root):
     fixture = Fixture(root)
+    origin_bin = fixture.settings.state_dir / 'releases/old/bundle/bin'
+    origin_bin.mkdir(parents=True)
+    (origin_bin / 'opencoder-server').write_bytes(b'compatible origin resource program')
     for value, version, engine in ((fixture.old['manifest'], 10, 'libsql'), (fixture.candidate, 11, 'turso')):
         value.update(storage_engine=engine, execution_io={'reader': 1, 'writer': 1}, brain_schema_version=7)
         value['compatibility']['data_format'] = {'min': version, 'max': version}
@@ -96,6 +99,8 @@ class EngineMaintenanceTests(unittest.TestCase):
             self.assertEqual(result['maintenance']['stage'], 'rolled_back')
             self.assertEqual(fixture.db.stat().st_ino, inode)
             self.assertEqual(fixture.db.read_bytes(), before)
+            self.assertEqual((fixture.settings.state_dir / 'services/opencoder-resources').read_bytes(),
+                             b'compatible origin resource program')
             self.assertFalse(any('/api/admin/drain' in call for call in fixture.calls))
 
     def test_early_rollback_preserves_a_compatible_todo_floor(self):
@@ -123,6 +128,25 @@ class EngineMaintenanceTests(unittest.TestCase):
             self.assertEqual(fixture.db.read_bytes(), before)
             self.assertFalse(any(call[:3] == ('systemctl', '--no-block', 'stop') for call in fixture.calls))
             self.assertIn(fixture.old['runtime_unit'], fixture.active)
+
+    def test_recovery_starts_registered_candidate_before_restored_host(self):
+        with tempfile.TemporaryDirectory() as directory, prepared(Path(directory)) as (fixture, internal):
+            internal.side_effect = RuntimeError('verification failed')
+            with self.assertRaisesRegex(RuntimeError, 'verification failed'):
+                flow.deploy(fixture.settings, fixture.bundle, fixture, 1)
+            journal = Journal(fixture.settings.state_dir)
+            journal.data['maintenance'].update(stage='engine_restore_services',
+                                               recovery_program={'release_id': 'old'})
+            candidate = journal.record('new')
+            journal.save()
+            fixture.calls.clear()
+            before = fixture.db.read_bytes()
+            result = flow.rollback(fixture.settings, fixture, 1)
+            candidate_start = fixture.calls.index(('systemctl', 'start', candidate['runtime_unit']))
+            host_start = fixture.calls.index(('systemctl', 'start', fixture.old['host_unit']))
+            self.assertLess(candidate_start, host_start)
+            self.assertEqual(fixture.db.read_bytes(), before)
+            self.assertEqual(result['releases']['new']['runtime_program']['release_id'], 'old')
 
     def test_reopened_writes_forbid_program_rollback(self):
         with tempfile.TemporaryDirectory() as directory, prepared(Path(directory)) as (fixture, _):

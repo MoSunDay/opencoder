@@ -66,7 +66,15 @@ def stage_one(settings, bundle, candidate, record, fallback):
     source = Path(source)
     if not source.is_dir():
         source = Path(fallback)
-    home = runtime_data / 'programs' / candidate['release_id']
+    managed = settings.state_dir / 'runtimes' / record['id']
+    program_data = runtime_data
+    if managed.is_dir() and managed.samefile(runtime_data):
+        # Retained registrations can use an older bind-mount alias. Keep the
+        # registration unchanged, but stage through one mount when possible.
+        program_data = managed
+        if source.is_relative_to(runtime_data):
+            source = managed / source.relative_to(runtime_data)
+    home = program_data / 'programs' / candidate['release_id']
     image = units.freeze_rootfs(record, source, bundle / 'bin', target=home / 'rootfs', link_source=True)
     config.setdefault('dag', {})['rootfs_dir'] = str(image)
     config['dag'].setdefault('data_dir', str(runtime_data / 'dag/runs'))

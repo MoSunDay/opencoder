@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
-import { emptyStream, reduceFrame, withUserTurn } from './reduce.js';
+import { emptyStream, reduceFrame } from './reduce.js';
 
 const fold = (state, event, data = {}) => reduceFrame(state, { event, data }, 1000);
 
 it('retry restores the round boundary while preserving completed tools', () => {
-  let state = withUserTurn(emptyStream(), 'fix it');
+  let state = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'fix it' } }, 0);
   state = fold(state, 'tool_start', { id: 'read', name: 'read', input: { path: 'a' } });
   state = fold(state, 'tool_end', { id: 'read', name: 'read', output: 'saved contents', is_error: false });
   const before = state.turns;

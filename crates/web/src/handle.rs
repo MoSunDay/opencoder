@@ -70,7 +70,7 @@ pub struct SessionHandle {
     /// check/write/start TOCTOU window.
     pub lifecycle: Arc<Mutex<()>>,
     /// Count of active SSE `/events` subscribers. Used by the events endpoint
-    /// to evict a handle it created once the last subscriber disconnects (and
+    /// to evict a handle once the last subscriber disconnects (and
     /// no drain is running), so the handle map cannot grow without bound on a
     /// long-running server.
     pub subscribers: AtomicUsize,

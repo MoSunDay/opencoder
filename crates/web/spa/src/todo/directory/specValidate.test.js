@@ -3,7 +3,7 @@
 // {path, message} problems, todo pinning via `todos[id]`, and cycle
 // detection with the iterative DFS (long chains must not blow the stack).
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_AGENTS, findCycle, parseSpecDraft, validateSpec } from './specValidate.js';
+import { findCycle, validateSpec } from './specValidate.js';
 
 const GOOD_TODO = (id, deps, agent) => ({
   id,
@@ -26,19 +26,6 @@ const GOOD = {
   todos: [GOOD_TODO('a'), GOOD_TODO('b', ['a']), GOOD_TODO('c', ['a', 'b'], 'plan')],
   metadata: { owner: 'ops' },
 };
-
-describe('parseSpecDraft', () => {
-  it('解析 JSON 对象草稿', () => {
-    expect(parseSpecDraft(JSON.stringify(GOOD)).spec).toEqual(GOOD);
-  });
-
-  it('空文本 / 坏 JSON / 非对象给出中文错误', () => {
-    expect(parseSpecDraft('')).toEqual({ error: '请输入工作流 JSON' });
-    expect(parseSpecDraft('   ').error).toContain('请输入');
-    expect(parseSpecDraft('{oops').error).toContain('JSON 解析失败');
-    expect(parseSpecDraft('[1,2]').error).toContain('对象');
-  });
-});
 
 describe('validateSpec', () => {
   it('合法完整 spec 返回 []', () => {
@@ -166,7 +153,6 @@ describe('validateSpec', () => {
       { path: 'todos[a]', message: 'TODO a 不能使用 workflow agent' },
     ]);
     expect(validateSpec({ ...GOOD, todos: [GOOD_TODO('a', [], 'ghost-agent')] })).toEqual([]);
-    expect(BUILTIN_AGENTS).toEqual(['act', 'plan', 'command']);
   });
 
   it('无法定位 id（空白/缺失）的 todo 问题挂 workflow', () => {

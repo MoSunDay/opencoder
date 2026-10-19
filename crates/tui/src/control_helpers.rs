@@ -3,7 +3,7 @@
 //! paths in `app.rs`.
 
 #[cfg(test)]
-#[path = "control_helpers_tests/mod.rs"]
+#[path = "control_helpers_tests/forward_skill.rs"]
 mod tests;
 
 /// When skill-token stripping collapses a compound control command (e.g.

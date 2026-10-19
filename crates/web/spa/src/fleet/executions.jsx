@@ -15,14 +15,11 @@ import { pushLocation, replaceLocation } from './navigation/history.js';
 
 export function ExecutionsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]);
-  const { execution: linked } = useLinkedLocation();
-  const [detail, setDetail] = useState(linked);
-  const [filter, setFilter] = useState(() => KINDS.some(({ value }) => value === linked?.kind) ? linked.kind : '');
+  const { execution: detail } = useLinkedLocation();
+  const [filter, setFilter] = useState(() => KINDS.some(({ value }) => value === detail?.kind) ? detail.kind : '');
   useEffect(() => {
-    if (!linked) return;
-    setDetail(linked);
-    if (KINDS.some(({ value }) => value === linked.kind)) setFilter(linked.kind);
-  }, [linked]);
+    if (KINDS.some(({ value }) => value === detail?.kind)) setFilter(detail.kind);
+  }, [detail]);
   /// 首屏、筛选和手动刷新遮罩表格；3s poll 静默，免得表格每 3 秒闪一次 spinner。
   const [loading, setLoading] = useState(true);
   const load = useCallback(async (mode = 'reset') => {
@@ -45,19 +42,14 @@ export function ExecutionsPanel({ onNotice }) {
   return <PageShell page="topics">
     <Space style={{ margin: '12px 0' }}><Select aria-label="执行类型筛选" style={{ width: 180 }} value={filter} onChange={setFilter} options={[{ value: '', label: '全部执行' }, ...KINDS]} /><Button onClick={() => load('reset')}>刷新</Button></Space>
     <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={tableRows(loading, rows)} size="small" loading={tableLoading(loading)} columns={[
-      { title: 'ID', dataIndex: 'id', render: (id, row) => <Button type="link" style={{ fontFamily: MONO_VAR }} onClick={() => {
-        setDetail(row);
-        pushLocation(executionHref(id));
-      }}>{id}</Button> },
+      { title: 'ID', dataIndex: 'id', render: (id) => <Button type="link" style={{ fontFamily: MONO_VAR }} onClick={() => pushLocation(executionHref(id))}>{id}</Button> },
       { title: '类型', dataIndex: 'kind', render: (v) => KIND_LABELS[v] || v },
       { title: '名称', dataIndex: 'name', render: (v) => v || '-' },
       { title: '创建时间', dataIndex: 'created_at', render: (v) => <TimeText ts={v} /> },
       { title: '所属节点', dataIndex: 'node_id', render: (id) => <Space size={4}><span style={{ fontFamily: MONO_VAR }}>{id}</span><StatusTag status={nodes.find((node) => node.id === id)?.online ? 'online' : 'offline'} /></Space> },
       { title: '状态', dataIndex: 'status', render: (v) => <StatusTag status={v} /> },
     ]} />
-    {detail && <ExecutionDetail id={detail.id} summary={detail} onClose={() => {
-      setDetail(null);
-      replaceLocation(withoutExecutionLink(window.location.href));
-    }} onNotice={onNotice} />}
+    {detail && <ExecutionDetail id={detail.id} summary={rows.find((row) => row.id === detail.id) || detail}
+      onClose={() => replaceLocation(withoutExecutionLink(window.location.href))} onNotice={onNotice} />}
   </PageShell>;
 }

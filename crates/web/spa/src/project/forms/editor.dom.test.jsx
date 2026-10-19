@@ -96,3 +96,44 @@ it('keeps read-only fields and both footer actions disabled', async () => {
   fireEvent.click(screen.getByRole('tab', { name: '任务', exact: true }));
   expect(screen.queryByRole('button', { name: '发表评论' })).toBeNull();
 });
+
+it('searches initiative labels and saves or clears the selected ID through the TODO form', async () => {
+  const groups = { ...overview, standalone_initiatives: [
+    { id: 'i1', title: '第一子项', todos: [] }, { id: 'i2', title: '第二子项', todos: [] },
+  ] };
+  render(<TodoDrawer {...props()} overview={groups} />);
+  fireEvent.click(screen.getByRole('tab', { name: '设置', exact: true }));
+  const select = screen.getByLabelText('所属子项');
+  fireEvent.change(select, { target: { value: '第二' } });
+  fireEvent.mouseDown(select);
+  fireEvent.click(await screen.findByText('第二子项 · 独立子项', { selector: '.ant-select-item-option-content' }));
+  expect(apiPatch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
+  await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/api/project/todos/t', expect.objectContaining({ initiative_id: 'i2' })));
+  await waitFor(() => expect(select.disabled).toBe(false));
+  fireEvent.click(select.closest('.ant-select').querySelector('.ant-select-clear'));
+  fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
+  await waitFor(() => expect(apiPatch).toHaveBeenLastCalledWith('/api/project/todos/t', expect.objectContaining({ initiative_id: null })));
+});
+
+it('isolates a pending association save when switching TODO records', async () => {
+  let rejectOld;
+  apiPatch.mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }));
+  const groups = { ...overview, backlog: [todo, { ...todo, id: 'new', title: '另一任务' }],
+    standalone_initiatives: [{ id: 'i1', title: '目标子项', todos: [] }] };
+  const p = { ...props(), overview: groups };
+  const view = render(<TodoDrawer {...p} />);
+  fireEvent.click(screen.getByRole('tab', { name: '设置', exact: true }));
+  fireEvent.mouseDown(screen.getByLabelText('所属子项'));
+  fireEvent.click(await screen.findByText('目标子项 · 独立子项', { selector: '.ant-select-item-option-content' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
+  await waitFor(() => expect(screen.getByLabelText('所属子项').disabled).toBe(true));
+  view.rerender(<TodoDrawer {...p} todoId="new" />);
+  fireEvent.click(screen.getByRole('tab', { name: '设置', exact: true }));
+  expect(screen.getByLabelText('所属子项').disabled).toBe(false);
+  await act(async () => rejectOld(new Error('旧请求失败')));
+  expect(screen.queryByText('旧请求失败')).toBeNull();
+  expect(screen.getByLabelText('TODO 标题').value).toBe('另一任务');
+  fireEvent.click(screen.getByRole('button', { name: '保存 TODO' }));
+  await waitFor(() => expect(apiPatch).toHaveBeenLastCalledWith('/api/project/todos/new', expect.objectContaining({ initiative_id: null })));
+});

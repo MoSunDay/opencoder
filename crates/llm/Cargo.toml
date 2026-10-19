@@ -7,9 +7,7 @@ license.workspace = true
 [dependencies]
 opencoder-core.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 futures.workspace = true
-async-trait.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

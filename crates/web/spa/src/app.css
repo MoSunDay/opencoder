@@ -3,11 +3,8 @@
    defaults, the shell surfaces and the DAG node visuals. Emitted as
    dist/static/app.css by the Vite build contract. */
 
-/* Fleet palette — the CSS twin of src/theme.js (antd ThemeConfig). The two
-   halves cannot read each other (cssinjs vs raw CSS, and antd pins its own
-   css vars to a .css-var-* class instead of :root), so they are kept in
-   lockstep by hand: change a color here AND in theme.js, or neither.
-   theme.test.js fails the build when the two drift apart. */
+/* Shared colors match the antd tokens in theme.js; theme.test.js checks
+   these declarations directly. CSS-only accents are defined here. */
 :root {
   --oc-primary: #1677ff;
   --oc-primary-rgb: 22, 119, 255;
@@ -31,8 +28,7 @@
   --oc-error: #ff4d4f;
   --oc-error-bg: #fff2f0;
   /* Transcript role accents, the DAG binary-node icon accent + markdown heading
-     green. The -rgb twins feed rgba() washes (RoleAvatar); see theme.js
-     cssVars for why. */
+     green. The -rgb twins feed rgba() washes (RoleAvatar). */
   --oc-accent-user: #13c2c2;
   --oc-accent-user-rgb: 19, 194, 194;
   --oc-accent-ai: #9254de;

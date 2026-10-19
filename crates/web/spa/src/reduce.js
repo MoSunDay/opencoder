@@ -292,8 +292,8 @@ function withTurns(state, turns) {
 
 // Terminal/boundary settle: freeze the ladder's progress AND retire every
 // Say-row running hint (sayStreaming) so no run outlives the sub-turn —
-// done, error, interrupted, transcript_reset, a user echo (queue/steer/
-// withUserTurn) all end the currently-streaming Say for good.
+// done, error, interrupted, transcript_reset and queue/steer user echoes
+// all end the currently-streaming Say for good.
 function settleTerminal(turns) {
   return clearSayStreaming(settleTurnProgress(turns));
 }
@@ -650,28 +650,6 @@ export function consumedEchoText(prompt) {
     return text;
   }
   return trimmed.slice(head.length).trim();
-}
-
-/// User prompt echo for flows where the server emits no echo frame (remote
-/// dispatch has no queue_consumed — the task session is synthetic). Feed it
-/// through consumedEchoText so the optimistic bubble matches what the server
-/// would have recorded — never the command token itself. `optimistic` marks
-/// the turn as a LOCAL prediction: a later steer/queue_consumed frame with
-/// the SAME text folds into it (dedup below) instead of rendering twice.
-export function withUserTurn(state, text, optimistic) {
-  if (!text) {
-    return state;
-  }
-  // Also remember the echo as pendingEcho: a mid-run transcript_reset rebuild
-  // must re-push this boundary if the store snapshot lacks it.
-  const echoTurn = { kind: 'text', role: 'user', text };
-  if (optimistic) {
-    echoTurn.optimistic = true;
-  }
-  return withTurns(
-    { ...state, pendingEcho: text },
-    closeOpenText(flushPendingThink(settleTerminal(state.turns))).concat([echoTurn]),
-  );
 }
 
 /// Mirror of the TUI's rebuild_after_reset echo re-push

@@ -1,10 +1,6 @@
-// todoRunsPanel.jsx — TODO 工作流「运行」视图：左侧工作流列表（GET
-// /api/todo/workflows?limit=50，3s 轮询——仅当仍有 running 时），点击行右侧
-// 展开 items 表 + SSE 事件流（openStream 订阅 /events，事件名 = kind）。
-// 流在 workflow_completed/workflow_failed 后服务器即关流，这里主动 abort，
-// 避免 sse.js 把「干净关闭」当作断线去空重连。
+// TODO 工作流列表、节点执行详情与任务工作台。
 
-import { Button, Card, Col, Drawer, Empty, Input, Row, Space, Table, Tooltip, Typography } from 'antd';
+import { Button, Card, Col, Drawer, Input, Row, Space, Table, Tooltip } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from './api.js';
 import { ExecutionDetail } from './fleet/detail.jsx';
@@ -15,44 +11,10 @@ import { tableLoading, tableRows } from './ui/tableLoading.js';
 import { err } from './notice.js';
 import { TodoWorkbench } from './todo/review/workbench.jsx';
 
-const { Text } = Typography;
-
 const POLL_MS = 3000;
-/// SSE 终帧事件名（服务器随后关流）。
-export const TERMINAL_KINDS = ['workflow_completed', 'workflow_failed'];
-
 /// 工作流行上的节点执行状态 Tag（可能缺省 → 不渲染）。
 function ExecutionStatusTag({ status }) {
   return status ? <StatusTag status={status} /> : null;
-}
-
-export function workflowActions(workflowStatus, executionStatus) {
-  const closed = ['done', 'cancelled'].includes(executionStatus)
-    || ['completed', 'failed'].includes(workflowStatus);
-  return {
-    interrupt: executionStatus
-      ? ['pending', 'running', 'idle'].includes(executionStatus)
-      : ['pending', 'running'].includes(workflowStatus),
-    resume: executionStatus
-      ? ['interrupted', 'error'].includes(executionStatus)
-      : workflowStatus === 'suspended',
-    cancel: !closed,
-  };
-}
-
-/// 事件 payload 摘要：todo_id / status 优先，够定位即可。
-export function summarizePayload(data) {
-  if (!data || typeof data !== 'object') {
-    return '';
-  }
-  const parts = [];
-  if (data.todo_id !== undefined) {
-    parts.push('todo ' + data.todo_id);
-  }
-  if (data.status !== undefined) {
-    parts.push(String(data.status));
-  }
-  return parts.join(' · ');
 }
 
 function WorkflowDetail({workflowId,summary,onNotice,onMutated}) {

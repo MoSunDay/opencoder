@@ -17,7 +17,7 @@ Commit: ca56953542ab475a67975dc6e06bf7cfa0db1fbd
 
 生产验收（同包 `21d21a6bf3274d74d7d764b6f0b86d001c07bc03`）：
 
-- 79.43 与 71.70 已由 Server 信号发布；保留原 Runtime、任务、NFS 与各节点授权。
+- 两个部署节点 已由 Server 信号发布；保留原 Runtime、任务、NFS 与各节点授权。
 - `dag-codex-runc-9f-tools-20261014` 在生产 runc 中完成真实 Codext 工具回合，平台 session/input 与账号回执一致，thread 持久化；声明的外部连接及其确切 token 文件只读可打开，没有读取或输出凭据值。完成后账号占用释放、容器状态清空。
 - `dag-codex-runc-9f-cancel-20261014` 取消后 8 个容器进程与宿主 broker 均退出，账号回执 released、退出码 143。公共取消曾返回 Runtime 504，随后同一执行 ID 重放取得 cancelled；首个接口失败记录保留，不能表述为取消接口全程通过。另一个零模型 native 长步骤的同一控制链复验在 3.72 秒取得 cancelling，4.72 秒清理完成；未修改已有任务。
 - 71 完整发布验收 PASS，117 个原生观察探针覆盖 900 秒，真实 TODO 依赖链和 SSE 恢复通过。两节点公网首页、health、ready 另有连续 900 秒、各入口 2396 次零失败记录；此前 79 同一轮三次 4 秒超时保留。

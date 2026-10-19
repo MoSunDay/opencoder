@@ -18,7 +18,6 @@ vi.mock('../execute/catalog.js', () => ({
   useCapabilities: () => ({ capabilities: [{ id: 'agent', kind: 'agent', target: 'Agent', definition: {} }, { id: 'operator', kind: 'operator', target: 'Operator', definition: {} }], loading: false, error: '' }),
   capabilityOptions: (caps) => caps.map((cap) => ({ value: cap.id, label: cap.target })),
 }));
-vi.mock('../execute/result.jsx', () => ({ ExecutionResult: () => null }));
 import { TodoDrawer } from '../todoDrawer.jsx';
 
 const overview = { goals: [], standalone_initiatives: [], tags: [],

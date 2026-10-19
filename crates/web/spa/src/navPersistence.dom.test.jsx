@@ -76,7 +76,7 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/');
   localStorage.clear();
   clearCredentials();
-  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init' });
+  setState({ page: 'nodes', nodes: [], conn: 'init' });
   installFetchRouter();
   vi.spyOn(console, 'error').mockImplementation(record('error'));
   vi.spyOn(console, 'warn').mockImplementation(record('warn'));

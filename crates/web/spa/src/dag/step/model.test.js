@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STEP_KIND_LABEL, finishedOf, isAgentKind, outputRows } from './model.js';
+import { STEP_KIND_LABEL, isAgentKind, outputRows } from './model.js';
 
 // Flat node-side binary capture frame.
 const out = (seq, stream, text) => ({ seq, event: 'step_output', data: { step: 'build', stream, text, at_ms: seq } });
@@ -39,16 +39,6 @@ describe('dag step projections', () => {
     expect(outputRows(frames, 'hello').map((r) => r.text)).toEqual(['Hello World']);
     expect(outputRows(frames, 'oom').map((r) => r.stream)).toEqual(['stderr']);
     expect(outputRows(frames, 'missing')).toEqual([]);
-  });
-  it('reports the last terminal receipt from finishedOf', () => {
-    expect(finishedOf([])).toBeNull();
-    expect(finishedOf([out(1, 'stdout', 'x')])).toBeNull();
-    const done = { status: 'done', error: null, started_at_ms: 1, finished_at_ms: 2 };
-    const frames = [
-      { seq: 2, event: 'step_finished', data: { status: 'running' } },
-      { seq: 3, event: 'step_finished', data: done },
-    ];
-    expect(finishedOf(frames)).toBe(done);
   });
   it('labels step kinds and detects agent steps', () => {
     expect(STEP_KIND_LABEL).toEqual({ binary: 'Binary 步骤', agent: 'Agent 步骤', dynamic: '动态步骤' });

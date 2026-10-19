@@ -24,7 +24,6 @@ async-trait.workspace = true
 tracing.workspace = true
 crossterm = "0.28"
 unicode-width = "0.2"
-ignore = "0.4"
 dirs = "5"
 
 [target.'cfg(unix)'.dependencies]

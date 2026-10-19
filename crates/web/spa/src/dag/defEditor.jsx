@@ -28,16 +28,6 @@ const EXAMPLE = `{
 
 const EXAMPLE_SPEC = JSON.parse(EXAMPLE);
 
-/// Pretty-print a def's spec for the textarea (stable key order via the
-/// server's wire shape; extra fields round-trip untouched).
-function specToText(def) {
-  const spec = def && def.spec ? def.spec : null;
-  if (!spec) {
-    return EXAMPLE;
-  }
-  return JSON.stringify(spec, null, 2);
-}
-
 /// DefEditor — controlled drawer, two edit modes: 画布 (visual canvas,
 /// default) and JSON (textarea power mode). The canvas maintains a spec
 /// draft (object) in this component; the JSON mode edits text that parses

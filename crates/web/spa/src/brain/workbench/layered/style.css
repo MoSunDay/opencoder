@@ -2,7 +2,7 @@
    sync with LAYER_NODE_W / LAYER_NODE_H in model.js: the layout is computed,
    not measured, so the CSS must not grow the box). */
 .brain-layer-canvas { height: 560px; }
-.brain-layer-barrier { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; border: 1px solid #dce5ef; border-radius: 12px; background: var(--oc-surface, #fafcff); }
+.brain-layer-barrier { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; border: 1px solid #dce5ef; border-radius: 12px; background: #fafcff; }
 .brain-layer-objective { margin-bottom: 0; color: #577087; }
 .brain-layer-node { box-sizing: border-box; width: 216px; height: 156px; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid #cbd7e4; border-left: 4px solid #9aacbc; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px #20374d0a; color: #1b2d40; overflow: hidden; }
 .brain-layer-node > :not(.react-flow__handle) { flex-shrink: 0; }

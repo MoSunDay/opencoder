@@ -36,7 +36,7 @@ const send = async (container, prompt) => {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  setState({ preselectNode: null, nodes: [] });
+  setState({ nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes };
     if (path.startsWith('/api/nodes/n1/dialogs')) return { dialogs };

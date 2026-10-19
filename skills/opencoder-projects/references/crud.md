@@ -1,16 +1,14 @@
 # 增删改查与字段
 
-以下示例已连接到 10.199.79.43，关闭鉴权时可用：
-
-已安装的环境可将示例中的 `opencoder-cli --no-auth` 换成 `opencoder-79`，不必每次设置服务器和代理参数。直接使用原生 CLI 访问内网若返回 502，将 `10.199.79.43` 加入该命令的 `NO_PROXY`；不要因此修改服务器鉴权或 Token。
+以下示例适用于鉴权已关闭的 Server。请将占位地址替换为目标地址；代理设置按当前连接环境配置。
 
 ```sh
-export OPENCODER_SERVER_URL=http://10.199.79.43:18081
+export OPENCODER_SERVER_URL=https://opencoder.example
 opencoder-cli --no-auth project overview
 opencoder-cli --no-auth project people
 ```
 
-为避免每次加 `--no-auth`，连接文件可保存 `{"server":"http://10.199.79.43:18081","auth_enabled":false}`，用 `--client-config PATH` 指定。命令行 Token 参数可以覆盖文件中的免鉴权设置；`--no-auth` 与显式 Token 参数互斥。
+为避免每次加 `--no-auth`，连接文件可保存 `{"server":"https://opencoder.example","auth_enabled":false}`，用 `--client-config PATH` 指定。命令行 Token 参数可以覆盖文件中的免鉴权设置；`--no-auth` 与显式 Token 参数互斥。
 
 ## 三层对象
 
@@ -77,13 +75,13 @@ opencoder-cli --no-auth project goals summary-restore PROJECT_ID VERSION
 ## TODO 执行上下文
 
 ```sh
-opencoder-79 project todos links TODO_ID
-opencoder-79 project todos context TODO_ID
-opencoder-79 project todos context TODO_ID --execution EXECUTION_ID
-opencoder-79 exec get EXECUTION_ID
-opencoder-79 project todos result TODO_ID --execution EXECUTION_ID
-opencoder-79 project todos messages TODO_ID --execution EXECUTION_ID
-opencoder-79 project todos messages TODO_ID --execution EXECUTION_ID --seq 7 --offset 1024
+opencoder-cli --no-auth project todos links TODO_ID
+opencoder-cli --no-auth project todos context TODO_ID
+opencoder-cli --no-auth project todos context TODO_ID --execution EXECUTION_ID
+opencoder-cli --no-auth exec get EXECUTION_ID
+opencoder-cli --no-auth project todos result TODO_ID --execution EXECUTION_ID
+opencoder-cli --no-auth project todos messages TODO_ID --execution EXECUTION_ID
+opencoder-cli --no-auth project todos messages TODO_ID --execution EXECUTION_ID --seq 7 --offset 1024
 ```
 
 `context` 默认读取全部关联，不依赖当前是否选择能力；返回 `record`（任务和全部评论）、`assignments`、`current_execution_id`、`executions`、`complete`、`issues`。每次执行包含原生 `detail`、`conclusion`、`events` 和 `full_fields`；Agent/Operator 还包含原 Session 与重组后的 `messages`，Team、TODO 工作流包含讨论轮次或工作项。`kind` 优先采用 Server 原生详情中的实际类型，不能从 ID 前缀或过期的关联提示猜测。长消息和省略字段自动翻页，数据较多时建议指定 `--execution` 并将 stdout 保存到文件。它只读取，不继续执行或修改看板。

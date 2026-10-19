@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import '../../test/setup-dom.js';
 const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiDel: vi.fn() }));
 vi.mock('../../api.js', () => api);
 vi.mock('../../fleet/detail.jsx', () => ({ ExecutionView: () => null }));
 import { ProjectPanel } from '../project.jsx';
-import { RelationSelect } from './relationSelect.jsx';
 import { flattenTodos, flattenInitiatives, groupOptions, initiativeOptions } from '../model/relations.js';
 
 const snapshot = { goals: [], standalone_initiatives: [{ id: 'm1', goal_id: null, title: '独立子项', todos: [
@@ -39,38 +38,3 @@ it('creates a standalone initiative without any project and navigates its TODO l
   await screen.findByText('子项任务', { exact: true });
   expect(screen.queryByText('独立任务', { exact: true })).toBeNull();
 }, 60000);
-
-it('searches associations by label or ID, sends a single ID and clears explicitly', async () => {
-  const props = { path: '/api/project/todos/t', field: 'initiative_id', value: null,
-    options: [{ value: 'm1', label: '同名子项 · 项目 A · m1' }, { value: 'm2', label: '同名子项 · 独立 · m2' }], refresh: vi.fn(), onNotice: vi.fn(), label: '选择子项' };
-  const view = render(<RelationSelect {...props} />);
-  const select = screen.getByRole('combobox', { name: '选择子项' });
-  fireEvent.change(select, { target: { value: 'm2' } });
-  fireEvent.mouseDown(select);
-  fireEvent.click(await screen.findByText('同名子项 · 独立 · m2', { selector: '.ant-select-item-option-content' }));
-  await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith(props.path, { initiative_id: 'm2' }));
-  view.rerender(<RelationSelect {...props} value="m2" />);
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '选择子项' }).disabled).toBe(false));
-  fireEvent.click(document.querySelector('.ant-select-clear'));
-  await waitFor(() => expect(api.apiPatch).toHaveBeenCalledWith(props.path, { initiative_id: null }));
-});
-
-it('isolates pending association and late save failure when the record changes', async () => {
-  let rejectOld;
-  api.apiPatch.mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }));
-  const props = { path: '/api/project/todos/old', field: 'initiative_id', value: 'm1',
-    options: [{ value: 'm1', label: 'First' }, { value: 'm2', label: 'Second' }],
-    refresh: vi.fn(), onNotice: vi.fn(), label: '选择子项' };
-  const view = render(<RelationSelect {...props} />);
-  fireEvent.mouseDown(screen.getByRole('combobox'));
-  fireEvent.click(await screen.findByText('Second', { selector: '.ant-select-item-option-content' }));
-  await waitFor(() => expect(screen.getByRole('combobox').disabled).toBe(true));
-  view.rerender(<RelationSelect {...props} path="/api/project/todos/new" />);
-  expect(screen.getByRole('combobox').disabled).toBe(false);
-  expect(screen.getByText('First')).toBeTruthy();
-  await act(async () => rejectOld(new Error('old save failed')));
-  expect(screen.getByRole('combobox').disabled).toBe(false);
-  expect(screen.getByText('First')).toBeTruthy();
-  fireEvent.click(document.querySelector('.ant-select-clear'));
-  await waitFor(() => expect(api.apiPatch).toHaveBeenLastCalledWith('/api/project/todos/new', { initiative_id: null }));
-});

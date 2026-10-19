@@ -12,10 +12,10 @@ Commit: (working-tree, skill self-contained 收敛)
 - `review/SKILL.md`：锚点句 `不调用 \`question\` 工具提问` → `不向用户提问`（与契约测试 guidance 换词对齐），其余零改动。
 - `do-and-done/SKILL.md`：description 去掉 `produced by task-plan`（改 `produced by the planning phase`）；正文 3 处 `task-plan` → 规划阶段/闭环计划；暂停协议 `question` 工具表述改为「可向用户提问（交互式 TUI 澄清通道）」；整节删除「## 与 task-plan 的衔接」（编排职责归 caller/system prompt）。
 - `say-and-replay/SKILL.md`：只读边界与原则中的 4 个 skill 名改为角色词（实现循环/规划/提交流程/任务回顾）；STATUS 块数据源表述去 `task-plan`；整节删除「## 与其它 skill 的衔接」（5 条）。
-- `submit/SKILL.md`：角色/前置 gate/changelog 生成/不可逆暂停协议各节保留，其中 `review`→评审、`do-and-done`→实现循环、`repo-local-memory`→记忆维护规范 换词；衔接节改写不删（`task-plan`→闭环计划），锚点 `逐项逻辑核查与影响面汇总`、`go-live ready`、`rules/02`、`迭代回归` 原样保留（锚点在节内）。
+- `submit/SKILL.md`：角色/前置 gate/changelog 生成/不可逆暂停协议各节保留，相关技能引用改为「评审」「实现循环」「记忆维护规范」；衔接节改写不删（`task-plan`→闭环计划），锚点 `逐项逻辑核查与影响面汇总`、`go-live ready`、`rules/02`、`迭代回归` 原样保留（锚点在节内）。
 - `summary/SKILL.md`：5 处 skill 名改角色词，衔接节 3 条改写为不点名职责描述。
-- `repo-local-memory/SKILL.md`：`- a PR summary` → `- a PR recap`（子串级契约误伤修正）。
-- `repo-local-dreaming/SKILL.md`：4 处 `repo-local-memory`/`summary`/`submit` 改为「迭代内记忆维护/任务级回顾/提交流程」。
+- 内置记忆维护说明：`- a PR summary` → `- a PR recap`（子串级契约误伤修正）。
+- `repo-local-dreaming/SKILL.md`：4 处跨 skill 引用改为「迭代内记忆维护/任务级回顾/提交流程」。
 - 未动：`task-plan/SKILL.md`（question 唯一文档面）、`task-plan/references/launch-closure-plan-checklist.md`、`ssh-pty`、`chrome-headless`（本就零交叉指涉）。
 
 ## Validation（当次实跑）

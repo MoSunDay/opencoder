@@ -5,8 +5,7 @@ Commit: (working-tree, pre-initial-commit)
 ## 背景
 
 `Skill` 结构体已有 `source: PathBuf` 字段（保存 skill 文件的完整路径），但激活 skill
-时只取 `body` 文本注入 system prompt，路径信息被完全丢弃。导致例如 `repo-local-memory`
-的 body 引用 `[EXAMPLES.md](./EXAMPLES.md)`，注入后 `./` 相对于 agent CWD，agent 无法定位
+时只取 `body` 文本注入 system prompt，路径信息被完全丢弃。当正文引用 `[EXAMPLES.md](./EXAMPLES.md)`，注入后 `./` 相对于 agent CWD，agent 无法定位
 这些同目录文件。
 
 本次变更：激活 skill 时，将源文件完整路径以 `> Source: <path>` 块引用注记前缀至 body，

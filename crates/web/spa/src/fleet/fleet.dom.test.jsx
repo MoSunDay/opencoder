@@ -10,7 +10,7 @@ import { FleetTeamsPanel } from './teams.jsx';
 import { rosterRowsOf } from './teams/model.js';
 import { PayloadWindows, detailMarkers } from './detail/fields.jsx';
 import { WorkloadDetail } from './detail/workloads.jsx';
-import { CREATABLE_KINDS, KINDS, LARGE_MESSAGE_BYTES, appendMessagePage, executionActions, executionPagePath, newId, nodeOptions, textOf } from './model.js';
+import { CREATABLE_KINDS, KINDS, LARGE_MESSAGE_BYTES, appendMessagePage, canUseNode, executionActions, executionPagePath, explicitNodeOptions, newId, nodeOptions } from './model.js';
 import { apiDel, apiGet, apiPost } from '../api.js';
 vi.mock('../api.js', () => ({ apiDel: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn() }));
 vi.mock('./detail.jsx', async (importOriginal) => ({
@@ -81,10 +81,31 @@ describe('fleet execution boundaries', () => {
     expect(KINDS.some((kind) => kind.value === 'maintenance')).toBe(true); // 节点维护产生的真实 kind，可筛选
     expect(CREATABLE_KINDS.some((kind) => kind.value === 'maintenance')).toBe(false); // 但不可手动启动
   });
-  it('rejects offline node options and reads persisted message blocks', () => {
+  it('rejects offline node options and creates typed execution IDs', () => {
     expect(nodeOptions([{ ...node, online: false }], 'agent')[1].disabled).toBe(true);
-    expect(textOf({ blocks: [{ kind: 'text', text: 'node answer' }] })).toBe('node answer');
     expect(newId('agent')).toMatch(/^agent-/);
+  });
+  it.each([
+    ['ready', {}, true],
+    ['offline', { online: false }, false],
+    ['unready', { snapshot: { ready: false } }, false],
+    ['no snapshot', { snapshot: undefined }, false],
+    ['unsupported kind', { kinds: ['dag'] }, false],
+    ['no kinds', { kinds: undefined }, false],
+  ])('checks node eligibility and disables options when %s', (_, overrides, allowed) => {
+    const nodes = [{ ...node, ...overrides }];
+    expect(canUseNode(nodes, node.id, 'agent')).toBe(allowed);
+    expect(nodeOptions(nodes, 'agent')[1].disabled).toBe(!allowed);
+    expect(explicitNodeOptions(nodes, 'agent')).toEqual([
+      { value: node.id, label: node.name, disabled: !allowed },
+    ]);
+  });
+  it('requires a known node ID and makes the kind filter optional', () => {
+    expect(canUseNode(undefined, node.id)).toBe(false);
+    expect(canUseNode([node], '')).toBe(false);
+    expect(canUseNode([node], 'missing')).toBe(false);
+    expect(canUseNode([{ ...node, kinds: undefined }], node.id)).toBe(true);
+    expect(canUseNode([{ ...node, kinds: undefined }], node.id, '')).toBe(true);
   });
   it('maps lifecycle actions without offering resume after terminal cancel', () => {
     expect(executionActions({ kind: 'agent', status: 'idle' })).toEqual({ interrupt: true, cancel: true, resume: false });

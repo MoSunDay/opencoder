@@ -12,6 +12,7 @@ import { useMessage } from '../ui/appMessage.js';
 import { MONO_VAR } from '../ui/mono.js';
 import { CanvasEditor } from './editor/canvasEditor.jsx';
 import { parseSpecDraft, problemsFromApiError, validateSpec } from './specValidate.js';
+import { CatalogConflict } from './catalog/conflict.jsx';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -42,6 +43,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
   const [draft, setDraft] = useState(EXAMPLE_SPEC);
   const [text, setText] = useState(EXAMPLE);
   const [problems, setProblems] = useState([]);
+  const [conflict, setConflict] = useState(null);
   const [positions, setPositions] = useState({});
   const [canvasKey, setCanvasKey] = useState(0);
 
@@ -56,6 +58,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
     setText(JSON.stringify(base, null, 2));
     setMode('canvas');
     setProblems([]);
+    setConflict(null);
     setPositions({});
     setCanvasKey((k) => k + 1);
   }, [open, recordId]);
@@ -99,6 +102,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
   };
 
   const submit = async () => {
+    setConflict(null);
     let specForSave;
     if (mode === 'json') {
       const parsed = parseSpecDraft(text);
@@ -119,6 +123,7 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
       await onSave(specForSave);
       setProblems([]); // parent closes the drawer on success
     } catch (e) {
+      setConflict(e.body?.details?.url ? e : null);
       setProblems(problemsFromApiError(e));
     }
   };
@@ -179,7 +184,8 @@ export function DefEditor({ open, def, saving, onClose, onSave }) {
             </Form.Item>
           </Form>
         )}
-        {problems.length ? (
+        <CatalogConflict error={conflict} />
+        {problems.length && !conflict ? (
           <Alert
             type="error"
             title="spec 校验未通过"

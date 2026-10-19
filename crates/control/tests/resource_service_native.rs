@@ -178,6 +178,13 @@ async fn resource_service_publishes_native_versions_to_its_exported_pool() {
         .unwrap();
     assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
     let server = opencoder_control::build_app(server, Some(token.into()), false);
+    let duplicate = call(&server,"POST","/api/dag/binaries",json!({
+        "name":"duplicate","description":"native","binary_b64":base64::engine::general_purpose::STANDARD.encode(&bytes)
+    }),Some(token)).await;
+    assert_eq!(duplicate.0, StatusCode::CONFLICT);
+    assert!(!pool.join("duplicate").exists());
+    let mut bytes = bytes;
+    bytes.push(1);
     let uploaded = call(
         &server,
         "POST",

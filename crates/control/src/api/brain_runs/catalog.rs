@@ -11,6 +11,8 @@ use opencoder_core::fleet::RpcReply;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+#[path = "catalog/dedup.rs"]
+mod dedup;
 mod selection;
 use selection::{Entry, Origin};
 
@@ -20,10 +22,10 @@ pub struct Library {
 }
 
 pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
-    Ok(load(state).await?.capabilities)
+    Ok(raw_load(state).await?.capabilities)
 }
 
-pub async fn load(state: &Arc<AppState>) -> anyhow::Result<Library> {
+async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
     let builtins = vec![
         json!({
             "id":"builtin-agent-act",
@@ -160,12 +162,46 @@ pub async fn load(state: &Arc<AppState>) -> anyhow::Result<Library> {
             capability["evidence"] = meta["evidence"].clone();
         }
     }
-    let selection_ids = selection::ids(&capabilities);
     Ok(Library {
+        selection_ids: selection::ids(&capabilities),
         capabilities: capabilities.into_iter().map(|entry| entry.value).collect(),
+    })
+}
+
+pub async fn load(state: &Arc<AppState>) -> anyhow::Result<Library> {
+    let Library {
+        mut capabilities,
+        selection_ids: initial_ids,
+    } = raw_load(state).await?;
+    let config = opencoder_core::Config::load(&state.workdir)?;
+    let selected = opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir, || {
+        dedup::prepare(&mut capabilities);
+        dedup::collapse(capabilities.clone())
+    });
+    let selection_ids = selected
+        .iter()
+        .filter_map(|value| {
+            value["id"]
+                .as_str()
+                .filter(|id| initial_ids.iter().any(|initial| initial == id))
+                .map(str::to_owned)
+        })
+        .collect();
+    for value in &mut capabilities {
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("_catalog_agent_identity");
+        if let Some(selected) = selected.iter().find(|v| v["id"] == value["id"]) {
+            *value = selected.clone();
+        }
+    }
+    Ok(Library {
+        capabilities,
         selection_ids,
     })
 }
+
 async fn registered_definition(state: &Arc<AppState>, target: &Value) -> anyhow::Result<Value> {
     let target: opencoder_core::fleet::CapabilityTarget = serde_json::from_value(target.clone())?;
     let request = opencoder_core::fleet::CreateExecution {

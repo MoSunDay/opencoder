@@ -1,7 +1,23 @@
+.brain-capability-type {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-inline-end: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .brain-capability-summary {
   display: block;
   max-width: 32rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .brain-capability-table .ant-table-cell-fix-end { position: static !important; }
+  .brain-capability-table .ant-table-cell-fix-end::after { display: none; }
 }

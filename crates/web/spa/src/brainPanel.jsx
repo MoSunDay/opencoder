@@ -46,7 +46,8 @@ export function BrainPanel({ onNotice }) {
   };
   const edit = (entry) => setEditor({ entry });
   const columns = [
-    { title: '执行类型', dataIndex: ['capability', 'capability_type'], width: 140, render: (value) => <Tag>{KIND_LABELS[value] || value}</Tag> },
+    { title: '执行类型', dataIndex: ['capability', 'capability_type'], width: 140, ellipsis: true,
+      render: (value) => <Tag className="brain-capability-type" title={KIND_LABELS[value] || value}>{KIND_LABELS[value] || value}</Tag> },
     { title: '一句话描述', dataIndex: ['capability', 'summary'], ellipsis: true,
       render: (summary) => <span className="brain-capability-summary" title={summary}>{summary}</span> },
     ...(hits ? [{ title: '距离', dataIndex: 'distance', width: 90, render: (value) => typeof value === 'number' ? value.toFixed(4) : '—' }] : []),
@@ -69,7 +70,7 @@ export function BrainPanel({ onNotice }) {
       <Space><Button onClick={load} loading={loading}>刷新</Button><EditButton type="primary" onClick={() => setEditor({ entry: null })}>新建能力</EditButton></Space>
     </div>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
-    <Table rowKey={(row) => row.capability.id} size="middle" tableLayout="fixed" columns={columns} dataSource={hits ?? rows}
+    <Table className="brain-capability-table" rowKey={(row) => row.capability.id} size="middle" tableLayout="fixed" columns={columns} dataSource={hits ?? rows}
       loading={loading || searching} scroll={{ x: hits ? 850 : 760 }} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 项` }}
       onRow={(row) => ({ onClick: () => edit(row), style: { cursor: 'pointer' } })}
       locale={{ emptyText: hits !== null ? '没有匹配的能力' : '暂无能力，点击「新建能力」添加' }} />

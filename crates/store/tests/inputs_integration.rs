@@ -37,6 +37,59 @@ async fn make_session(store: &TursoStore, id: &str, now: i64) {
 }
 
 #[tokio::test]
+async fn claim_decode_failure_rolls_back_promotion_before_retry() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+    let input = SessionInput {
+        seq: None,
+        id: "queued".into(),
+        session_id: "s".into(),
+        delivery: Delivery::Queue,
+        prompt: "retained prompt".into(),
+        images: vec!["image".into()],
+        display_text: Some("display".into()),
+        admitted_seq: 0,
+        promoted_seq: None,
+    };
+    let seq = store.admit_input(&input).await.unwrap();
+    let connection = store.conn().await.unwrap();
+    connection
+        .execute(
+            "UPDATE session_inputs SET prompt = x'ff' WHERE seq = ?",
+            [seq],
+        )
+        .await
+        .unwrap();
+    assert!(store.claim_next_queue("s").await.is_err());
+    let mut rows = connection
+        .query(
+            "SELECT promoted_seq, recorded FROM session_inputs WHERE seq = ?",
+            [seq],
+        )
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert_eq!(row.get::<Option<i64>>(0).unwrap(), None);
+    assert_eq!(row.get::<i64>(1).unwrap(), 0);
+    assert!(rows.next().await.unwrap().is_none());
+    drop(rows);
+    connection
+        .execute(
+            "UPDATE session_inputs SET prompt = ? WHERE seq = ?",
+            turso::params![input.prompt.as_str(), seq],
+        )
+        .await
+        .unwrap();
+    let (claimed_seq, claimed) = store.claim_next_queue("s").await.unwrap().unwrap();
+    assert_eq!(claimed_seq, seq);
+    assert_eq!(claimed.prompt, input.prompt);
+    assert_eq!(claimed.images, input.images);
+    assert_eq!(claimed.display_text, input.display_text);
+    assert_eq!(claimed.promoted_seq, Some(seq + 1));
+    assert!(store.claim_next_queue("s").await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn inputs_steer_and_queue_promotion_semantics() {
     let (_dir, store) = fresh().await;
     make_session(&store, "s", 1).await;

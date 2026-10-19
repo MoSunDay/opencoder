@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
     time::Instant,
 };
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, RwLock, RwLockWriteGuard, Semaphore};
 use turso::Connection;
 
 const ACTIVE_OPERATIONS: usize = 4;
@@ -20,6 +20,7 @@ struct Inner {
     admission: Arc<Semaphore>,
     reads: Lane,
     writes: Lane,
+    connections: RwLock<()>,
 }
 
 struct Lane {
@@ -76,7 +77,22 @@ impl Database {
                 admission: Arc::new(Semaphore::new(ACTIVE_OPERATIONS)),
                 reads: Lane::new(4),
                 writes: Lane::new(1),
+                connections: RwLock::new(()),
             });
+            let database = Self(inner.clone());
+            // Turso reconciles shared WAL state when a connection is opened.
+            // Establish the bounded pool before any transaction can be active.
+            for write in [true, false, false, false, false] {
+                let connection = database.new_connection().await?;
+                if !write {
+                    connection.execute("PRAGMA query_only=1", ()).await?;
+                }
+                let lane = if write { &inner.writes } else { &inner.reads };
+                lane.idle
+                    .lock()
+                    .expect("database idle pool poisoned")
+                    .push(connection);
+            }
             if let Some(key) = key {
                 registry.retain(|_, db| db.strong_count() > 0);
                 registry.insert(key, Arc::downgrade(&inner));
@@ -94,7 +110,11 @@ impl Database {
     /// Application operations use read/write so the entire operation owns a lease.
     pub async fn connect(&self) -> Result<Connection> {
         let this = self.clone();
-        runtime::run(false, async move { this.new_connection().await }).await
+        runtime::run(false, async move {
+            let _exclusive = this.0.connections.write().await;
+            this.new_connection().await
+        })
+        .await
     }
 
     async fn new_connection(&self) -> Result<Connection> {
@@ -174,14 +194,18 @@ impl Database {
         let started = Instant::now();
         let queue_us = queued.elapsed().as_micros() as u64;
         let lane = if write { &self.0.writes } else { &self.0.reads };
+        let mut access = self.0.connections.read().await;
         let cached = lane.idle.lock().expect("database idle pool poisoned").pop();
         let conn = match cached {
             Some(conn) => conn,
             None => {
+                drop(access);
+                let exclusive = self.0.connections.write().await;
                 let conn = self.new_connection().await?;
                 if !write {
                     conn.execute("PRAGMA query_only=1", ()).await?;
                 }
+                access = RwLockWriteGuard::downgrade(exclusive);
                 conn
             }
         };
@@ -189,6 +213,8 @@ impl Database {
             conn.execute("BEGIN", ()).await?;
         }
         let result = work(conn.clone()).await;
+        // Keep the shared guard through transaction cleanup, including COMMIT.
+        let _access = access;
         // Turso defers Transaction::drop rollback until the next operation.
         // Flush that rollback before inspecting autocommit or returning a lease.
         if result.is_err() {

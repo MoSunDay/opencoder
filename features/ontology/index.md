@@ -59,3 +59,5 @@ Web 导航提供独立 Ontology 分类：图谱、实体、实体类型、关系
 
 - [Ontology 逻辑](../../agents/ontology/index.md)、[Ontology 前端](../../agents/web/ontology.md)、[Web 导航](../../agents/web/index.md)
 - [控制面](../../agents/control/index.md)、[Server 与备份](../../agents/server/index.md)
+
+实体详情和创建校验按实体读取属性与正文版本，避免逐个实体反复加载整个环境的数据；接口、revision 与存储格式保持兼容。

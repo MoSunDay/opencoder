@@ -54,12 +54,7 @@ impl Store {
         env: i64,
         entity: Uuid,
     ) -> Result<Vec<Value>, AppError> {
-        Ok(self
-            .list::<Value>("structured_values", env)
-            .await?
-            .into_iter()
-            .filter(|item| item["entity_id"] == entity.to_string())
-            .collect())
+        self.entity_values("structured_values", env, entity).await
     }
 
     pub(crate) async fn validate_required_values(

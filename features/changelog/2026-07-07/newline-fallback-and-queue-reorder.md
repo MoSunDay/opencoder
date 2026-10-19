@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 换行 fallback + follow-up 队列面板重排/删除
 
@@ -30,8 +30,8 @@ Commit: (working-tree, pre-initial-commit)
 - `crates/tui/src/app_tests.rs` — 3 个换行测试
 - `crates/tui/src/session_ui.rs` — queue_items 类型 + 测试数据
 - `crates/store/src/store.rs` — trait `swap_input_order`
-- `crates/store/src/libsql_store/inputs.rs` — `swap_input_order` 实现
-- `crates/store/src/libsql_store/mod.rs` — Store impl 接线
+- `crates/store/src/turso_store/conversation/inputs.rs` — `swap_input_order` 实现
+- `crates/store/src/turso_store/mod.rs` — Store impl 接线
 - `crates/store/tests/inputs_integration.rs` — `swap_input_order_changes_drain_order`
 
 ## 测试覆盖

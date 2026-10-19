@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # feat(tui): /task 选择器显示子代理状态徽标 + resume 时重放横幅
 
@@ -13,7 +13,7 @@ Commit: (working-tree, pre-initial-commit)
 
 ## 变更
 
-### store 层（`crates/store/src/types.rs`、`libsql_store/sessions.rs`）
+### store 层（`crates/store/src/types.rs`、`turso_store/conversation/sessions.rs`）
 
 - `SessionListItem` 新增派生计数字段 `pub subagent_running: usize`、
   `pub subagent_cancelled: usize`（均 `#[serde(default)]`，web/CLI 序列化兼容；

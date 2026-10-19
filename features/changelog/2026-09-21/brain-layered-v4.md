@@ -1,4 +1,4 @@
-Commit: 7177f7987d3c3cdc7ed17864a4ffcf347bf4d182
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 大脑分层能力画布（v4）：领域 → 持久化 → 节点 → 控制面 → CLI → Web 的迭代收口
 
@@ -11,7 +11,7 @@ Commit: 7177f7987d3c3cdc7ed17864a4ffcf347bf4d182
 ## 变更摘要
 
 - **领域与线协议**：`crates/brain/src/layered/`（`levels`/`context`/`decide`/`activation`/`terminal`/`validate`/`prompt`，纯函数无 I/O）承载层划分、层上下文与祖先绑定、层决策、层屏障与准入；`crates/core/src/brain/layered/`（`plan`/`run`/`decision`）承载 LOCKED DTO（`LayeredRequest`/`LayeredPlan`/`LayeredRun`/`LayeredOperation`/`LayeredContext`/`LayeredDispatchIntent`/`LayeredTerminalEvent` 等）。`LayeredRun.layer` 是已完成层数，正在决策的层恒为 `run.layer + 1`。
-- **持久化**：新增 `brain_layered_runs` / `brain_layered_operations` / `brain_layered_events`（`crates/store/src/libsql_store/brain_layered/schema.rs`）与 `brain_layered` / `commit_brain_layered` / `brain_layered_events` 三个 trait 方法；投影写入按 generation 栅栏且原子，重试落成独立 operation，终态不可变。
+- **持久化**：新增 `brain_layered_runs` / `brain_layered_operations` / `brain_layered_events`（`crates/store/src/turso_store/execution/brain_layered/schema.rs`）与 `brain_layered` / `commit_brain_layered` / `brain_layered_events` 三个 trait 方法；投影写入按 generation 栅栏且原子，重试落成独立 operation，终态不可变。
 - **节点侧**：`crates/worker/src/brain/v4/`（`state`/`parent`/`output`/`outbox`/`api`/`run`，与 v3 同构）实现 `layered_wake`/`layered_dispatch`/`layered_cancel`/`layered_terminal` 动作面；每 generation 只发一次 wake 且 ack 后关闭；层上下文安装后节点自行重入队做一次层决策；层屏障与栅栏只留在节点。
 - **控制面**：`crates/control/src/api/brain_runs/v4/`（`api`/`catalog`/`delivery`/`gateway`/`read`/`request`/`runtime`/`view`）补齐准入分派、幂等（同一 intent 重放回执、异 intent 409）、`layered_` 前缀动作投递与回执转发、`GET /api/brain/runs/:id/layered` 与 `/layered/rounds/:round`；能力冻结为 `BRAIN_V4`，v4 只落在广告 `brain_scheduler_v4` 的节点；控制面不持层划分与 generation。
 - **CLI**：`brain runs create --json` 只放行显式 3|4（2/5/缺失/字符串在计划期报错）；新增 `brain runs layered <id>` 与 `brain runs layered-round <id> <round>`；v3 `runs round`/`runs get` 路径不变。
@@ -56,7 +56,7 @@ Commit: 7177f7987d3c3cdc7ed17864a4ffcf347bf4d182
 - 构建：`cargo build --workspace` → 零错误（exit 0）。
 - 格式：`rustfmt --edition 2021 --check` 对本轮全部 79 个新增/改动 Rust 文件无差异。（已知遗留：`crates/web/tests/dag_api.rs` 在本次迭代前就已未格式化，本轮未触及该文件。）
 - 行数 gate：本轮新增文件最大 365 行（`crates/control/src/api/brain_runs/v4/delivery.rs`），全部 ≤ 400 行；新增目录最多 9 个文件（`crates/control/src/api/brain_runs/v4/`），全部 ≤ 10 个。
-- 安全 gate：diff 与未跟踪文件无硬编码密钥/凭证/连接串（仅测试夹具 `"api_key":"fixture"` 与 `token_hash` 测试符号）；`crates/store/src/libsql_store/schema.rs` 的 `SCHEMA_VERSION` 为 28（发布提交自身携带，v4 未推动）；`crates/store/src/bundle.rs` 未被改动。
+- 安全 gate：diff 与未跟踪文件无硬编码密钥/凭证/连接串（仅测试夹具 `"api_key":"fixture"` 与 `token_hash` 测试符号）；`crates/store/src/turso_store/bootstrap/schema.rs` 的 `SCHEMA_VERSION` 为 28（发布提交自身携带，v4 未推动）；`crates/store/src/bundle.rs` 未被改动。
 - v4 定向实跑：`opencoder-brain --test layered` 11 passed；`opencoder-store --test brain_layered_v4` 5 passed；`opencoder-worker --test brain_scheduler_v4` 4 passed；`opencoder-control --test e2e -- layered` 8 passed（e2e 全量 204 passed）；`opencoder-control --lib layered` 3 passed；`--test brain_layered_e2e` 5 passed；`-p opencoder-cli` 100 passed（13 个测试目标）。
 - v3/v2 回归定向实跑：`--test brain_e2e` 2 passed；`--test dag_e2e` 17 passed；`-p opencoder-worker --test brain_scheduler_v3` 4 passed。
 - SPA：`bash scripts/build-spa.sh` 成功；`bash scripts/check-spa-drift.sh` → `spa dist: no drift`（提交的 `dist/` 与源码重建逐字节一致）；`npm test`（`crates/web/spa`）→ 122 个测试文件 / 907 passed。
@@ -67,11 +67,11 @@ Commit: 7177f7987d3c3cdc7ed17864a4ffcf347bf4d182
 
 - v3 未改语义：外层接缝按 `schema_version` 分支（`==3` 走 v3、`==4` 走 v4），v3 的路由、回执、输出适配与 projection 语义逐字节保留。
 - Store `SCHEMA_VERSION` 为 28（发布提交自身携带，v4 未推动），v4 表由加性迁移创建；控制面不写层划分、不持 generation；层一律重算。
-- 迭代中文件 > 800 行的既有偏差（本轮只有加性增长，未新增超限文件）：`crates/store/src/store.rs` 923→944（+21）、`crates/store/src/libsql_store/impl_store.rs` 868→891（+23）、`crates/store/src/libsql_store/schema.rs` 822→823（+1）；三者在本轮开始前已超 800 行，拆分属独立重构，不在本轮范围。
+- 迭代中文件 > 800 行的既有偏差（本轮只有加性增长，未新增超限文件）：`crates/store/src/store.rs` 923→944（+21）、`crates/store/src/turso_store/impl_store.rs` 868→891（+23）、`crates/store/src/turso_store/bootstrap/schema.rs` 822→823（+1）；三者在本轮开始前已超 800 行，拆分属独立重构，不在本轮范围。
 
 ## 合并入主树后的收口复跑（2026-09-21）
 
-- 移植方式：worktree 变更以 `git diff --cached --binary` + `git apply --3way` 落到主树（基于 `f4e532d3`）。唯一冲突是 `crates/store/src/libsql_store/schema.rs` 的 `SCHEMA_VERSION`（worktree 27 / 主树 28），保留 28：v4 表是加性迁移，不得再推动该水位；`crates/store/tests/brain_layered_v4.rs` 的断言与文档措辞同步为 28。
+- 移植方式：worktree 变更以 `git diff --cached --binary` + `git apply --3way` 落到主树（基于 `f4e532d3`）。唯一冲突是 `crates/store/src/turso_store/bootstrap/schema.rs` 的 `SCHEMA_VERSION`（worktree 27 / 主树 28），保留 28：v4 表是加性迁移，不得再推动该水位；`crates/store/tests/brain_layered_v4.rs` 的断言与文档措辞同步为 28。
 - 移植完整性：v4 变更集 105 个文件逐文件与 worktree 版本比对，仅 10 处差异且全部为预期——6 处文档把 27 改述为 28、2 处 `SCHEMA_VERSION` 冲突解决、2 处（`crates/worker/src/brain/workdir.rs`、`crates/worker/src/operations/create.rs`）与 `f4e532d3` 对同一区域的既有改动合流（新增/删除行与 worktree 逐字节一致）。
 - 主树收口 gate：`cargo build --workspace` EXIT=0；`cargo clippy --workspace --all-targets -- -D warnings` 干净；`cargo test --workspace` → 442 个测试目标 / 5578 passed / 0 failed / 8 ignored，脚本判定 EXIT=0（较上表 439 目标 / 5570 的差值来自迭代期间进入主树的 `f4e532d3`，不是本轮新增用例）；根 e2e 复跑 `brain_layered_e2e` 5、`brain_e2e` 2、`dag_e2e` 17、`team_e2e` 1、`todos_e2e` 3 全通过；`bash scripts/check-spa-drift.sh` → `spa dist: no drift`。
 - 交付提交：`552879e4`（105 files, +8550/-84）。

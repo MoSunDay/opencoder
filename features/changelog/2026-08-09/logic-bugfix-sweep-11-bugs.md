@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # 逻辑错误清扫：11 个静默潜伏 bug 修复
 
 ## 背景
@@ -68,7 +70,7 @@
 - `post_skill` 缺 `get_session` 存在检查（`post_compact`/`post_handoff` 均有），对不
   存在的会话返回错误成功 `{ok:true}`。修复：增加与 `post_compact` 一致的存在守卫。
 
-**Bug 10 — `LibsqlStore.load_after` 绕过负偏移 clamp**（`crates/store/src/libsql_store/messages.rs`）
+**Bug 10 — `LibsqlStore.load_after` 绕过负偏移 clamp**（`crates/store/src/turso_store/conversation/messages.rs`）
 - `load_after` 直接把 `skip_count` 传入 SQL `OFFSET ?`，绕过 trait 默认的
   `clamp(0, i64::MAX)`。负偏移会到达 `OFFSET`。修复：`let skip_count = skip_count.max(0);`。
 

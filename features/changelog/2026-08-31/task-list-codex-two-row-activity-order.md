@@ -1,4 +1,4 @@
-Commit: (working-tree, /task 列表 Codex 化: 活跃排序 + 两行式 + 不变量锁死)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # `/task` 任务列表 Codex 化改造：最近活跃排序 + 两行式行渲染 + 「不新建记录」不变量收口
 
@@ -12,7 +12,7 @@ Commit: (working-tree, /task 列表 Codex 化: 活跃排序 + 两行式 + 不变
 
 ## 变更
 
-### store：活跃排序与活跃 touch（`crates/store/src/libsql_store/sessions.rs`、`messages.rs`、`types.rs`）
+### store：活跃排序与活跃 touch（`crates/store/src/turso_store/conversation/sessions.rs`、`messages.rs`、`types.rs`）
 - `list_sessions` 排序改 `MAX(updated_at, created_at) DESC, id DESC`（keyset 翻页 cursor 同键，`(ts|id)` 格式不变，无外部 cursor 生产者，decode 兼容）；`updated_at=0` 的导入行自然回落 `created_at`。parent-only 过滤原样保留。
 - **活跃 touch**：`append_chunk_in_tx` 同事务内 `UPDATE sessions SET updated_at = MAX(updated_at, ?)`（取 chunk 内最大消息 `created_at`，单调防乱序回填）——追加消息即活跃，`/task` 沉浮跟随真实使用。`messages::import`（LibsqlStore 覆写）**故意绕过**：批量历史导入不是活跃。
 - SQL 瘦身：删除两个 `subagent_tasks` COUNT 子查询与 `SessionListItem::subagent_running/subagent_cancelled` 字段（web/cli 零消费，已核实）。

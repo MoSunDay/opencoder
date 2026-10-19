@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # fix(session,store): steer batch 错误传播 + 失败恢复（P1-2 / P1-3，附带 P2-6）
 
@@ -33,10 +33,10 @@ pending）。
   提供**默认 no-op 实现**（直接返回 `Ok(())`）。这样 test fake / 任何不实现该
   方法的 Store 都向后兼容，无需 override。语义：把已 promote 的 input 重置回
   pending（待消费）状态。
-- **`crates/store/src/libsql_store/inputs.rs`**（~90）：新增 `unpromote()` 函数——
+- **`crates/store/src/turso_store/conversation/inputs.rs`**（~90）：新增 `unpromote()` 函数——
   幂等 `UPDATE`，仅对当前已 promote（`promoted_seq IS NOT NULL`）的行置
   `promoted_seq = NULL`，未 promote 的行不动。
-- **`crates/store/src/libsql_store/mod.rs`**（~186）：`LibsqlStore` 实现
+- **`crates/store/src/turso_store/mod.rs`**（~186）：`LibsqlStore` 实现
   `unpromote_inputs`，委托给 `inputs::unpromote()`。
 
 ### 批量恢复（P1-3）—— runner drain 循环
@@ -51,7 +51,7 @@ pending）。
 
 ### 清理
 
-- **`crates/store/src/libsql_store/sessions.rs`**：删除无用的 dead code
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：删除无用的 dead code
   `encode_cursor` 函数。
 
 ### 附带修复（P2-6）—— autopilot iteration 饱和

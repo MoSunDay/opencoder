@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # Fix: DB-op serialization + event backpressure (multi-subagent deadlock)
 
 **Date:** 2026-07-22
@@ -26,7 +28,7 @@ the UI channel could both fall over:
 
 | Fix | File | Change |
 |-----|------|--------|
-| 1 — DB-op serialization | `crates/store/src/libsql_store/mod.rs` | Add a `tokio::sync::Mutex<()>` (`db_lock`) to `LibsqlStore`; acquire a guard at the top of all 26 async `Store` methods. An async Mutex yields on contention (never blocks a worker thread) while ensuring at most one worker touches SQLite FFI at a time. |
+| 1 — DB-op serialization | `crates/store/src/turso_store/mod.rs` | Add a `tokio::sync::Mutex<()>` (`db_lock`) to `LibsqlStore`; acquire a guard at the top of all 26 async `Store` methods. An async Mutex yields on contention (never blocks a worker thread) while ensuring at most one worker touches SQLite FFI at a time. |
 | 2 — Backpressure-aware delta drop | `crates/tui/src/worker.rs` | `forward_event()` replaces 12 raw `try_send` sites. Recoverable streaming deltas (`TextDelta`/`ReasoningDelta`/`SubagentChild` wrapping those) are dropped when free capacity ≤ `DELTA_MIN_CAPACITY` (64); final text is always rebuilt from the store on `TurnDone`, so no data is lost. Lifecycle events always get a slot via `try_send`. |
 
 ## Tests

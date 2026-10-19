@@ -1,4 +1,4 @@
-Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # ontology 模块
 
@@ -7,8 +7,8 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 ## 索引
 
 - [http.rs](../../crates/ontology/src/http.rs)、[api/mod.rs](../../crates/ontology/src/api/mod.rs) — `AppState::open/ready/drained` 与 `/api/ontology` 路由，复用平台 `Identity`；域读取开放给 User/Root，写入仅 Admin。
-- [database/schema.rs](../../crates/ontology/src/database/schema.rs)、[database/store.rs](../../crates/ontology/src/database/store.rs) — 独立 `<server-data>/ontology.db`，SQLite WAL；对象按 `env_num` 隔离，用唯一键与索引约束类型、属性和切面。`ontology_schema_version` 在首次初始化时固定实际正文根，供备份定位；之后重启必须使用同一规范化路径，空库也不能重绑。路径变化使启动失败，原绑定、当前正文和历史引用保持原值。
-- [mutations.rs](../../crates/ontology/src/mutations.rs) — 每个 HTTP 请求独立连接与事务；写请求成功才提交，错误回滚域数据、审计、正文当前版本与幂等记录。已接纳写入在请求断开后继续完成，退休等待活动写入归零。
+- [database/schema.rs](../../crates/ontology/src/database/schema.rs)、[database/store.rs](../../crates/ontology/src/database/store.rs) — 独立 `<server-data>/ontology.db`，Turso WAL；对象按 `env_num` 隔离，用唯一键与索引约束类型、属性和切面。`ontology_schema_version` 在首次初始化时固定实际正文根，供备份定位；之后重启必须使用同一规范化路径，空库也不能重绑。路径变化使启动失败，原绑定、当前正文和历史引用保持原值。
+- [mutations.rs](../../crates/ontology/src/mutations.rs) — 每个 HTTP 请求独占连接池中的连接与事务；写请求成功才提交，错误回滚域数据、审计、正文当前版本与幂等记录。已接纳写入在请求断开后继续完成，退休等待活动写入归零。
 - [database/model](../../crates/ontology/src/database/model/mod.rs)、[domain/validation.rs](../../crates/ontology/src/domain/validation.rs) — 类型、属性、Action 配置、关系、切面和 revision 校验；Action 仅保存定义，没有执行入口。
 - [text_store.rs](../../crates/ontology/src/text_store.rs)、[database/text_revision.rs](../../crates/ontology/src/database/text_revision.rs) — UUID 与 revision 组成的不可变正文路径；独占创建、文件和祖先目录同步、路径边界及 SHA256/字节数核验，单份正文最多 4 MiB。NFS 引用读取内容校验失败返回冲突，不能覆盖历史。
 - [api/graph](../../crates/ontology/src/api/graph/mod.rs)、[api/directories.rs](../../crates/ontology/src/api/directories.rs) — 有向上下游范围、多个中心、关系筛选、跨类型邻居与固定切面；系统目录约束单父级并拒绝环。
@@ -29,3 +29,5 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 ## 实体查询范围
 
 结构化属性与文本版本按环境、实体 ID 使用已有索引读取；文本版本继续按属性筛选并倒序返回。普通实体加入目录只检查自身归属，目录实体仍检查父级链和环。对应回归见 `crates/ontology/tests/entity_lookup.rs`。
+
+数据库通过 [opencoder-database](../../crates/database/src/lib.rs) 的独立读、写执行器运行；请求中的任务局部连接贯穿处理和事务收尾。退休计数覆盖提交或回滚完成，客户端断开不取消已接纳写入。

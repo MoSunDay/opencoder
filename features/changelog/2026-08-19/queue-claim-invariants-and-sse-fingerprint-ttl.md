@@ -1,4 +1,4 @@
-Commit: (working-tree, post-75d6866；子项 1/3 的已跟踪文件改动被并行进程的 75d6866 一并收入，子项 2 与新增文件仍在工作树未提交)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 批次二 P2-4：queue claim 不变量守卫 + SSE 指纹 TTL + drain claim 持续失败可见化
 
@@ -12,13 +12,13 @@ Commit: (working-tree, post-75d6866；子项 1/3 的已跟踪文件改动被并�
 
 ## 根因
 
-- `crates/store/src/libsql_store/inputs.rs`：bulk `promote`（Steer 批量路径）在再提升时**故意**重置 `recorded=0`（消费动作在 promote 之后统一发生，见既有测试 `promote_resets_recorded_marker_on_repromotion`）；但 queue drain 的单条 claim/promote 是「claim 即将消费」语义，行到达该路径时 `recorded=1` 只可能意味着**已经消费过**——两函数的 SELECT/UPDATE 没有区分这一点。
+- `crates/store/src/turso_store/conversation/inputs.rs`：bulk `promote`（Steer 批量路径）在再提升时**故意**重置 `recorded=0`（消费动作在 promote 之后统一发生，见既有测试 `promote_resets_recorded_marker_on_repromotion`）；但 queue drain 的单条 claim/promote 是「claim 即将消费」语义，行到达该路径时 `recorded=1` 只可能意味着**已经消费过**——两函数的 SELECT/UPDATE 没有区分这一点。
 - `crates/web/src/api.rs::get_events`：指纹在首次匹配时 `remove`（自清理），但从未匹配上的指纹（overlap 窗口事件没有对应的 live 重复广播）永远留在集合里。缺少「overlap 窗口何时确定性结束」的判定。
 - `crates/session/src/runner/drain.rs::claim_one_queued`：重试一次仍 Err → `warn!` + `None`。日志对 UI 不可见，违反「搁浅必须可观测」。
 
 ## 变更
 
-- `crates/store/src/libsql_store/inputs.rs`
+- `crates/store/src/turso_store/conversation/inputs.rs`
   - `promote_next_queued` / `claim_next_queue` 的 **SELECT 和 UPDATE 均加 `AND recorded = 0`**。SELECT 必须加：否则会选中 recorded 行、被守卫的 UPDATE 匹配 0 行、函数却仍谎报该行已提升（且每次调用重复选中同一行）。UPDATE 同时保留为纵深防御（风格与行 77 附近的 bulk `promote` 及 `recover_orphans` 的守卫一致）。函数 doc 注释补充不变量说明。
   - 范围刻意限定在这两个 queue-drain 函数：bulk `promote`（Steer 路径，生产唯一显式调用是 `Delivery::Steer`）保持「再提升即重置 recorded=0」的既有语义不变；`pending_inputs` 不加过滤（pending 投影仍如实反映行的物理状态，供 UI 镜像/审计）。
 - `crates/web/src/api.rs::get_events` + 新模块 `crates/web/src/sse_dedup.rs`（拆分自 api.rs：原文件 799 行已顶到 800 帽，TTL 修复后超限，按职责把去重决策整体迁出）

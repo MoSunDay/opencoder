@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # feat(web,store): Web API 运维操作端点 + DrainCmd 通道 + clear_skill
 
 ## 背景
@@ -54,7 +56,7 @@
 
 - `types.rs`：`SessionPatch` 新增 `clear_skill: bool`（`#[serde(default,
   skip_serializing_if = "is_false")]`，向后兼容）。
-- `libsql_store/sessions.rs`：`update` 中 `if patch.clear_skill { sets
+- `turso_store/conversation/sessions.rs`：`update` 中 `if patch.clear_skill { sets
   .push("skill = NULL") }`。
 
 ## 兼容性

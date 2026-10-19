@@ -1,4 +1,4 @@
-Commit: a3b194219b48609bbb078ffd214da477d626bdf4
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # plan 阶段状态落库：压缩前计划快照 + plan_input_count 持久化，resume 后 handoff 仍可武装
 
@@ -19,7 +19,7 @@ plan→act handoff 依赖两份易失状态，重启/压缩后双双失效：
 
 ### store：schema v10 两列 + patch 契约
 - **`crates/store/src/types.rs`**：`SessionMeta` 新增 `plan_snapshot: Option<String>`、`plan_input_count: i64`；`SessionPatch` 新增 `plan_snapshot / plan_input_count / clear_plan_snapshot`，set 与 clear 互斥校验。
-- **`crates/store/src/libsql_store/schema.rs` / `sessions.rs`**：v10 加列（`plan_snapshot TEXT`、`plan_input_count INTEGER NOT NULL DEFAULT 0`），读写链路贯通。
+- **`crates/store/src/turso_store/bootstrap/schema.rs` / `sessions.rs`**：v10 加列（`plan_snapshot TEXT`、`plan_input_count INTEGER NOT NULL DEFAULT 0`），读写链路贯通。
 
 ## 测试覆盖
 
@@ -44,6 +44,6 @@ plan→act handoff 依赖两份易失状态，重启/压缩后双双失效：
 - 不影响：CLI/Web API 形状、消息与事件 schema。
 
 ## Related Docs
-- [agents/session](../../agents/session/index.md)
-- [agents/store](../../agents/store/index.md)
+- [agents/session](../../../agents/session/index.md)
+- [agents/store](../../../agents/store/index.md)
 - [shift-tab-double-tap-fake-handoff](shift-tab-double-tap-fake-handoff.md)（溯源门 UI 侧修复）

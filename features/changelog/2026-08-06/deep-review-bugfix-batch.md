@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 深审 bug 扫除批次 — 6 主题
 
@@ -14,7 +14,7 @@ Commit: (working-tree, pre-initial-commit)
 - **`crates/session/src/runner/mod.rs`**（`run_loop`，compaction 成功分支）：compaction 用全新 summary 替换 transcript 后，清除 `doom` / `tool_failures` / `bash_timeout_first`。此前这三个计数器在循环外声明且永不重置，预 compaction turn 的陈旧 doom 签名 / 工具失败计数 / bash 超时去重会在 compaction 后误触守卫。
 
 ### store: claim_next_queue 返回陈旧 promoted_seq
-- **`crates/store/src/libsql_store/inputs.rs`**（`claim_next_queue`）：返回的 `SessionInput` 在事务内 `UPDATE` 之前物化，且 SELECT 以 `promoted_seq IS NULL` 过滤，导致返回值恒为 `None`。修复为 UPDATE 后将新 `promoted_seq` 回写到返回结构体。
+- **`crates/store/src/turso_store/conversation/inputs.rs`**（`claim_next_queue`）：返回的 `SessionInput` 在事务内 `UPDATE` 之前物化，且 SELECT 以 `promoted_seq IS NULL` 过滤，导致返回值恒为 `None`。修复为 UPDATE 后将新 `promoted_seq` 回写到返回结构体。
 
 ### store: import_bundle 误清子会话 workdir_hash
 - **`crates/store/src/bundle.rs`**（`import_bundle_inner`）：条件由 `depth > 0 || workdir_hash.is_some()` 改为仅 `workdir_hash.is_some()`。此前 `depth > 0` 分支在调用方未传 override 时也会把子会话自带的 `workdir_hash` 清成 `None`，违背「每个 session 行都携带 workdir_hash」的契约。
@@ -49,7 +49,7 @@ Commit: (working-tree, pre-initial-commit)
 - cli：skill-token 剥离语义回归守卫。
 
 ## Related Docs
-- [agents/session](../../agents/session/index.md)
-- [agents/store](../../agents/store/index.md)
-- [agents/web](../../agents/web/index.md)
-- [既有相关 changelog](../2026-08-06/drain-idle-boundary-fixes.md)
+- [agents/session](../../../agents/session/index.md)
+- [agents/store](../../../agents/store/index.md)
+- [agents/web](../../../agents/web/index.md)
+- [既有相关 changelog](../2026-08-05/drain-idle-boundary-fixes.md)

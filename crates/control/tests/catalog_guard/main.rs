@@ -1,3 +1,4 @@
+mod agents;
 mod binaries;
 mod definitions;
 mod library;

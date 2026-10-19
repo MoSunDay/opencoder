@@ -1,5 +1,6 @@
 //! Server catalog writes share a process lock with execution admission. The
 //! resource owner remains the sole writer of binary pool files and NFS owner.
+pub(crate) mod agents;
 mod binaries;
 mod model;
 mod references;
@@ -50,7 +51,8 @@ fn guarded(path: &str) -> bool {
 }
 
 fn exclusive(method: &str, path: &str) -> bool {
-    (path == "/api/dag/defs" && method == "POST")
+    (agents::card_path(path) && method == "DELETE")
+        || (path == "/api/dag/defs" && method == "POST")
         || (path.starts_with("/api/dag/defs/") && method == "DELETE")
         || ((path == "/api/dag/binaries" || path.starts_with("/api/dag/binaries/"))
             && !path.ends_with("/nfs"))
@@ -71,7 +73,8 @@ pub(crate) async fn protect(
             .any(|prefix| {
                 path.strip_prefix(prefix)
                     .is_some_and(|tail| !tail.contains('/') && tail != "nfs")
-            });
+            })
+            || path.strip_suffix("/meta").is_some_and(agents::card_path);
         let response = next.run(request).await;
         return if detail {
             transport::with_etag(response).await

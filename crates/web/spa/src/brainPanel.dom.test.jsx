@@ -8,6 +8,7 @@ vi.mock('./api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(),
 
 const entry = { capability: { id: 'c1', capability_type: 'goal', summary: '解析依赖图', input_desc: 'crate 列表', output_desc: '依赖 DAG', updated_at: 2 }, eng_inputs: [{ content: 'opencoder' }] };
 const second = { capability: { ...entry.capability, id: 'c2', capability_type: 'agent', summary: '生成构建计划' }, eng_inputs: [] };
+const bindings = [{ id: 'c1', kind: 'operator', target: 'generic-transform' }, { id: 'c2', kind: 'agent', target: 'generic-agent' }];
 const button = (name) => screen.getAllByRole('button').find((item) => item.textContent.replace(/\s/g, '') === name);
 const fill = () => {
   for (const [label, value] of [['一句话描述', '新能力'], ['输入描述', '需求'], ['输出描述', '结果']]) {
@@ -35,18 +36,21 @@ beforeEach(() => {
 
 describe('capability library table and editor', () => {
   it('shows a single table and keeps all forms in the drawer', async () => {
-    const { container } = render(<BrainPanel />);
+    const { container } = render(<BrainPanel executionCatalog={bindings} />);
     expect(await screen.findByText('解析依赖图')).toBeTruthy();
     expect(screen.getByText('生成构建计划')).toBeTruthy();
     expect(container.querySelectorAll('.ant-table')).toHaveLength(1);
     expect(container.querySelector('.ant-card')).toBeNull();
     expect(screen.queryByLabelText('能力类型')).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
-    // 列头为「执行类型」（非「能力类型」），值经 KIND_LABELS 渲染，存量自由文本原样回退。
+    // 类型与名称来自执行绑定，历史能力分类不能冒充执行类型。
     expect(screen.getByText('执行类型', { selector: 'th' })).toBeTruthy();
     expect(screen.queryByText('能力类型', { selector: 'th' })).toBeNull();
     expect(screen.getByText('Agent')).toBeTruthy();
-    expect(screen.getByText('goal')).toBeTruthy();
+    expect(screen.getByText('Operator')).toBeTruthy();
+    expect(screen.queryByText('goal')).toBeNull();
+    expect(screen.getByText('执行名称', { selector: 'th' })).toBeTruthy();
+    expect(screen.getByText('generic-transform')).toBeTruthy();
     for (const label of ['输入描述', '输出描述', '工程输入']) {
       expect(screen.queryByText(label, { selector: 'th' })).toBeNull();
     }
@@ -55,7 +59,7 @@ describe('capability library table and editor', () => {
   });
 
   it('creates through a 75 percent right drawer and resets fields for the next creation', async () => {
-    render(<BrainPanel />);
+    render(<BrainPanel executionCatalog={bindings} />);
     fireEvent.click(button('新建能力'));
     const drawer = screen.getByRole('dialog');
     expect(drawer.closest('.ant-drawer').className).toContain('ant-drawer-right');
@@ -74,7 +78,7 @@ describe('capability library table and editor', () => {
   });
 
   it('opens a clicked table row in edit mode and saves the full content through PUT', async () => {
-    render(<BrainPanel />);
+    render(<BrainPanel executionCatalog={bindings} />);
     fireEvent.click(await screen.findByText('解析依赖图'));
     expect(await screen.findByText('编辑能力', { selector: '.ant-drawer-title' })).toBeTruthy();
     await waitFor(() => expect(screen.getByDisplayValue('opencoder').disabled).toBe(false));
@@ -87,7 +91,7 @@ describe('capability library table and editor', () => {
   });
 
   it('renders search hits in the same table and fetches exemplars before editing', async () => {
-    const { container } = render(<BrainPanel />);
+    const { container } = render(<BrainPanel executionCatalog={bindings} />);
     await screen.findByText('解析依赖图');
     fireEvent.change(screen.getByLabelText('搜索能力'), { target: { value: '依赖' } });
     fireEvent.click(button('搜索'));
@@ -104,7 +108,7 @@ describe('capability library table and editor', () => {
   });
 
   it('distinguishes a cancelled edit from a blank new capability', async () => {
-    render(<BrainPanel />);
+    render(<BrainPanel executionCatalog={bindings} />);
     fireEvent.click(await screen.findByText('解析依赖图'));
     await screen.findByDisplayValue('opencoder');
     fireEvent.click(button('取消'));
@@ -116,7 +120,7 @@ describe('capability library table and editor', () => {
   });
 
   it('does not open an editor from the delete action and waits for confirmation', async () => {
-    render(<BrainPanel />);
+    render(<BrainPanel executionCatalog={bindings} />);
     const row = (await screen.findByText('解析依赖图')).closest('tr');
     fireEvent.click(within(row).getByRole('button', { name: /删\s*除/ }));
     expect(apiDel).not.toHaveBeenCalled(); expect(screen.queryByRole('dialog')).toBeNull();
@@ -125,7 +129,7 @@ describe('capability library table and editor', () => {
   });
 
   it('retains content and reuses the created ID when saving its target fails', async () => {
-    render(<BrainPanel />); fireEvent.click(button('新建能力')); fill();
+    render(<BrainPanel executionCatalog={bindings} />); fireEvent.click(button('新建能力')); fill();
     fireEvent.mouseDown(screen.getByLabelText('名称').closest('.ant-select'));
     fireEvent.click(await screen.findByText('custom-agent', { selector: '.ant-select-item-option-content' }));
     apiPut.mockRejectedValueOnce(new Error('connection lost'));
@@ -140,7 +144,7 @@ describe('capability library table and editor', () => {
   });
 
   it('cascades the name options from the chosen execution kind', async () => {
-    render(<BrainPanel />);
+    render(<BrainPanel executionCatalog={bindings} />);
     fireEvent.click(button('新建能力'));
     // The 名称 select lives inside the drawer and preselects the default 'act'.
     const dialog = screen.getByRole('dialog');
@@ -171,7 +175,7 @@ describe('capability library table and editor', () => {
       if (path === '/api/brain/capabilities') return { capabilities: [entry] };
       throw new Error('node unavailable');
     });
-    render(<BrainPanel />); fireEvent.click(await screen.findByText('解析依赖图'));
+    render(<BrainPanel executionCatalog={bindings} />); fireEvent.click(await screen.findByText('解析依赖图'));
     expect(await screen.findByText('读取能力失败: node unavailable')).toBeTruthy();
     expect(button('保存修改').disabled).toBe(true);
     expect(apiPut).not.toHaveBeenCalled();

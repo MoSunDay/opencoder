@@ -1,4 +1,4 @@
-Commit: c139569c708859863cadc589ce49a6dcaf371f13
+Commit: 33d91d7cd47127fbf15b8d38a1b4a62ac08d9c8e
 
 # control 模块
 
@@ -80,3 +80,5 @@ TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；�
 [能力目录投影](../../crates/control/src/api/brain_runs/catalog/dedup.rs) 折叠同目标、同定义与同字段约定的条目；跨名 Agent 还核验实际资源的全部文件、相对路径与执行配置。资源读取和摘要计算在阻塞线程中执行，并显式保留请求的 Agent 资源根，避免占用处理准入与健康检查的异步线程。其他说明及 ID 保留在 `equivalent_sources`；接口仍返回完整目录，`selection_ids` 仅控制新建选项，旧计划编辑和执行解析保留原 ID。
 
 Agent 卡片删除由 [catalog_guard/agents.rs](../../crates/control/src/catalog_guard/agents.rs) 处理：持有目录独占锁与资源写锁，检查保存版本、绑定、日程、TODO、活动任务、配置及资源文件后才删除。`GET /api/agents/:name/meta` 返回 ETag；DELETE 可带 `If-Match`，不匹配返回 412，有引用返回 409。资源读取与删除在阻塞线程执行，锁保留到删除完成。移除标记阻止晚到请求引用被删 Agent，原名重建后重新允许。健康接口新增 `agent_delete_guard: 1`，保留 `catalog_guard: 2` 供既有工具使用。
+
+Agent 卡片的已知元数据字段只描述自身、共享资源池和执行配置，不作为其他 Agent 的依赖；未识别字段继续检查，资源文件正文仍按完整引用判断。

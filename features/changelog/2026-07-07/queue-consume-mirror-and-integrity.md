@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # follow-up 队列消费镜像根修 + 删除/重排完整性
 
@@ -12,7 +12,7 @@ Commit: (working-tree, pre-initial-commit)
 
 ### Part A — 删除/重排完整性（修 M2/M3）
 - **M2 本地变更门控**（`crates/tui/src/app.rs`）：✕ 删除与 ▲▼ 重排的本地 `queue_items` 变更改为**仅在 store 操作 `is_ok()` 时**执行；store 失败则本地不动，镜像与库一致。
-- **M3 已提升守卫**（`crates/store/src/libsql_store/inputs.rs::delete_input`）：DELETE 加 `AND promoted_seq IS NULL`，已提升（已 drain 为 steer）的行不被删，保留审计轨迹。
+- **M3 已提升守卫**（`crates/store/src/turso_store/conversation/inputs.rs::delete_input`）：DELETE 加 `AND promoted_seq IS NULL`，已提升（已 drain 为 steer）的行不被删，保留审计轨迹。
 - 新测试 `delete_input_preserves_already_promoted_audit_row`（`store/tests/inputs_integration.rs`）。
 
 ### Part B — 消费镜像根修（修 M1，从源头而非 TUI 补丁）
@@ -26,8 +26,8 @@ Commit: (working-tree, pre-initial-commit)
 ## 涉及文件
 - `crates/session/src/runner.rs` — `SessionEvent::QueueConsumed`（第 38 行）+ emit 点（第 179 行）
 - `crates/store/src/store.rs` — trait `claim_next_queue` 返回类型
-- `crates/store/src/libsql_store/inputs.rs` — `claim_next_queue` 实现返回 seq + `delete_input` 加 promoted_seq 守卫
-- `crates/store/src/libsql_store/mod.rs` — Store impl 接线
+- `crates/store/src/turso_store/conversation/inputs.rs` — `claim_next_queue` 实现返回 seq + `delete_input` 加 promoted_seq 守卫
+- `crates/store/src/turso_store/mod.rs` — Store impl 接线
 - `crates/tui/src/app.rs` — `QueueConsumed` 收缩镜像 + 删除/重排本地变更门控 store `is_ok()`
 - `crates/tui/src/chat.rs` — 回放路径 `QueueConsumed` no-op
 - `crates/cli/src/run.rs` — `QueueConsumed` no-op

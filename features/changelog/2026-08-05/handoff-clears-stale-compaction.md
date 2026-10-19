@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # handoff 持久化未清除残留 compaction 元数据 → transcript 污染
 
 ## 背景
@@ -9,7 +11,7 @@
 ### 写入层（主防线）
 
 - **`store/src/types.rs`**：`SessionPatch` 新增 `clear_summary: bool`（对称于 `clear_handoff`，None=skip 语义无法表达「置 NULL」）。
-- **`store/src/libsql_store/sessions.rs`**：`update()` 加 `clear_summary` 分支 → `summary`/`summary_seq`/`summary_images_json = NULL`。
+- **`store/src/turso_store/conversation/sessions.rs`**：`update()` 加 `clear_summary` 分支 → `summary`/`summary_seq`/`summary_images_json = NULL`。
 - **同上**：`create()` INSERT 补 `summary_images_json` 列（修复 INSERT 与 struct 读写不对称：新 session 的 image 列此前被静默丢弃）。
 - **`session/src/control_cmd.rs`**：`persist_clear()` 设 `clear_summary: true`（/clear 上下文切换）。
 - **`session/src/autopilot/phases.rs`**：autopilot handoff 设 `clear_summary: true`。

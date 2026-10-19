@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # bugfix sweep: 8 运行时逻辑 / 并发 / 契约缺陷修复
 
@@ -48,7 +48,7 @@ Commit: (working-tree, pre-initial-commit)
 和 TUI worker（Error 事件 + TurnDone）能正确处理。**契约变更**：调用方已适配。
 
 ### Bug #6 — subagent_tasks UPDATE 无状态守卫（store）
-**文件**: `crates/store/src/libsql_store/subagent_tasks.rs`
+**文件**: `crates/store/src/turso_store/conversation/subagent_tasks.rs`
 
 COMPLETE 的 UPDATE 仅 `WHERE task_id=?`，无终态守卫。晚到的 complete 可把
 已终态（Completed/Failed）的任务重新覆写（result/ok 字段数据丢失）。
@@ -57,7 +57,7 @@ COMPLETE UPDATE 加守卫 `AND status IN ('running', 'cancelled')`，
 CANCEL 保持无守卫：execute.rs 超时恢复路径需要从任意终态强制覆写为 Cancelled。
 
 ### Bug #7 — JSON 反序列化静默回退（store）
-**文件**: `crates/store/src/libsql_store/messages.rs`, `events.rs`
+**文件**: `crates/store/src/turso_store/conversation/messages.rs`, `events.rs`
 
 `serde_json::from_str` 失败时直接 `unwrap_or_default()` 返回空集合，数据损坏
 无任何日志。改为 `unwrap_or_else(|e| { warn!(...); default })`，便于诊断。
@@ -79,9 +79,9 @@ CANCEL 保持无守卫：execute.rs 超时恢复路径需要从任意终态强�
 | 3 | steer match_promoted | `match_promoted_*` (3 cases) | `crates/session/src/runner/steer.rs` |
 | 5a | doom returns Err | `doom_loop_guard_terminates_act_phase` | `crates/session/tests/autopilot.rs` |
 | 5b | doom in autopilot | `doom_loop_in_initial_run_aborts_autopilot` | `crates/session/tests/autopilot.rs` |
-| 6a | COMPLETE guard | `complete_does_not_overwrite_completed_terminal_state` | `crates/store/src/libsql_store/subagent_tasks.rs` |
-| 6b | resume path | `complete_allows_cancelled_to_completed_resume_path` | `crates/store/src/libsql_store/subagent_tasks.rs` |
-| 6c | timeout override | `cancel_can_override_terminal_for_timeout_recovery` | `crates/store/src/libsql_store/subagent_tasks.rs` |
+| 6a | COMPLETE guard | `complete_does_not_overwrite_completed_terminal_state` | `crates/store/src/turso_store/conversation/subagent_tasks.rs` |
+| 6b | resume path | `complete_allows_cancelled_to_completed_resume_path` | `crates/store/src/turso_store/conversation/subagent_tasks.rs` |
+| 6c | timeout override | `cancel_can_override_terminal_for_timeout_recovery` | `crates/store/src/turso_store/conversation/subagent_tasks.rs` |
 
 - 全量回归：`cargo test --workspace` → 1685 passed / 0 failed
 - clippy：`cargo clippy --workspace --all-targets` → 零警告
@@ -94,7 +94,7 @@ CANCEL 保持无守卫：execute.rs 超时恢复路径需要从任意终态强�
 - **store**: subagent 终态完整性得到守卫保护；JSON 损坏有日志可查。
 
 ## Related Docs
-- [agents/web](../../agents/web/index.md)
-- [agents/session](../../agents/session/index.md)
-- [agents/store](../../agents/store/index.md)
-- [agents/cli](../../agents/cli/index.md)
+- [agents/web](../../../agents/web/index.md)
+- [agents/session](../../../agents/session/index.md)
+- [agents/store](../../../agents/store/index.md)
+- [agents/local](../../../agents/local/index.md)

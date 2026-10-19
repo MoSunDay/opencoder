@@ -1,4 +1,4 @@
-Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # project 模块
 
@@ -14,12 +14,12 @@ Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 - `crates/store/src/project.rs`、`crates/store/src/project/overview.rs` — 存储接缝与概览投影；进度以看板 `done` 状态计数，悬空归属仍展示为独立专项或未归属 TODO
 - [project/summary.rs](../../crates/store/src/project/summary.rs) — 项目与专项的用户维护概述及独立更新时间；概述不参与进度与验收，不作为原生执行结果缓存。每个对象保留最近 10 个版本，回滚新增版本；证据收集和版本入口见 [ctl](../ctl/index.md)。
 - `crates/store/src/project/tags.rs` — 纯函数解析可用 Tag、验证选择与按名称整理关联；同名定义按专项、项目、全局优先，未归属 TODO 仅可选全局定义
-- [project/people.rs](../../crates/store/src/project/people.rs)、[存储人员关系](../../crates/store/src/libsql_store/project/people.rs) — 三层独立人员字段、关注人集合规范化及 PATCH 清空语义；对象、人员与 Tag 在同一事务提交。
+- [project/people.rs](../../crates/store/src/project/people.rs)、[存储人员关系](../../crates/store/src/turso_store/projects/project/people.rs) — 三层独立人员字段、关注人集合规范化及 PATCH 清空语义；对象、人员与 Tag 在同一事务提交。
 - [project_links.rs](../../crates/control/src/api/project_links.rs)、[project_links/](../../crates/control/src/api/project_links/) — 关联既有执行并核验能力身份；派发适配器通过既有 Fleet 回执固定能力和请求，复用原生执行入口，无项目执行循环。
 - [executions/results/](../../crates/control/src/api/executions/results/) — 按需从所属节点读取当前结论；离线返回错误，DAG 产物由步骤明细读取。
-- [完成前提](../../crates/store/src/project/acceptance.rs)、[事务核验](../../crates/store/src/libsql_store/project/acceptance.rs) — 验证读取时的任务、能力、执行和依赖仍有效，再修改看板；前提过期由 API 返回 409。
+- [完成前提](../../crates/store/src/project/acceptance.rs)、[事务核验](../../crates/store/src/turso_store/projects/project/acceptance.rs) — 验证读取时的任务、能力、执行和依赖仍有效，再修改看板；前提过期由 API 返回 409。
 
-- [评论数据](../../crates/store/src/project/comments.rs)、[评论存储](../../crates/store/src/libsql_store/project/comments.rs) — schema 39 使用递增序号分页，按 TODO、提交用户与请求 ID 保证事务追加幂等；同时核验任务及执行关联，更新任务时间。正文与署名快照不引用用户、能力的可变名称；TODO 删除触发同事务清理，评论不作为执行结果缓存。
+- [评论数据](../../crates/store/src/project/comments.rs)、[评论存储](../../crates/store/src/turso_store/projects/project/comments.rs) — schema 39 使用递增序号分页，按 TODO、提交用户与请求 ID 保证事务追加幂等；同时核验任务及执行关联，更新任务时间。正文与署名快照不引用用户、能力的可变名称；TODO 删除触发同事务清理，评论不作为执行结果缓存。
 
 - [project_files](../../crates/control/src/project_files/mod.rs) 管理 Server 上主动上传的任务文件，使用创建日期、TODO ID 和相对路径定位；独立 NFS 只读导出。目录绑定、文件锁、原子发布及备份协调与数据库任务删除配合，原生执行记录仍由执行节点持有。配置和接口见 [任务文件](../../docs/project-files.md)。
 

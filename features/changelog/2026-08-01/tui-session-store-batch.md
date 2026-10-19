@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # feat(tui/session/store): agent 模式持久化 + 排队 skill 展示 + /task skill 标签（本批汇总）
 
@@ -13,13 +13,13 @@ Commit: (working-tree, pre-initial-commit)
 - 细节见 `tui-agent-mode-persist.md`。
 
 ### fix(tui): 排队提交 skill 展示闭环
-- **`crates/store/src/libsql_store/schema.rs` / `inputs.rs` / `types.rs`**：`session_inputs`
+- **`crates/store/src/turso_store/bootstrap/schema.rs` / `inputs.rs` / `types.rs`**：`session_inputs`
   新增 `display_text` 列（schema v6 迁移），排队/插队项保留含 `{$skill}` token 的原文，
   drain 仍只消费 clean `prompt`。
 - 细节见 `queued-combined-skill-display.md`。
 
 ### feat(tui): /task 选择器 skill 标签
-- **`crates/store/src/libsql_store/sessions.rs`**：`list_sessions` 返回 `sessions.skill` 列，
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：`list_sessions` 返回 `sessions.skill` 列，
   TUI `/task` 选择器按行渲染激活 skill。
 - 细节见 `tui-task-picker-skill-tag.md`。
 

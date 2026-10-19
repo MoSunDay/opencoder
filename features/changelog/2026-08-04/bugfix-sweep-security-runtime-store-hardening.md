@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # bugfix sweep: 10 安全 / 运行时 / Web-Store / 健壮性缺陷修复
 
 ## 背景
@@ -41,7 +43,7 @@ plan 模式依赖 bash_guard 拦截所有写操作，但以下类别可绕过分
 
 ### Batch 3 (P2 Web/Store) — DB 错误误分类 + 跨 session 查询
 
-**文件**: `crates/web/src/api.rs`, `crates/store/src/libsql_store/inputs.rs`
+**文件**: `crates/web/src/api.rs`, `crates/store/src/turso_store/conversation/inputs.rs`
 
 9. **3 处 `.ok().flatten()` 将 DB Err 误判为 None** — `messages_response`、
    `ensure_session_row`、`get_events` 中 `store.get_session().await.ok().flatten()`

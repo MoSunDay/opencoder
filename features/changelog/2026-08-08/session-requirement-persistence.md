@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # session requirement 持久化 + /requirement 斜杠命令
 
@@ -10,11 +10,11 @@ resume 后存活。此前该文本仅存在于运行时内存，压缩 / 重启�
 
 ## 变更
 ### store —— 持久化与 schema 迁移
-- **`crates/store/src/libsql_store/schema.rs:4`**：`SCHEMA_VERSION` 7 → 8。
-- **`crates/store/src/libsql_store/schema.rs`**（CREATE_SESSIONS）：`sessions` 表新增 `requirement TEXT`（新建库直接具备）。
-- **`crates/store/src/libsql_store/schema.rs:249`**：`migrate` 新增 `if from < 8` 分支，`add_column_if_absent(conn, "sessions", "requirement", "TEXT")` —— 已存在的 v7 库首次打开即补列，避免 INSERT/SELECT 缺列报错。
+- **`crates/store/src/turso_store/bootstrap/schema.rs:4`**：`SCHEMA_VERSION` 7 → 8。
+- **`crates/store/src/turso_store/bootstrap/schema.rs`**（CREATE_SESSIONS）：`sessions` 表新增 `requirement TEXT`（新建库直接具备）。
+- **`crates/store/src/turso_store/bootstrap/schema.rs:249`**：`migrate` 新增 `if from < 8` 分支，`add_column_if_absent(conn, "sessions", "requirement", "TEXT")` —— 已存在的 v7 库首次打开即补列，避免 INSERT/SELECT 缺列报错。
 - **`crates/store/src/types.rs:48,89`**：`SessionMeta.requirement` / `SessionPatch.requirement`（均 `Option<String>`）。
-- **`crates/store/src/libsql_store/sessions.rs`**：INSERT_SESSION / SELECT_SESSION 携带 requirement。
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：INSERT_SESSION / SELECT_SESSION 携带 requirement。
 
 ### tui —— /requirement 命令与编辑器
 - **`crates/tui/src/command.rs:37,185,204`**：`/requirement`（别名 `/req`）→ `SlashAction::Requirement`。
@@ -50,5 +50,5 @@ resume 后存活。此前该文本仅存在于运行时内存，压缩 / 重启�
 - 不影响：CLI 子命令、Web SSE 协议、store trait 接缝、subagent 调度。
 
 ## Related Docs
-- [agents/store](../../agents/store/index.md) — schema 迁移（含 v7→v8）
-- [agents/tui](../../agents/tui/index.md)
+- [agents/store](../../../agents/store/index.md) — schema 迁移（含 v7→v8）
+- [agents/tui](../../../agents/tui/index.md)

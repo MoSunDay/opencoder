@@ -1,4 +1,4 @@
-Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # Operator 执行隔离补全（P1–P4）
 
@@ -9,7 +9,7 @@ Commit: 40a688a77bfdbedc3f30f9f6b1e3a1ba67244d68
 - P4 会话泳道：schema v27→v28 增 `sessions.kind TEXT`；创建时定值 `operator`/`agent`/`team`/`dag`/`todos`/`project`/`brain`（存量 NULL）。默认清单 SQL 排除 `kind='operator'`，精确泳道 `kind = ?`；`worker/service.rs::indexes()` 按 `row.kind` 解析已打标行，NULL 行保留 id 前缀/标题回退。
 
 ## 修复
-- `libsql_store/sessions.rs::row_to_meta` 在插入 `kind` 列后未整体后移字段索引，导致 `get_session` 读串列（快照/summary 等），store bundle 集成测试失败。
+- `turso_store/conversation/sessions.rs::row_to_meta` 在插入 `kind` 列后未整体后移字段索引，导致 `get_session` 读串列（快照/summary 等），store bundle 集成测试失败。
 - `maintenance_dialogs_clear` 集成测试改用 operator 泳道过滤（默认清单现在排除 operator）。
 - 约 80 处测试夹具 `SessionMeta` 初始化补 `kind: None`（store/session/web/tui/local/todos/worker）。
 

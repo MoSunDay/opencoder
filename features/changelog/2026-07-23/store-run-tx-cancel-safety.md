@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # fix(store): run_tx helper replaces libsql::Transaction to eliminate panic-on-drop
 
@@ -13,7 +13,7 @@ libsql 0.9.30 的 `Transaction::Drop` 实现调用 `do_rollback().unwrap()`—�
 
 ## 变更
 ### 新增
-- **`crates/store/src/libsql_store/tx.rs`**（新文件）：`run_tx<F, Fut, T>(conn,
+- **`crates/store/src/turso_store/tx.rs`**（新文件）：`run_tx<F, Fut, T>(conn,
   begin_sql, work)` 纯异步函数，用手动 `BEGIN`/`COMMIT`/`ROLLBACK` 替代
   `libsql::Transaction`。语义：
   - `BEGIN` 前做 best-effort `ROLLBACK`（恢复上一轮取消遗留的悬挂事务，
@@ -25,15 +25,15 @@ libsql 0.9.30 的 `Transaction::Drop` 实现调用 `do_rollback().unwrap()`—�
     仅供 `claim_next_queue`）。
 
 ### 改动
-- **`crates/store/src/libsql_store/inputs.rs`**：5 处 `libsql::Transaction`
+- **`crates/store/src/turso_store/conversation/inputs.rs`**：5 处 `libsql::Transaction`
   → `run_tx`（`admit_input`、`pending_inputs` 内的事务体、`promote_inputs`、
   `claim_next_queue`（`"BEGIN IMMEDIATE"`）、`swap_input_order`）。
-- **`crates/store/src/libsql_store/messages.rs`**：2 处 → `run_tx`
+- **`crates/store/src/turso_store/conversation/messages.rs`**：2 处 → `run_tx`
   （`append_many`、`import`）。
-- **`crates/store/src/libsql_store/events.rs`**：1 处 → `run_tx`
+- **`crates/store/src/turso_store/conversation/events.rs`**：1 处 → `run_tx`
   （`append_many`）。
-- **`crates/store/src/libsql_store/mod.rs`**：声明 `mod tx;` 并 `pub(crate) use`。
-- **`crates/store/src/libsql_store/schema.rs`**：新增 `add_column_if_absent` 辅助函数（检查 `PRAGMA table_info` 跳过已存在列），全部 `ALTER TABLE ... ADD COLUMN` 迁移（v2 `sse_kind`、v3 `handoff_seq`/`handoff_plan`/`skill`）改用此函数，消除 `CREATE TABLE` 已含全量 schema 但 `schema_version` 记录旧版本时的 `duplicate column name` 错误。
+- **`crates/store/src/turso_store/mod.rs`**：声明 `mod tx;` 并 `pub(crate) use`。
+- **`crates/store/src/turso_store/bootstrap/schema.rs`**：新增 `add_column_if_absent` 辅助函数（检查 `PRAGMA table_info` 跳过已存在列），全部 `ALTER TABLE ... ADD COLUMN` 迁移（v2 `sse_kind`、v3 `handoff_seq`/`handoff_plan`/`skill`）改用此函数，消除 `CREATE TABLE` 已含全量 schema 但 `schema_version` 记录旧版本时的 `duplicate column name` 错误。
 
 ### 不变
 - `Store` trait 公共 API 零变更——`run_tx` 为私有辅助函数。

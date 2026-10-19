@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # Bugfix Sweep Wave 3 — Low-Severity Defects + Flaky Test Root-Cause Fix
 
@@ -20,9 +20,9 @@ Commit: (working-tree, pre-initial-commit)
 
 ### store (5 fixes)
 - **`crates/store/src/types.rs`**：`SubagentStatus::parse()` 补 `"unknown"` 臂，修复 Unknown→"unknown"→Running 的 round-trip 不匹配
-- **`crates/store/src/libsql_store/messages.rs`**：`append()` 改为委托 `append_many()`（单条消息入事务），消除 INSERT+SELECT MAX(seq) 的跨进程竞态
-- **`crates/store/src/libsql_store/sessions.rs`**：搜索过滤 LIKE 转义 `%`/`_`/`\` + `ESCAPE '\'`，防用户输入充当通配符
-- **`crates/store/src/libsql_store/sessions.rs`**：畸形分页游标不再静默忽略，改为返回错误
+- **`crates/store/src/turso_store/conversation/messages.rs`**：`append()` 改为委托 `append_many()`（单条消息入事务），消除 INSERT+SELECT MAX(seq) 的跨进程竞态
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：搜索过滤 LIKE 转义 `%`/`_`/`\` + `ESCAPE '\'`，防用户输入充当通配符
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：畸形分页游标不再静默忽略，改为返回错误
 - **`crates/store/src/jsonl.rs`**：`create_dir_all` 错误不再 `.ok()` 吞掉，改为 `.context()?` 传播
 
 ### web (4 fixes)
@@ -64,9 +64,9 @@ Commit: (working-tree, pre-initial-commit)
 - 不影响：Store trait 接缝、ChatStream 抽象、CLI 命令接口
 
 ## Related Docs
-- [agents/llm](../../agents/llm/index.md)
-- [agents/store](../../agents/store/index.md)
-- [agents/web](../../agents/web/index.md)
-- [agents/core](../../agents/core/index.md)
+- [agents/llm](../../../agents/llm/index.md)
+- [agents/store](../../../agents/store/index.md)
+- [agents/web](../../../agents/web/index.md)
+- [agents/core](../../../agents/core/index.md)
 - [既有 wave1 changelog](./bugfix-sweep-wave1-high.md)
 - [既有 wave2 changelog](./bugfix-sweep-wave2-medium.md)

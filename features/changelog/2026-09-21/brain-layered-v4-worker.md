@@ -1,4 +1,4 @@
-Commit: 7177f7987d3c3cdc7ed17864a4ffcf347bf4d182
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 大脑分层能力画布（v4）的节点侧调度与持久化
 
@@ -8,7 +8,7 @@ Commit: 7177f7987d3c3cdc7ed17864a4ffcf347bf4d182
 
 线协议 DTO 落在 `crates/core/src/brain/layered/`（`LayeredRequest`/`LayeredPlan`/`LayeredRun`/`LayeredOperation`/`LayeredContext`/`LayeredDispatchIntent`/`LayeredTerminalEvent` 等）。`LayeredRun.layer` 是已完成层数，正在决策的层恒为 `run.layer + 1`；`run.layer == total_layers` 时用空 `nodes` 的收口上下文完成运行并冻结 `summary`。
 
-持久化新增 `brain_layered_runs`/`brain_layered_operations`/`brain_layered_events` 三张表（`crates/store/src/libsql_store/brain_layered/`）与 `brain_layered`/`commit_brain_layered`/`brain_layered_events` 三个 trait 方法，投影写入按 generation 栅栏且原子；Store 的 `SCHEMA_VERSION` 未由本轮推动（合并线上为 28，来自同批合并的发布提交自身）。
+持久化新增 `brain_layered_runs`/`brain_layered_operations`/`brain_layered_events` 三张表（`crates/store/src/turso_store/execution/brain_layered`）与 `brain_layered`/`commit_brain_layered`/`brain_layered_events` 三个 trait 方法，投影写入按 generation 栅栏且原子；Store 的 `SCHEMA_VERSION` 未由本轮推动（合并线上为 28，来自同批合并的发布提交自身）。
 
 节点侧新增 `crates/worker/src/brain/v4/`（`mod`/`state`/`parent`/`output`/`outbox`/`api`/`run`，与 v3 同构）。根节点持运行投影与 operations，动作面为 `layered_wake`/`layered_dispatch`/`layered_cancel`/`layered_terminal`，ack 与副作用为 `layered_wake_ack`/`layered_authorize`/`layered_receipt`/`layered_dispatch_ack`/`layered_cancel_ack`，root↔child RPC 为 `layered_context`/`layered_block`/`layered_summary`（输出走 `layered_output`）；v4 终态回执注解为 `brain_layered_ack`，durable 状态注解为 `layered_intent`，决策注解为 `layered_decision`。子执行输入约定：根与嵌套输入带 `layered_request`，叶子子输入带 `brain_layered` 对象与 `parent{run_id,operation_id,node_id,layer}` 绑定。
 

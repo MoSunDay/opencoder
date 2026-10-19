@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # store: libsql concurrency hardening (busy_timeout + batch chunking + WAL checkpoint)
 
 **Date:** 2026-08-08
@@ -13,7 +15,7 @@ INSERT transactions caused WAL bloat and prolonged lock holds.
 
 ## Changes
 
-### `crates/store/src/libsql_store/schema.rs`
+### `crates/store/src/turso_store/bootstrap/schema.rs`
 - **`busy_timeout` raised to 30000 ms** (30 s) and moved to first position in
   PRAGMAS so it is active before any lock-acquiring pragma executes.
 - **Added `PRAGMA wal_autocheckpoint=1000`** to trigger passive WAL
@@ -21,12 +23,12 @@ INSERT transactions caused WAL bloat and prolonged lock holds.
 - **Added `checkpoint_wal()`** function — best-effort `PRAGMA
   wal_checkpoint(PASSIVE)` called on open to merge any leftover WAL.
 
-### `crates/store/src/libsql_store/mod.rs`
+### `crates/store/src/turso_store/mod.rs`
 - Both `open()` and `open_memory()` now call `conn.busy_timeout(Duration::from_secs(30))`
   as a belt-and-suspenders complement to the PRAGMA.
 - `open()` performs a best-effort `schema::checkpoint_wal()` after bootstrap.
 
-### `crates/store/src/libsql_store/messages.rs`
+### `crates/store/src/turso_store/conversation/messages.rs`
 - **`BATCH_CHUNK = 200`** constant bounds transaction size for batch INSERTs.
 - `append_many` refactored to chunk messages into batches of 200, each in its
   own transaction (`append_chunk_in_tx`).

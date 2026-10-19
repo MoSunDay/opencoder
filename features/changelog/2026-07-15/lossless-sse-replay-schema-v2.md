@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # 无损 SSE 事件回放（store schema v2 迁移 + SessionEvent 单一真相源）+ TUI t+Tab/置顶按钮
 
 ## 背景
@@ -13,11 +15,11 @@
 - `SessionEvent` 新增**单一真相源**三方法：`sse_kind()`（细粒度事件名字符串，如 `reasoning_delta`/`subagent_child`/`plan_handoff`）、`sse_data()`（与 SSE 线格式一致的 JSON payload）、`coarse_kind()`（12 变体 `EventKind`，仅作 DB `type` 列与回退）。web 与 TUI 都走这三方法，live 广播与 replay 的 kind/payload 完全一致。
 - `run_subagent` 子事件持久化改用 `cev.coarse_kind()` + `cev.sse_data()` + `Some(cev.sse_kind())`，删除旧的 `event_kind_from_str`（合并进 `coarse_kind`/`sse_kind`）。
 
-### `crates/store/src/libsql_store/schema.rs`
+### `crates/store/src/turso_store/bootstrap/schema.rs`
 - `SCHEMA_VERSION` 1 → 2。`bootstrap` 改为：CREATE 全表后读已存版本，仅当 `prev < SCHEMA_VERSION` 时跑 `migrate(prev)`。
 - 新增 `migrate(from)`：v2 执行 `ALTER TABLE session_events ADD COLUMN sse_kind TEXT`（nullable，旧行仍合法）。新库（version None）已含全量 schema 故跳过迁移，仅写版本号——幂等且对存量库安全。
 
-### `crates/store/src/libsql_store/events.rs` + `crates/store/src/types.rs`
+### `crates/store/src/turso_store/conversation/events.rs` + `crates/store/src/types.rs`
 - `SessionEventRecord` 新增 `sse_kind: Option<String>`（`#[serde(default)]`，向后兼容）。`append`/`after` 读写该列。
 
 ### `crates/web/src/handle.rs` + `crates/web/src/api.rs`
@@ -65,7 +67,7 @@
 - 不影响：`Store` trait 签名、CLI 命令、session 运行时语义（仅持久化字段补充）。
 
 ## Related Docs
-- [agents/store](../../agents/store/index.md)
-- [agents/session](../../agents/session/index.md)
-- [agents/web](../../agents/web/index.md)
-- [agents/tui](../../agents/tui/index.md)
+- [agents/store](../../../agents/store/index.md)
+- [agents/session](../../../agents/session/index.md)
+- [agents/web](../../../agents/web/index.md)
+- [agents/tui](../../../agents/tui/index.md)

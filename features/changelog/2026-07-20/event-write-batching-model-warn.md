@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # session_events 写入批量化 O(tokens)→O(turn) + 模型值合理性告警
 
 ## 背景
@@ -24,7 +26,7 @@
 
 - `Store::append_events(&[SessionEventRecord]) -> Result<Vec<i64>>`（`crates/store/src/store.rs`）：
   trait 新方法，单事务批量 INSERT，返回 seq 数组（输入序）。`append_event` 改为默认实现委托它。
-- `events::append_many`（`crates/store/src/libsql_store/events.rs`）：单事务批量 INSERT + 一次
+- `events::append_many`（`crates/store/src/turso_store/conversation/events.rs`）：单事务批量 INSERT + 一次
   `SELECT seq ... ORDER BY seq DESC LIMIT N` 回填，reverse 还原为写入序（emission order）。
 - `LibsqlStore` 实现 dispatch（`mod.rs`）；`bundle.rs` 批量导入改用 `append_events`。
 - `StubStore`（`tui/src/app_helpers.rs`）同步实现 `append_events`。

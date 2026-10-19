@@ -1,4 +1,4 @@
-Commit: bf757d2e8688496f8c1be8fc8926dbd9fb2e3c21
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # brain playbook：双轨调度第二轨——编排图域 + v25 存储 + CRUD/派发 API + 项目执行器
 
@@ -47,7 +47,7 @@ situation digest 铸出并缓存；两份落地端同时接入：控制面把剧
   created_at)`；fresh DB 走 bootstrap CREATE，旧库走 `from < 25` 幂等迁移。
 - `Store` trait 新增 `save/get/list/delete_brain_playbook` 与
   `latest_brain_playbook_for`（默认实现 bail，非 libsql 后端明确不支持）；
-  libsql 实现委托 `libsql_store/brain_playbooks.rs` 自由函数；mod.rs 的
+  libsql 实现委托 `turso_store/brain_playbooks.rs` 自由函数；mod.rs 的
   `impl Store for LibsqlStore` 整块迁至 `impl_store.rs`（Rust 不允许同 trait
   多 impl 块，E0119），mod.rs 收敛为 70 行结构定义。
 - `ProjectExecutorKind::Playbook`（`executor_ref` 引用剧本，内联 spec 一律

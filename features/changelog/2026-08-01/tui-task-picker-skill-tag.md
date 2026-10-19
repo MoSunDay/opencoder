@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # feat(tui): /task 选择器展示 session 激活的 skill 标签
 
@@ -10,7 +10,7 @@ store 的 `list_sessions` 此前不返回 `sessions.skill` 列，TUI 无法渲�
 
 ## 变更
 
-### store 面：list_sessions 携带 skill body（`crates/store/src/libsql_store/sessions.rs`、`types.rs`）
+### store 面：list_sessions 携带 skill body（`crates/store/src/turso_store/conversation/sessions.rs`、`types.rs`）
 
 - **`sessions.rs`**：`list_sessions` 的 SELECT 追加 `s.skill` 列（`subagent_cancelled`
   子查询后），行映射 `skill: r.get::<Option<String>>(9)?`。

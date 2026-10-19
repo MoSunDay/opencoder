@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # Bugfix Sweep Wave 1 — 7 High-Severity Defects
 
@@ -20,7 +20,7 @@ Commit: (working-tree, pre-initial-commit)
 - **`crates/session/src/compaction.rs`**：`prev_skip` 改用 `session.summary_seq.or(session.handoff_seq).unwrap_or(0)`；SessionPatch 加 `clear_handoff: true`。
 - **`crates/session/src/lib.rs`**：`after_compaction` 清 `handoff_seq`/`handoff_plan`。新增 3 个单元测试。
 - **`crates/store/src/types.rs`**：`SessionPatch` 加 `clear_handoff: bool` 字段（`is_false` skip）。
-- **`crates/store/src/libsql_store/sessions.rs`**：`update()` 处理 `clear_handoff` → `handoff_seq = NULL, handoff_plan = NULL`。
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：`update()` 处理 `clear_handoff` → `handoff_seq = NULL, handoff_plan = NULL`。
 
 ### H5 — read_bundle 无上限分配（OOM/DoS）
 - **`crates/store/src/bundle.rs`**：分配前校验 `len <= 256 MiB`，超限 `bail!`。新增测试 `rejects_oversized_payload`。
@@ -56,8 +56,8 @@ Commit: (working-tree, pre-initial-commit)
 - H7：SSE 事件流不再因相同 payload 丢失/重复事件
 
 ## Related Docs
-- [agents/session](../../agents/session/index.md)
-- [agents/llm](../../agents/llm/index.md)
-- [agents/web](../../agents/web/index.md)
-- [agents/store](../../agents/store/index.md)
-- [agents/core](../../agents/core/index.md)
+- [agents/session](../../../agents/session/index.md)
+- [agents/llm](../../../agents/llm/index.md)
+- [agents/web](../../../agents/web/index.md)
+- [agents/store](../../../agents/store/index.md)
+- [agents/core](../../../agents/core/index.md)

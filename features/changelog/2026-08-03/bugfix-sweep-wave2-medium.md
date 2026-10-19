@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # Bugfix Sweep Wave 2 — 24 Medium-Severity Defects
 
@@ -18,7 +18,7 @@ Commit: (working-tree, pre-initial-commit)
 - **`crates/core/src/config/merge.rs`**：provider headers 改为 extend 合并（Bug4）
 
 ### store（2 项）
-- **`crates/store/src/libsql_store/events.rs`**：`append_events` 校验批量内 session_id 一致（Bug1）
+- **`crates/store/src/turso_store/conversation/events.rs`**：`append_events` 校验批量内 session_id 一致（Bug1）
 - **`crates/store/src/import.rs`**：jsonl 导入 append 失败时回滚 session 行（Bug2）
 - **`crates/store/tests/store_bugfix_events_import.rs`**（新）：两个集成测试
 
@@ -69,8 +69,8 @@ Commit: (working-tree, pre-initial-commit)
 - cli：所有静默错误行为改为显式报错；workdir hash 稳定
 
 ## Related Docs
-- [agents/session](../../agents/session/index.md)
-- [agents/llm](../../agents/llm/index.md)
-- [agents/web](../../agents/web/index.md)
-- [agents/core](../../agents/core/index.md)
-- [agents/store](../../agents/store/index.md)
+- [agents/session](../../../agents/session/index.md)
+- [agents/llm](../../../agents/llm/index.md)
+- [agents/web](../../../agents/web/index.md)
+- [agents/core](../../../agents/core/index.md)
+- [agents/store](../../../agents/store/index.md)

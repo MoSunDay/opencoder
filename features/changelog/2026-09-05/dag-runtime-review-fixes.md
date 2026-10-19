@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # DAG 节点执行运行时：逻辑评审缺陷修复（并发双发 / busy guard / 超时清理 / 取消落盘 / 终态原子性）
 
 日期：2026-09-05 ｜ Commit: 80020b9
@@ -14,7 +16,7 @@
 
 ### #2 claim busy guard 漏 cancelling（中）
 
-- `crates/store/src/libsql_store/dag.rs::claim_next`：单活跃检查从 `status = 'running'` 补为 `status IN ('running','cancelling')`（与移植源 `node_tasks.rs::claim_next` 一致），取消收尾窗口内节点不可再 claim，恢复单活跃不变量。
+- `crates/store/src/turso_store/execution/dag.rs::claim_next`：单活跃检查从 `status = 'running'` 补为 `status IN ('running','cancelling')`（与移植源 `node_tasks.rs::claim_next` 一致），取消收尾窗口内节点不可再 claim，恢复单活跃不变量。
 
 ### #3 双重 timeout 吞掉 runc 清理（中）
 

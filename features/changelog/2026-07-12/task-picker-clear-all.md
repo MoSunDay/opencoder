@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # `/task` 列表「一键清空所有任务记录」+ 二次确认
 
@@ -10,7 +10,7 @@ Commit: (working-tree, pre-initial-commit)
 
 ### 1. Store 层新增批量删除接缝
 - `Store` trait 新增 `clear_other_sessions(&self, keep_session_id: &str) -> Result<u64>`（`crates/store/src/store.rs`）——删除除当前活动会话外的所有 session，返回删除条数。
-- libsql 实现 `sessions::clear_others`（`crates/store/src/libsql_store/sessions.rs`）：单条 `DELETE FROM sessions WHERE id != ?`；子表（messages / session_inputs / session_events / subagent_tasks）由 schema 的 `ON DELETE CASCADE` 外键自动级联清除，无需逐表删。
+- libsql 实现 `sessions::clear_others`（`crates/store/src/turso_store/conversation/sessions.rs`）：单条 `DELETE FROM sessions WHERE id != ?`；子表（messages / session_inputs / session_events / subagent_tasks）由 schema 的 `ON DELETE CASCADE` 外键自动级联清除，无需逐表删。
 
 ### 2. `TaskPicker` 加 destructive 行 + 两步确认
 - `TaskPicker` 新增字段 `current_session_id`（构造时由 app 传入，始终豁免删除并在列表标 `(current)`）与 `confirm_clear`（两步确认 guard）。
@@ -57,5 +57,5 @@ Commit: (working-tree, pre-initial-commit)
 - **不影响** CLI / Web / session / llm —— 仅 store trait 增一方法 + tui `/task` picker。
 
 ## Related Docs
-- [agents/tui](../../agents/tui/index.md)（已同步：`/task` picker 新增 clear-all 行 + 两步确认）
-- [agents/store](../../agents/store/index.md)（已同步：`Store::clear_other_sessions` 接缝）
+- [agents/tui](../../../agents/tui/index.md)（已同步：`/task` picker 新增 clear-all 行 + 两步确认）
+- [agents/store](../../../agents/store/index.md)（已同步：`Store::clear_other_sessions` 接缝）

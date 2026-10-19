@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # SessionPatch 字段+清除冲突前置拒绝 (Bug #15)
 
@@ -10,7 +10,7 @@ Commit: (working-tree, pre-initial-commit)
 
 ## 变更
 ### 前置冲突校验
-- **`crates/store/src/libsql_store/sessions.rs`**：
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：
   - 新增纯函数 `validate_no_field_clear_conflict(&SessionPatch) -> Result<()>`，
     在 `update()` 入口最先调用。三族互斥规则：
     - `clear_summary` 与 `summary` / `summary_seq` / `summary_images` 互斥
@@ -32,10 +32,10 @@ Commit: (working-tree, pre-initial-commit)
 ## 测试覆盖
 | 层级 | 测试名 | 文件 | 断言要点 |
 |------|--------|------|----------|
-| unit | `non_conflicting_patch_is_accepted` | `libsql_store/sessions.rs` | 合法组合（跨列、单独 clear、空 patch）均 `Ok` |
-| unit | `summary_fields_with_clear_summary_are_rejected` | `libsql_store/sessions.rs` | summary/summary_seq/summary_images + clear_summary 均 `Err` |
-| unit | `handoff_fields_with_clear_handoff_are_rejected` | `libsql_store/sessions.rs` | handoff_plan/handoff_seq + clear_handoff 均 `Err` |
-| unit | `skill_with_clear_skill_is_rejected` | `libsql_store/sessions.rs` | skill + clear_skill `Err` |
+| unit | `non_conflicting_patch_is_accepted` | `turso_store/conversation/sessions.rs` | 合法组合（跨列、单独 clear、空 patch）均 `Ok` |
+| unit | `summary_fields_with_clear_summary_are_rejected` | `turso_store/conversation/sessions.rs` | summary/summary_seq/summary_images + clear_summary 均 `Err` |
+| unit | `handoff_fields_with_clear_handoff_are_rejected` | `turso_store/conversation/sessions.rs` | handoff_plan/handoff_seq + clear_handoff 均 `Err` |
+| unit | `skill_with_clear_skill_is_rejected` | `turso_store/conversation/sessions.rs` | skill + clear_skill `Err` |
 | integration | `field_and_clear_combinations_are_rejected` | `tests/session_patch_conflict.rs` | 经 `update_session` 公开 API，6 个冲突对均 `Err` |
 | integration | `unrelated_field_and_clear_still_succeeds` | `tests/session_patch_conflict.rs` | 跨列 set+clear 成功，且字段确实写入 |
 | integration | `clear_flag_alone_succeeds` | `tests/session_patch_conflict.rs` | 单独 clear flag 成功 |

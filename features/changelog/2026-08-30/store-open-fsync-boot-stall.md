@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # store 冷启动 fsync 风暴修复：pragma 顺序不变量 + bootstrap 单事务 + 启动阶段计时
 
 ## 背景
@@ -10,16 +12,16 @@
 
 ## 变更
 
-### `crates/store/src/libsql_store/schema.rs`
+### `crates/store/src/turso_store/bootstrap/schema.rs`
 - **PRAGMA 顺序不变量**：`busy_timeout` 第一，`synchronous=NORMAL` 提到 `journal_mode=WAL` 之前，WAL 切换 fsync 从此落在 NORMAL 下；附顺序说明注释。
 - **bootstrap 单事务化**：薄壳 `run_tx(conn, "BEGIN IMMEDIATE", bootstrap_tx)`，17 次隐式提交 → 1 次；任一步失败整体回滚（migrate 原子性增强）；`BEGIN IMMEDIATE` + 已生效 busy_timeout 使并发打开在写锁上排队。语句顺序原样保留（迁移后索引批依赖 migrate 产出的列）。
 - `write_version`（无事务 DELETE+INSERT 体）从 `set_version` 拆出；`set_version` 保留原事务语义供既有单测。
 - 新增单测 `pragma_order_synchronous_precedes_journal_wal`：断言 busy_timeout < synchronous < journal_mode 顺序（生效值断言抓不住本 bug——顺序错时最终值仍是 NORMAL）。
 
-### `crates/store/src/libsql_store/mod.rs`
+### `crates/store/src/turso_store/mod.rs`
 - `LibsqlStore::open` 四阶段计时（build/pragmas/bootstrap/checkpoint），info 汇总 + 任一阶段 >1s 发 `WARN slow store open`（含 slowest_stage/slowest_ms）。TUI/run/ts/web/daemon 全部入口自动受益。
 
-### `crates/store/src/libsql_store/mod.rs`（风暴复测追加）
+### `crates/store/src/turso_store/mod.rs`（风暴复测追加）
 - **fresh 建库跳过 bootstrap 后的 TRUNCATE checkpoint**（`existed` 判定）：同风暴窗口实测 checkpoint 段吃掉 46s/82s，是残留第一大户；WAL 本就是真相源，`wal_autocheckpoint` 会后续收敛，跳过不影响正确性（重开幂等/integrity_check 契约覆盖该路径）。该路径不再产生 checkpoint fsync。
 
 ### `crates/tui/src/`（首帧与启动分段观测）
@@ -46,7 +48,7 @@
 
 | 层 | 契约 | 位置 |
 |---|---|---|
-| 单元 | pragma 顺序不变量（synchronous 先于 WAL） | `crates/store/src/libsql_store/schema.rs::tests` |
+| 单元 | pragma 顺序不变量（synchronous 先于 WAL） | `crates/store/src/turso_store/bootstrap/schema.rs::tests` |
 | 单元 | set_version 单行原子替换（既有，未动） | 同上 |
 | 集成 | open 后 synchronous=1、journal_mode=wal | `crates/store/tests/schema_bootstrap.rs` |
 | 集成 | fresh open → 建会话 → 重开×2 幂等：会话存活、version 单行、integrity_check ok | 同上 |

@@ -1,4 +1,4 @@
-Commit: (working-tree, team 功能与 daemon→server 拆分等并行迭代共享工作树，随收口会话统一落盘)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # opencoder-team：多 agent 组队讨论——队长/组员 node 多轮对齐 + 共享目录权威状态 + Web 组队/话题面板
 
@@ -20,7 +20,7 @@ Commit: (working-tree, team 功能与 daemon→server 拆分等并行迭代共�
 ## 落地清单
 
 - **core**：`Config.team_root`（默认 `<data_root>/team`，env `OPENCODER_TEAM_ROOT`）、`team_max_turns`（8）、`team_max_sub_turns`（3），env `OPENCODER_TEAM_MAX_TURNS`/`OPENCODER_TEAM_MAX_SUB_TURNS`（非法值 warn 忽略）。
-- **store（schema v16→v17）**：`team_topic_runs(topic_id, node_id FK→nodes CASCADE, status executing|finished, created_at, PK(topic_id,node_id))` + topic 索引；`Store` trait 增 `upsert_team_topic_run`（冲突臂只刷 status，**created_at 首插冻结**）/`finish_team_topic_run`（topic 全行翻 finished，幂等）/`list_team_topic_runs`（`created_at, rowid` 定序——ULID 非单调不可排序）三方法（默认 bail，libsql 完整实现）；新文件 `team_types.rs`、`libsql_store/team_runs.rs`（DDL 由域模块持有、schema.rs 注册进 bootstrap 批与 v17 迁移）。
+- **store（schema v16→v17）**：`team_topic_runs(topic_id, node_id FK→nodes CASCADE, status executing|finished, created_at, PK(topic_id,node_id))` + topic 索引；`Store` trait 增 `upsert_team_topic_run`（冲突臂只刷 status，**created_at 首插冻结**）/`finish_team_topic_run`（topic 全行翻 finished，幂等）/`list_team_topic_runs`（`created_at, rowid` 定序——ULID 非单调不可排序）三方法（默认 bail，libsql 完整实现）；新文件 `team_types.rs`、`turso_store/execution/team_runs.rs`（DDL 由域模块持有、schema.rs 注册进 bootstrap 批与 v17 迁移）。
 - **新 crate `crates/team`**（纯函数式，13 文件）：`layout.rs`（校验+路径构造）、`types.rs`（元信息 DTO+容错 JSON 解析）、`fs_store.rs`（全 crate 唯一磁盘 IO：tmp+rename/尺寸界/坏文件容忍/整树读取）、`prompts.rs`（plan/answer/alignment/summary/closing/profile/correction 七提示词）、`decide.rs`（ask_json 纠错管线+validator+能力表/轮摘要注入）、`dispatcher.rs`（trait+Node/Mock）、`cursor.rs`（磁盘游标）、`runtime.rs`+`runtime/stages.rs`（`start_topic` 校验成员注册→落 executing 元信息；`run_topic` 状态机 plan→sub_turn 作答/歧义追答→summary→closing）、`terminal.rs`（唯一终态迁移：先写终态元信息再翻台账，两写幂等）、`profile.rs`（`profile_team` 逐成员画像，失败仅 warn）、`config.rs`（`TeamRunConfig`+`CancelToken`）。
 - **共享目录布局**：`<team_root>/<team>/team.json`（团队元信息+成员能力画像）、`<team>/<topic_id>/team.json`（话题元信息，文件名按用户指定；状态机+轮次账本+final_summary）、`<topic>/<turn>/plan.json`、`<turn>/<sub>/<member>/result.json`、`<sub>/summary.json`。
 - **web**：新文件 `team_state.rs`（`TeamWebState`：run cfg+可注入 dispatcher+hub；production 启动加载 Config 失败降级默认、未显式配置的 team_root 重定到 workdir `data_dir` 下、启动建根目录）、`team_hub.rs`（话题运行时注册表+`spawn_topic_runtime`；register 先取消遗留 token）、`api_teams.rs`（团队半区）、`api_teams_topics.rs`（话题半区）；`AppState.team` 挂载。路由：`GET/POST /api/teams`、`PATCH /api/teams/:name`（改队长）、`POST /api/teams/:name/members`（增删，队长不可移出）、`POST /api/teams/:name/profile`（202 后台画像）、`GET/POST /api/teams/:name/topics`（创建 201+spawn）、`GET /api/teams/:name/topics/:tid`（整棵讨论树）、`POST .../cancel`（幂等双路径）、`POST .../resume`（202；executing 孤儿/finished(error) 可续，其余或已在跑 409）、`GET /api/topics?team=`；全部自动受 HMAC 签名保护。

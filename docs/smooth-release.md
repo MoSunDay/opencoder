@@ -1,4 +1,4 @@
-Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 平滑发布
 
@@ -95,7 +95,7 @@ scripts/platform/deploy.sh --maintenance --bundle /srv/releases/opencoder-native
 scripts/platform/deploy.sh --rollback --wait-seconds 600
 ```
 
-迁移新旧配置分开放置：可在 deployment 配置中指定绝对路径 `agent_config`、`server_config`，指向本次维护的候选配置 JSON；DAG 段是完整的新声明，其余服务设置在原配置基础上覆盖。预检固定摘要和私有快照，停止旧服务并完成备份后才安装，续跑读取同一快照。停服前必须已有完整的候选配置：Agent 的 `dag.rootfs_dir`、`dag.binary_dir`、`dag.workspace_dir`、`agent.agents_dir` 都是绝对路径；Server 显式配置三个资源目录，启用各自独立端口的只读 NFS。既有 Agent 客户端目录必须已经挂载为可读的只读 NFS。原生二进制目录和工作区目录在预检时保存挂载计划；停止旧服务并完成备份后，先升级资源服务，再建立这两个只读挂载并核验实际资源。镜像中的本版本两个 runner 必须能够启动。本维护流程管理 Linux/libsql 本机服务；缺失配置、旧 DAG 配置和在线的外部节点会在停服前拒绝。外部节点须先冻结、结束或经授权取消任务并单独停服，保存服务和进程恢复信息；不删除离线节点注册及其执行历史。排空依据本机节点的冻结回复、实际运行数、所属进程数和每个保留 Runtime 的最终库存，不将历史空闲会话等同于正在运行的任务。等待期间外部节点重新接入会继续阻止停服。
+迁移新旧配置分开放置：可在 deployment 配置中指定绝对路径 `agent_config`、`server_config`，指向本次维护的候选配置 JSON；DAG 段是完整的新声明，其余服务设置在原配置基础上覆盖。预检固定摘要和私有快照，停止旧服务并完成备份后才安装，续跑读取同一快照。停服前必须已有完整的候选配置：Agent 的 `dag.rootfs_dir`、`dag.binary_dir`、`dag.workspace_dir`、`agent.agents_dir` 都是绝对路径；Server 显式配置三个资源目录，启用各自独立端口的只读 NFS。既有 Agent 客户端目录必须已经挂载为可读的只读 NFS。原生二进制目录和工作区目录在预检时保存挂载计划；停止旧服务并完成备份后，先升级资源服务，再建立这两个只读挂载并核验实际资源。镜像中的本版本两个 runner 必须能够启动。上述应用 schema 迁移管理 Linux 本机服务；缺失配置、旧 DAG 配置和在线的外部节点会在停服前拒绝。存储引擎切换的本机范围见下文。外部节点须先冻结、结束或经授权取消任务并单独停服，保存服务和进程恢复信息；不删除离线节点注册及其执行历史。排空依据本机节点的冻结回复、实际运行数、所属进程数和每个保留 Runtime 的最终库存，不将历史空闲会话等同于正在运行的任务。等待期间外部节点重新接入会继续阻止停服。
 
 容量预检按实际目标文件系统计算新镜像、共享数据的停服备份、服务与配置副本、资源数据及两个发布包副本，并预留数据库迁移和安全余量。镜像冻结后、关闭入口前再次检查；已有副本和中断留下的文件占用当前可用空间。容量不足时保留旧服务和入口，不开始停服。
 
@@ -192,3 +192,11 @@ Runtime 使用私有挂载时，宿主看到的 `workspace` 可能只是空挂�
 加入 `--signal` 使用 Server 信号发布；两版均支持信号时，再加入 `--signal-roundtrip`，在新旧长任务仍运行时执行发布、回滚、再发布。验收脚本应由独立 systemd 作业运行，避免终端退出中断观察。独立信号失败演练入口为 `scripts/acceptance/signal_release/main.py --bin-dir <已构建二进制目录> --nginx <nginx路径> --rootfs <配套原生镜像>`，验证真实 USR1/USR2、重复信号、失败回执和 Server 继续服务。
 
 TODO 过程文件由专用 `opencoder-todo-resources.service` 提供只读 NFS（端口 2053、管理端口 18085），不升级或重启既有资源服务。首次滚动发布安装服务并绑定 `<state_dir>/exports/todos`；先发布上传关闭的兼容版本，再发布完整页面，最后用 `--todo-uploads enable` 开放上传。持久化的最低回滚能力要求阻止退回没有文件保护的旧 Server；回滚关闭上传并保留读取与文件。健康检查核验实际进程摘要、导出根及端口。备份覆盖实际文件根、`todo-storage.json`、服务安装与上传策略记录，备份期间暂停文件操作。详见 [TODO 任务文件](project-files.md)。
+
+## Turso 引擎切换
+
+Turso 发布使用数据格式 11 和 `storage_engine: "turso"`，应用 schema 仍为 39。它与 libsql 发布必须通过 `--maintenance` 切换，禁止同文件混用两个引擎。引擎切换限定本机 Server、Host、资源服务和登记的 Runtime；本机任务自然结束后才停止服务，远端节点不接收冻结或升级指令。公共入口在维护期间返回 503。
+
+控制器在停服前为历史 Runtime 准备新的程序关联、私有配置与冻结镜像，旧包、旧镜像、执行 ID、目录和输入保持原值。`runtime_program` 独立记录实际运行程序；新程序与镜像内运行器必须具有相同构建信息。共享数据和历史 Runtime 数据库分别保存停止写入后的备份。
+
+维护完成前按持久阶段续跑同一候选包。开放写入前可通过原维护记录回退程序和路由，先用 Turso 清空已停止库的 WAL，不覆盖数据库；开放写入后只能发布修复版本。原生在线检查使用 `opencoder-cli storage query`，快照使用 `storage backup`；原有 Python 维护事务通过 `storage serve` 保持一条原生连接。普通发布仍保留既有 Runtime，不使用此停服路径。

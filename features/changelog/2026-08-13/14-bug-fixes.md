@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 14 项缺陷修复：编译阻断、用户可见 Bug、健壮性与并发问题
 
@@ -22,8 +22,8 @@ Commit: (working-tree, pre-initial-commit)
 - **`crates/web/src/handle.rs`**：Bug 8 — `release_events_subscriber` 添加 `blocking_lock()` 回退分支，在无 tokio runtime（如 Drop 上下文）时仍执行订阅者递减。
 
 ### 存储 / 持久化
-- **`crates/store/src/libsql_store/inputs.rs`**：Bug 10 — 事务改为 `BEGIN IMMEDIATE`，减少 SQLite 写锁竞争。
-- **`crates/store/src/libsql_store/schema.rs`**：Bug 11 — `set_version` 的 DELETE+INSERT 包裹在 `run_tx` 事务中，防止崩溃间残留空 `schema_version`。
+- **`crates/store/src/turso_store/conversation/inputs.rs`**：Bug 10 — 事务改为 `BEGIN IMMEDIATE`，减少 SQLite 写锁竞争。
+- **`crates/store/src/turso_store/bootstrap/schema.rs`**：Bug 11 — `set_version` 的 DELETE+INSERT 包裹在 `run_tx` 事务中，防止崩溃间残留空 `schema_version`。
 
 ### LLM 客户端
 - **`crates/llm/src/client.rs`**：Bug 4 — `parse_usage` 的 total 计算改用 `input_tokens.saturating_add(output_tokens)`，防止 u64 溢出回绕。新增 `parse_usage_total_saturates_on_overflow` 测试。
@@ -46,7 +46,7 @@ Commit: (working-tree, pre-initial-commit)
 | Bug 3: invalid UTF-8 剥离后解码推进 | `strips_leading_invalid_utf8_and_advances` | client/src/sse.rs |
 | Bug 4: total_tokens 溢出饱和 | `parse_usage_total_saturates_on_overflow` | llm/src/client_tests.rs |
 | Bug 12: --session/--continue 互斥 | cli_parse 集成测试（27 passed） | cli/tests/cli_parse.rs |
-| Bug 11: set_version 事务原子替换单行 | `set_version_replaces_single_row_atomically` | store/src/libsql_store/schema.rs |
+| Bug 11: set_version 事务原子替换单行 | `set_version_replaces_single_row_atomically` | store/src/turso_store/bootstrap/schema.rs |
 | Bug 13: turn-cancel 清零 doom 签名（差分回归） | `turn_cancel_clears_doom_signatures` | session/tests/doom_clear_on_cancel.rs |
 
 - 全量回归：core 167 / store 88（+1 Bug 11）/ llm 119 / client 9 / web 81 / cli 91 / session(runner::) 48 + doom_clear_on_cancel 1（+1 Bug 13）/ tui(lib) 1238 → 共 1842 passed, 0 failed
@@ -58,5 +58,5 @@ Commit: (working-tree, pre-initial-commit)
 - **不影响**：Store trait 接口、ChatStream trait、session 主循环语义
 
 ## Related Docs
-- [agents/session](../../agents/session/index.md) — drain 语义、doom-loop 守卫
-- [agents/web](../../agents/web/index.md) — SSE 会话管理
+- [agents/session](../../../agents/session/index.md) — drain 语义、doom-loop 守卫
+- [agents/web](../../../agents/web/index.md) — SSE 会话管理

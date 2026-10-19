@@ -1,4 +1,4 @@
-Commit: 625e2ea, 5686b15
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 17-bug 审计计划落地：14 项修复 + 1 项非 bug + 2 项顺带 clippy（#13 按计划 deferred）
 
@@ -25,9 +25,9 @@ Commit: 625e2ea, 5686b15
 - **`crates/llm/src/client.rs`**：`extract_reasoning(delta)` 提到 if/else 之前（此前 thinking 块内 text 通道的 reasoning 被丢弃）；text 块缺 `text` 字段时 `.or_else(content)` 回退；thinking 臂加 `if !emitted_reasoning` 守卫防重复；`get_tokens` 返回 `Option<u64>`（`as_u64` 失败回退 `as_f64`，覆盖 GLM 等返回浮点 usage 的后端——prompt/completion/total/cached_tokens/first_u64 全路径）；429 Retry-After 解析失败回退 HTTP-date（新模块 `src/http_date.rs`，RFC 7231 GMT 解析）。
 
 ### store 契约加固（#14/#15/#16）
-- **`crates/store/src/libsql_store/messages.rs`**：`append_many` 补 Non-atomic 文档注释（多 batch 间无事务包裹，崩溃可留部分写入——现状记录，非行为变更）。
-- **`crates/store/src/libsql_store/sessions.rs`**：`update()` 加 6 组互斥校验——summary/summary_seq/summary_images↔clear_summary、handoff_plan/handoff_seq↔clear_handoff、skill↔clear_skill，同 patch 同时设字段与清标志即 `Err`。
-- **`crates/store/src/libsql_store/subagent_tasks.rs`**：`complete`/`cancel` 检查 rows==0 时 `bail!("subagent_task not found")`——late-complete 幂等覆盖改为显式报错（终态不可覆写）；对应用例断言改 `is_err()`。
+- **`crates/store/src/turso_store/conversation/messages.rs`**：`append_many` 补 Non-atomic 文档注释（多 batch 间无事务包裹，崩溃可留部分写入——现状记录，非行为变更）。
+- **`crates/store/src/turso_store/conversation/sessions.rs`**：`update()` 加 6 组互斥校验——summary/summary_seq/summary_images↔clear_summary、handoff_plan/handoff_seq↔clear_handoff、skill↔clear_skill，同 patch 同时设字段与清标志即 `Err`。
+- **`crates/store/src/turso_store/conversation/subagent_tasks.rs`**：`complete`/`cancel` 检查 rows==0 时 `bail!("subagent_task not found")`——late-complete 幂等覆盖改为显式报错（终态不可覆写）；对应用例断言改 `is_err()`。
 
 ## 测试覆盖
 
@@ -55,7 +55,7 @@ Commit: 625e2ea, 5686b15
 | #15 仅 clear 标志放行 | `clear_flag_alone_succeeds` | store/tests/session_patch_conflict.rs |
 | #14 多 batch append 全量落盘 | `multi_batch_append_persists_all_in_order` | store/tests/append_many_chunking.rs |
 | #14 单消息 append 单 seq | `single_message_append_returns_one_seq` | store/tests/append_many_chunking.rs |
-| #16 late-complete 报错（改断言） | `complete_does_not_overwrite_completed_terminal_state` | store/src/libsql_store/subagent_tasks.rs |
+| #16 late-complete 报错（改断言） | `complete_does_not_overwrite_completed_terminal_state` | store/src/turso_store/conversation/subagent_tasks.rs |
 
 - 全量回归（当次实跑，`cargo test --workspace`）：**2464 passed / 0 failed**（152 套件全 ok）。分 crate：core 169（08-13 基线 167）/ llm 124（+5，恰为本轮新测试）/ store 93（+5，恰为本轮新测试）/ web 85（81 基线 +3 本轮）/ cli 91（持平）/ client 9（持平）/ session、tui 无下降。无任何 crate 低于上轮记录。
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
@@ -68,5 +68,5 @@ Commit: 625e2ea, 5686b15
 - **已知遗留**：#13（悬空事务）按计划 deferred；`append_many` 跨 batch 非原子性以文档记录，待后续事务包裹
 
 ## Related Docs
-- [agents/session](../../agents/session/index.md) — bash_guard 命令替换语义（本轮已更新）
-- [agents/store](../../agents/store/index.md) — update_session 互斥校验（本轮已更新）
+- [agents/session](../../../agents/session/index.md) — bash_guard 命令替换语义（本轮已更新）
+- [agents/store](../../../agents/store/index.md) — update_session 互斥校验（本轮已更新）

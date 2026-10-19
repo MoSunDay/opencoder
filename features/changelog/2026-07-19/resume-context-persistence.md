@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # Resume 上下文持久化：plan→act 移交、技能、subagent 状态跨重启保留
 
 ## 背景
@@ -11,7 +13,7 @@
 
 ## 变更
 
-### Schema v3 迁移（`crates/store/src/libsql_store/schema.rs`）
+### Schema v3 迁移（`crates/store/src/turso_store/bootstrap/schema.rs`）
 
 `SCHEMA_VERSION` 2→3。`CREATE_SESSIONS` 新增三列 `handoff_seq INTEGER`、`handoff_plan TEXT`、`skill TEXT`（均 nullable）。`migrate` 增加 v3 分支：对既存库 `ALTER TABLE sessions ADD COLUMN ...`。迁移是纯加列、nullable、向后兼容。
 
@@ -19,7 +21,7 @@
 
 `SessionMeta` 与 `SessionPatch` 各加 `handoff_seq: Option<i64>`、`handoff_plan: Option<String>`、`skill: Option<String>` 三字段。全仓库 `SessionMeta` 字面量（web/api.rs、cli/run.rs 含 fork+3 测试、cli/session_cmd.rs、tui/web/session/store 测试）同步补齐。
 
-### Store CRUD（`crates/store/src/libsql_store/sessions.rs`）
+### Store CRUD（`crates/store/src/turso_store/conversation/sessions.rs`）
 
 `INSERT` / `SELECT` / update handler / `row_to_meta` 四处扩展三列读写。
 

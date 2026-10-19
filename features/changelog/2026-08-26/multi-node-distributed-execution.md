@@ -1,4 +1,4 @@
-Commit: (working-tree, multi-node distributed execution)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 多节点分布式执行（server ↔ node）
 
@@ -16,7 +16,7 @@ Commit: (working-tree, multi-node distributed execution)
 
 - 新表 `nodes`（name UNIQUE，同名重注册 ON CONFLICT 顶替旧行且**保留原 id**，旧任务外键不断链）与 `node_tasks`（status/cancel_requested/created_at/claimed_at/finished_at + `idx_node_tasks_node_status`）。
 - `node_state.rs::transition_allowed` 纯函数状态机格：pending→running→done|error|cancelled；running/pending 经 cancelling 收束；终态冻结。
-- Store trait 新增 11 个 node 方法（全部带 default impl，测试 fake 零破坏），实现在 `libsql_store/nodes.rs`：
+- Store trait 新增 11 个 node 方法（全部带 default impl，测试 fake 零破坏），实现在 `turso_store/execution/nodes.rs`：
   - `claim_next_node_task`：BEGIN IMMEDIATE 内 单活跃守卫 → 最老 pending → 条件 UPDATE CAS（禁 RETURNING）；FIFO 以 `(created_at, rowid)` 定序——同毫秒 ULID 无单调性不可作 tiebreak（实测修复过一个该缺陷）。
   - `heartbeat_node`：touch + 取回 `cancelling AND cancel_requested=1` 任务 id 清单（取消指令一拍送达）。
   - `dispatch_node_task`：单事务内建 pending 任务 + 合成 session（task_type="node"）。
@@ -79,7 +79,7 @@ v1 每节点串行单活跃任务（busy 时其余留 FIFO 队列）；并行化
 
 ### 落点与语义
 - **store**：新增 `Store::converge_lost_node_tasks(now_ms, stale_ms)`（实现
-  `libsql_store/nodes.rs::converge_lost`）。单事务（BEGIN IMMEDIATE）内：
+  `turso_store/execution/nodes.rs::converge_lost`）。单事务（BEGIN IMMEDIATE）内：
   JOIN 选取「所属节点心跳距今 **严格大于** stale_ms（与展示层 `compute_status`
   排他边界一致）且任务状态 ∈ running/cancelling」的僵尸行 → 条件 UPDATE 置
   `error("node lost")` + 盖 `finished_at`（无 RETURNING，同 claim 约定）→ 释放

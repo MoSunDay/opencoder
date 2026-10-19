@@ -1,4 +1,4 @@
-Commit: 8ca4d0e（统一收口落库，348 文件含 brain 全量；尾笔 66a3247 补最后一笔 changelog）
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # opencoder-brain：项目目标/能力库——录入、语义向量检索与 Web「项目目标」面板
 
@@ -55,7 +55,7 @@ Commit: 8ca4d0e（统一收口落库，348 文件含 brain 全量；尾笔 66a32
 - `cargo test -p opencoder-core -p opencoder-llm -p opencoder-store -p opencoder-brain`：全绿（llm 165 例、store 184 例、brain 18 例、core 全过）；`cargo test -p opencoder-web`：30 suite / 132 例全绿。
 - `npm test`（spa）：298/298 全绿；`scripts/check-spa-drift.sh`：无漂移（本轮未改 SPA 源码，dist 不需重建）。
 - `cargo test --workspace`：仍被并行在途批次阻塞——本轮实测两处**实时编译错误**：`opencoder-dag-runtime`（`root_path_value` 未定义）、`opencoder-session`（`opencode_core` 未解析，agent 批次重命名中途），（再次重试又命中 `opencoder-session` 测试目标：`OVERRIDE_LOCK`/`HOME_LOCK`/`opencode_llm` 未解析）——阻塞点随并行编辑进度移动，始终不在 brain 改动面（core/llm/store/brain/web 五 crate 定向全绿已闭合本功能自身的 gate）；workspace 级 gate 待该批次收口后闭合。
-- Commit：维持 pending——共享文件（root `Cargo.toml`、`crates/store/src/{lib,store}.rs`、`libsql_store/mod.rs`、`crates/web/src/lib.rs`、`crates/core/src/config.rs` 等）的未提交 diff 同时裹挟并行批次的 dag/agent/server 迁移改动，hunk 级拆分在并行编辑活动下不可靠（有覆盖他人未提交工作的风险）；随收口会话统一落库后回填 hash。
+- Commit：维持 pending——共享文件（root `Cargo.toml`、`crates/store/src/{lib,store}.rs`、`turso_store/mod.rs`、`crates/web/src/lib.rs`、`crates/core/src/config.rs` 等）的未提交 diff 同时裹挟并行批次的 dag/agent/server 迁移改动，hunk 级拆分在并行编辑活动下不可靠（有覆盖他人未提交工作的风险）；随收口会话统一落库后回填 hash。
 
 ## 评审后打磨（P3，同日第三轮）
 

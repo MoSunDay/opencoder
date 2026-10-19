@@ -1,4 +1,4 @@
-Commit: (working-tree, 基于 64f7000f5...)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 平台用户体系与 Operator 执行类型
 
@@ -23,7 +23,7 @@ Commit: (working-tree, 基于 64f7000f5...)
 | 功能 | 测试 |
 | --- | --- |
 | Identity/Role/token_hash/parse_role | `crates/core/src/identity.rs` 单测 3 项 |
-| platform_users 表 CRUD + 唯一约束 | `crates/store/src/libsql_store/users.rs` CRUD 测试 |
+| platform_users 表 CRUD + 唯一约束 | `crates/store/src/turso_store/identity/users.rs` CRUD 测试 |
 | v23→v24 迁移后 schema 版本断言更新（24） | store 各迁移测试（brain_store、display_text、inputs_recorded、project_store、schema_bootstrap、schema_v4_migration、store_migrations/{early,middle,sessions,catalog}） |
 | seed token 识别、哈希反查、401、exempt | `crates/web/src/auth_mw.rs` 单测 5 项 |
 | 角色权限矩阵 | `crates/control/src/role_gate.rs` 单测 3 项 |
@@ -33,7 +33,7 @@ Commit: (working-tree, 基于 64f7000f5...)
 | worker 宿主机 Operator 负载（标题/前导/完成态） | `crates/worker/tests/platform/workloads.rs::operator_executions_run_the_host_process_agent_loop` |
 | SPA token 登录探测 /api/me | `crates/web/spa/src/login.dom.test.jsx` |
 | operator 记录跨节点重启恢复（P1） | `crates/worker/tests/durable_execution/main.rs::operator_executions_survive_node_restart` |
-| seed token 轮换重指 / last-admin 原子删除 | `crates/control/src/bootstrap.rs::seed_admin_tests`、`crates/store/src/libsql_store/users.rs::tests::{guarded_delete_never_removes_the_last_admin, token_hash_rotation_repoints_and_keeps_uniqueness}` |
+| seed token 轮换重指 / last-admin 原子删除 | `crates/control/src/bootstrap.rs::seed_admin_tests`、`crates/store/src/turso_store/identity/users.rs::tests::{guarded_delete_never_removes_the_last_admin, token_hash_rotation_repoints_and_keeps_uniqueness}` |
 | SPA 刷新后身份重探（401 回弹窗） | `crates/web/spa/src/app.dom.test.jsx::re-probes_/api/me_on_refresh_and_restores_the_admin_identity` 等 |
 | 用户管理抽屉（列表/建号/一次性 token/删除/保护提示） | `crates/web/spa/src/admin/usersDrawer.dom.test.jsx` |
 | Operator 子 tab（admin 可见、节点表、发起弹窗） | `crates/web/spa/src/operators/{panel,launchModal}.dom.test.jsx` |

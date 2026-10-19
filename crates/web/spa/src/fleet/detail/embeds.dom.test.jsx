@@ -97,7 +97,7 @@ describe('执行明细内嵌运行视图', () => {
     // 画布节点也渲染同名 label，断言作用域化到步骤列表。
     expect(await screen.findByText('第一步', { selector: '.brain-layer-node-title' })).toBeTruthy();
     expect(document.querySelector('.brain-layer-canvas')).toBeTruthy(); // PlanCanvas + Inspector 容器
-    expect(apiGet).toHaveBeenCalledWith('/api/brain/runs/brain-1/layered');
+    expect(apiGet).toHaveBeenCalledWith('/api/brain/runs/brain-1/layered', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     // Embed 不得写 brain_run 参数（BrainRunView 才同步浏览器地址）。
     expect(window.location.search).toBe('');
   });

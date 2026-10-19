@@ -1,5 +1,5 @@
 import { Alert, Button, Space, Spin, Typography } from 'antd';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiGet } from '../../api.js';
 import { decodeBase64, decodeWindow } from '../model.js';
 
@@ -52,6 +52,7 @@ function markerLabel(marker) {
 }
 
 export function PayloadWindows({ id, marker, seq, label }) {
+  const request = useRef(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -62,12 +63,16 @@ export function PayloadWindows({ id, marker, seq, label }) {
   useEffect(() => {
     setOpen(false); setPage(null); setError(''); setWindowIndex(0);
     setWindows([{ offset: 0, leading: new Uint8Array() }]);
+    return () => request.current?.abort();
   }, [id, marker.field, marker.read_via, seq]);
 
   const load = async (target, index) => {
+    request.current?.abort();
+    const controller = new AbortController(); request.current = controller;
     setBusy(true); setError('');
     try {
-      const chunk = await apiGet(payloadPath(id, marker, seq, target.offset));
+      const chunk = await apiGet(payloadPath(id, marker, seq, target.offset), { signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (!['base64', 'json-base64', 'utf8-base64'].includes(chunk.encoding) || chunk.offset !== target.offset) {
         throw new Error('分段内容格式无效');
       }
@@ -87,9 +92,9 @@ export function PayloadWindows({ id, marker, seq, label }) {
       });
       setWindowIndex(index);
     } catch (e) {
-      setError(e?.message || '读取分段内容失败');
+      if (!controller.signal.aborted) setError(e?.message || '读取分段内容失败');
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   };
   const show = () => { setOpen(true); load(windows[0], 0); };

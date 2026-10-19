@@ -31,6 +31,10 @@ pub async fn require_v4(state: &AppState, id: &str) -> Result<(), RpcReply> {
 pub use require_v4 as require_brain;
 
 pub async fn list(State(state): State<Arc<AppState>>, Query(page): Query<Page>) -> Response {
+    let limit = page.limit.unwrap_or(20);
+    if !(1..=EXECUTION_PAGE_MAX).contains(&limit) {
+        return error_400(format!("limit must be between 1 and {EXECUTION_PAGE_MAX}"));
+    }
     let cursor = match (page.cursor_created_at, page.cursor_id) {
         (None, None) => None,
         (Some(created_at), Some(id)) if valid_id(&id) => Some(ExecutionCursor { created_at, id }),
@@ -40,12 +44,15 @@ pub async fn list(State(state): State<Arc<AppState>>, Query(page): Query<Page>) 
     };
     match state
         .fleet
-        .indexes_page(None, Some(ExecutionKind::Brain), cursor.as_ref(), 100)
+        .indexes_page(None, Some(ExecutionKind::Brain), cursor.as_ref(), limit)
         .await
     {
-        Ok(page) => response(RpcReply::ok(
-            json!({"runs":page.executions,"next_cursor":page.next_cursor}),
-        )),
+        Ok(page) => match crate::api::executions::paging::named_page(&state, page).await {
+            Ok(body) => response(RpcReply::ok(json!({
+                "runs": body["executions"], "next_cursor": body["next_cursor"]
+            }))),
+            Err(error) => error_500(error),
+        },
         Err(e) => error_500(e.to_string()),
     }
 }

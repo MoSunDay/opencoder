@@ -35,6 +35,8 @@ mod agents;
 mod capabilities;
 mod contracts;
 
+mod history;
+
 mod content_guard;
 
 mod selection;

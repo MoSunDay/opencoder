@@ -1,4 +1,4 @@
-Commit: 060b4a24
+Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
 
 # web 模块
 
@@ -56,7 +56,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `spa/src/dag/dynamic/`、`spa/src/brain/workbench/` — 动态 DAG 与 Brain 工作台
 - [dag/step/binaryLogs.jsx](../../crates/web/spa/src/dag/step/binaryLogs.jsx) — 原生二进制步骤输出；编辑器只提供 Binary、Agent 与 Dynamic，运行页面按节点所属执行读取实例、日志与声明产物。
 - [dag/run/context.jsx](../../crates/web/spa/src/dag/run/context.jsx) — DAG 与执行明细共用的只读运行环境；容器、工作目录、版本和摘要来自节点保存的运行资料，不从当前资源池推测历史。
-- `spa/src/brain/workbench/` — schema 7 工作台。`scheduler/editor.jsx` 在 `milestone/` 画布上配置必填里程碑信息和绑定泛化能力的并行节点，随后用表单提交计划信息；节点名称和任务由能力库生成。画布按顺序展示相邻层，大脑在运行时决定是否回到已执行层。`milestone/run.jsx` 管理画布与详情抽屉，`milestone/runtime/viewport.js` 计算可用高度；`runtime/model.js` 从全部历史操作中选择层或节点的最新执行，`runtime/layerDetails.jsx` 展示单任务、多任务与历史记录，复用 `ExecutionView`。`runDetails.jsx` 保留按轮次汇总的详情表格；右侧抽屉中的人工输入，以及受计划管理的 Agent/Operator/Team 明细引导，统一提交到 Brain 输入事件；托管明细不暴露单独中断/取消执行的控件。`useRun.js` 读取 `/layered`，由事件流及轮询刷新。
+- `spa/src/brain/workbench/` — schema 7 工作台。`scheduler/editor.jsx` 在 `milestone/` 画布上配置必填里程碑信息和绑定泛化能力的并行节点，随后用表单提交计划信息；节点名称和任务由能力库生成。画布按顺序展示相邻层，大脑在运行时决定是否回到已执行层。`milestone/run.jsx` 管理画布与详情抽屉，`milestone/runtime/viewport.js` 计算可用高度；`runtime/model.js` 从全部历史操作中选择层或节点的最新执行，`runtime/layerDetails.jsx` 展示单任务、多任务与历史记录，复用 `ExecutionView`。`runDetails.jsx` 与 `milestone/details/` 组织概览、轮次任务、调度事件和按需读取的实际输入；`details/model.js` 区分执行终态与里程碑评估，并按后续派发识别失效的历史结论；右侧抽屉“补充信息”中的人工输入，以及受计划管理的 Agent/Operator/Team 明细引导，统一提交到 Brain 输入事件；托管明细不暴露单独中断/取消执行的控件。`useRun.js` 读取 `/layered`，由事件流及轮询刷新。
 - [milestone/canvas.jsx](../../crates/web/spa/src/brain/workbench/milestone/canvas.jsx)、[canvas/presentation.js](../../crates/web/spa/src/brain/workbench/milestone/canvas/presentation.js) — 节点成员与内容只由计划投影；本地状态只保留选择、测量和拖动过程。位置以增量写入草稿，React Flow 不直接删除计划节点。运行画布按可用宽度排列层级，编辑器保持纵向布局。
 - [scheduler/changes.js](../../crates/web/spa/src/brain/workbench/scheduler/changes.js)、[scheduler/draft.js](../../crates/web/spa/src/brain/workbench/scheduler/draft.js) — 编辑动作应用到同步保存的最新草稿，持久化读取同一份最新值；批量删除按层清理子节点及该层位置，迟到的位置事件不能恢复已删层。[scheduler/editor.jsx](../../crates/web/spa/src/brain/workbench/scheduler/editor.jsx) 统一按钮与键盘删除确认，只有显式整理布局才清空位置。
 - [brain/workbench/plans.jsx](../../crates/web/spa/src/brain/workbench/plans.jsx) — 新建计划、点击当前计划名称与修改操作共用 `PlanEditor`；历史版本预览独立打开，旧格式必须显式转换后编辑。读取请求用序号隔离，迟到响应不能覆盖新建表单。
@@ -90,5 +90,9 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 [project/summary/section.jsx](../../crates/web/spa/src/project/summary/section.jsx) 为项目、子项详情的现状和目标提供独立折叠按钮，默认收起正文，标题、现状时间与历史入口始终可用。记录 ID 作为组件 key；刷新同一记录保留展开状态，切换记录重置。网页名称“子项 / 目标 / 现状”分别对应 `initiative / detail_md / current_summary`。
 
 TODO 正文显示为“关键信息”，仍使用 draft；详情新增文件页签，单独上传、下载、确认删除，切换时保留任务和评论草稿。Agent 配置页显示第五路 TODO 文件只读导出。见 [任务文件](../../docs/project-files.md)。
+
+- `spa/src/brain/workbench/history/` — 运行历史使用冻结计划名称与执行 ID，单层游标分页，每页 20 条；请求可取消，返回保留页码与滚动位置。
+- `spa/src/ui/runContent/` — 安全 Markdown、可展开长文、字段树、对象数组表格、分段标记和产物下载；`ReadingTabs` 保留各页签滚动位置。`fleet/download.js` 与下载 Service Worker 保留同源服务路径前缀；关闭鉴权时由浏览器直接流式下载，凭据不写入下载 URL。`fleet/detail/presentation/brain.jsx` 使用通用 `ExecutionView` 的同一份读取结果组织子执行页签；请求按执行隔离并在关闭时取消。
+- [运行历史与详情显示验收](../../scripts/acceptance/brain/ui/history.js) — 使用通用合成记录检查四种屏宽、历史翻页、详情返回、结果与实际输入展示，截图与几何结果写入指定的仓库外目录。
 
 计划编辑器使用完整能力目录做显示、校验和保存，新选项按 Server 的 `selection_ids` 过滤；当前节点的旧 ID 保留，不自动改绑。同类型同目标的选项显示必填输入、输出及 ID。能力详情返回 `content_version`，PUT 可提交 `expected_content_version`，冲突返回 409。见 [编辑器](../../crates/web/spa/src/brain/workbench/scheduler/editor.jsx) 和 [能力 API](../../crates/web/src/api_brain.rs)。

@@ -14,13 +14,14 @@ Execution status done only means the capability finished; inspect the complete s
 Required input and output fields are enforced. Admission and output contract errors are execution evidence: correct the task or bindings and retry the appropriate layer.
 When plan.shared_workspace is true, Operator steps share one workspace on the root's owning node. Each activation has its own evidence directory and private HOME; use the runtime context paths. Otherwise executions have separate workspaces. Always bind exact code versions and artifact references, and bind failed verification diagnostics into concrete rework inputs.
 Use the complete plan, attached capability contracts and execution evidence to choose the next layer. Explain why that layer is appropriate.
-Forward dispatch is only to current layer + 1 and requires the current layer milestone to meet its criteria.
+Forward dispatch is only to current layer + 1 and requires the current layer milestone to meet its criteria. Its reflection MUST be null, including when continuing forward after rework.
 If results require rework and plan.adjacent_only is true, choose only the current or immediately preceding layer. Otherwise choose the current or any previously executed layer that can address the problem. A return to an earlier stage must proceed through each adjacent stage.
 Returning begins the next round, invalidating that layer and subsequent layers' earlier achievements.
 Every dispatch after the first and every completion MUST include assessments with exactly one key: the current layer_id, value {"met":true|false,"reason":"evidence-based layer assessment"}. Initial dispatch has assessments {}. Forward and completion require met=true.
 Do not re-assess earlier layers; their evidence may appear in the summary only.
 If run.error records a rejected decision, correct that validation error; do not treat it as a capability failure.
-Explain the reflection, problems to fix and evidence. The context's previous results are historical evidence,
+Only a return or same-layer retry uses a nonempty reflection: explain the problems to fix and evidence. run.reflection records the previous rework; do not copy it into a forward decision. Explain forward progress in reason and assessments instead.
+The context's previous results are historical evidence,
 not automatically valid current outputs. Do not invent output values or execution IDs.
 Decision layer numbers are 1-based integers: use layer_numbers to map plan layer_id values to their numeric targets. run.layer=0 is the initial state, never a dispatch target; the first target is 1. Do not use a zero-based plan array index or a layer_id string as the decision layer.
 First dispatch layer 1. Complete only after the final layer passes; never complete early.

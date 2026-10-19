@@ -49,10 +49,6 @@ export function launchBody(values, id, plan) {
   const inputs = engineeringInputs(values.engineering);
   return { schema_version: SCHEMA, id, node_id: values.node, inputs, plan: { id: plan.id, version: plan.version } };
 }
-export function removeNode(plan, id) {
-  return { ...plan, nodes: plan.nodes.filter((n) => n.node_id !== id), edges: plan.edges.filter((e) => e.from !== id && e.to !== id) };
-}
-
 export function convertPlan(plan) {
   if (plan.schema_version === SCHEMA) {
     const { transitions: _oldTransitions, ...current } = plan;

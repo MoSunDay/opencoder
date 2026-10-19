@@ -3,10 +3,6 @@
 // hand-written per panel (fleet/model.js 执行状态, todoRunsPanel 工作流/TODO 项,
 // project/labels.jsx 项目目标/里程碑/TODO/运行, nodes 在线态), so color + 中文
 // wording can never drift between panels again. Function components only.
-//
-// Compatibility seam: fleet/model.js re-exports STATUS_COLORS / STATUS_LABELS
-// from here, so every legacy import path keeps the exact same colors/labels
-// (DOM tests guard that copy) while the table itself lives in one place.
 
 import { Tag } from 'antd';
 
@@ -54,16 +50,6 @@ export const STATUS_META = {
   fired: { color: 'success', label: '已触发' },
   missed: { color: 'default', label: '已错过' },
 };
-
-/// Legacy shape for fleet/model.js importers: status → antd Tag color token.
-export const STATUS_COLORS = Object.fromEntries(
-  Object.entries(STATUS_META).map(([status, meta]) => [status, meta.color]),
-);
-
-/// Legacy shape for fleet/model.js importers: status → 中文文案.
-export const STATUS_LABELS = Object.fromEntries(
-  Object.entries(STATUS_META).map(([status, meta]) => [status, meta.label]),
-);
 
 /// statusColor(status) → antd Tag color token; unknown statuses fall back to
 /// the neutral default token.

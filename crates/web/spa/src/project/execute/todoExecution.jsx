@@ -9,7 +9,6 @@ import { err, ok } from '../../notice.js';
 import { ProjectTable } from '../views/projectTable.jsx';
 import { capabilityOptions, useCapabilities } from './catalog.js';
 import { CapabilityLauncher } from './launcher.jsx';
-import { ExecutionResult } from './result.jsx';
 
 export function TodoExecution({ todoId, active, save, source, onSourceOpened, onBusyChange, onNotice }) {
   const canEdit = useCanEdit();
@@ -96,7 +95,7 @@ export function TodoExecution({ todoId, active, save, source, onSourceOpened, on
   const columns = [
     { title: '类型', key: 'kind', width: 110, render: (_, row) => KIND_LABELS[row.kind] || row.kind || '不可读取' },
     { title: '名称', key: 'name', render: (_, row) => row.name || row.id },
-    { title: '执行 ID', key: 'id', width: 300, dataIndex: 'id', render: (id, row) => <Typography.Text copyable={{ text: id }}>
+    { title: '执行 ID', key: 'id', width: 300, dataIndex: 'id', render: (id) => <Typography.Text copyable={{ text: id }}>
       <a className="project-execution-id" href={executionHref(id)} target="_blank" rel="noopener noreferrer" title="在新页面打开执行过程">{id}</a>
     </Typography.Text> },
     { title: '状态', key: 'status', width: 150, render: (_, row) => row.readError || row.status || '等待读取' },
@@ -121,7 +120,6 @@ export function TodoExecution({ todoId, active, save, source, onSourceOpened, on
       <Typography.Title level={5} style={{ margin: 0 }}>指派记录</Typography.Title>
       <Spin spinning={loading}><ProjectTable label="TODO 指派记录" viewKey={`assignments:${todoId}`} scroll={{ x: 900 }} pagination={false}
         rows={links.map((link) => ({ ...indexes[link.execution_id], ...link, id: link.execution_id, status: indexes[link.execution_id]?.status }))} columns={columns} /></Spin>
-      {active && links[0]?.execution_id && <ExecutionResult key={links[0].execution_id} id={links[0].execution_id} />}
     </>}
     {active && mode === 'launch' && <CapabilityLauncher key={capabilityId} capability={catalog.capabilities.find((cap) => cap.id === capabilityId)} todoId={todoId} onNotice={onNotice}
       prompt={[title, draft].filter(Boolean).join('\n\n')} onCreated={(id) => link(id, true)} />}

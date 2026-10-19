@@ -19,11 +19,6 @@ export const groups = (plan) => (plan.layers || []).map((layer) => (plan.nodes |
 export function addLayer(plan, layer_id) {
   return { ...plan, layers: [...plan.layers, layerMilestone(layer_id)] };
 }
-export function removeLayer(plan, layer_id) {
-  return { ...plan, layers: plan.layers.filter((layer) => layer.layer_id !== layer_id),
-    nodes: plan.nodes.filter((node) => node.layer_id !== layer_id) };
-}
-export const removeNode = (plan, node_id) => ({ ...plan, nodes: plan.nodes.filter((node) => node.node_id !== node_id) });
 export function moveNode(plan, node_id, layer_id) {
   if (!plan.layers.some((layer) => layer.layer_id === layer_id)) throw new Error('目标里程碑不存在');
   return { ...plan, nodes: plan.nodes.map((node) => node.node_id === node_id ? { ...node, layer_id } : node) };

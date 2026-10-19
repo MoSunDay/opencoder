@@ -1,7 +1,7 @@
 import { ConfigProvider } from "antd";
 import { App as AntdApp } from "antd";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, expect, vi } from "vitest";
 import { EnvContext } from "../../../env";
 import GraphPage from "../GraphPage";
 vi.setConfig({ testTimeout: 15000 });

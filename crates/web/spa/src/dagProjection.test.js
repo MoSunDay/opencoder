@@ -1,21 +1,7 @@
-// dagProjection.test.js — pure fold/projection contract for the DAG run
-// view. The wire shapes mirror crates/dag/src/protocol.rs (DagEventView /
-// DagRunView / DagSpec); the projection rules are the ones runDetail.jsx
-// renders (step colors, skipped deps, feed text).
+// DAG event normalization, snapshot projection and graph layout contracts.
 import { describe, expect, it } from 'vitest';
 import { NODE_W } from './dag/dagLayout.js';
-import {
-  dropCycleEdges,
-  foldStepStates,
-  frameToEvent,
-  graphFromSpec,
-  nodeBadgeText,
-  outputPreview,
-  projectStepStatuses,
-  specSteps,
-} from './dagProjection.js';
-
-const ev = (seq, kind, step, payload, at_ms = seq) => ({ seq, kind, step, payload, at_ms });
+import { dropCycleEdges, frameToEvent, graphFromSpec, nodeBadgeText, projectStepStatuses, specSteps } from './dagProjection.js';
 
 const SPEC = {
   name: 'etl',
@@ -47,70 +33,16 @@ describe('frameToEvent', () => {
   });
 });
 
-describe('foldStepStates', () => {
-  it('folds started→done(ok) with the output snapshot', () => {
-    const m = foldStepStates([
-      ev(1, 'step_started', 'fetch'),
-      ev(2, 'step_done', 'fetch', { ok: true, output: 'hello\nworld' }),
-    ]);
-    expect(m.get('fetch')).toEqual({ status: 'done', output: 'hello\nworld', error: '', at_ms: 2 });
-  });
-
-  it('folds a failed step_done into error with the error text', () => {
-    const m = foldStepStates([ev(3, 'step_done', 'x', { ok: false, error: 'boom', output: 'partial' })]);
-    expect(m.get('x')).toEqual({ status: 'error', output: 'partial', error: 'boom', at_ms: 3 });
-  });
-
-  it('treats a missing ok as success (payload {} → done)', () => {
-    expect(foldStepStates([ev(1, 'step_done', 'x', {})]).get('x').status).toBe('done');
-  });
-
-  it('sorts by seq so a late-arriving replay still folds in order', () => {
-    const m = foldStepStates([
-      ev(2, 'step_done', 'a', { ok: true, output: 'out' }),
-      ev(1, 'step_started', 'a'),
-    ]);
-    expect(m.get('a').status).toBe('done');
-    expect(m.get('a').output).toBe('out');
-  });
-
-  it('collapses duplicate seqs (replay + live double-delivery is idempotent)', () => {
-    const m = foldStepStates([
-      ev(1, 'step_started', 'a'),
-      ev(1, 'step_started', 'a'),
-      ev(2, 'step_done', 'a', { ok: true }),
-      ev(2, 'step_done', 'a', { ok: true }),
-    ]);
-    expect(m.get('a').status).toBe('done');
-    expect(m.size).toBe(1);
-  });
-
-  it('keeps the latest step_started as running and ignores run-level kinds', () => {
-    const m = foldStepStates([
-      ev(1, 'run_started', null, { node_id: 'n1' }),
-      ev(2, 'step_started', 'a'),
-      ev(3, 'run_finished', null, { status: 'done' }),
-    ]);
-    expect(m.size).toBe(1);
-    expect(m.get('a')).toMatchObject({ status: 'running', at_ms: 2 });
-  });
-
-  it('degrades on garbage input instead of throwing', () => {
-    expect(foldStepStates(null)).toEqual(new Map());
-    expect(foldStepStates([null, 3, { kind: 'step_started' }]).size).toBe(0);
-  });
-});
-
 describe('projectStepStatuses', () => {
-  it('pending without events, folded statuses win', () => {
-    const states = foldStepStates([ev(1, 'step_done', 'fetch', { ok: true })]);
+  it('pending without a snapshot state, known statuses win', () => {
+    const states = new Map([['fetch', { status: 'done' }]]);
     const p = projectStepStatuses(SPEC, states);
     expect(p.get('fetch')).toBe('done');
     expect(p.get('transform')).toBe('pending');
   });
 
   it('skips steps whose deps failed, transitively', () => {
-    const states = foldStepStates([ev(1, 'step_done', 'fetch', { ok: false, error: 'net' })]);
+    const states = new Map([['fetch', { status: 'error', error: 'net' }]]);
     const p = projectStepStatuses(SPEC, states);
     expect(p.get('fetch')).toBe('error');
     expect(p.get('transform')).toBe('skipped');
@@ -128,10 +60,10 @@ describe('projectStepStatuses', () => {
         { name: 'd', depends_on: ['c'], kind: { type: 'binary', resource: 'tool' } },
       ],
     };
-    const states = foldStepStates([
-      ev(1, 'step_done', 'a', { ok: true }),
-      ev(2, 'step_done', 'b', { ok: false, error: 'x' }),
-      ev(3, 'step_started', 'c'),
+    const states = new Map([
+      ['a', { status: 'done' }],
+      ['b', { status: 'error', error: 'x' }],
+      ['c', { status: 'running' }],
     ]);
     const p = projectStepStatuses(spec, states);
     expect(p.get('c')).toBe('running'); // already started: never re-projected
@@ -146,9 +78,9 @@ describe('projectStepStatuses', () => {
 
 describe('graphFromSpec', () => {
   it('builds React-Flow shapes: ids are slugs, edges follow depends_on', () => {
-    const states = foldStepStates([
-      ev(1, 'step_done', 'fetch', { ok: true, output: 'rows=3' }),
-      ev(2, 'step_started', 'transform'),
+    const states = new Map([
+      ['fetch', { status: 'done', output: 'rows=3' }],
+      ['transform', { status: 'running' }],
     ]);
     const { nodes, edges } = graphFromSpec(SPEC, states);
     expect(nodes.map((n) => n.id)).toEqual(['fetch', 'transform', 'review', 'publish']);
@@ -235,7 +167,7 @@ describe('graphFromSpec', () => {
   });
 
   it('projected node statuses include skipped (dep failure) without events', () => {
-    const states = foldStepStates([ev(1, 'step_done', 'fetch', { ok: false, error: 'x' })]);
+    const states = new Map([['fetch', { status: 'error', error: 'x' }]]);
     const { nodes } = graphFromSpec(SPEC, states);
     const by = new Map(nodes.map((n) => [n.id, n.data.status]));
     expect(by.get('fetch')).toBe('error');
@@ -272,13 +204,5 @@ describe('display tokens', () => {
     expect(nodeBadgeText(undefined)).toBe('任意节点排队中');
     expect(nodeBadgeText('')).toBe('任意节点排队中');
     expect(nodeBadgeText(null, '—')).toBe('—');
-  });
-
-  it('outputPreview passes short snapshots through and clips long ones with a marker', () => {
-    expect(outputPreview('ok')).toBe('ok');
-    expect(outputPreview('', 5)).toBe('');
-    expect(outputPreview(null)).toBe('');
-    const long = 'x'.repeat(50);
-    expect(outputPreview(long, 10)).toBe('xxxxxxxxxx…(已截断)');
   });
 });

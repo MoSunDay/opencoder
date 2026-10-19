@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { App, LoginModal, bootUrlCredential, clearCredentials, embeddedBase, getState, setCredentials, setState, HEADERLESS_REASONS, NAV_CATEGORIES, ConfigProvider, Popconfirm, zhCN, dayjs, theme, installFetchRouter, jsonResponse, deprecationHits, mountApp } from './test/appShell.jsx';
+import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { getState, setCredentials, setState, HEADERLESS_REASONS, NAV_CATEGORIES, ConfigProvider, Popconfirm, zhCN, dayjs, theme, mountApp } from './test/appShell.jsx';
 
 describe('App shell navigation and layout', () => {
   it('opens an execution link before restoring a saved project page', async () => {
@@ -120,30 +120,12 @@ describe('App shell navigation and layout', () => {
     expect(within(categories).getByRole('tab', { name: '后台管理', selected: true })).toBeTruthy();
   });
 
-  it('names every menu-only page in the mobile page Select', async () => {
-    // 'menu-only' pages have no page header and no body title: the sidebar
-    // Menu item and, on a narrow viewport, the mobile Select label are the
-    // ONLY page names left — this case guards BOTH surfaces. Delete either
-    // one (or stop feeding it nav labels) and those pages go nameless with
-    // every other suite still green — headerContract.dom.test.jsx can only
-    // see the nav copy, not these DOM surfaces (it renders panels, not
-    // <App/>).
-    // Coupling note: this case mounts the real team/topics/chat/nodes panels,
-    // so a failure to MOUNT a panel (or an antd deprecation reported by the
-    // file-level afterEach) is not a navigation-contract failure — read the
-    // panel's own suite first.
-    setCredentials('smoke-token', '');
-    const menuOnly = Object.keys(HEADERLESS_REASONS)
-      .filter((page) => HEADERLESS_REASONS[page] === 'menu-only');
-    expect(menuOnly.length, 'no page declares the menu-only reason any more — delete this case rather than loosening it').toBeGreaterThan(0);
-    const labelOf = (page) => NAV_CATEGORIES.flatMap((c) => c.items)
-      .find((i) => i.page === page)?.menu || '';
-    // None of today's menu-only labels carries a regex special, but escape
-    // anyway so a future label still matches literally.
-    const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    for (const page of menuOnly) {
-      cleanup();
+  it.each(Object.keys(HEADERLESS_REASONS).filter((page) => HEADERLESS_REASONS[page] === 'menu-only'))(
+    'names %s in the mobile page Select and sidebar', async (page) => {
+      // These pages rely on the sidebar and mobile selector for their name.
+      setCredentials('smoke-token', '');
+      const label = NAV_CATEGORIES.flatMap((c) => c.items).find((i) => i.page === page)?.menu || '';
+      const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       setState({ page });
       await mountApp();
       await act(async () => {});
@@ -155,20 +137,15 @@ describe('App shell navigation and layout', () => {
       const shown = select.querySelector('.ant-select-content, .ant-select-selection-item');
       expect(
         shown?.textContent,
-        `mobile page Select shows no label for ${page} (expected ${labelOf(page)})`,
-      ).toBe(labelOf(page));
-      // The sidebar half of the promise: the Sider Menu is scoped to the
-      // page's category and icon glyphs add their own aria-label, so match
-      // by regex within the sider. Anchored at the end: the chat page label
-      // 「Agent」is a prefix of「Agent 配置」, and both live in the same scoped
-      // menu — an unanchored match would be ambiguous.
+        `mobile page Select shows no label for ${page} (expected ${label})`,
+      ).toBe(label);
+      // Anchor the label so Agent cannot match Agent 配置.
       const sider = within(document.querySelector('.fleet-sidebar'));
       expect(
-        sider.queryByRole('menuitem', { name: new RegExp(escapeRegExp(labelOf(page)) + '$') }),
-        `sidebar Menu has no item for ${page} (expected ${labelOf(page)})`,
+        sider.queryByRole('menuitem', { name: new RegExp(escapedLabel + '$') }),
+        `sidebar Menu has no item for ${page} (expected ${label})`,
       ).toBeTruthy();
-    }
-  });
+    });
 
   it('switches categories via the Sider Segmented and lands on the home page', async () => {
     setCredentials('smoke-token', '');

@@ -7,9 +7,6 @@ import { linkedPage } from './fleet/navigation/links.js';
 
 export const TOKEN_KEY = 'oc_token';
 export const BASE_KEY = 'oc_base';
-/// Automatic placement; every conversation runs on its assigned node.
-export const LOCAL_NODE = '__local__';
-export const LOCAL_NODE_LABEL = '自动调度 / 全部会话';
 
 let state = {
   token: localStorage.getItem(TOKEN_KEY) || '',
@@ -17,7 +14,6 @@ let state = {
   // explicitly stored '' still means same-origin and wins over the embed.
   base: localStorage.getItem(BASE_KEY) ?? embeddedBase(),
   page: linkedPage(window.location.search, window.location.hash) || 'nodes', // 'nodes' | 'chat' | 'dag' | 'team' | 'topics'
-  preselectNode: null, // node id the fleet tab asked chat to open
   nodes: [], // last fleet snapshot shared between tabs
   conn: 'init', // 'init' | 'ok' | 'fail'
   identity: null, // {name, role} from GET /api/me; null until probed
@@ -31,11 +27,7 @@ export function getState() {
 }
 
 export function setState(patch) {
-  const next = { ...state, ...patch };
-  if (next === state) {
-    return;
-  }
-  state = next;
+  state = { ...state, ...patch };
   listeners.forEach((fn) => fn());
 }
 
@@ -75,7 +67,7 @@ export function clearCredentials() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(BASE_KEY);
   setState({
-    token: '', base: embeddedBase(), conn: 'init', nodes: [], preselectNode: null, identity: null, authEnabled: null,
+    token: '', base: embeddedBase(), conn: 'init', nodes: [], identity: null, authEnabled: null,
   });
 }
 
@@ -86,7 +78,7 @@ export function clearCredentials() {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   setState({
-    token: '', conn: 'init', nodes: [], preselectNode: null, identity: null, authEnabled: true,
+    token: '', conn: 'init', nodes: [], identity: null, authEnabled: true,
   });
 }
 
@@ -98,20 +90,5 @@ export function urlFor(pathAndQuery) {
 export function setConn(conn) {
   if (state.conn !== conn) {
     setState({ conn });
-  }
-}
-
-export function setNodes(nodes) {
-  setState({ nodes: Array.isArray(nodes) ? nodes : [] });
-}
-
-/// Tab-1 "打开对话" → jump to tab 2 with that node preselected.
-export function openChatForNode(nodeId) {
-  setState({ page: 'chat', preselectNode: nodeId });
-}
-
-export function clearPreselect() {
-  if (state.preselectNode !== null) {
-    setState({ preselectNode: null });
   }
 }

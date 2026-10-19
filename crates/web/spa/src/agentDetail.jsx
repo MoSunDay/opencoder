@@ -32,13 +32,14 @@ function MetaTab({ meta }) {
         )}
       </Card>
       <Card size="small" title="解析快照（references）" style={{ marginTop: 12 }}>
-        {REF_FIELDS.map(({ field, cat }) => (
-          <div key={field} style={{ marginBottom: 4 }}>
+        {REF_FIELDS.map((field) => {
+          const names = resolvedNames(refs, field);
+          return <div key={field} style={{ marginBottom: 4 }}>
             <Text type="secondary" style={{ fontSize: 12, width: 64, display: 'inline-block' }}>{field}</Text>
-            {resolvedNames(refs, field).map((n) => <Tag key={n}>{n}</Tag>)}
-            {resolvedNames(refs, field).length === 0 ? <Text type="secondary">—</Text> : null}
-          </div>
-        ))}
+            {names.map((n) => <Tag key={n}>{n}</Tag>)}
+            {names.length === 0 ? <Text type="secondary">—</Text> : null}
+          </div>;
+        })}
       </Card>
     </div>
   );

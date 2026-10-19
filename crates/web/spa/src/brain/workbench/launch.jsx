@@ -1,5 +1,5 @@
 import { EditButton } from '../../ui/permissions.jsx';
-import { Alert, Button, Form, Select, Space, Spin, Typography } from 'antd';
+import { Alert, Form, Select, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../../api.js';
 import { useNodes } from '../../fleet/useNodes.js';

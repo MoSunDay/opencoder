@@ -138,7 +138,7 @@ pub fn decide(
                 );
                 ensure!(
                     reflection.is_none(),
-                    "forward dispatch cannot declare a reflection"
+                    "forward dispatch cannot declare a reflection; set reflection to null. run.reflection is historical; put the forward rationale in reason and assessments"
                 );
                 update.run.valid_layers = snapshot.run.layer;
             }

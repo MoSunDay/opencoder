@@ -5,8 +5,8 @@
 //   3. fail the case on ANY deprecation chatter from React/antd on console.
 // The pure-node suites (reduce/sign) are frozen — DOM tests live only here.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
+import { cleanup, render, waitFor } from '@testing-library/react';
 
 // main.jsx calls createRoot(document.getElementById('root')).render(<App/>)
 // at import time. That stray instance would double every landmark query (its
@@ -34,20 +34,7 @@ vi.mock('react-dom/client', async (importOriginal) => {
 // #root fixture that main.jsx's import-time mount requires.
 import '../test/setup-dom.js';
 import App from '../main.jsx';
-import { LoginModal } from '../login.jsx';
-import { bootUrlCredential } from '../boot.js';
-import { clearCredentials, embeddedBase, getState, setCredentials, setState } from '../store.js';
-// Nav registry: HEADERLESS_REASONS['menu-only'] promises the sidebar Menu AND
-// the mobile Select label are that page's only name, so the mobile half of the
-// promise is asserted here (the panel half lives in shell/headerContract).
-import { HEADERLESS_REASONS, NAV_CATEGORIES } from '../nav.js';
-// Locale/theme probe components — same wiring main.jsx uses for the shell,
-// imported here so the zh-CN assertion exercises the exact same objects.
-import { ConfigProvider, Popconfirm } from 'antd';
-import zhCN from 'antd/locale/zh_CN';
-import dayjs from 'dayjs';
-import { theme } from '../theme.js';
-
+import { clearCredentials, getState, setState } from '../store.js';
 // Unmount the import-time stray app before any test renders its own <App/>.
 for (const root of strayRoots.splice(0, strayRoots.length)) {
   root.unmount();
@@ -116,7 +103,7 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/');
   localStorage.clear();
   clearCredentials();
-  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init' });
+  setState({ page: 'nodes', nodes: [], conn: 'init' });
   installFetchRouter();
   vi.spyOn(console, 'error').mockImplementation(record('error'));
   vi.spyOn(console, 'warn').mockImplementation(record('warn'));

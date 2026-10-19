@@ -10,6 +10,3 @@ serde_json.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 opencoder-dag-binary.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

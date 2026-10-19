@@ -8,9 +8,8 @@ import { EditButton } from '../../ui/permissions.jsx';
 // panel shown while no node is selected. Problem strings come from
 // specValidate.js via the parent.
 
-import { Alert, Button, Form, Input, InputNumber, Popconfirm, Select, Typography } from 'antd';
+import { Alert, Form, Input, InputNumber, Popconfirm, Select, Typography } from 'antd';
 import { useEffect, useState } from 'react';
-import { MONO_VAR } from '../../ui/mono.js';
 import { changeStepKind, renameStep } from './canvasModel.js';
 import { SourceFields } from '../dynamic/sourceFields.jsx';
 import { BinaryResourceField } from '../resources/field.jsx';

@@ -251,15 +251,6 @@ export function specProblemIndex(problems, nodes) {
   return index;
 }
 
-/// specLevelProblems(problems) → the problems WITHOUT a steps[N] prefix
-/// (spec-level shape issues, ghost-dep lines, cycles — rendered in the
-/// toolbar popover instead of on a node).
-export function specLevelProblems(problems) {
-  return (Array.isArray(problems) ? problems : [])
-    .filter((p) => !STEP_PREFIX_RE.test(typeof p === 'string' ? p : String(p)))
-    .map((p) => (typeof p === 'string' ? p : String(p)));
-}
-
 function emptyKind(type) {
   if (type === 'dynamic') return { type, source: { type: 'input', pointer: '/items' }, template: { type: 'agent', prompt: '' } };
   if (type === 'binary') return { type, resource: '', args: [] };

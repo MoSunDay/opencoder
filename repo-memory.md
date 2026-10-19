@@ -1,4 +1,4 @@
-Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
+Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
 
 # OpenCoder 逻辑地图
 
@@ -21,7 +21,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面与不可变正文。
 - [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
 - [agents/dag-binary](agents/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。
-- [agents/dag-runtime](agents/dag-runtime/index.md) — 单 DAG 单容器、共享写时复制工作区与原生步骤调度；Server 不链接。
+- [agents/dag-runtime](agents/dag-runtime/index.md) — 每次 DAG 运行归属单个节点、单个容器，共享写时复制工作区；Server 不链接。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
 - [agents/project](agents/project/index.md) — 项目、专项、TODO 与 Tag 数据；旧执行链独立保留。
 - [agents/brain](agents/brain/index.md) — 能力库、schema 7 里程碑计划、分层调度与嵌套计划。

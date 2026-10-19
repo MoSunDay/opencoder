@@ -146,7 +146,7 @@ export function validateSpec(spec) {
   // depends_on references, self-deps, cycles — only meaningful when names parse.
   const known = new Set(specSteps(spec).map((s) => s.name));
   for (const s of specSteps(spec)) {
-    dependsOn(s).forEach((d, j) => {
+    dependsOn(s).forEach((d) => {
       if (d === s.name) {
         problems.push('steps ' + s.name + ' depends_on 不能包含自身');
       } else if (!known.has(d)) {

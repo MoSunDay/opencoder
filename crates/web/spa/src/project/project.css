@@ -1,11 +1,5 @@
-/* project.css — 项目 module styles. Vite extracts every imported CSS into
-   the single dist/static/app.css output, so panel-local rules live here
-   instead of growing the shared src/app.css (sibling-agent merge safety).
-   The --oc-* custom properties consumed below are declared once in that same
-   src/app.css :root block (Vite bundles every imported CSS into
-   dist/static/app.css, so the vars are in scope here); theme.test.js scans
-   this file and fails the build if it references a var that is not declared
-   in app.css :root AND present in theme.js cssVars. */
+/* Project styles share app.css :root variables. Vite bundles both sheets
+   into dist/static/app.css; theme.test.js checks for missing variables. */
 
 /* Markdown bodies rendered by src/project/markdown.jsx. */
 .md-body {

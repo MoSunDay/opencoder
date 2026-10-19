@@ -216,7 +216,6 @@ export function downstreams(view, nodeId) {
 export const LAYER_NODE_W = 216;
 export const LAYER_NODE_H = 156;
 export const LAYER_GAP_X = 88;
-export const LAYER_GAP_Y = 26;
 /// React Flow's own handle box (style.css does not resize .react-flow__handle);
 /// the declared box must match the JSX <Handle> so an edge starts on the dot.
 const LAYER_HANDLE = 6;

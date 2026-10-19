@@ -29,7 +29,7 @@ vi.mock('./sse.js', () => ({ openStream: () => ({ abort() {} }) }));
 import './test/setup-dom.js';
 import { FleetTeamsPanel as TeamPanel } from './fleet/teams.jsx';
 import { ExecutionsPanel as TopicsPanel } from './fleet/executions.jsx';
-import { clearCredentials, getState, setState } from './store.js';
+import { clearCredentials, setState } from './store.js';
 
 const T0 = 1700000000000;
 
@@ -119,9 +119,10 @@ const installApi = () => {
 };
 
 beforeEach(() => {
+  window.history.replaceState(null, '', '/');
   localStorage.clear();
   clearCredentials();
-  setState({ page: 'nodes', preselectNode: null, nodes: [], conn: 'init' });
+  setState({ page: 'nodes', nodes: [], conn: 'init' });
   installApi();
 });
 

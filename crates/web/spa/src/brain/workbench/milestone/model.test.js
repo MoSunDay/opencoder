@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addLayer, executionNode, groups, moveNode, removeLayer, removeNode, validateGraph, visits } from './model.js';
+import { addLayer, executionNode, groups, moveNode, validateGraph, visits } from './model.js';
+import { changeDraft } from '../scheduler/changes.js';
 const cap = { id: 'a' };
 const layer = (id) => ({ layer_id: id, title: id, task: '执行里程碑工作', objective: '目标', success_criteria: '通过证据验收' });
 const node = (id, layer_id) => ({ ...executionNode(id, layer_id), title: id, objective: '执行任务', capability_id: 'a' });
@@ -11,7 +12,7 @@ describe('milestone canvas methodology', () => {
   });
   it('removes a layer and its nodes while preserving order', () => {
     const p = addLayer(plan(), 'release');
-    const next = removeLayer(p, 'test');
+    const next = changeDraft({ version: { plan: p } }, { type: 'remove', items: [{ type: 'layer', id: 'test' }] }).version.plan;
     expect(next.layers.map((item) => item.layer_id)).toEqual(['code', 'release']);
     expect(next.nodes.map((item) => item.node_id)).toEqual(['code-a', 'code-b']);
     expect(next).not.toHaveProperty('transitions');
@@ -19,7 +20,8 @@ describe('milestone canvas methodology', () => {
   it('moves and removes execution nodes', () => {
     const moved = moveNode(plan(), 'code-b', 'test');
     expect(moved.nodes.find((item) => item.node_id === 'code-b').layer_id).toBe('test');
-    expect(removeNode(moved, 'code-b').nodes).toHaveLength(2);
+    const next = changeDraft({ version: { plan: moved } }, { type: 'remove', items: [{ type: 'node', id: 'code-b' }] });
+    expect(next.version.plan.nodes).toHaveLength(2);
   });
   it('locates an invalid execution node', () => {
     const p = plan(); p.nodes[1].capability_id = '';

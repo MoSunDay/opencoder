@@ -1,4 +1,4 @@
-Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
+Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
 
 # core 模块
 
@@ -18,7 +18,7 @@ Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 - [harness/remote.rs](../../crates/core/src/harness/remote.rs) — `ServerConnection` 仅含默认关闭的 `enabled` 与 `url`；`ServerCapability` 表示能力 ID、种类、目标和摘要，`RemoteSession` 保存执行绑定与可重试首轮输入。已有 Harness JSON 保存 `remote` 与 `literal_mentions`，不新增表结构。
 - `src/agent/`、`src/skill.rs` — Agent 引用卡（资源引用与 Harness，不包含宿主机/容器开关）、memory 池聚合（`agent/memory.rs`）与技能发现。技能根优先级：执行任务本地根（`skill::with_execution`/`execution_root`）→ 节点 pinned 根 → 真实 `~/.opencoder/skills`
 - `src/skill/seed.rs` — 二进制内置 skill 增量 seed
-- [内置记忆模板](../../crates/core/assets/skills/repo-local-memory/TEMPLATES.md) — 默认索引为 `repo-memory.md`；沿用仓库明确指定且与 `AGENTS.md` 大小写折叠后不同的索引，保持仓库指令文件不变。种子文件与实际文件分离约束见 [seeding.rs](../../crates/core/tests/skill_contract/seeding.rs)。
+- 仓库记忆 — 默认索引为 `repo-memory.md`；沿用仓库明确指定且与 `AGENTS.md` 大小写折叠后不同的索引，保持仓库指令文件不变。种子文件与实际文件分离约束见 [seeding.rs](../../crates/core/tests/skill_contract/seeding.rs)。
 - [技能契约测试](../../crates/core/tests/skill_contract/main.rs) — 按发现、种子写入、规划与工作流分模块；首次安装核对准确的技能和资源集合，升级备份内置文件的用户修改，清单之外的用户资源保持原样。
 - `src/tool.rs` — Tool trait / ToolContext / ToolOutput
 - [platform/](../../crates/core/src/platform/mod.rs) — 执行种类、宿主命令语言、私有文件与原子发布的跨平台入口；Windows ACL 在创建文件时生效，路径校验拒绝设备名与重解析点，目录身份用于去重。

@@ -322,8 +322,12 @@ async fn execution_list_lifts_dispatch_time_names() {
         .unwrap();
     assert!(legacy.get("name").is_none());
 
-    // The name survives deleting the definition: it comes from the
-    // dispatch-time assignment snapshot, not the live definition table.
+    // An active run still protects its definition. Once the node reports its
+    // completion, deletion preserves the dispatch-time historical name.
+    let (status, body) = h.req(Method::DELETE, "/api/dag/defs/etl-demo", None).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["code"], "catalog_in_use");
+    h.report_status("dag-name-1", ExecutionStatus::Done).await;
     let (status, body) = h.req(Method::DELETE, "/api/dag/defs/etl-demo", None).await;
     assert_eq!(status, 200, "{body}");
     let (status, body) = h

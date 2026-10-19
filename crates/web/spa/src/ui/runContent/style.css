@@ -1,0 +1,17 @@
+.run-content-stack { display:flex; flex-direction:column; gap:20px; min-width:0; }
+.run-content-stack h5 { margin:0 0 12px; }
+.run-readable,.run-readable-body,.run-data-value { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+.run-plain-text { white-space:pre-wrap; line-height:1.7; }
+.run-readable .md-body { min-width:0; overflow-wrap:anywhere; }
+.run-readable .md-body table { display:block; max-width:100%; overflow:auto; }
+.run-readable .md-body pre,.run-raw pre { max-width:100%; overflow:auto; padding:12px; background:#f6f8fa; border-radius:8px; font-size:12px; line-height:1.6; }
+.run-raw { display:flex; flex-direction:column; align-items:flex-start; gap:8px; min-width:0; }
+.run-raw pre { width:100%; max-height:480px; margin:0; box-sizing:border-box; }
+.run-data-fields { margin:0; }
+.run-data-fields > div { display:grid; grid-template-columns:minmax(100px, 22%) minmax(0, 1fr); gap:16px; padding:10px 0; border-bottom:1px solid #eef1f5; }
+.run-data-fields dt { color:#667085; overflow-wrap:anywhere; }
+.run-data-fields dd { margin:0; min-width:0; }
+.run-data-value .ant-table-wrapper { max-width:100%; }
+.run-data-value td { max-width:380px; min-width:100px; vertical-align:top; }
+.run-artifact { display:flex; flex-direction:column; gap:8px; padding:12px; border:1px solid #eef1f5; border-radius:8px; }
+@media(max-width:767px) { .run-data-fields > div { grid-template-columns:minmax(0, 1fr); gap:6px; } }

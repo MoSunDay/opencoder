@@ -85,7 +85,14 @@ async function main() {
           await card.locator('header').click();
           const drawer = page.getByRole('dialog').filter({ has: page.getByRole('combobox', { name: '选择层执行记录' }) });
           await drawer.waitFor();
+          const choices = drawer.locator('.brain-layer-execution-list button');
+          if (await choices.count()) {
+            const node = snapshot.plan.nodes.find((item) => item.node_id === latest.node_id);
+            await choices.filter({ hasText: node.title }).click();
+          }
           await drawer.locator('.execution-view-full').waitFor();
+          await drawer.getByRole('tab', { name: '结果', exact: true }).waitFor();
+          await drawer.getByRole('tab', { name: '执行过程', exact: true }).click();
           if (latest.execution_kind === 'dag') await drawer.locator('.dag-detail-graph .react-flow__node').first().waitFor();
           await drawer.getByText(latest.execution_id, { exact: true }).first().waitFor();
           await page.waitForFunction(() => [...document.querySelectorAll('.ant-drawer-open .ant-drawer-content-wrapper')].every((element) => {
@@ -95,6 +102,15 @@ async function main() {
           assert(detailReads.has(latest.execution_id), 'drawer did not read the actual child execution');
           if (!opened.length) await page.screenshot({ path: path.join(output, `layer-detail-${width}.png`) });
           opened.push(latest.execution_id);
+          if (await drawer.getByRole('button', { name: '本层全部任务', exact: true }).count()) {
+            await drawer.getByRole('button', { name: '本层全部任务', exact: true }).click();
+            await choices.first().waitFor();
+            assert.equal(await drawer.locator('.execution-view-full').count(), 0);
+            if (await choices.count() > 1) {
+              await choices.nth(1).click();
+              await drawer.getByRole('tab', { name: '结果', exact: true }).waitFor();
+            }
+          }
           await drawer.locator('.ant-drawer-close').click();
           await drawer.waitFor({ state: 'hidden' });
           await page.waitForTimeout(350);

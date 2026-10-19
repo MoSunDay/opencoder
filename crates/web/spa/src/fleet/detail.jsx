@@ -1,3 +1,4 @@
+import { BrainExecutionPresentation } from './detail/presentation/brain.jsx';
 import { EditButton } from '../ui/permissions.jsx';
 import { ConversationInput } from '../chat/conversationInput.jsx';
 import { QueuePanel } from '../queuePanel.jsx';
@@ -59,11 +60,12 @@ export function ExecutionDetail({ id, summary, onClose, onNotice, managed = fals
   </Drawer>;
 }
 
-export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', managed = false, allowGuidance = false, onGuidance }) {
+export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', presentation = 'default', managed = false, allowGuidance = false, onGuidance }) {
   const canEdit = useCanEdit();
   const id = executionRef.id;
   const [childId, setChildId] = useState(null);
-  const [detail, setDetail] = useState(null);
+  const [loadedDetail, setDetail] = useState(null);
+  const detail = loadedDetail?.execution?.id === id ? loadedDetail : null;
   const [error, setError] = useState('');
   const [events, setEvents] = useState([]);
   const [prompt, setPrompt] = useState('');
@@ -76,16 +78,29 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   const [messageWindows, setMessageWindows] = useState([{ cursor: null, leading: new Uint8Array() }]);
   const [messageWindow, setMessageWindow] = useState(0);
   const [revision, setRevision] = useState(0);
+  const detailRequest = useRef(null);
+  const messageRequest = useRef(null);
   const load = useCallback(async () => {
-    try { setDetail(await apiGet(`/api/executions/${encodeURIComponent(id)}`)); setError(''); }
-    catch (e) { setDetail(null); setError(e.status === 503 ? '所属节点当前离线，恢复连接后可读取明细和继续操作' : e.message); }
+    if (detailRequest.current?.pending && !detailRequest.current.controller.signal.aborted && detailRequest.current.id === id) return;
+    detailRequest.current?.controller.abort();
+    const controller = new AbortController();
+    const request = { id, controller, pending: true }; detailRequest.current = request;
+    try {
+      const next = await apiGet(`/api/executions/${encodeURIComponent(id)}`, { signal: controller.signal });
+      if (!controller.signal.aborted) {
+        if (next?.execution?.id !== id) throw new Error('执行详情响应格式错误');
+        setDetail(next); setError('');
+      }
+    } catch (e) {
+      if (!controller.signal.aborted) setError(e.status === 503 ? '所属节点当前离线，恢复连接后可读取明细和继续操作' : e.message);
+    } finally { request.pending = false; }
   }, [id]);
   useEffect(() => {
     if (!id) return undefined;
     setDetail(null); setEvents([]); setMessages({ messages: [], partial: null, large: [], nextCursor: null, more: false });
     setMessageWindows([{ cursor: null, leading: new Uint8Array() }]); setMessageWindow(0); setError(''); load();
     const timer = setInterval(load, 3000);
-    return () => clearInterval(timer);
+    return () => { clearInterval(timer); detailRequest.current?.controller.abort(); messageRequest.current?.abort(); };
   }, [id, load]);
   const index = detail?.execution || summary || null;
   const kind = detail?.request?.kind || index?.kind;
@@ -106,16 +121,19 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   }, [id, kind, detailReady, load]);
   const loadMessages = useCallback(async ({ reset = false, rewind = false, cursor = null, leading = new Uint8Array(), windowIndex = 0 } = {}) => {
     if (!id || !hasMessages) return;
+    messageRequest.current?.abort();
+    const controller = new AbortController(); messageRequest.current = controller;
     setMessagesBusy(true);
     try {
-      const page = await apiGet(messagePagePath(id, cursor));
+      const page = await apiGet(messagePagePath(id, cursor), { signal: controller.signal });
+      if (controller.signal.aborted) return;
       setMessages((old) => {
         const next = appendMessagePage(reset ? null : { ...old, partial: rewind ? null : old.partial, large: [] }, page, leading);
         return JSON.stringify(next) === JSON.stringify(old) ? old : next;
       });
       setMessageWindow(windowIndex);
-    } catch (e) { setError(e.message); }
-    finally { setMessagesBusy(false); }
+    } catch (e) { if (!controller.signal.aborted) setError(e.message); }
+    finally { if (!controller.signal.aborted) setMessagesBusy(false); }
   }, [id, kind, hasMessages]);
   const live = useExecutionTranscript({
     id, enabled: detailReady && ['agent', 'maintenance', 'operator'].includes(kind), status: index?.status, revision,
@@ -174,23 +192,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   const execution = index;
   const actions = executionActions(execution);
   const unavailable = !detail && !!error;
-  return <div className={`execution-view-${mode}`}>
-    {error && <Alert type="error" showIcon title={error} />}
-    {execution && <Descriptions size="small" items={[
-      { key: 'node', label: '所属节点', children: execution.node_id },
-      { key: 'kind', label: '类型', children: KIND_LABELS[kind] || kind },
-      { key: 'harness', label: 'Harness', children: detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' },
-      { key: 'status', label: '状态', children: <StatusTag status={execution.status} /> },
-      { key: 'created', label: '创建时间', children: <TimeText ts={execution.created_at} /> },
-    ]} />}
-    {!managed && <Space wrap style={{ margin: '12px 0' }}>
-      <Button onClick={() => { setRevision((v) => v + 1); load(); }}>刷新明细</Button>
-      <Button disabled={!canEdit || busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
-      <Button disabled={!canEdit || busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
-      <Button danger disabled={!canEdit || busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
-    </Space>}
-    {detail?.error && !todoInitialization && <Alert type="error" title={detail.error} />}
-    {hasMessages && <div className="execution-messages">
+  const process = <>    {hasMessages && <div className="execution-messages">
       <Typography.Title level={5}>会话消息</Typography.Title>
       {!messages.messages.length && !messages.partial && !messagesBusy ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息" /> : null}
       {(showLive || !!messages.messages.length) && <ExecutionTranscript messages={messages.messages} live={showLive ? live.state : null} />}
@@ -207,22 +209,9 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
       {!messages.large?.length && (messages.more || messages.partial) && <Button block loading={messagesBusy} onClick={nextMessages}>继续加载消息</Button>}
       {messagesBusy && !messages.messages.length && !messages.partial ? <Spin size="small" /> : null}
     </div>}
-    {hasMessages && !managed && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
-      {canEdit && <Select aria-label="发送方式" value={delivery} onChange={setDelivery} options={[{ value: 'steer', label: '指导当前执行 / 继续对话' }, { value: 'queue', label: '加入队列' }]} />}
-      <ConversationInput value={prompt} onChange={setPrompt} disabled={busy || unavailable} loading={busy}
-        placeholder="继续会话" onSubmit={() => { if (prompt.trim()) command(delivery, { prompt }); }} />
-      <QueuePanel sessionId={id} refreshSignal={`${revision}-${events[events.length - 1]?.seq || 0}`} />
-      {canEdit && <QuestionModal sessionId={id} active={index?.status === 'running'} />}
-    </Space>}
-    {canEdit && allowGuidance && onGuidance && (managed || kind === 'team') && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
-      <Input.TextArea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={managed ? '补充信息，由大脑决定后续调度' : '继续会话'} rows={3} />
-      <EditButton type="primary" disabled={!prompt.trim() || busy} loading={busy} onClick={submitGuidance}>提交给大脑</EditButton>
-    </Space>}
     {kind === 'dag' && (detail?.definition?.spec || detail?.definition)?.steps && <DagRunResult key={id} id={id}
       spec={detail.definition.spec || detail.definition} status={execution?.status}
       onStatus={(status) => { if (status !== execution?.status) load(); }} />}
-    {kind === 'dag' && <DagRunContext context={detail?.dag_context} />}
-    {kind === 'dag' && <Artifacts id={id} spec={detail?.definition?.spec || detail?.definition} onNotice={onNotice} />}
     {kind !== 'team' && typeof detail?.topic?.final_summary === 'string' && <Markdown text={detail.topic.final_summary} />}
     {/* 过程视图只在完整明细挂载：inline 模式（brain 工作台 Inspector 的「执行过程」页，
         ~380px 窄列）不嵌 PlanCanvas/TODO 画布与第二条 SSE，内联仍由下方 Transcript/
@@ -230,10 +219,45 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
     {mode === 'full' && kind === 'brain' && <BrainRunEmbed id={id} onNotice={onNotice} />}
     {mode === 'full' && kind === 'todos' && detailReady && detail.workflow && <TodoRunEmbed id={id} />}
     <WorkloadDetail id={id} detail={detail} kind={kind} onOpen={setChildId} />
-    <DetailFields id={id} detail={detail} />
-    {kind !== 'dag' && <Collapse style={{ marginTop: 16 }} items={[
+</>;
+  const guidance = canEdit && allowGuidance && onGuidance && (managed || kind === 'team') && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
+      <Input.TextArea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={managed ? '补充信息，由大脑决定后续调度' : '继续会话'} rows={3} />
+      <EditButton type="primary" disabled={!prompt.trim() || busy} loading={busy} onClick={submitGuidance}>提交给大脑</EditButton>
+    </Space>;
+  const context = <>    {kind === 'dag' && <DagRunContext context={detail?.dag_context} />}
+    {kind === 'dag' && <Artifacts id={id} spec={detail?.definition?.spec || detail?.definition} onNotice={onNotice} />}
+</>;
+  const eventHistory = <>    {kind !== 'dag' && <Collapse style={{ marginTop: 16 }} items={[
       { key: 'events', label: `执行事件（最近 ${events.length} 条）`, children: events.map((e, i) => <div key={`${e.seq}-${i}`}><pre style={{ whiteSpace: 'pre-wrap' }}>#{e.seq} {e.event} {e.data?.omitted ? '内容较大，可分段查看' : e.text}</pre>{e.data?.omitted && e.data?.read_via === 'event_payload' ? <PayloadWindows id={id} marker={e.data} seq={e.seq} label="分段查看事件内容" /> : null}</div>) },
     ]} />}
+</>;
+  return <div className={`execution-view-${mode}`}>
+    {error && <Alert type="error" showIcon title={error} action={<Button aria-label="重试" onClick={load}>重试</Button>} />}
+    {!detail && !error && <Spin />}
+    {execution && <Descriptions size="small" column={presentation === 'brain' ? 2 : 3} items={[
+      { key: 'node', label: '所属节点', children: execution.node_id },
+      { key: 'kind', label: '类型', children: KIND_LABELS[kind] || kind },
+      ...(presentation === 'brain' ? [] : [{ key: 'harness', label: 'Harness', children: detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' }]),
+      { key: 'status', label: '状态', children: <StatusTag status={execution.status} /> },
+      { key: 'created', label: '创建时间', children: <TimeText ts={execution.created_at} /> },
+    ]} />}
+    {!managed && <Space wrap style={{ margin: '12px 0' }}>
+      <Button onClick={() => { setRevision((v) => v + 1); load(); }}>刷新明细</Button>
+      <Button disabled={!canEdit || busy || unavailable || !actions.resume} onClick={() => command('resume')}>在原节点恢复</Button>
+      <Button disabled={!canEdit || busy || unavailable || !actions.interrupt} onClick={() => command('interrupt')}>中断（可恢复）</Button>
+      <Button danger disabled={!canEdit || busy || unavailable || !actions.cancel} onClick={() => command('cancel')}>取消（终止）</Button>
+    </Space>}
+    {presentation !== 'brain' && detail?.error && !todoInitialization && <Alert type="error" title={detail.error} />}
+    {presentation !== 'brain' && process}
+    {hasMessages && !managed && <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
+      {canEdit && <Select aria-label="发送方式" value={delivery} onChange={setDelivery} options={[{ value: 'steer', label: '指导当前执行 / 继续对话' }, { value: 'queue', label: '加入队列' }]} />}
+      <ConversationInput value={prompt} onChange={setPrompt} disabled={busy || unavailable} loading={busy}
+        placeholder="继续会话" onSubmit={() => { if (prompt.trim()) command(delivery, { prompt }); }} />
+      <QueuePanel sessionId={id} refreshSignal={`${revision}-${events[events.length - 1]?.seq || 0}`} />
+      {canEdit && <QuestionModal sessionId={id} active={index?.status === 'running'} />}
+    </Space>}
+    {presentation === 'brain' ? detail && <BrainExecutionPresentation key={id} id={id} detail={detail} process={process} events={eventHistory} guidance={guidance} context={context} />
+      : <>{guidance}{context}<DetailFields id={id} detail={detail} />{eventHistory}</>}
     {childId && <ExecutionDetail key={childId} id={childId} onClose={() => setChildId(null)} onNotice={onNotice} managed={managed} />}
   </div>;
 }

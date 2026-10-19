@@ -98,6 +98,7 @@ async fn submit_inner(
     dispatch_resources: bool,
 ) -> anyhow::Result<RpcReply> {
     let started = Instant::now();
+    let catalog_lock = crate::catalog_guard::read_lock(state).await?;
     let _request_lock = state.fleet.request_lock("execution", &request.id).await?;
     let key = dispatch_key(&request).to_owned();
     if opencoder_core::brain::EXECUTION_IO_WRITER_VERSION == 0
@@ -151,6 +152,11 @@ async fn submit_inner(
     let (_permit, assignment) = if let Some(assignment) = frozen {
         (None, assignment)
     } else {
+        if let Some(reply) =
+            crate::catalog_guard::validate_value(state, &serde_json::to_value(&request)?).await?
+        {
+            return Ok(reply);
+        }
         let _gate = state.placement.lock().await;
         let permit = match state.admission.enter().await {
             Ok(permit) => permit,
@@ -293,6 +299,8 @@ async fn submit_inner(
         .fleet
         .prepare_assignment(&assignment, &fingerprint)
         .await?;
+    // The durable assignment now protects every referenced definition/resource.
+    drop(catalog_lock);
     // Pending resource admission is durable in the existing dispatch outbox.
     // No node slot or process is started until the external authority grants it.
     if managed && !dispatch_resources {

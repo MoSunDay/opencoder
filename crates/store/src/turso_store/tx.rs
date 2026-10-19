@@ -12,12 +12,18 @@ where
     Fut: Future<Output = Result<T>>,
 {
     anyhow::ensure!(conn.is_autocommit()?, "nested storage transaction");
-    conn.execute(begin_sql, ())
+    conn.prepare_cached(begin_sql)
+        .await?
+        .execute(())
         .await
         .context("begin transaction")?;
     match work().await {
         Ok(val) => {
-            if let Err(error) = conn.execute("COMMIT", ()).await {
+            let commit = match conn.prepare_cached("COMMIT").await {
+                Ok(mut statement) => statement.execute(()).await,
+                Err(error) => Err(error),
+            };
+            if let Err(error) = commit {
                 let _ = conn.execute("ROLLBACK", ()).await;
                 return Err(error).context("commit transaction");
             }

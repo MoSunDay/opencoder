@@ -24,27 +24,33 @@ pub async fn append_many(conn: &Connection, events: &[SessionEventRecord]) -> Re
             anyhow::bail!("append_events: all events in a batch must share the same session_id");
         }
     }
-    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
-        let mut insert = conn.prepare_cached(INSERT_EVENT).await?;
-        let mut seqs = Vec::with_capacity(events.len());
-        for ev in events {
-            let payload_json =
-                serde_json::to_string(&ev.payload).context("serialize event payload")?;
-            insert
-                .execute(params![
-                    ev.session_id.as_str(),
-                    kind_str(ev.kind),
-                    payload_json,
-                    ev.sse_kind.as_deref(),
-                    ev.ts
-                ])
-                .await
-                .context("insert event in tx")?;
-            seqs.push(conn.last_insert_rowid());
-        }
-        Ok(seqs)
-    })
-    .await
+    if events.len() == 1 {
+        anyhow::ensure!(conn.is_autocommit()?, "nested storage transaction");
+        // A single INSERT already commits atomically. The write lease keeps
+        // its row ID private until the durable implicit transaction finishes.
+        return insert_rows(conn, events).await;
+    }
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || insert_rows(conn, events)).await
+}
+
+async fn insert_rows(conn: &Connection, events: &[SessionEventRecord]) -> Result<Vec<i64>> {
+    let mut insert = conn.prepare_cached(INSERT_EVENT).await?;
+    let mut seqs = Vec::with_capacity(events.len());
+    for ev in events {
+        let payload_json = serde_json::to_string(&ev.payload).context("serialize event payload")?;
+        insert
+            .execute(params![
+                ev.session_id.as_str(),
+                kind_str(ev.kind),
+                payload_json,
+                ev.sse_kind.as_deref(),
+                ev.ts
+            ])
+            .await
+            .context("insert event")?;
+        seqs.push(conn.last_insert_rowid());
+    }
+    Ok(seqs)
 }
 
 pub async fn last_seq(conn: &Connection, session_id: &str) -> Result<i64> {

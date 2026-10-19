@@ -312,3 +312,72 @@ async fn busy_runtime_hibernation_releases_the_fleet_activation_lock() {
     drop(activation);
     drop(reader);
 }
+
+#[tokio::test]
+async fn recently_read_retired_runtime_is_not_collected_between_history_requests() {
+    let root = tempfile::tempdir().unwrap();
+    let host = Host::open(&root.path().join("host"), "node".into(), "test".into(), 2)
+        .await
+        .unwrap();
+    let model = Arc::new(MockChatClient::new());
+    let (retired, retired_http) =
+        runtime(&host, root.path(), "history-reader", model.clone()).await;
+    host.store.activate_runtime("history-reader").await.unwrap();
+    let (active, active_http) = runtime(&host, root.path(), "current-reader", model).await;
+    host.store.activate_runtime("current-reader").await.unwrap();
+    host.store
+        .put_definition("host", "current", &json!({"instance":host.instance}))
+        .await
+        .unwrap();
+    let read = NodeOperation::Maintenance {
+        command: ExecutionCommand {
+            action: "status".into(),
+            input: json!({}),
+        },
+    };
+    assert_eq!(
+        host.call_runtime("history-reader", &read)
+            .await
+            .unwrap()
+            .status,
+        200
+    );
+    // Keep an attempted collection from invoking systemctl in this test.
+    // Recent reads must skip collection before waiting on this shared lock.
+    let activation = host
+        .store
+        .request_lock("release", "activation")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), host.collect_retired())
+        .await
+        .expect("recent history reads must defer automatic hibernation")
+        .unwrap();
+    assert!(host
+        .store
+        .definition("runtime_sleep", "history-reader")
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        host.call_runtime("history-reader", &read)
+            .await
+            .unwrap()
+            .status,
+        200
+    );
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(61)).await;
+    tokio::time::resume();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), host.collect_retired())
+            .await
+            .is_err(),
+        "an idle Runtime must become eligible for collection again"
+    );
+    drop(activation);
+    retired_http.abort();
+    active_http.abort();
+    retired.shutdown().await.unwrap();
+    active.shutdown().await.unwrap();
+}

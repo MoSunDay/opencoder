@@ -1,3 +1,5 @@
+#[path = "lifecycle/activity.rs"]
+mod activity;
 mod admission;
 mod api;
 mod client;
@@ -29,6 +31,7 @@ pub struct Host {
     pub token: String,
     pub client: reqwest::Client,
     creations: admission::Creations,
+    activity: activity::RecentUse,
     result_reader: opencoder_worker::result_reader::ResultReader,
     pub snapshot: RwLock<NodeSnapshot>,
     pub sequence: AtomicU64,
@@ -81,6 +84,7 @@ impl Host {
             token,
             client: reqwest::Client::builder().no_proxy().build()?,
             creations: admission::Creations::default(),
+            activity: activity::RecentUse::default(),
             result_reader: opencoder_worker::result_reader::ResultReader::default(),
             snapshot: RwLock::new(NodeSnapshot {
                 generation: String::new(),

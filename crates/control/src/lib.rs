@@ -2,6 +2,7 @@
 pub mod admission;
 pub mod api;
 mod bootstrap;
+mod catalog_guard;
 mod ontology;
 pub mod release;
 mod resource_scope;

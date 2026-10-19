@@ -40,8 +40,7 @@ async fn agents_lists_only_agent_bound_capabilities() {
     assert_eq!(capabilities[0]["id"], json!(bound));
     assert_eq!(capabilities[0]["summary"], json!("agent bound capability"));
 
-    // Whitespace-padded bindings normalize on bind: the read-back shows the
-    // trimmed target and the aggregation groups it under the same agent.
+    // A padded name is normalized before duplicate detection.
     let padded = seed_cap(&h, "padded binding capability").await;
     let (status, body) = h
         .req(
@@ -50,8 +49,7 @@ async fn agents_lists_only_agent_bound_capabilities() {
             Some(json!({"kind": "agent", "target": " act "})),
         )
         .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body["target"], json!("act"));
+    assert_eq!(status, 409, "{body}");
 
     let (status, body) = h.req(Method::GET, "/api/brain/agents", None).await;
     assert_eq!(status, 200, "{body}");
@@ -68,7 +66,7 @@ async fn agents_lists_only_agent_bound_capabilities() {
         .map(|c| c["id"].clone())
         .collect();
     assert!(ids.contains(&json!(bound)), "{body}");
-    assert!(ids.contains(&json!(padded)), "{body}");
+    assert!(!ids.contains(&json!(padded)), "{body}");
 }
 
 /// The phantom gate is lenient: binding an agent capability to a name with

@@ -38,6 +38,9 @@ pub async fn bind(
         target: target.target.trim().to_string(),
         ..target
     };
+    let mut identity = target.clone();
+    identity.required_inputs.sort();
+    identity.required_outputs.sort();
     let _lock = match state.fleet.request_lock("capability", &id).await {
         Ok(lock) => lock,
         Err(error) => return error_500(error.to_string()),
@@ -47,11 +50,39 @@ pub async fn bind(
         Ok(None) => return error_404("capability not found"),
         Err(error) => return error_500(error.to_string()),
     }
-    // Lenient phantom gate: an agent binding naming an agent with no card
-    // (custom or builtin) still succeeds — agents may be created after the
-    // bind — but the mismatch is logged so a typo cannot silently group a
-    // capability under a name nothing will ever resolve. Team/dag/todos
-    // targets are free-form and stay unchecked.
+    for capability in match state.store.list_brain_capabilities().await {
+        Ok(existing) => existing,
+        Err(error) => return error_500(error.to_string()),
+    } {
+        let existing_id = &capability.capability.id;
+        let existing = match state
+            .fleet
+            .definition("capability_target", existing_id)
+            .await
+        {
+            Ok(Some(value)) => match serde_json::from_value::<CapabilityTarget>(value) {
+                Ok(mut value) => {
+                    value.target = value.target.trim().to_owned();
+                    value.required_inputs.sort();
+                    value.required_outputs.sort();
+                    value
+                }
+                Err(error) => return error_500(error.to_string()),
+            },
+            Ok(None) => continue,
+            Err(error) => return error_500(error.to_string()),
+        };
+        if json!(existing) == json!(identity) {
+            if existing_id == &id {
+                return response(RpcReply::ok(json!(target)));
+            }
+            return response(RpcReply {
+                status: 409,
+                body: json!({"error":"相同能力绑定已存在，请复用已有能力", "code":"duplicate_binding",
+                    "details":{"id":existing_id,"name":capability.capability.summary}}),
+            });
+        }
+    }
     if target.kind == ExecutionKind::Agent
         && opencoder_core::agent::read_agent_meta(&target.target).is_none()
         && !opencoder_core::builtin_agents()

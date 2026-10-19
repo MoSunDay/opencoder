@@ -122,7 +122,10 @@ async fn legacy_dag_gets_timestamps_on_save_and_concurrent_edits_keep_creation()
     assert_eq!(first.1["created_at"], second.1["created_at"]);
     let first_time = first.1["updated_at"].as_i64().unwrap();
     let second_time = second.1["updated_at"].as_i64().unwrap();
-    assert_ne!(first_time, second_time);
+    assert_eq!(
+        first_time, second_time,
+        "identical retries must not refresh timestamps"
+    );
     let (status, stored) = h.req(Method::GET, "/api/dag/defs/etl-demo", None).await;
     assert_eq!(status, 200, "{stored}");
     assert_eq!(stored["created_at"], first.1["created_at"]);
@@ -188,8 +191,8 @@ async fn dag_definition_spec_validation_table() {
     let (status, body) = h.req(Method::GET, "/api/dag/defs/bare-demo", None).await;
     assert_eq!(status, 200, "{body}");
 
-    // Deleting an unknown definition is a no-op success (pinned contract).
+    // A missing object is distinguished from a verified successful deletion.
     let (status, body) = h.req(Method::DELETE, "/api/dag/defs/none", None).await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body, json!({"ok": true}));
+    assert_eq!(status, 404, "{body}");
+    assert_eq!(body, json!({"error": "DAG not found"}));
 }

@@ -8,6 +8,7 @@ vi.mock('../sse.js', () => ({ openStream: open }));
 import '../test/setup-dom.js';
 import { RunDetail } from './runDetail.jsx';
 import { ExecutionView } from '../fleet/detail.jsx';
+import { DagProcess } from './process.jsx';
 
 const spec = { name: 'etl', steps: [
   { name: 'fetch', kind: { type: 'binary', resource: 'tool' } },
@@ -92,4 +93,42 @@ it('subscribes strictly above the current state, folds new steps and finalizes o
   expect(finished).toHaveBeenCalledOnce();
   expect(screen.getByText('run failed')).toBeTruthy();
   expect(open.mock.results[0].value.abort).toHaveBeenCalled();
+});
+
+it('keeps measured nodes visible when a snapshot refreshes without another resize', async () => {
+  const observers = [];
+  vi.stubGlobal('ResizeObserver', function Observer(callback) {
+    const elements = new Set();
+    observers.push({ callback, elements });
+    return { observe: (element) => elements.add(element), unobserve: (element) => elements.delete(element), disconnect: () => elements.clear() };
+  });
+  vi.stubGlobal('DOMMatrixReadOnly', function Matrix() { this.m22 = 1; });
+  let unmount;
+  try {
+    const rendered = render(<DagProcess spec={spec} snapshot={snapshot} />);
+    unmount = rendered.unmount;
+    const nodes = [...document.querySelectorAll('.react-flow__node')];
+    expect(nodes).toHaveLength(2);
+    for (const node of nodes) {
+      Object.defineProperty(node, 'offsetWidth', { value: 176 });
+      Object.defineProperty(node, 'offsetHeight', { value: 120 });
+    }
+    await act(async () => {
+      for (const observer of observers) {
+        const entries = [...observer.elements].filter((node) => nodes.includes(node)).map((target) => ({ target }));
+        if (entries.length) observer.callback(entries);
+      }
+    });
+    for (const node of nodes) expect(node.style.visibility).toBe('visible');
+    rendered.rerender(<DagProcess spec={spec} snapshot={{ ...snapshot, steps: [
+      { name: 'fetch', status: 'done' }, { name: 'review', status: 'error', error: 'step failed' },
+    ] }} selectedId="review" />);
+    await waitFor(() => expect(screen.getByText('step failed')).toBeTruthy());
+    for (const node of nodes) {
+      expect(node.style.visibility).toBe('visible');
+      expect(node.style.height).toBe('');
+    }
+    expect(document.querySelector('[data-id="review"]').classList.contains('selected')).toBe(true);
+    expect(document.querySelectorAll('.react-flow__edge')).toHaveLength(1);
+  } finally { unmount?.(); vi.unstubAllGlobals(); }
 });

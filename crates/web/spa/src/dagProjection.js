@@ -129,18 +129,16 @@ export function dropCycleEdges(edges) {
 const RUN_HANDLE = 6;
 
 /// runNodeBox() → {width, handles} declaring the fixed run-view card box
-/// (mirrors .dag-node CSS and the dagre constants). React Flow only
-/// renders an edge once BOTH endpoint nodes are "initialized" (handle
-/// bounds + a width); declaring them makes that true on the first frame
-/// instead of after ResizeObserver measurement, so snapshot churn (3s
-/// polling + SSE step events rebuild every node object) can no longer
-/// un-initialize nodes and blank the whole graph. Height is deliberately
+/// (mirrors .dag-node CSS and the dagre constants). React Flow can place
+/// edges using these initial handle bounds before measuring.
+/// Node visibility still requires measured width AND height; DagProcess
+/// retains those measurements when snapshots replace the node data.
+/// Height is deliberately
 /// NOT declared: getNodeInlineStyleDimensions() would bake a permanent
 /// inline height:52px onto the wrapper while .dag-node has no
 /// position:relative — error text grows cards past 52px, yet handles
 /// would stay pinned to the stale box and fitView would read the clamped
-/// measured.height. Width alone satisfies initialization, so RO keeps
-/// reporting the true DOM height like it did before this fix.
+/// measured.height. ResizeObserver reports the true DOM height.
 function runNodeBox() {
   return {
     width: NODE_W,

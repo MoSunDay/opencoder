@@ -1,4 +1,4 @@
-Commit: f0590b1bbb4cb1fd82f880c885ef3b9290558bf4
+Commit: 5a2bd1b9a799bf2c6a25de55527d3b20a543a016
 
 # web 模块
 
@@ -72,6 +72,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - 原生执行详情与消息翻页兼容缺少 `Array.at`、`URLSearchParams.size` 的浏览器；会话 Markdown 无法解析时以普通文本展示，仍可读取 Session 上下文。执行深链测试挂载真实 `ExecutionView`，检查所属节点、消息、分页和离线错误。
 - 会话执行复用 session 运行时；持久化经 `Arc<dyn Store>`。
 - [serve](../../crates/web/src/lib.rs) 为会话与 `ProjectService` 提供同一 `LibsqlStore` 实例，共享连接和锁；存储接口见 [store](../store/index.md)。
+- [项目工作台浏览器步骤](../../scripts/acceptance/project/browser.js) 通过当前子项与 TODO 入口创建层级；关闭关联详情时依次退出实际打开的抽屉，再回到 TODO 列表发起下一次操作。
 - [UI 验收入口](../../scripts/acceptance/ui/main.js) 与 [范围表](../../scripts/acceptance/ui/scope.js) — 按 [规则 05](../../rules/05-ui-acceptance.md) 选择受影响页面和行为；全站验收仅在用户明确要求时执行。
 - [远端会话验收](../../scripts/acceptance/conversations/README.md) 共用节点选择、会话身份核对与回复等待，验证两种模式的只读工具调用、续聊和重开。
 - 验收 `--resume` 只复用覆盖范围及二进制摘要相同的成功记录，失败保留日志并重跑，SPA 漂移检查始终执行；`--brain-test` 可使用同批构建的测试可执行文件，其原生镜像版本检查仍然执行。

@@ -98,7 +98,10 @@ async fn submit_inner(
     dispatch_resources: bool,
 ) -> anyhow::Result<RpcReply> {
     let started = Instant::now();
-    let catalog_lock = crate::catalog_guard::read_lock(state).await?;
+    let catalog_lock = match crate::catalog_guard::read_lock(state).await {
+        Ok(lock) => lock,
+        Err(reply) => return Ok(reply),
+    };
     let _request_lock = state.fleet.request_lock("execution", &request.id).await?;
     let key = dispatch_key(&request).to_owned();
     if opencoder_core::brain::EXECUTION_IO_WRITER_VERSION == 0

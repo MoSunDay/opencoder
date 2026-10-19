@@ -12,6 +12,7 @@ path = "src/main.rs"
 tokio-util = { workspace = true, features = ["io"] }
 base64.workspace = true
 opencoder-core.workspace = true
+opencoder-database.workspace = true
 opencoder-brain.workspace = true
 opencoder-llm.workspace = true
 opencoder-session.workspace = true

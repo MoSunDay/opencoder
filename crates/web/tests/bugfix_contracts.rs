@@ -23,13 +23,13 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use futures::StreamExt;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store};
+use opencoder_store::{EventKind, SessionEventRecord, SessionMeta, Store, TursoStore};
 use opencoder_web::handle::SseEvt;
 use serde_json::json;
 
 /// Fresh in-memory AppState (handlers are called directly, no router).
 async fn state() -> Arc<opencoder_web::AppState> {
-    state_with_store(Arc::new(LibsqlStore::open_memory().await.unwrap())).await
+    state_with_store(Arc::new(TursoStore::open_memory().await.unwrap())).await
 }
 
 /// AppState backed by a custom store (for the failing-store regression).
@@ -280,7 +280,7 @@ async fn post_interrupt_no_handle_returns_ok_false() {
 /// Bug #4: a Store failure on POST /sessions must surface as a structured 500.
 #[tokio::test]
 async fn create_session_returns_500_on_store_failure() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let failing: Arc<dyn Store> = Arc::new(FailingStore { inner });
     let state = state_with_store(failing).await;
 

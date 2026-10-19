@@ -54,13 +54,18 @@ impl Fixture {
             .await["item"]
             .clone()
     }
-    pub async fn connection(&self) -> libsql::Connection {
-        libsql::Builder::new_local(self.directory.path().join("ontology.db"))
-            .build()
-            .await
-            .unwrap()
-            .connect()
-            .unwrap()
+    pub async fn connection(&self) -> turso::Connection {
+        turso::Builder::new_local(
+            (self.directory.path().join("ontology.db"))
+                .to_str()
+                .expect("UTF-8 database path"),
+        )
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap()
+        .connect()
+        .unwrap()
     }
 }
 pub fn creation(kind: &str, title: &str) -> Value {

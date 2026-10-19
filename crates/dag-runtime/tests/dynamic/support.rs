@@ -2,7 +2,7 @@ use opencoder_dag::{DagClaimedRun, DagEventBatch, DagEventIn, DagStatusReport};
 use opencoder_dag_runtime::{ExecDeps, RunDeps};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_node::uplink::{LocalDagPersistence, Uplink};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
@@ -58,7 +58,7 @@ impl Fixture {
             tmp,
             root,
             events: Arc::new(Events::default()),
-            store: Arc::new(LibsqlStore::open_memory().await.unwrap()),
+            store: Arc::new(TursoStore::open_memory().await.unwrap()),
             config,
             _permit: permit,
         }

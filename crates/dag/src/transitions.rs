@@ -82,7 +82,7 @@ impl StepOutcome {
 }
 
 /// The legal-transition grid (see module docs). Mirrors
-/// `libsql_store/node_state.rs::transition_allowed` on purpose.
+/// `turso_store/node_state.rs::transition_allowed` on purpose.
 pub fn transition_allowed(from: DagRunStatus, to: DagRunStatus) -> bool {
     use DagRunStatus::{Cancelled, Cancelling, Done, Error, Pending, Running};
     matches!(

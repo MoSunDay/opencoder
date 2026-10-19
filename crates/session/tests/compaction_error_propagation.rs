@@ -14,14 +14,14 @@ use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{compaction::compact, SessionEvent, SessionState};
 use opencoder_store::{
-    Delivery, ImportReport, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
-/// Wraps a real in-memory `LibsqlStore` but makes `update_session` fail,
+/// Wraps a real in-memory `TursoStore` but makes `update_session` fail,
 /// simulating a transient disk/DB error during compaction metadata persistence.
 struct FailingUpdateStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
 }
 
 #[async_trait]
@@ -115,7 +115,7 @@ impl Store for FailingUpdateStore {
 /// succeeds (MockChatClient) so we reach the store-write line.
 #[tokio::test]
 async fn compact_returns_err_when_store_rejects_metadata_persistence() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let failing: Arc<dyn Store> = Arc::new(FailingUpdateStore { inner });
 
     let mock: Arc<dyn ChatStream> =

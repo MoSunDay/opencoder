@@ -9,7 +9,7 @@
 //! to cross the chunk boundary.
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
 fn msg(id: &str) -> Message {
@@ -27,9 +27,9 @@ fn msg(id: &str) -> Message {
     }
 }
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     store
         .create_session(&SessionMeta {
             id: "s1".into(),

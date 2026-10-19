@@ -6,7 +6,7 @@ use opencoder_core::fleet::{
     ExecutionCommand, ExecutionKind, ExecutionRef, ExecutionStatus, NodeOperation,
 };
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use serde_json::json;
 
 #[tokio::test]
@@ -14,7 +14,7 @@ async fn index_replays_top_level_session_pages_with_activity_order_and_ties() {
     let (_guard, _home) = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let worker = support::worker(dir.path(), support::mock()).await;
-    let store = LibsqlStore::open(dir.path().join("node/runtime.db"))
+    let store = TursoStore::open(dir.path().join("node/runtime.db"))
         .await
         .unwrap();
     let mut expected = std::collections::HashSet::new();
@@ -88,7 +88,7 @@ async fn internal_session_is_running_only_while_its_loop_is_live() {
         "idle"
     );
     let id = "session-owned-child";
-    let store = LibsqlStore::open(dir.path().join("node/runtime.db"))
+    let store = TursoStore::open(dir.path().join("node/runtime.db"))
         .await
         .unwrap();
     store

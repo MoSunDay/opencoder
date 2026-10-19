@@ -12,7 +12,7 @@ use std::{
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatStream, LlmEvent};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
@@ -159,7 +159,7 @@ async fn wait_for_session_message(
 
 #[tokio::test]
 async fn rewound_sibling_discards_late_failed_result() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let notify = Arc::new(tokio::sync::Notify::new());
     let client: Arc<dyn ChatStream> = Arc::new(ParkingFailClient {
         queue: std::sync::Mutex::new(std::collections::VecDeque::from(vec![

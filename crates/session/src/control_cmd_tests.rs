@@ -144,7 +144,7 @@ fn parse_compound_recognized_as_command() {
 
 use opencoder_core::{resolve_agent, Config, ContentBlock};
 use opencoder_llm::{ChatStream, MockChatClient};
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 
 fn make_session(store: Option<Arc<dyn opencoder_store::Store>>) -> SessionState {
     let working_dir = std::env::temp_dir().join("opencoder-control-cmd-tests");
@@ -171,7 +171,7 @@ fn collect_events(session: &mut SessionState, cmd: ControlCmd) -> Vec<SessionEve
 #[tokio::test]
 async fn apply_switch_agent_changes_agent_and_emits() {
     let store =
-        Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        Arc::new(TursoStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "sess-ctrl".into(),
@@ -200,7 +200,7 @@ async fn apply_clear_context_preserves_last_say_as_seed() {
     // A prior assistant reply exists -> ClearContext preserves it as a
     // neutral continuity seed rather than wiping to a blank fresh-start.
     let store =
-        Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        Arc::new(TursoStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "sess-ctrl".into(),
@@ -290,7 +290,7 @@ async fn apply_clear_context_clears_skill_in_store() {
     // store's `skill` column populated, so resume() reloaded a stale
     // skill. Both layers must now be empty after the clear.
     let store =
-        Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        Arc::new(TursoStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "sess-ctrl".into(),
@@ -359,7 +359,7 @@ async fn apply_clear_context_clears_active_skill_names_too() {
 async fn apply_clear_context_with_no_skill_is_harmless() {
     // No skill was ever set: clearing must be a no-op, never panic/error.
     let store =
-        Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        Arc::new(TursoStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "sess-ctrl".into(),
@@ -386,7 +386,7 @@ async fn apply_clear_context_on_plan_hands_off_to_act() {
     // The canonical clear is the plan execution boundary: preserve the
     // plan under an explicit execution directive, then converge to act.
     let store =
-        Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        Arc::new(TursoStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "sess-ctrl".into(),

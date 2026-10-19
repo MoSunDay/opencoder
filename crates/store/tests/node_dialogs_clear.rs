@@ -4,13 +4,13 @@
 //! with them); sessions of pending/running/cancelling tasks are kept and
 //! reported as `skipped`. Runs on `open_memory`.
 
-use opencoder_store::{LibsqlStore, NodeTaskRecord, NodeTaskStatus, Store};
+use opencoder_store::{NodeTaskRecord, NodeTaskStatus, Store, TursoStore};
 
-async fn fresh() -> LibsqlStore {
-    LibsqlStore::open_memory().await.unwrap()
+async fn fresh() -> TursoStore {
+    TursoStore::open_memory().await.unwrap()
 }
 
-async fn register(store: &LibsqlStore, name: &str) -> String {
+async fn register(store: &TursoStore, name: &str) -> String {
     store
         .register_node(name, None, None, None, 1_000)
         .await
@@ -18,7 +18,7 @@ async fn register(store: &LibsqlStore, name: &str) -> String {
         .id
 }
 
-async fn dispatch(store: &LibsqlStore, id: &str, node: &str, created_at: i64) -> NodeTaskRecord {
+async fn dispatch(store: &TursoStore, id: &str, node: &str, created_at: i64) -> NodeTaskRecord {
     store
         .dispatch_node_task(
             id,

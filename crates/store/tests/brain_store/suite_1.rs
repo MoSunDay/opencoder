@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn create_get_and_list_roundtrip_with_ordered_eng_inputs() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
 
     store
         .create_brain_capability(
@@ -50,7 +50,7 @@ async fn create_get_and_list_roundtrip_with_ordered_eng_inputs() {
 
 #[tokio::test]
 async fn update_replaces_eng_inputs() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_brain_capability(
             &cap("cap-1", "goal", 100),
@@ -81,7 +81,7 @@ async fn update_replaces_eng_inputs() {
 
 #[tokio::test]
 async fn delete_cascades_eng_inputs_and_vectors() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_brain_capability(&cap("cap-1", "goal", 100), &[eng("cap-1", "a", 1)])
         .await
@@ -111,7 +111,7 @@ async fn delete_cascades_eng_inputs_and_vectors() {
 
 #[tokio::test]
 async fn upsert_vector_is_idempotent() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_brain_capability(&cap("cap-1", "goal", 100), &[])
         .await
@@ -146,7 +146,7 @@ async fn upsert_vector_is_idempotent() {
 
 #[tokio::test]
 async fn vector_distance_cos_orders_hits_and_reports_cosine_distance() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     // e1 aligned with the query, e2 orthogonal, e3 opposite.
     let vectors: &[(&str, [f32; 4])] = &[
         ("cap-e1", [1.0, 0.0, 0.0, 0.0]),
@@ -199,7 +199,7 @@ async fn vector_distance_cos_orders_hits_and_reports_cosine_distance() {
 
 #[tokio::test]
 async fn search_filters_by_embedding_model() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_brain_capability(&cap("cap-a", "goal", 100), &[])
         .await
@@ -240,7 +240,7 @@ async fn search_filters_by_embedding_model() {
 
 #[tokio::test]
 async fn create_with_vector_persists_capability_inputs_and_vector_together() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
 
     store
         .create_brain_capability_with_vector(
@@ -282,7 +282,7 @@ async fn create_with_vector_persists_capability_inputs_and_vector_together() {
 
 #[tokio::test]
 async fn update_with_vector_replaces_content_inputs_and_vector() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
 
     store
         .create_brain_capability_with_vector(

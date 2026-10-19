@@ -9,14 +9,14 @@
 use super::replay::rebuild_after_reset;
 use crate::chat::{ChatBlock, ChatView};
 use opencoder_core::Message;
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use std::sync::Arc;
 
 const SEED_MARKER: &str = "<<OPENCODER_CLEAR_SEED>>";
 const BLANK_MARKER: &str = "<<OPENCODER_CLEAR_CONTEXT_MARKER>>";
 
 async fn store_with_boundary(session_id: &str, handoff_plan: Option<&str>) -> Arc<dyn Store> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: session_id.into(),

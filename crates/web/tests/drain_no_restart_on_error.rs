@@ -20,7 +20,7 @@ use std::time::Duration;
 use opencoder_core::Config;
 use opencoder_core::ContentBlock;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{Delivery, EventKind, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, EventKind, SessionInput, SessionMeta, Store, TursoStore};
 use tokio::sync::mpsc;
 
 // ---- failing / fail-first ChatStream impls ----
@@ -78,7 +78,7 @@ impl ChatStream for FailFirstStream {
 
 /// Fresh in-memory AppState (drain tests call fns directly, no router).
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

@@ -35,8 +35,8 @@ use axum::response::IntoResponse;
 use futures::StreamExt;
 use opencoder_core::Message;
 use opencoder_store::{
-    Delivery, EventKind, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, EventKind, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 use opencoder_web::handle::SseEvt;
 use serde_json::json;
@@ -45,10 +45,10 @@ use tokio::sync::Mutex;
 /// Store wrapper that injects an "overlap-window" event the first time
 /// `events_after` runs, modelling a concurrent persistence between the baseline
 /// snapshot and the replay query. Every other method delegates to the inner
-/// libsql store, so `last_event_seq` truthfully reports persisted state *at call
+/// turso store, so `last_event_seq` truthfully reports persisted state *at call
 /// time* — which is what makes the production call order observable here.
 struct OverlapStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
     overlap: Mutex<Option<SessionEventRecord>>,
     seeded: AtomicBool,
 }
@@ -176,7 +176,7 @@ const OVERLAP_MARKER: &str = "__overlap_window_seed__";
 
 #[tokio::test]
 async fn overlap_window_event_is_deduped_once() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let sid = "ov";
     let store: Arc<dyn Store> = Arc::new(OverlapStore {
         inner: inner.clone(),

@@ -254,20 +254,24 @@ async fn reopen_is_idempotent_and_serves_v15() {
 
     // First open creates the file at the latest schema.
     {
-        let store = LibsqlStore::open(&db_path).await.unwrap();
+        let store = TursoStore::open(&db_path).await.unwrap();
         drop(store);
     }
     // Second open re-runs bootstrap/migrate on the existing file; creating and
     // listing a goal proves the v15 tables are live after the reopen.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
     let conn = store.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
         .await
         .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let v: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(v, 38, "schema_version must be latest (38) after reopen");
+    assert_eq!(
+        v,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema_version must be current watermark after reopen"
+    );
 
     let iface: Arc<dyn ProjectStore> = Arc::new(store);
     iface.create_goal(&goal("g1", 0, 1)).await.unwrap();
@@ -277,7 +281,7 @@ async fn reopen_is_idempotent_and_serves_v15() {
 
     // Third open: still idempotent, data intact.
     drop(iface);
-    let store3 = LibsqlStore::open(&db_path).await.unwrap();
+    let store3 = TursoStore::open(&db_path).await.unwrap();
     let iface3: Arc<dyn ProjectStore> = Arc::new(store3);
     assert_eq!(iface3.list_goals().await.unwrap().len(), 1);
 }

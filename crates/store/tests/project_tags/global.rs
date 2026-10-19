@@ -1,6 +1,6 @@
 use super::*;
 
-async fn selected(s: &LibsqlStore, id: &str) -> Vec<String> {
+async fn selected(s: &TursoStore, id: &str) -> Vec<String> {
     s.list_todo_tags()
         .await
         .unwrap()

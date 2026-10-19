@@ -1,7 +1,7 @@
 use super::*;
 use opencoder_store::project::tags::TagError;
 
-async fn selected(store: &LibsqlStore, todo_id: &str) -> Vec<String> {
+async fn selected(store: &TursoStore, todo_id: &str) -> Vec<String> {
     store
         .list_todo_tags()
         .await

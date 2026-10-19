@@ -1,7 +1,7 @@
-use opencoder_store::{LibsqlStore, ProjectStore};
+use opencoder_store::{ProjectStore, TursoStore};
 use serde_json::json;
 
-pub async fn seed(store: &LibsqlStore) {
+pub async fn seed(store: &TursoStore) {
     store
         .create_goal(
             &serde_json::from_value(json!({

@@ -1,17 +1,17 @@
-use super::{records::read_index, FleetStore};
+use super::FleetStore;
+use super::{records::read_index, FleetConnection};
 use anyhow::{bail, Context, Result};
-use libsql::{params, Connection};
 use opencoder_core::fleet::{valid_id, ExecutionIndex};
 use std::collections::HashSet;
+use turso::{params, Connection};
 
 mod rows;
 #[cfg(test)]
 mod tests;
 
-impl FleetStore {
+impl FleetConnection {
     /// Snapshot the pending IDs eligible for first-sync recovery.
     pub async fn pending_ids(&self, node_id: &str) -> Result<Vec<String>> {
-        let _guard = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(
@@ -49,7 +49,6 @@ impl FleetStore {
         // Serialize outside the shared writer gate. Whole inventories can
         // contain tens of thousands of rows during a Server handoff.
         let encoded = serde_json::to_string(records)?;
-        let _guard = self.gate.lock().await;
         self.conn
             .execute("BEGIN IMMEDIATE", ())
             .await
@@ -165,3 +164,6 @@ pub(super) async fn rollback(conn: &Connection) {
         tracing::warn!(%error, "index report rollback failed");
     }
 }
+
+#[path = "access/report.rs"]
+mod database_access;

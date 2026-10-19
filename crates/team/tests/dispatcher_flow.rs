@@ -1,4 +1,4 @@
-//! Real `NodeDispatcher` against a real LibsqlStore: the done path (claim →
+//! Real `NodeDispatcher` against a real TursoStore: the done path (claim →
 //! answer → complete → last-assistant-text) and the timeout path (cancel
 //! request + error), plus the `team_topic_runs` ledger upsert.
 

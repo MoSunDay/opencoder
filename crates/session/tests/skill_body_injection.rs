@@ -18,7 +18,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionState};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 fn done_turn(text: &str) -> LlmEvent {
     LlmEvent::Completed {
@@ -120,7 +120,7 @@ fn count_user_occurrences(req: &opencoder_llm::ChatRequest, needle: &str) -> usi
 /// run submits neither body nor `[active skill]` tail.
 #[tokio::test]
 async fn armed_body_ships_once_then_stops_and_is_never_persisted() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     // Run 1 spans TWO LLM rounds (tool call, then Done); run 2 is plain.
     let mock = Arc::new(
         MockChatClient::new()

@@ -22,7 +22,7 @@ use anyhow::Result;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, Usage};
 use opencoder_session::{fire_turn_cancel, run, SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{SessionInput, SessionMeta, Store, TursoStore};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -47,7 +47,7 @@ fn text_done(text: &str) -> LlmEvent {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 /// A ChatStream whose first `chat_stream` call blocks forever (never produces

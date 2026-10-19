@@ -74,7 +74,7 @@ pub fn compose_embed_text(input: &CapabilityInput) -> String {
     lines.join("\n")
 }
 
-/// Encode f32s as little-endian bytes — the blob encoding libsql's bundled
+/// Encode f32s as little-endian bytes — the blob encoding the database's
 /// `vector32()` accepts directly, so store and query share one codec.
 pub fn f32_slice_to_le_bytes(vals: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(vals.len() * 4);

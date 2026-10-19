@@ -11,7 +11,7 @@ use anyhow::Result;
 use opencoder_core::{resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
 use opencoder_session::SessionState;
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionPatch, Store};
+use opencoder_store::{Delivery, SessionInput, SessionPatch, Store, TursoStore};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Terminal;
@@ -608,7 +608,7 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<Arc<dyn Store>> {
     let data_dir = data_dir_for(workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
     Ok(Arc::new(
-        LibsqlStore::open(data_dir.join("opencoder.db")).await?,
+        TursoStore::open(data_dir.join("opencoder.db")).await?,
     ))
 }
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::MockChatClient;
 use opencoder_session::{handoff, resume, SessionState};
-use opencoder_store::{LibsqlStore, SessionPatch, Store};
+use opencoder_store::{SessionPatch, Store, TursoStore};
 
 fn cfg() -> Config {
     Config {
@@ -26,7 +26,7 @@ fn assistant(id: &str, text: &str) -> Message {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 #[tokio::test]

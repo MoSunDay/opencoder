@@ -8,7 +8,7 @@
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
-    LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoStatus,
+    ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoStatus, TursoStore,
 };
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ struct Harness {
 }
 
 async fn harness_on(
-    store: Arc<LibsqlStore>,
+    store: Arc<TursoStore>,
     mock: Arc<MockChatClient>,
     brain: Option<opencoder_brain::Runtime>,
 ) -> Harness {
@@ -47,7 +47,7 @@ async fn harness_on(
 }
 
 async fn harness_with(scripts: Vec<Vec<LlmEvent>>) -> Harness {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut mock = MockChatClient::new();
     for script in scripts {
         mock = mock.push_script(script);

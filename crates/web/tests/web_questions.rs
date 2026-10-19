@@ -10,7 +10,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -19,7 +19,7 @@ use tower::ServiceExt;
 /// default covers title generation / any later call so the queue never
 /// starves.
 async fn app(mock: MockChatClient) -> (axum::Router, Arc<dyn Store>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     // Pin autopilot off via the project domain file: a developer's global
     // ap.json must not append a review turn to this scripted sequence.

@@ -15,7 +15,7 @@ use anyhow::Result;
 use opencoder_core::{Config, ContentBlock, Message, MessageUsage, Role};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_session::resume_and_replay;
-use opencoder_store::{LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord};
+use opencoder_store::{SessionMeta, Store, SubagentStatus, SubagentTaskRecord, TursoStore};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -40,7 +40,7 @@ impl ChatStream for HangingChatClient {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn session_meta(id: &str, agent: &str) -> SessionMeta {

@@ -6,7 +6,7 @@
 //! worker (or this test playing one) can claim again with zero code changes.
 //!
 //! The stale heartbeat is backfilled through a SECOND connection to a
-//! file-backed db (`LibsqlStore::conn()` clones share the same underlying
+//! file-backed db (`TursoStore::conn()` clones share the same underlying
 //! database) because in-memory dbs cannot be reached cross-connection.
 //! Server harness mirrors `node_e2e_support::spawn_server`, reusing its HTTP /
 //! SSE helpers against the SAME signature token.
@@ -17,9 +17,9 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use libsql::params;
 use opencoder_llm::MockChatClient;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
+use turso::params;
 
 use node_e2e_support::{collect_until, get_json, open_sse, post_json, wait_for, TOKEN};
 
@@ -31,7 +31,7 @@ struct Srv {
     base: String,
     store: Arc<dyn Store>,
     /// Second connection into the SAME file-backed database (backfill path).
-    raw: libsql::Connection,
+    raw: turso::Connection,
     shutdown: tokio::sync::watch::Sender<bool>,
     _dir: tempfile::TempDir,
 }
@@ -42,13 +42,11 @@ impl Drop for Srv {
     }
 }
 
-/// `node_e2e_support::spawn_server`, but backed by an on-disk libsql file so
+/// `node_e2e_support::spawn_server`, but backed by an on-disk turso file so
 /// the test can reach the rows from a second connection.
 async fn spawn_file_server() -> Srv {
     let dir = tempfile::tempdir().unwrap();
-    let ls = LibsqlStore::open(dir.path().join("sweep.db"))
-        .await
-        .unwrap();
+    let ls = TursoStore::open(dir.path().join("sweep.db")).await.unwrap();
     let raw = ls.conn().await.unwrap();
     let _ = raw.busy_timeout(Duration::from_secs(5));
     let store: Arc<dyn Store> = Arc::new(ls);

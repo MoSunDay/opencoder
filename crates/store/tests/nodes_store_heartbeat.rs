@@ -7,18 +7,18 @@
 //!   refreshes last_seen_at, collapses non-busy status toward idle without
 //!   demoting a working (`busy`) node, and hard-errors on unknown ids
 
-use opencoder_store::{LibsqlStore, NodeTaskStatus, SessionMeta, Store};
+use opencoder_store::{NodeTaskStatus, SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
 const NODE_A: &str = "node-alpha";
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn register(store: &LibsqlStore, name: &str, now_ms: i64) -> opencoder_store::NodeRecord {
+async fn register(store: &TursoStore, name: &str, now_ms: i64) -> opencoder_store::NodeRecord {
     store
         .register_node(name, Some("v1"), Some("/tmp/wd"), None, now_ms)
         .await
@@ -26,7 +26,7 @@ async fn register(store: &LibsqlStore, name: &str, now_ms: i64) -> opencoder_sto
 }
 
 async fn dispatch(
-    store: &LibsqlStore,
+    store: &TursoStore,
     task_id: &str,
     session_seq: usize,
     node_id: &str,

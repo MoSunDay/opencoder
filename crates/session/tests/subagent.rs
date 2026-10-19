@@ -12,7 +12,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, Store, SubagentStatus};
+use opencoder_store::{Store, SubagentStatus, TursoStore};
 
 fn config() -> Config {
     Config {
@@ -85,7 +85,7 @@ fn text_done(text: &str) -> LlmEvent {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 #[tokio::test]

@@ -4,6 +4,9 @@ import fcntl
 import hashlib
 import json
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+from rolling.storage.connection import connect as engine_connect
 import shutil
 import sqlite3
 import tempfile
@@ -33,7 +36,7 @@ def restore(plan, receipt):
             require(not pool_lock_path.is_symlink(), 'invalid pool lock')
             pool_lock = resources.enter_context(pool_lock_path.open('a+'))
             fcntl.flock(pool_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        connection = sqlite3.connect(database)
+        connection = engine_connect(database)
         if kind == 'dag':
             current = connection.execute("SELECT body FROM fleet_definitions WHERE kind='dag' AND id=?", (name,)).fetchone()
             require(current is None or json.loads(current[0]) == snapshot, 'name has been reused')

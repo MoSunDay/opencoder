@@ -1,17 +1,17 @@
 //! Message-display and team-ledger migrations.
 
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn index_count(store: &LibsqlStore) -> i64 {
+async fn index_count(store: &TursoStore) -> i64 {
     let conn = store.conn().await.unwrap();
-    let stmt = conn
+    let mut stmt = conn
         .prepare(
             "SELECT COUNT(*) FROM sqlite_master \
              WHERE type = 'index' AND name = 'idx_subagent_task_id'",
@@ -43,7 +43,7 @@ async fn bootstrap_creates_subagent_task_id_index() {
     // Reopening the same database (idempotent bootstrap) must not fail or
     // duplicate the index.
     drop(store);
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     assert_eq!(
         index_count(&store).await,
         1,
@@ -55,8 +55,8 @@ async fn bootstrap_creates_subagent_task_id_index() {
 /// column; existing rows read back as `None` and new rows round-trip.
 #[tokio::test]
 async fn schema_migration_v13_to_v14_adds_message_display() {
-    use libsql::Builder;
     use opencoder_core::Message;
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate-v14.db");
@@ -64,7 +64,11 @@ async fn schema_migration_v13_to_v14_adds_message_display() {
     // Phase 1: hand-write a v13 messages table (full v13 column set, NO
     // display) plus a matching sessions table, and stamp version 13.
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -99,12 +103,12 @@ async fn schema_migration_v13_to_v14_adds_message_display() {
     }
 
     // Phase 2: reopen — migrate(conn, 13) runs the `if from < 14` block.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // (1) The display column now exists on messages.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn.prepare("PRAGMA table_info(messages)").await.unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(messages)").await.unwrap();
         let mut rows = stmt.query(()).await.unwrap();
         let mut found = false;
         while let Some(row) = rows.next().await.unwrap() {
@@ -145,8 +149,8 @@ async fn schema_migration_v13_to_v14_adds_message_display() {
 /// have it, and register_node works against the pre-existing table.
 #[tokio::test]
 async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
-    use libsql::Builder;
     use opencoder_store::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate-v17.db");
@@ -154,7 +158,11 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
     // Phase 1: hand-write a v16 database — nodes registry + version stamp 16.
     // team_topic_runs deliberately absent: that is what v17 adds.
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -172,19 +180,23 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
 
     // Phase 2: reopen — bootstrap's CREATE batch stamps the missing table,
     // migrate(conn, 16) runs the `if from < 17` block, version lands at 17.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // (1) The version bumped to 17.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().expect("version row exists");
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 38, "schema version must be latest after v16 migration");
+        assert_eq!(
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be latest after v16 migration"
+        );
     }
 
     // (2) The table exists (write proves it) and the pre-existing nodes
@@ -214,7 +226,7 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
     // (3) The topic index landed too (post-migrate batch).
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_team_topic_runs_topic'",
             )
@@ -233,11 +245,11 @@ async fn schema_migration_v16_to_v17_adds_team_topic_runs() {
 /// agent flow (`NOT NULL DEFAULT 'agent'`) and new rows must round-trip.
 #[tokio::test]
 async fn schema_migration_v19_to_v20_adds_project_executor_columns() {
-    use libsql::Builder;
     use opencoder_store::{
         ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind,
         ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
     };
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate-v20.db");
@@ -245,7 +257,11 @@ async fn schema_migration_v19_to_v20_adds_project_executor_columns() {
     // Phase 1: hand-write a v19 database — project tables in their pre-v20
     // shape (no executor columns) plus one legacy todo/run row each.
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -283,10 +299,10 @@ async fn schema_migration_v19_to_v20_adds_project_executor_columns() {
 
     // Phase 2: reopen — migrate(conn, 19) runs the `if from < 20` block and
     // stamps version 20.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -298,7 +314,11 @@ async fn schema_migration_v19_to_v20_adds_project_executor_columns() {
             .expect("version row exists")
             .get(0)
             .unwrap();
-        assert_eq!(v, 38, "schema version must be latest after v19 migration");
+        assert_eq!(
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be latest after v19 migration"
+        );
     }
 
     // Legacy rows backfill to the agent flow.

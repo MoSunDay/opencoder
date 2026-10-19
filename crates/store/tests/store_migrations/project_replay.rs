@@ -1,5 +1,5 @@
 //! Upgrade and backup/reopen evidence uses only databases created by this test.
-use opencoder_store::{LibsqlStore, ProjectStore, ProjectTodoRunPatch};
+use opencoder_store::{ProjectStore, ProjectTodoRunPatch, TursoStore};
 
 #[tokio::test]
 async fn v20_backup_preserves_history_and_v21_replay_survives_reopen() {
@@ -7,7 +7,11 @@ async fn v20_backup_preserves_history_and_v21_replay_survives_reopen() {
     let path = dir.path().join("v20.db");
     let backup = dir.path().join("v20-backup.db");
     {
-        let db = libsql::Builder::new_local(&path).build().await.unwrap();
+        let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute_batch(
             "CREATE TABLE schema_version(version INTEGER NOT NULL);
@@ -26,9 +30,11 @@ async fn v20_backup_preserves_history_and_v21_replay_survives_reopen() {
         .await
         .unwrap();
     }
-    std::fs::copy(&path, &backup).unwrap();
+    opencoder_database::maintenance::backup(path.clone(), backup.clone())
+        .await
+        .unwrap();
     let original_backup = std::fs::read(&backup).unwrap();
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     let legacy = store.get_todo_run("prun-legacy").await.unwrap().unwrap();
     assert_eq!(legacy.version, 7);
     assert_eq!(legacy.plan_md.as_deref(), Some("old plan"));
@@ -55,7 +61,7 @@ async fn v20_backup_preserves_history_and_v21_replay_survives_reopen() {
         .await
         .unwrap();
     drop(store);
-    let reopened = LibsqlStore::open(&path).await.unwrap();
+    let reopened = TursoStore::open(&path).await.unwrap();
     let retained = reopened.get_todo_run(&current.id).await.unwrap().unwrap();
     assert_eq!(retained.input_snapshot, current.input_snapshot);
     assert_eq!(retained.trace_manifest.as_deref(), Some(complete));
@@ -67,13 +73,13 @@ async fn v20_backup_preserves_history_and_v21_replay_survives_reopen() {
         .unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        38
+        opencoder_store::turso_store::schema_watermark()
     );
     assert_eq!(std::fs::read(&backup).unwrap(), original_backup);
     // Restoring the unchanged backup into a separate path is independently viable.
     let restored = dir.path().join("restored.db");
     std::fs::copy(&backup, &restored).unwrap();
-    let restored = LibsqlStore::open(restored).await.unwrap();
+    let restored = TursoStore::open(restored).await.unwrap();
     assert!(restored.get_todo_run("prun-new").await.unwrap().is_none());
     let restored_legacy = restored.get_todo_run("prun-legacy").await.unwrap().unwrap();
     assert_eq!(restored_legacy.output_md, legacy.output_md);

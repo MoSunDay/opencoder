@@ -10,7 +10,7 @@ use super::*;
 /// FK to sessions).
 async fn memory_store(sid: &str) -> Arc<dyn opencoder_store::Store> {
     let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+        Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: sid.into(),

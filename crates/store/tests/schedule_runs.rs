@@ -11,18 +11,18 @@
 //! - schedules_do_not_require_registered_nodes: unlike the team ledger the
 //!   fire history has no FK (definitions survive node churn)
 //!
-//! Runs against a real on-disk libsql file (tempdir) so WAL pragmas are
+//! Runs against a real on-disk turso file (tempdir) so WAL pragmas are
 //! exercised truthfully.
 
 use opencoder_store::{
-    LibsqlStore, ScheduleRunRecord, Store, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED,
+    ScheduleRunRecord, Store, TursoStore, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED,
     SCHEDULE_RUN_MISSED,
 };
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 

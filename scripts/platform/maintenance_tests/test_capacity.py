@@ -69,6 +69,22 @@ class CapacityTests(unittest.TestCase):
             self.assertFalse(any('/api/admin/drain' in call for call in fixture.calls))
             self.assertEqual(Journal(fixture.settings.state_dir).data['maintenance']['stage'], 'closing')
 
+    def test_engine_cutover_budgets_retained_runtime_databases_and_wal(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            root = fixture.settings.state_dir / 'runtimes/old'
+            root.mkdir(parents=True)
+            (root / 'runtime.db').write_bytes(b'x' * 100)
+            (root / 'runtime.db-wal').write_bytes(b'x' * 50)
+            image = root / 'programs/retained'
+            image.mkdir(parents=True)
+            (image / 'resource.db').write_bytes(b'x' * 1000)
+            scope = {'registered': {'old': {'config': json.dumps({'data_dir': str(root)})}}}
+            budget = capacity.plan(fixture.settings, fixture.candidate, fixture.rootfs,
+                                   Journal(fixture.settings.state_dir).data, scope)
+            self.assertEqual(budget['components']['runtime_databases'], 150)
+
     def test_tree_bytes_ignores_runtime_mounts_and_symlink_targets(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

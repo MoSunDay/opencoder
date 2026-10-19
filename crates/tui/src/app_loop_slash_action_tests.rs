@@ -12,7 +12,7 @@ use super::super::*;
 use crate::chat::ChatBlock;
 use crate::command::SlashAction;
 use opencoder_core::Config;
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 
 /// Drain the first real UiCmd from cmd_rx, skipping the ResetCancel preamble
 /// that `start_turn` always emits before the actual command.
@@ -31,7 +31,7 @@ fn drain_cmd(cmd_rx: &mut mpsc::Receiver<UiCmd>) -> UiCmd {
 /// (`app.rs`) takes when the user types `/compact` + Enter.
 #[tokio::test]
 async fn slash_action_compact_idle_starts_turn() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView {
         agent: "act".into(),
         ..Default::default()
@@ -95,7 +95,7 @@ async fn slash_action_compact_idle_starts_turn() {
 /// `[compact] busy` marker is pushed into the transcript.
 #[tokio::test]
 async fn slash_action_compact_running_pushes_busy_marker() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView {
         agent: "act".into(),
         ..Default::default()
@@ -165,7 +165,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
 /// built from the discovered skills merged with the config toggles).
 #[tokio::test]
 async fn slash_action_skill_parses_and_opens_toggle_menu() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut running = false;
     let mut follow = false;
@@ -234,7 +234,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
 /// mode. No `UiCmd` is sent until the user confirms a mode in the modal.
 #[tokio::test]
 async fn slash_action_ap_parses_and_opens_mode_menu() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut running = false;
     let mut follow = false;
@@ -303,7 +303,7 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
 /// conversation). The turn state is untouched.
 #[tokio::test]
 async fn slash_action_sidecar_idle_opens_fresh_panel() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView {
         agent: "act".into(),
         ..Default::default()
@@ -380,7 +380,7 @@ async fn slash_action_sidecar_idle_opens_fresh_panel() {
 /// apply and the running turn is untouched (no ResetCancel, no UiCmd).
 #[tokio::test]
 async fn slash_action_sidecar_running_still_opens_panel() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView {
         agent: "act".into(),
         ..Default::default()

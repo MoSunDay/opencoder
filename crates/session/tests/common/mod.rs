@@ -15,10 +15,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use opencoder_core::{Config, ContentBlock, Message, MessageUsage, Role};
 use opencoder_llm::{CompletedToolCall, LlmEvent, Usage};
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, SessionPatch, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, SessionPatch, Store, TursoStore};
 
 pub async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 pub fn config(model: &str) -> Config {

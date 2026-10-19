@@ -1,7 +1,7 @@
 //! Shared helpers for the `store_integration` test suite.
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
 pub(crate) fn conv(seed: &str, n: usize) -> Vec<Message> {
@@ -29,13 +29,13 @@ pub(crate) fn conv(seed: &str, n: usize) -> Vec<Message> {
         .collect()
 }
 
-pub(crate) async fn fresh() -> (TempDir, LibsqlStore) {
+pub(crate) async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-pub(crate) async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
+pub(crate) async fn make_session(store: &TursoStore, id: &str, now: i64) {
     let meta = SessionMeta {
         id: id.to_string(),
         title: Some(format!("title-{id}")),

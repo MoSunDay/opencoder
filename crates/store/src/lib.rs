@@ -2,7 +2,6 @@ pub mod brain_types;
 pub mod bundle;
 pub mod import;
 pub mod jsonl;
-pub mod libsql_store;
 pub mod project;
 pub mod project_executor_spec;
 pub mod project_types;
@@ -12,6 +11,7 @@ pub mod store;
 pub mod team_types;
 pub mod todo_types;
 pub mod ts_registry;
+pub mod turso_store;
 pub mod types;
 mod users;
 
@@ -23,7 +23,6 @@ pub use bundle::{
     export_bundle, import_bundle, read_bundle, write_bundle, SessionBundle, SubagentBundle,
 };
 pub use jsonl::JsonlStore;
-pub use libsql_store::LibsqlStore;
 pub use project::ProjectStore;
 pub use project_types::{
     ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
@@ -44,6 +43,7 @@ pub use todo_types::{
     TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
 };
 pub use ts_registry::{TsRecord, TsRegistry};
+pub use turso_store::TursoStore;
 pub use types::{
     ClearNodeDialogs, ConvergedDagRun, DagDefRecord, DagEventRecord, DagRunRecord, Delivery,
     EventKind, ImportReport, InputAdmission, InputConflict, MessageChunkPage, MessageChunkRecord,

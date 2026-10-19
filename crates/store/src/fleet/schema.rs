@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
-use libsql::{params, Connection};
 use opencoder_core::fleet::{valid_id, ExecutionKind, ExecutionStatus};
 use serde_json::Value;
+use turso::{params, Connection};
 
 const CREATE_NODES: &str =
     "CREATE TABLE IF NOT EXISTS fleet_nodes (id TEXT PRIMARY KEY, registration TEXT NOT NULL)";

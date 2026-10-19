@@ -3,7 +3,7 @@ mod support;
 
 use opencoder_core::{fleet::*, Role};
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 use serde_json::{json, Value};
 use support::{assignment, mock, settled, worker};
 
@@ -41,7 +41,7 @@ async fn seed_session(root: &std::path::Path, id: &str, prompt: &str, seed: Seed
     if matches!(seed, Seed::NoSession) {
         return;
     }
-    let store = LibsqlStore::open(root.join("node/runtime.db"))
+    let store = TursoStore::open(root.join("node/runtime.db"))
         .await
         .unwrap();
     store
@@ -159,7 +159,7 @@ async fn resume(root: &std::path::Path, id: &str, prompt: &str, seed: Seed) {
     recovered.shutdown().await.unwrap();
     drop(recovered);
 
-    let store = LibsqlStore::open(root.join("node/runtime.db"))
+    let store = TursoStore::open(root.join("node/runtime.db"))
         .await
         .unwrap();
     let messages = store.load_messages(id).await.unwrap();

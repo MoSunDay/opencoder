@@ -1,17 +1,17 @@
 use super::*;
 
 #[tokio::test]
-async fn synchronous_is_normal_after_open() {
+async fn synchronous_is_full_after_open() {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("cold.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("cold.db")).await.unwrap();
     let conn = store.conn().await.unwrap();
 
     let synchronous: i64 = {
-        let stmt = conn.prepare("PRAGMA synchronous").await.unwrap();
+        let mut stmt = conn.prepare("PRAGMA synchronous").await.unwrap();
         let mut rows = stmt.query(()).await.unwrap();
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
     };
-    assert_eq!(synchronous, 1, "synchronous must be NORMAL (1) after open");
+    assert_eq!(synchronous, 2, "synchronous must be FULL (2) after open");
 
     assert_eq!(
         scalar(&conn, "PRAGMA journal_mode").await.to_lowercase(),
@@ -27,7 +27,7 @@ async fn fresh_open_then_reopen_is_idempotent() {
 
     // Fresh open + one durable session through the Store trait.
     {
-        let store = LibsqlStore::open(&path).await.unwrap();
+        let store = TursoStore::open(&path).await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "boot-s1".into(),
@@ -42,7 +42,7 @@ async fn fresh_open_then_reopen_is_idempotent() {
     // Two re-opens on the same path: each re-runs the (single-transaction)
     // bootstrap. A nested BEGIN would fail the whole open loudly.
     for reopen in 1..=2 {
-        let store = LibsqlStore::open(&path).await.unwrap();
+        let store = TursoStore::open(&path).await.unwrap();
         let conn = store.conn().await.unwrap();
 
         let session = store.get_session("boot-s1").await.unwrap();
@@ -65,8 +65,8 @@ async fn second_open_on_live_path_succeeds() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("live.db");
 
-    let first = LibsqlStore::open(&path).await.unwrap();
-    let second = LibsqlStore::open(&path).await.unwrap();
+    let first = TursoStore::open(&path).await.unwrap();
+    let second = TursoStore::open(&path).await.unwrap();
 
     assert!(
         first.get_session("none").await.unwrap().is_none(),
@@ -100,12 +100,12 @@ async fn legacy_tables_without_version_row_converge_on_open() {
 
     // First open: previously failed inside the bootstrap transaction with
     // "no such column: task_type" (index over the stale sessions shape).
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     let conn = store.conn().await.unwrap();
 
     assert_eq!(
         version_of(&conn).await,
-        38,
+        opencoder_store::turso_store::schema_watermark(),
         "version row must be stamped at the latest version"
     );
     for (table, column) in [
@@ -122,7 +122,7 @@ async fn legacy_tables_without_version_row_converge_on_open() {
             "{table}.{column} must exist after the legacy repair"
         );
     }
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_sessions_task_type'")
         .await
         .unwrap();
@@ -143,7 +143,7 @@ async fn legacy_tables_without_version_row_converge_on_open() {
     assert_eq!(parent.task_type.as_deref(), Some(TASK_TYPE_PARENT));
     let child = store.get_session("child").await.unwrap().unwrap();
     assert_eq!(child.task_type.as_deref(), Some(TASK_TYPE_SUBAGENT));
-    let stmt = conn.prepare("SELECT COUNT(*) FROM messages").await.unwrap();
+    let mut stmt = conn.prepare("SELECT COUNT(*) FROM messages").await.unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
@@ -152,11 +152,11 @@ async fn legacy_tables_without_version_row_converge_on_open() {
 
     // Second open is idempotent: same version, no duplicate row, healthy db.
     drop(store);
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     let conn = store.conn().await.unwrap();
     assert_eq!(
         version_of(&conn).await,
-        38,
+        opencoder_store::turso_store::schema_watermark(),
         "re-open must not move the version"
     );
     assert_eq!(count_schema_version_rows(&conn).await, 1);
@@ -170,7 +170,7 @@ async fn failed_bootstrap_rolls_back_and_reopens_after_repair() {
     let path = dir.path().join("rollback.db");
     seed_legacy_db(&path, true).await;
 
-    let first = LibsqlStore::open(&path).await;
+    let first = TursoStore::open(&path).await;
     assert!(
         first.is_err(),
         "index over the missing promoted_seq column must fail the open"
@@ -192,7 +192,7 @@ async fn failed_bootstrap_rolls_back_and_reopens_after_repair() {
         !has_column(&conn, "sessions", "task_type").await,
         "no migration DDL may leak"
     );
-    let stmt = conn.prepare("SELECT COUNT(*) FROM sessions").await.unwrap();
+    let mut stmt = conn.prepare("SELECT COUNT(*) FROM sessions").await.unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
@@ -208,9 +208,12 @@ async fn failed_bootstrap_rolls_back_and_reopens_after_repair() {
     .unwrap();
     drop(conn);
 
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     let conn = store.conn().await.unwrap();
-    assert_eq!(version_of(&conn).await, 38);
+    assert_eq!(
+        version_of(&conn).await,
+        opencoder_store::turso_store::schema_watermark()
+    );
     assert!(has_column(&conn, "sessions", "task_type").await);
     assert!(store.get_session("parent").await.unwrap().is_some());
     assert_eq!(scalar(&conn, "PRAGMA integrity_check").await, "ok");
@@ -227,7 +230,7 @@ async fn checkpoint_gate_existing_path_reopen_converges() {
         "gate input must be false before the first open"
     );
     {
-        let store = LibsqlStore::open(&path).await.unwrap();
+        let store = TursoStore::open(&path).await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "gate-1".into(),
@@ -241,7 +244,7 @@ async fn checkpoint_gate_existing_path_reopen_converges() {
     // The file now pre-exists: the reopen below takes the checkpoint branch.
     assert!(path.exists(), "gate input must be true for the reopen");
 
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     let conn = store.conn().await.unwrap();
     assert!(store.get_session("gate-1").await.unwrap().is_some());
     assert_eq!(count_schema_version_rows(&conn).await, 1);

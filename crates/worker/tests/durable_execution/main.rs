@@ -5,7 +5,7 @@ use opencoder_core::fleet::*;
 use opencoder_core::Role;
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use opencoder_worker::Worker;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -44,7 +44,7 @@ async fn durable_acceptance_deduplicates_and_details_stay_on_node() {
         .as_array()
         .unwrap()
         .is_empty());
-    let persisted = LibsqlStore::open(dir.path().join("node/runtime.db"))
+    let persisted = TursoStore::open(dir.path().join("node/runtime.db"))
         .await
         .unwrap()
         .load_messages("agent-durable")
@@ -227,7 +227,7 @@ async fn failed_agent_can_be_explicitly_resumed_without_duplicating_initial_inpu
         2,
         "one explicit retry must call the model exactly once"
     );
-    let messages = LibsqlStore::open(dir.path().join("node/runtime.db"))
+    let messages = TursoStore::open(dir.path().join("node/runtime.db"))
         .await
         .unwrap()
         .load_messages(id)

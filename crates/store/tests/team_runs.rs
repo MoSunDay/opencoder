@@ -8,21 +8,21 @@
 //! - finish_flips_every_row_of_the_topic: bulk finish + no-op on unknown ids
 //! - node_deletion_cascades_to_its_topic_runs: FK `nodes(id) ON DELETE CASCADE`
 //!
-//! Runs against a real on-disk libsql file (tempdir) so WAL + FK pragmas are
+//! Runs against a real on-disk turso file (tempdir) so WAL + FK pragmas are
 //! exercised truthfully.
 
 use opencoder_store::{
-    LibsqlStore, Store, TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED,
+    Store, TeamTopicRunRecord, TursoStore, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED,
 };
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn register_node(store: &LibsqlStore, name: &str) -> String {
+async fn register_node(store: &TursoStore, name: &str) -> String {
     store
         .register_node(name, Some("v1"), Some("/tmp/wd"), None, 1_000)
         .await

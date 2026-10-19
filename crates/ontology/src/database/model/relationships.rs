@@ -152,7 +152,7 @@ impl Store {
             .connection
             .query(
                 sql,
-                libsql::params![env, anchor.map(|id| id.to_string()), deleted as i64],
+                turso::params![env, anchor.map(|id| id.to_string()), deleted as i64],
             )
             .await?;
         let mut items = Vec::new();
@@ -279,7 +279,7 @@ mod tests {
             .connection
             .query(
                 &format!("EXPLAIN QUERY PLAN {}", super::ANCHORED_RELATIONSHIPS_SQL),
-                libsql::params![1, uuid::Uuid::new_v4().to_string(), 0],
+                turso::params![1, uuid::Uuid::new_v4().to_string(), 0],
             )
             .await
             .unwrap();

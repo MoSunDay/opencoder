@@ -5,7 +5,11 @@ async fn migration_v14_to_v15_creates_brain_tables() {
     let dir: TempDir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("brain-migrate.db");
     {
-        let db = libsql::Builder::new_local(&db_path).build().await.unwrap();
+        let db = turso::Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -15,12 +19,12 @@ async fn migration_v14_to_v15_creates_brain_tables() {
             .unwrap();
     }
 
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
-    // Schema version bumped to the latest (38).
+    // Schema version bumped to the current watermark.
     assert_eq!(
         scalar_i64(&store, "SELECT version FROM schema_version LIMIT 1").await,
-        38
+        opencoder_store::turso_store::schema_watermark()
     );
 
     // All three brain tables now exist.

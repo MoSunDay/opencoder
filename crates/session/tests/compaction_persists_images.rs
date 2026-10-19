@@ -9,7 +9,7 @@ use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::compaction::compact;
 use opencoder_session::SessionState;
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 fn cfg() -> Config {
     Config {
@@ -31,7 +31,7 @@ fn meta(id: &str) -> SessionMeta {
 
 #[tokio::test]
 async fn compaction_persists_surviving_images_to_store() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store.create_session(&meta("cp1")).await.unwrap();
 
     let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![

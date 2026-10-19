@@ -5,7 +5,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{LlmEvent, MockChatClient, Usage};
 use opencoder_session::{handoff, resume, run, SessionState};
-use opencoder_store::{LibsqlStore, SessionPatch, Store};
+use opencoder_store::{SessionPatch, Store, TursoStore};
 
 fn config() -> Config {
     Config {
@@ -53,7 +53,7 @@ fn mk_session(store: Arc<dyn Store>, id: &str) -> SessionState {
 
 #[tokio::test]
 async fn handoff_run_no_duplicate() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let _dir = tempfile::tempdir().unwrap();
     let mut session = mk_session(store.clone(), "dup-1");
     run(&mut session, "explore something".into(), |_| {})
@@ -90,7 +90,7 @@ async fn handoff_run_no_duplicate() {
 
 #[tokio::test]
 async fn handoff_resume_run_no_duplicate() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
     let mut session = mk_session(store.clone(), "dup-2");
     run(&mut session, "explore something".into(), |_| {})
@@ -146,7 +146,7 @@ async fn handoff_resume_run_no_duplicate() {
 #[tokio::test]
 async fn handoff_steer_consumed_once() {
     use opencoder_store::{Delivery, SessionInput};
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let _dir = tempfile::tempdir().unwrap();
     let mut session = mk_session(store.clone(), "dup-3");
     run(&mut session, "explore something".into(), |_| {})

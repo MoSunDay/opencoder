@@ -5,8 +5,7 @@ async fn agent_self_detaches_remote_and_creates_an_empty_local_task_then_resumes
 ) {
     let dir = tempfile::tempdir().unwrap();
     let _scope = opencoder_core::scoped_config_home(dir.path().join("config-home"));
-    let store: Arc<dyn Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
     let mut config = Config::default();
     config.opencoder_server.enabled = true;

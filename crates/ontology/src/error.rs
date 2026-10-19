@@ -22,9 +22,21 @@ pub enum AppError {
     #[error("dependency unavailable: {0}")]
     Dependency(String),
     #[error("database operation failed: {0}")]
-    Database(#[from] libsql::Error),
+    Database(#[from] turso::Error),
     #[error("file operation failed")]
     Io(#[from] std::io::Error),
+}
+
+impl From<anyhow::Error> for AppError {
+    fn from(error: anyhow::Error) -> Self {
+        match error.downcast::<Self>() {
+            Ok(error) => error,
+            Err(error) => match error.downcast::<turso::Error>() {
+                Ok(error) => Self::Database(error),
+                Err(error) => Self::Dependency(error.to_string()),
+            },
+        }
+    }
 }
 
 impl AppError {

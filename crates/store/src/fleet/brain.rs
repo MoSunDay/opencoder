@@ -1,22 +1,21 @@
-use super::FleetStore;
+use super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
-use libsql::params;
 use opencoder_core::{brain::*, fleet::valid_id};
 use serde_json::Value;
+use turso::params;
 
-pub(super) async fn initialize(conn: &libsql::Connection) -> Result<()> {
+pub(super) async fn initialize(conn: &turso::Connection) -> Result<()> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS brain_plan_versions (id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(id,version));").await?;
     Ok(())
 }
 
-impl FleetStore {
+impl FleetConnection {
     /// Remove a saved plan and every immutable version in one fleet-store
     /// transaction. Plan capability metadata is derived from the saved
     /// versions, so it is removed with the plan to avoid orphaned catalog
     /// entries. Returns `false` when the plan metadata does not exist.
     pub async fn delete_brain_plan(&self, id: &str) -> Result<bool> {
         ensure!(valid_id(id), "invalid plan identity");
-        let _guard = self.gate.lock().await;
         self.conn.execute("BEGIN IMMEDIATE", ()).await?;
         let result = async {
             if self.definition_locked("brain_plan", id).await?.is_none() {
@@ -77,7 +76,6 @@ impl FleetStore {
             !version.changelog.trim().is_empty(),
             "changelog is required"
         );
-        let _guard = self.gate.lock().await;
         self.conn.execute("BEGIN IMMEDIATE", ()).await?;
         let result = self.save_brain_plan_tx(version).await;
         match result {
@@ -152,7 +150,6 @@ impl FleetStore {
         id: &str,
         version: u64,
     ) -> Result<Option<PlanVersion<Value>>> {
-        let _guard = self.gate.lock().await;
         self.brain_plan_version_locked(id, version).await
     }
     async fn brain_plan_version_locked(
@@ -189,7 +186,6 @@ impl FleetStore {
         id: &str,
         before: Option<u64>,
     ) -> Result<Vec<PlanVersion<Value>>> {
-        let _guard = self.gate.lock().await;
         let mut rows = self.conn.query("SELECT body FROM brain_plan_versions WHERE id=?1 AND (?2 IS NULL OR version<?2) ORDER BY version DESC LIMIT 20",params![id,before.map(|v|v as i64)]).await?;
         let mut result = vec![];
         while let Some(row) = rows.next().await? {
@@ -199,7 +195,6 @@ impl FleetStore {
     }
 
     pub async fn mark_brain_stable(&self, id: &str, version: u64) -> Result<PlanDefinition> {
-        let _guard = self.gate.lock().await;
         ensure!(
             self.brain_plan_version_locked(id, version).await?.is_some(),
             "unknown plan version"
@@ -215,3 +210,6 @@ impl FleetStore {
         Ok(definition)
     }
 }
+
+#[path = "access/brain.rs"]
+mod database_access;

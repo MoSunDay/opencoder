@@ -4,10 +4,10 @@
 //! which the plain `Option<T>` (None = "skip") semantics cannot express, hence
 //! the dedicated `clear_requirement: true` flag.
 
-use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
+use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
 
-async fn mem() -> LibsqlStore {
-    LibsqlStore::open_memory().await.unwrap()
+async fn mem() -> TursoStore {
+    TursoStore::open_memory().await.unwrap()
 }
 
 fn meta(id: &str) -> SessionMeta {

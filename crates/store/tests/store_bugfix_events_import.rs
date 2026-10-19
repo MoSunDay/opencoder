@@ -20,8 +20,8 @@ use async_trait::async_trait;
 
 use opencoder_core::Message;
 use opencoder_store::{
-    Delivery, EventKind, ImportReport, LibsqlStore, SessionEventRecord, SessionFilter,
-    SessionInput, SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, EventKind, ImportReport, SessionEventRecord, SessionFilter, SessionInput,
+    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 fn make_session_meta(id: &str) -> SessionMeta {
@@ -61,7 +61,7 @@ fn event(session_id: &str, n: i64, ts: i64) -> SessionEventRecord {
 #[tokio::test]
 async fn append_events_rejects_mixed_session_ids() {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("ev.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("ev.db")).await.unwrap();
     // Both sessions must exist for the session_events FK constraint.
     store
         .create_session(&make_session_meta("sess-a"))
@@ -97,11 +97,11 @@ async fn append_events_rejects_mixed_session_ids() {
     assert!(seqs[1] > seqs[0], "seqs must be monotonic within a batch");
 }
 
-/// Wraps a real `LibsqlStore` but makes `append_messages` fail, so we can
+/// Wraps a real `TursoStore` but makes `append_messages` fail, so we can
 /// exercise the "session row created, then message append fails" path.
 /// `delete_calls` counts rollbacks so we can assert the stub was cleaned up.
 struct FailingAppendStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
     delete_calls: Arc<AtomicUsize>,
 }
 
@@ -205,7 +205,7 @@ async fn import_jsonl_failure_rolls_back_empty_session() {
     text.push('\n');
     tokio::fs::write(&path, text).await.unwrap();
 
-    let inner = Arc::new(LibsqlStore::open(dir.path().join("fail.db")).await.unwrap());
+    let inner = Arc::new(TursoStore::open(dir.path().join("fail.db")).await.unwrap());
     let delete_calls = Arc::new(AtomicUsize::new(0));
     let failing = FailingAppendStore {
         inner: inner.clone(),

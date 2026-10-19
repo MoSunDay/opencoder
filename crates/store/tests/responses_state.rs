@@ -1,5 +1,5 @@
 use opencoder_core::{ContentBlock, Message, ProviderState};
-use opencoder_store::{bundle, LibsqlStore, SessionMeta, Store};
+use opencoder_store::{bundle, SessionMeta, Store, TursoStore};
 use serde_json::json;
 
 #[tokio::test]
@@ -7,7 +7,11 @@ async fn legacy_v23_migration_preserves_messages_and_bundle_roundtrips_responses
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("legacy.db");
     // Construct an actual v23 messages table; no existing database is modified.
-    let db = libsql::Builder::new_local(&path).build().await.unwrap();
+    let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     conn.execute_batch(
         "CREATE TABLE schema_version(version INTEGER NOT NULL);
@@ -24,7 +28,7 @@ async fn legacy_v23_migration_preserves_messages_and_bundle_roundtrips_responses
     .unwrap();
     drop(conn);
     drop(db);
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     store
         .create_session(&SessionMeta {
             id: "s".into(),
@@ -59,7 +63,7 @@ async fn legacy_v23_migration_preserves_messages_and_bundle_roundtrips_responses
     assert_eq!(imported[1].provider_state, message.provider_state);
     assert_eq!(imported[1].usage.reasoning_tokens, 42);
     drop(store);
-    let reopened = LibsqlStore::open(&path).await.unwrap();
+    let reopened = TursoStore::open(&path).await.unwrap();
     assert_eq!(
         reopened.load_messages("s").await.unwrap()[1].provider_state,
         message.provider_state

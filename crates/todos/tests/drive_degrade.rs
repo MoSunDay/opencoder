@@ -17,8 +17,8 @@ use async_trait::async_trait;
 use opencoder_core::{Config, Message};
 use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_store::{
-    LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
-    SessionPatch, Store, SubagentTaskRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch,
+    Store, SubagentTaskRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TursoStore,
 };
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
@@ -29,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 /// passes through untouched, so the failure lands precisely on the takeover
 /// probe inside the error path.
 struct ProbeFailingStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
 }
 
 #[async_trait]
@@ -195,7 +195,7 @@ fn make_runtime(store: &Arc<dyn Store>, client: Arc<dyn ChatStream>, dir: &Path)
 /// as `runtime_error` in the real store.
 #[tokio::test]
 async fn probe_failure_degrades_and_original_error_survives() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<dyn Store> = Arc::new(ProbeFailingStore {
         inner: inner.clone(),
     });

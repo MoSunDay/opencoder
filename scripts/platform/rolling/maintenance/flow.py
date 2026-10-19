@@ -9,6 +9,7 @@ from ..deployment import record_for, register_runtime, register_server
 from ..state import Journal
 from . import archive, gates, preflight, restore, services, runtimes, configuration, mounts
 from .recovery import forward
+from .engine import files as engine_files, gates as local_gates, programs
 
 
 def checkpoint(journal, stage):
@@ -33,7 +34,7 @@ def deploy(settings, bundle, operations, seconds=90):
             return forward.deploy(settings, bundle, journal, candidate, operations, seconds)
         if journal.record(state['target'])['manifest'] != candidate:
             raise ValueError('maintenance release ID already belongs to another immutable bundle')
-        if state['stage'].startswith('restore'):
+        if state['stage'].startswith(('restore', 'engine_restore')):
             return rollback(settings, operations, seconds)
     else:
         if journal.data['current'] == candidate['release_id']:
@@ -47,12 +48,17 @@ def deploy(settings, bundle, operations, seconds=90):
         original = copy.deepcopy(journal.data)
         original.pop('maintenance', None)
         old = journal.record(original['current'])
+        engine_switch = manifest.storage_engine(candidate) != manifest.storage_engine(old['manifest'])
+        if engine_switch and (scope['database']['schema_version'] != 39
+                or candidate['protocol_version'] != old['manifest']['protocol_version']
+                or candidate.get('brain_schema_version') != old['manifest'].get('brain_schema_version')):
+            raise ValueError('storage engine maintenance requires the current schema and execution protocol')
         if candidate['compatibility']['data_format']['min'] < old['manifest']['compatibility']['data_format']['min']:
             raise ValueError('maintenance cannot downgrade a live database; use an unopened rollback or a new corrective release')
         nodes = operations.http(endpoint(old), '/api/nodes')['nodes']
         node_id = (settings.state_dir / 'host/node-id').read_text().strip()
         online = [node for node in nodes if node.get('online')]
-        if len(online) != 1 or online[0]['id'] != node_id:
+        if not engine_switch and (len(online) != 1 or online[0]['id'] != node_id):
             raise ValueError('maintenance requires the single configured local node; remote writers must be stopped separately')
         scope.update(services=services.states(settings, original, operations),
                      nginx=base64.b64encode(settings.nginx_include.read_bytes()).decode()
@@ -64,7 +70,16 @@ def deploy(settings, bundle, operations, seconds=90):
         record['probe_epoch'] = time.time_ns()
         if record['id'] in original['releases']:
             raise ValueError('maintenance candidate must have a fresh immutable release ID')
+        if engine_switch:
+            # The native checkpoint tool must survive failures before any
+            # candidate service is prepared or started. Pin it before stopping.
+            bundle = units.install_bundle(settings, bundle, record)
         rootfs = units.freeze_rootfs(record, Path(scope['rootfs']), bundle / 'bin')
+        if engine_switch:
+            registered = programs.registrations(settings)
+            scope['registered'] = registered
+            scope['programs'] = programs.stage(settings, bundle, candidate, original, registered, rootfs, operations)
+            scope['engine_databases'] = [str(path) for path in engine_files.managed(settings, registered)]
         # Execute both packaged runners inside the release image before any
         # service stop; missing dynamic libraries/architecture fail here.
         import json
@@ -77,11 +92,16 @@ def deploy(settings, bundle, operations, seconds=90):
         remember_controller(settings, candidate['release_id'])
         journal.data['releases'][record['id']] = record
         state = {'target': record['id'], 'origin': old['id'], 'stage': 'closing',
+                 'engine_switch': engine_switch,
                  'original': original, 'scope': scope, 'writes_open': False,
                  'backup': str(settings.state_dir / 'backups' / ('maintenance-' + uuid.uuid4().hex))}
         journal.data.update(maintenance=state, candidate=record['id'], previous=old['id'])
         journal.phase('migrating')
     try:
+        if state.get('engine_switch'):
+            from ..storage.database import using
+            with using(bundle / 'bin/opencoder-cli'):
+                return advance(settings, bundle, journal, operations, seconds)
         return advance(settings, bundle, journal, operations, seconds)
     except Exception as error:
         journal.fail(error)
@@ -102,12 +122,18 @@ def advance(settings, bundle, journal, operations, seconds):
         from .planning import capacity
         capacity.check(capacity.plan(settings, record['manifest'], Path(state['scope']['rootfs']),
                                      state['original'], state['scope']))
-        gates.close(settings, old, operations, seconds)
-        operations.http(endpoint(old), '/api/admin/drain', 'POST', {})
+        if state.get('engine_switch'):
+            local_gates.close(settings, old, operations, seconds)
+        else:
+            gates.close(settings, old, operations, seconds)
+            operations.http(endpoint(old), '/api/admin/drain', 'POST', {})
         checkpoint(journal, 'waiting')
     if state['stage'] == 'waiting':
         node_id = (settings.state_dir / 'host/node-id').read_text().strip()
-        operations.wait(lambda: gates.drained(operations, endpoint(old), node_id), seconds)
+        if state.get('engine_switch'):
+            operations.wait(lambda: local_gates.drained(settings, old, operations), seconds)
+        else:
+            operations.wait(lambda: gates.drained(operations, endpoint(old), node_id), seconds)
         manifest.brain_preflight(settings, record['manifest'], state['original']['releases'].values())
         state['scope']['inventories'] = runtimes.capture(settings, operations)
         checkpoint(journal, 'stopping')
@@ -116,10 +142,21 @@ def advance(settings, bundle, journal, operations, seconds):
         checkpoint(journal, 'backup')
     if state['stage'] == 'backup':
         archive.create(settings, Path(state['backup']), state['original'], state['scope'])
+        if state.get('engine_switch'):
+            engine_files.snapshot(Path(state['backup'] + '-runtimes'), state['scope']['registered'])
         checkpoint(journal, 'installing')
     if state['stage'] == 'installing':
         archive.verify(Path(state['backup']))
-        runtimes.install(settings, state['scope']['inventories'])
+        # This offline registry update runs once, before the owning engine is
+        # changed. Retrying installation must never open live Turso with SQLite.
+        if not state.get('runtimes_installed'):
+            runtimes.install(settings, state['scope']['inventories'])
+            state['runtimes_installed'] = True
+            journal.save()
+        if state.get('engine_switch'):
+            engine_files.verify(Path(state['backup'] + '-runtimes'))
+            programs.install(settings, journal, state['scope']['programs'])
+            engine_files.mark([Path(path) for path in state['scope']['engine_databases']])
         configuration.install(settings, state['scope']['configuration'])
         services.resource_upgrade(settings, bundle, operations)
         operations.wait(lambda: operations.http(settings.resource_url, '/api/health'), seconds)
@@ -162,8 +199,11 @@ def advance(settings, bundle, journal, operations, seconds):
         state['writes_open'] = True
         journal.data.update(current=record['id'], candidate=record['id'])
         journal.save()
-        operations.wait(lambda: operations.http(endpoint(record), '/api/admin/drain', 'DELETE'), seconds)
-        gates.reopen(settings, record, operations, seconds)
+        if state.get('engine_switch'):
+            local_gates.reopen(settings, record, operations, seconds)
+        else:
+            operations.wait(lambda: operations.http(endpoint(record), '/api/admin/drain', 'DELETE'), seconds)
+            gates.reopen(settings, record, operations, seconds)
         checkpoint(journal, 'public')
     if state['stage'] == 'public':
         probes.public(settings, record, operations, seconds)
@@ -187,6 +227,9 @@ def rollback(settings, operations, seconds=90):
     state = journal.data.get('maintenance')
     if not state:
         raise ValueError('no maintenance upgrade is recorded')
+    if state.get('engine_switch'):
+        from .engine.recovery import rollback as engine_rollback
+        return engine_rollback(settings, journal, operations, seconds)
     from ..todo_resources import require_candidate
     require_candidate(settings, journal.record(state['origin'])['manifest'])
     policy = settings.state_dir / 'todo-files-policy.json'

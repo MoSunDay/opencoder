@@ -8,8 +8,7 @@ use super::*;
 /// carries a `REFERENCES sessions(id)` foreign key, so the session must
 /// exist before `persist_event` can append.
 async fn memory_store(sid: &str) -> Arc<dyn Store> {
-    let store: Arc<dyn Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: sid.into(),

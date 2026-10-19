@@ -103,7 +103,8 @@ async fn executor_dimension_round_trips() {
 
     // Unknown executor_kind text fails closed instead of guessing.
     {
-        let store2 = LibsqlStore::open(tempfile::tempdir().unwrap().path().join("x.db"))
+        let directory = tempfile::tempdir().unwrap();
+        let store2 = TursoStore::open(directory.path().join("x.db"))
             .await
             .unwrap();
         store2.create_todo(&todo("t-bad", None, 1)).await.unwrap();

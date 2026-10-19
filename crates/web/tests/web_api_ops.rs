@@ -11,7 +11,7 @@ use tower::ServiceExt;
 
 use opencoder_core::Message;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 fn app(state: Arc<opencoder_web::AppState>) -> Router {
     Router::new()
@@ -48,7 +48,7 @@ fn app(state: Arc<opencoder_web::AppState>) -> Router {
 }
 
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir().join(format!("oc-web-ops-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
@@ -76,7 +76,7 @@ async fn state_with_reply(text: &str) -> Arc<opencoder_web::AppState> {
             usage: None,
         },
     ]));
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir().join(format!("oc-web-ops-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {

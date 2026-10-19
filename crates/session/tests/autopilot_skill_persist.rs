@@ -10,7 +10,7 @@ use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usa
 use opencoder_session::autopilot::drive;
 use opencoder_session::tools::registry;
 use opencoder_session::{SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 /// A completed turn with optional tool calls (empty tools = idle/Done).
 fn completed(text: &str, tool_calls: Vec<CompletedToolCall>) -> LlmEvent {
@@ -83,7 +83,7 @@ async fn drive_clears_persisted_skill_on_complete_and_on_error() {
         let mock = Arc::new(builder) as Arc<dyn ChatStream>;
         let (_dir, mut session) = make_session(mock, autopilot_config(10, 3));
 
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
                 id: "ap-sess".into(),

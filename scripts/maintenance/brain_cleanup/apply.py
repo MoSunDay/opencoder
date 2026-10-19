@@ -5,6 +5,9 @@ import os
 import shutil
 import sqlite3
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+from rolling.storage.connection import connect as engine_connect
 from .model import ALLOWED_TABLES, digest
 from . import inventory
 
@@ -20,7 +23,7 @@ def shared_ownership_databases(manifest):
 def restore_ownership(database, rows):
     # Other runtimes keep working through the shared host. Restore only our
     # deleted keys, never replace a live database with a whole-file snapshot.
-    with sqlite3.connect(database) as connection:
+    with engine_connect(database) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute('BEGIN IMMEDIATE')
         for row in rows:
@@ -95,7 +98,7 @@ def apply(manifest, approved_digest, backup):
         receipt = backup / 'completed.json'
         if receipt.is_file() and json.loads(receipt.read_text()).get('manifest_digest') == approved_digest:
             for change in manifest['databases']:
-                with sqlite3.connect(Path(change['database']).as_uri() + '?mode=ro', uri=True) as connection:
+                with engine_connect(change['database'], readonly=True) as connection:
                     for entry in change['rows']:
                         where = ' AND '.join(f'"{key}" IS ?' for key in entry['key'])
                         if connection.execute(f'SELECT 1 FROM "{change["table"]}" WHERE {where}', list(entry['key'].values())).fetchone():
@@ -103,7 +106,7 @@ def apply(manifest, approved_digest, backup):
             if any(Path(entry['path']).exists() for entry in manifest['directories']):
                 raise ValueError('a previously cleared journal reappeared')
             for database in {entry['database'] for entry in manifest.get('cached_inventories', [])}:
-                with sqlite3.connect(Path(database).as_uri() + '?mode=ro', uri=True) as connection:
+                with engine_connect(database, readonly=True) as connection:
                     inventory.verify(connection, [entry for entry in manifest['cached_inventories'] if entry['database'] == database])
             return
         raise ValueError('backup directory already exists without a matching completed receipt')
@@ -132,7 +135,7 @@ def apply(manifest, approved_digest, backup):
         # Keep shared ownership writes available while backing up and checking
         # the offline stores. No database commits before all checks pass.
         for index, database in enumerate(databases):
-            connection = sqlite3.connect(database)
+            connection = engine_connect(database)
             connection.row_factory = sqlite3.Row
             destination = sqlite3.connect(backup / f'database-{index}.sqlite')
             connection.backup(destination)
@@ -189,7 +192,7 @@ def apply(manifest, approved_digest, backup):
         for database, snapshot in backed_up:
             if database in shared:
                 restore_ownership(database, ownership_rows.get(database, []))
-                with sqlite3.connect(database) as connection:
+                with engine_connect(database) as connection:
                     inventory.restore(connection, inventory_rows.get(database, []))
                 continue
             with sqlite3.connect(snapshot) as source, sqlite3.connect(database) as destination:

@@ -1,5 +1,5 @@
 //! Migration and progress checks use only disposable databases.
-use opencoder_store::{LibsqlStore, ProjectStore};
+use opencoder_store::{ProjectStore, TursoStore};
 use serde_json::json;
 
 #[tokio::test]
@@ -8,7 +8,7 @@ async fn v37_removes_only_initiative_status_and_preserves_todo_progress() {
     let path = dir.path().join("project.db");
     let before;
     {
-        let store = LibsqlStore::open(&path).await.unwrap();
+        let store = TursoStore::open(&path).await.unwrap();
         let conn = store.conn().await.unwrap();
         conn.execute_batch(
             "ALTER TABLE project_initiatives ADD COLUMN status TEXT NOT NULL DEFAULT 'planned';
@@ -66,7 +66,7 @@ async fn v37_removes_only_initiative_status_and_preserves_todo_progress() {
             .unwrap();
     }
     for _ in 0..2 {
-        let store = LibsqlStore::open(&path).await.unwrap();
+        let store = TursoStore::open(&path).await.unwrap();
         let conn = store.conn().await.unwrap();
         assert!(conn
             .query(
@@ -120,7 +120,7 @@ async fn failed_status_migration_rolls_back_schema_and_rows() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("project.db");
     {
-        let store = LibsqlStore::open(&path).await.unwrap();
+        let store = TursoStore::open(&path).await.unwrap();
         store
             .conn()
             .await
@@ -133,8 +133,12 @@ async fn failed_status_migration_rolls_back_schema_and_rows() {
             .await
             .unwrap();
     }
-    assert!(LibsqlStore::open(&path).await.is_err());
-    let db = libsql::Builder::new_local(&path).build().await.unwrap();
+    assert!(TursoStore::open(&path).await.is_err());
+    let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
     assert_eq!(
         conn.query("SELECT version FROM schema_version", ())
@@ -155,5 +159,5 @@ async fn failed_status_migration_rolls_back_schema_and_rows() {
     conn.execute("DROP INDEX invalid_status_dependency", ())
         .await
         .unwrap();
-    assert!(LibsqlStore::open(&path).await.is_ok());
+    assert!(TursoStore::open(&path).await.is_ok());
 }

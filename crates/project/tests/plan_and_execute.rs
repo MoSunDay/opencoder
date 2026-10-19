@@ -11,10 +11,10 @@ use std::{
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
-    LibsqlStore, ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
+    ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
     ProjectInitiativePatch, ProjectInitiativeRecord, ProjectStore, ProjectTodoPatch,
     ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, ProjectTodoStatus, Store, TASK_TYPE_PROJECT,
+    ProjectTodoRunStatus, ProjectTodoStatus, Store, TursoStore, TASK_TYPE_PROJECT,
 };
 
 fn done(text: &str) -> Vec<LlmEvent> {
@@ -46,7 +46,7 @@ struct Harness {
 }
 
 async fn harness(scripts: Vec<Vec<LlmEvent>>) -> Harness {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut mock = MockChatClient::new();
     for script in scripts {
         mock = mock.push_script(script);
@@ -183,7 +183,7 @@ async fn wait_until(what: &str, mut probe: impl FnMut() -> bool) {
 /// 故障注入包装：原子 claim + run 入口在任何写入前失败。Store 层另有
 /// 真实唯一键冲突用例验证事务内 INSERT 失败会回滚已经执行的 claim。
 struct CreateRunFailingStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
 }
 
 #[async_trait::async_trait]

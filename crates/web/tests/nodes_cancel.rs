@@ -12,16 +12,16 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures::StreamExt;
 use opencoder_llm::MockChatClient;
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 use tower::ServiceExt;
 
 async fn app() -> axum::Router {
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::mock_brain(Arc::new(
-            LibsqlStore::open_memory().await.unwrap(),
+            TursoStore::open_memory().await.unwrap(),
         )),
-        store: Arc::new(LibsqlStore::open_memory().await.unwrap()),
+        store: Arc::new(TursoStore::open_memory().await.unwrap()),
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),

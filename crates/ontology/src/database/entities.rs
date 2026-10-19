@@ -6,7 +6,7 @@ use crate::{
     domain::{Entity, Environment},
     error::AppError,
 };
-use libsql::params;
+use turso::params;
 use uuid::Uuid;
 
 impl Store {

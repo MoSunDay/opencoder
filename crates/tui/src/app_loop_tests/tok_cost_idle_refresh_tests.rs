@@ -19,9 +19,9 @@ use super::*;
 /// Drive the turn-final event sequence and pin the idle-boundary contract.
 #[tokio::test]
 async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
-    use opencoder_store::{LibsqlStore, SessionMeta};
+    use opencoder_store::{SessionMeta, TursoStore};
 
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "tok-cost-idle".into(),

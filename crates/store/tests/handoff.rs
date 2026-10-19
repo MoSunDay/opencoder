@@ -252,12 +252,18 @@ async fn historical_owner_reads_do_not_wait_for_another_process_writer() {
         .unwrap();
     store.activate_runtime("r1").await.unwrap();
     store.assign_runtime("agent-history", None).await.unwrap();
-    let database = libsql::Builder::new_local(&path).build().await.unwrap();
-    let connection = database.connect().unwrap();
-    let writer = connection
-        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
+    let database = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
         .await
         .unwrap();
+    let connection = database.connect().unwrap();
+    let writer = turso::transaction::Transaction::new_unchecked(
+        &connection,
+        turso::transaction::TransactionBehavior::Immediate,
+    )
+    .await
+    .unwrap();
     let mut read = tokio::spawn(async move {
         let owner = store
             .assign_runtime("agent-history", Some("r1"))

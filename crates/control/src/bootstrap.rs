@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use opencoder_brain::activation::configured_request as configured_planner_request;
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{fleet::FleetStore, LibsqlStore, Store};
+use opencoder_store::{fleet::FleetStore, Store, TursoStore};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -48,12 +48,12 @@ pub async fn new_state(
     client: Option<Arc<dyn ChatStream>>,
 ) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let libsql = Arc::new(LibsqlStore::open(data.join("definitions.db")).await?);
-    new_state_with_projects(workdir, data, client, libsql).await
+    let turso = Arc::new(TursoStore::open(data.join("definitions.db")).await?);
+    new_state_with_projects(workdir, data, client, turso).await
 }
 
 /// Test/injection seam over `new_state`: swaps only the project store while
-/// the shared `store` keeps the internal libsql. Production goes through
+/// the shared `store` keeps the internal turso. Production goes through
 /// `new_state`.
 pub async fn new_state_with_projects(
     workdir: PathBuf,
@@ -66,7 +66,7 @@ pub async fn new_state_with_projects(
 
 pub(crate) async fn new_resource_state(workdir: PathBuf, data: PathBuf) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let projects = Arc::new(LibsqlStore::open(data.join("definitions.db")).await?);
+    let projects = Arc::new(TursoStore::open(data.join("definitions.db")).await?);
     state_with_projects(workdir, data, None, projects, false).await
 }
 
@@ -88,8 +88,8 @@ async fn state_with_projects(
     } else {
         None
     };
-    let libsql = Arc::new(LibsqlStore::open(data.join("definitions.db")).await?);
-    let store: Arc<dyn Store> = libsql;
+    let turso = Arc::new(TursoStore::open(data.join("definitions.db")).await?);
+    let store: Arc<dyn Store> = turso;
     let client = client.unwrap_or_else(|| {
         Arc::new(BrainClient {
             config: config.clone(),
@@ -229,7 +229,7 @@ pub async fn serve_release(
         seed_admin(&state.store, &token).await?;
     }
     // One-time import of legacy `schedules.json` definitions into the
-    // libsql `schedules` table (only when the table is empty; a failure
+    // turso `schedules` table (only when the table is empty; a failure
     // warns and never blocks boot) — see `seed_schedules`.
     crate::seed_schedules::seed_schedules(&state.store, &workdir).await;
     let config = Config::load(&workdir)?;
@@ -473,7 +473,7 @@ mod seed_admin_tests {
     use opencoder_store::Store;
 
     async fn memory_store() -> Arc<dyn Store> {
-        Arc::new(LibsqlStore::open_memory().await.unwrap())
+        Arc::new(TursoStore::open_memory().await.unwrap())
     }
 
     async fn name_of_digest(store: &Arc<dyn Store>, token: &str) -> Option<String> {

@@ -13,12 +13,12 @@ use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_session::{
     is_clear_context_handoff, is_clear_context_seed, resume, SessionEvent, SessionState,
 };
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn assistant_with_text(id: &str, text: &str) -> Message {

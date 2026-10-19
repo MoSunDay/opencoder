@@ -1,4 +1,4 @@
-//! Integration tests for the brain runtime: real `LibsqlStore` (in-memory)
+//! Integration tests for the brain runtime: real `TursoStore` (in-memory)
 //! plus `MockChatClient` — zero tokens, zero network.
 //!
 //! The mock embedder is a pure hash, so embedding the *exact same text*
@@ -12,13 +12,13 @@ use anyhow::{bail, Result};
 use opencoder_brain::domain;
 use opencoder_brain::{CapabilityInput, Runtime};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use tokio::sync::mpsc;
 
 const MODEL: &str = "mock-embed-v1";
 
 async fn setup() -> (Runtime, Arc<MockChatClient>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(MockChatClient::new());
     let client: Arc<dyn ChatStream> = mock.clone();
     (Runtime::new(store, client, MODEL), mock)
@@ -261,7 +261,7 @@ async fn upsert_embed_failure_is_typed_and_writes_nothing() {
         BreakEmbed::Cardinality,
         BreakEmbed::EmptyVector,
     ] {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         let rt = runtime_over(store, Arc::new(BrokenEmbedClient { mode }));
         let err = rt
             .upsert_capability(&payload("doomed capability"), 1_000)
@@ -291,7 +291,7 @@ async fn update_embed_failure_is_typed_and_keeps_old_row() {
         BreakEmbed::Cardinality,
         BreakEmbed::EmptyVector,
     ] {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         let seeder = runtime_over(store.clone(), Arc::new(MockChatClient::new()));
         let created = seeder
             .upsert_capability(&payload("original summary"), 1_000)

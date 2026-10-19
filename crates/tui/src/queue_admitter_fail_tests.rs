@@ -6,8 +6,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use opencoder_core::Message;
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 use super::{apply_done, spawn_admitter, submit, AdmitUiState, QUEUE_SUBMIT_FAILED_FLASH};
@@ -26,9 +26,9 @@ fn mk_input(prompt: &str) -> SessionInput {
     }
 }
 
-/// Delegates everything to an inner LibsqlStore EXCEPT `admit_input`,
+/// Delegates everything to an inner TursoStore EXCEPT `admit_input`,
 /// which always fails.
-struct FailingAdmitStore(Arc<LibsqlStore>);
+struct FailingAdmitStore(Arc<TursoStore>);
 
 #[async_trait::async_trait]
 impl Store for FailingAdmitStore {
@@ -114,7 +114,7 @@ impl Store for FailingAdmitStore {
 
 #[tokio::test]
 async fn actor_failure_path_flashes_and_removes_row() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<dyn Store> = Arc::new(FailingAdmitStore(inner));
     let (tx, mut done_rx) = spawn_admitter(store, None);
     let mut st = AdmitUiState::default();

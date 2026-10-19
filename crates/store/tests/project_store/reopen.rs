@@ -15,7 +15,7 @@ async fn snapshot(store: &dyn ProjectStore) -> Value {
 }
 
 #[tokio::test]
-async fn reopening_libsql_preserves_catalog_board_and_execution_results() {
+async fn reopening_turso_preserves_catalog_board_and_execution_results() {
     let (directory, concrete, store) = fresh().await;
     store.create_goal(&goal("project", 0, 1)).await.unwrap();
     store
@@ -69,7 +69,7 @@ async fn reopening_libsql_preserves_catalog_board_and_execution_results() {
     drop(store);
     drop(concrete);
 
-    let reopened = LibsqlStore::open(directory.path().join("test.db"))
+    let reopened = TursoStore::open(directory.path().join("test.db"))
         .await
         .unwrap();
     assert_eq!(snapshot(&reopened).await, expected);

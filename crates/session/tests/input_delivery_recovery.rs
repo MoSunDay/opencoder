@@ -24,8 +24,8 @@ use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{run, SessionState};
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -128,7 +128,7 @@ fn user_texts(msgs: &[Message]) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 struct FailingUpdateStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
 }
 
 #[async_trait]
@@ -341,7 +341,7 @@ async fn llm_failure_leaves_queue_pending_without_resubmit() {
 /// instead of re-entering drain mode for another consumption round.
 #[tokio::test]
 async fn store_failure_leaves_queue_pending_unpromoted() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let failing: Arc<dyn Store> = Arc::new(FailingUpdateStore { inner });
 
     let (_dir, mut s) = session(failing.clone(), mock_reply());

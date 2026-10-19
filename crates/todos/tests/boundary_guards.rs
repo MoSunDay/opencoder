@@ -12,7 +12,7 @@ use std::{
 
 use opencoder_core::{Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
@@ -121,7 +121,7 @@ async fn kinds(store: &Arc<dyn Store>, id: &str) -> Vec<String> {
 /// before the execution snapshot was taken, so the channel was always null.
 #[tokio::test]
 async fn recovery_context_reaches_retry_prompt() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -176,7 +176,7 @@ async fn recovery_context_reaches_retry_prompt() {
 /// several decisions.
 #[tokio::test]
 async fn parent_summary_stays_clean_across_decisions() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -216,7 +216,7 @@ async fn parent_summary_stays_clean_across_decisions() {
 /// the workflow.
 #[tokio::test]
 async fn nondispatch_decision_correction_reasks() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             // Invalid: "step-1" is not (yet) a milestone and not even passed.
@@ -252,7 +252,7 @@ async fn nondispatch_decision_correction_reasks() {
 /// workflow-fatal bail.
 #[tokio::test]
 async fn duplicate_milestone_remark_is_idempotent() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -295,7 +295,7 @@ async fn duplicate_milestone_remark_is_idempotent() {
 /// `required_gate_passes_when_tool_really_ran` for the positive counterpart.)
 #[tokio::test]
 async fn acceptance_correction_reasks_on_failed_gate() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -340,7 +340,7 @@ async fn acceptance_correction_reasks_on_failed_gate() {
 /// observers replaying the todo session see the ToolStart/ToolEnd stream.
 #[tokio::test]
 async fn required_gate_passes_when_tool_really_ran() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -390,7 +390,7 @@ async fn required_gate_passes_when_tool_really_ran() {
 /// a Suspended workflow while the parent is already deciding.
 #[tokio::test]
 async fn resume_persists_running_before_first_dispatch() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new().push_script(done(r#"{"operation":"suspend","reason":"park"}"#)),
     );
@@ -463,7 +463,7 @@ async fn acceptance_rewind_to_unrelated_milestone_is_corrected() {
         },
         metadata: serde_json::Value::Null,
     });
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             // root passes and is marked as the milestone.

@@ -23,7 +23,7 @@ use std::time::Duration;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use futures::StreamExt;
-use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, SessionMeta};
+use opencoder_store::{EventKind, SessionEventRecord, SessionMeta, TursoStore};
 use opencoder_web::handle::SseEvt;
 use serde_json::json;
 
@@ -33,9 +33,9 @@ async fn state() -> Arc<opencoder_web::AppState> {
         config_home: None,
         client_override: None,
         brain: opencoder_web::api_brain::mock_brain(Arc::new(
-            LibsqlStore::open_memory().await.unwrap(),
+            TursoStore::open_memory().await.unwrap(),
         )),
-        store: Arc::new(LibsqlStore::open_memory().await.unwrap()),
+        store: Arc::new(TursoStore::open_memory().await.unwrap()),
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),

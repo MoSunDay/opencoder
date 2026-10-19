@@ -1,11 +1,11 @@
 #![allow(dead_code)] // shared across test binaries; each sees only its own subset
-//! Shared fixtures: tempdir team root ("fake NFS"), real LibsqlStore, a
+//! Shared fixtures: tempdir team root ("fake NFS"), real TursoStore, a
 //! registered-node team, and topic bootstrapping helpers.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use opencoder_store::{LibsqlStore, NodeRecord, Store};
+use opencoder_store::{NodeRecord, Store, TursoStore};
 use opencoder_team::{
     fs_store,
     types::{MemberRef, TeamMember, TeamMeta, TopicMeta},
@@ -18,7 +18,7 @@ pub const TEAM: &str = "demo";
 pub struct Fixture {
     pub root: TempDir,
     pub db: TempDir,
-    pub store: Arc<LibsqlStore>,
+    pub store: Arc<TursoStore>,
     pub cfg: TeamRunConfig,
 }
 
@@ -31,7 +31,7 @@ impl Fixture {
 pub async fn fixture(max_turns: usize, max_sub_turns: usize) -> Fixture {
     let root = tempfile::tempdir().unwrap();
     let db = tempfile::tempdir().unwrap();
-    let store = Arc::new(LibsqlStore::open(db.path().join("team.db")).await.unwrap());
+    let store = Arc::new(TursoStore::open(db.path().join("team.db")).await.unwrap());
     let cfg = TeamRunConfig {
         team_root: root.path().to_path_buf(),
         max_turns,
@@ -45,7 +45,7 @@ pub async fn fixture(max_turns: usize, max_sub_turns: usize) -> Fixture {
     }
 }
 
-pub async fn register(store: &LibsqlStore, name: &str) -> NodeRecord {
+pub async fn register(store: &TursoStore, name: &str) -> NodeRecord {
     store
         .register_node(name, Some("v1"), Some("/tmp/wd"), None, 1_000)
         .await
@@ -122,6 +122,6 @@ pub async fn run_cancelled(
 }
 
 /// A real NodeDispatcher with test-friendly polling (for dispatcher tests).
-pub fn fast_dispatcher(store: Arc<LibsqlStore>) -> NodeDispatcher {
+pub fn fast_dispatcher(store: Arc<TursoStore>) -> NodeDispatcher {
     NodeDispatcher::with_timeouts(store, Duration::from_millis(20), Duration::from_secs(5))
 }

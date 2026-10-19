@@ -1,23 +1,23 @@
-//! `session_inputs.recorded` lifecycle tests for the libsql-backed Store.
+//! `session_inputs.recorded` lifecycle tests for the turso-backed Store.
 //!
 //! Covers the recorded state machine (admit → promote → mark_recorded), the
 //! promote-resets-recorded invariant, orphan recovery (promoted but never
 //! recorded rows flipped back to pending), and the v9→v10 migration backfill
 //! that treats pre-existing promoted rows as consumed. Split out of
 //! `inputs_integration.rs` to keep each file focused and under the line-count
-//! limit. Runs against a real on-disk libsql file (tempdir).
+//! limit. Runs against a real on-disk turso file (tempdir).
 
-use libsql::{params, Connection};
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
+use turso::{params, Connection};
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
+async fn make_session(store: &TursoStore, id: &str, now: i64) {
     let meta = SessionMeta {
         id: id.to_string(),
         title: Some(format!("title-{id}")),
@@ -59,7 +59,7 @@ fn mk_input(sid: &str, id: &str, delivery: Delivery) -> SessionInput {
 // Raw `(promoted_seq, recorded)` state of an input row, bypassing the Store
 // API so the tests assert what actually landed in the table.
 async fn input_state(conn: &Connection, seq: i64) -> (Option<i64>, i64) {
-    let stmt = conn
+    let mut stmt = conn
         .prepare("SELECT promoted_seq, recorded FROM session_inputs WHERE seq = ?")
         .await
         .unwrap();
@@ -85,7 +85,7 @@ async fn input_state(conn: &Connection, seq: i64) -> (Option<i64>, i64) {
 
 // v9→v10 migration backfill: simulate a legacy v9 database (version row
 // rewound to 9, a promoted input reset to the pre-column recorded=0 state),
-// reopen through `LibsqlStore::open` so bootstrap runs the migration, then
+// reopen through `TursoStore::open` so bootstrap runs the migration, then
 // assert the version bumps to 10 and the pre-existing promoted row is
 // backfilled to recorded=1 (historical audit rows count as consumed) while a
 // pending row keeps recorded=0.

@@ -18,11 +18,11 @@ use std::time::Duration;
 
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{Delivery, LibsqlStore, Store};
+use opencoder_store::{Delivery, Store, TursoStore};
 
 /// Fresh in-memory AppState (mirrors `web_drain_contract::state`).
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

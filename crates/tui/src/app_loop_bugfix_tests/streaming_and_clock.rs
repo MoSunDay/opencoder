@@ -16,10 +16,9 @@ fn first_step_thinking_text(chat: &ChatView) -> String {
 
 #[tokio::test]
 async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
-    let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items = Vec::new();
     let mut running = true;
@@ -99,10 +98,9 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
 
 #[tokio::test]
 async fn batched_reasoning_deltas_coalesce_into_one_step() {
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
-    let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items = Vec::new();
     let mut running = true;
@@ -169,10 +167,9 @@ async fn batched_reasoning_deltas_coalesce_into_one_step() {
 /// arrives).
 #[tokio::test]
 async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
-    let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView {
         agent: "plan".into(),
         ..ChatView::default()

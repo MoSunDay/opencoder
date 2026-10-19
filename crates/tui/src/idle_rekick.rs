@@ -35,7 +35,7 @@ mod tests {
     #[tokio::test]
     async fn empty_store_reports_no_stranded_rows() {
         let store: Arc<dyn Store> =
-            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "s".into(),
@@ -49,7 +49,7 @@ mod tests {
     #[tokio::test]
     async fn pending_queue_row_is_stranded() {
         let store: Arc<dyn Store> =
-            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "s".into(),
@@ -76,7 +76,7 @@ mod tests {
 
     async fn seeded_store() -> Arc<dyn Store> {
         let store: Arc<dyn Store> =
-            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "s".into(),
@@ -257,7 +257,7 @@ mod tests {
     #[tokio::test]
     async fn missing_session_reports_no_stranded_rows() {
         let store: Arc<dyn Store> =
-            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
         assert!(!stranded_pending(&store, "no-such-session").await);
     }
 }

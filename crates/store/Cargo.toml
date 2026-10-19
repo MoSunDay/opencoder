@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+opencoder-database.workspace = true
 opencoder-core.workspace = true
 opencoder-dag.workspace = true
 serde.workspace = true
@@ -14,14 +15,14 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
-libsql.workspace = true
+turso.workspace = true
 ulid.workspace = true
 fs2 = "0.4"
 sha2 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true
-libsql.workspace = true
+turso.workspace = true
 
 [[test]]
 name = "bounded_pagination"

@@ -165,7 +165,7 @@ async fn migration_v9_to_v10_backfills_recorded_for_promoted_rows() {
 
     let (seq_promoted, seq_pending);
     {
-        let store = LibsqlStore::open(&db_path).await.unwrap();
+        let store = TursoStore::open(&db_path).await.unwrap();
         make_session(&store, "s", 1).await;
         seq_promoted = store
             .admit_input(&mk_input("s", "legacy-promoted", Delivery::Steer))
@@ -206,10 +206,10 @@ async fn migration_v9_to_v10_backfills_recorded_for_promoted_rows() {
     }
 
     // Reopen: bootstrap sees version 9 < 10 and runs the migration.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -221,7 +221,11 @@ async fn migration_v9_to_v10_backfills_recorded_for_promoted_rows() {
             .expect("version row")
             .get(0)
             .unwrap();
-        assert_eq!(v, 38, "schema version must be latest (38) after migration");
+        assert_eq!(
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after migration"
+        );
 
         // Backfill: pre-existing promoted row treated as consumed.
         let (p_prom, rec_prom) = input_state(&conn, seq_promoted).await;

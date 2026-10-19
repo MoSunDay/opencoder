@@ -26,8 +26,8 @@ use super::*;
 /// come back from the store in admit (FIFO) order.
 #[tokio::test]
 async fn cancel_running_turn_keeps_pending_rows_in_store_and_mirrors() {
-    use opencoder_store::{Delivery, LibsqlStore, SessionMeta};
-    let store = LibsqlStore::open_memory().await.unwrap();
+    use opencoder_store::{Delivery, SessionMeta, TursoStore};
+    let store = TursoStore::open_memory().await.unwrap();
     let sid = "cancel-keep";
     store
         .create_session(&SessionMeta {
@@ -138,9 +138,9 @@ async fn cancel_running_turn_keeps_pending_rows_in_store_and_mirrors() {
 /// false so the run does not auto-restart.
 #[tokio::test]
 async fn fold_error_resyncs_steer_mirror_from_store() {
-    use opencoder_store::{Delivery, LibsqlStore, SessionMeta};
+    use opencoder_store::{Delivery, SessionMeta, TursoStore};
     let store: std::sync::Arc<dyn opencoder_store::Store> =
-        std::sync::Arc::new(LibsqlStore::open_memory().await.unwrap());
+        std::sync::Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "test-session".into(),

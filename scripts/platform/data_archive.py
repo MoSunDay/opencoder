@@ -16,6 +16,8 @@ import sqlite3
 import sys
 import time
 from rolling.native import ontology
+from rolling.storage.connection import connect as engine_connect
+from rolling.storage import database as storage_database
 
 STATUSES = {"pending", "running", "idle", "cancelling", "interrupted", "done", "error", "cancelled"}
 ACTIVE = {"pending", "running", "idle", "cancelling"}
@@ -138,7 +140,7 @@ def copy_tree(source: pathlib.Path, target: pathlib.Path, skip: set[str] | None 
 def open_locked_database(stack: contextlib.ExitStack, path: pathlib.Path) -> sqlite3.Connection:
     if path.is_symlink() or not path.is_file():
         raise ArchiveError(f"database is missing or linked: {path}")
-    connection = sqlite3.connect(path, timeout=0, isolation_level=None)
+    connection = engine_connect(path, timeout=0, isolation_level=None)
     stack.callback(connection.close)
     try:
         connection.execute("PRAGMA busy_timeout=0")
@@ -151,6 +153,9 @@ def open_locked_database(stack: contextlib.ExitStack, path: pathlib.Path) -> sql
 
 def sqlite_backup(source_path: pathlib.Path, target: pathlib.Path) -> None:
     mode = source_path.stat().st_mode & 0o777
+    if storage_database.backup(source_path, target):
+        target.chmod(mode)
+        return
     source_uri = source_path.resolve(strict=True).as_uri() + "?mode=ro"
     source = sqlite3.connect(source_uri, uri=True, timeout=0)
     destination = sqlite3.connect(target)

@@ -175,8 +175,7 @@ async fn release_subscriber_does_not_underflow_fresh_instance() {
 /// persisted) — otherwise the SSE stream hangs open forever.
 #[tokio::test]
 async fn run_err_without_runner_error_emits_terminal_error_frame() {
-    let store: Arc<dyn Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "term-err".into(),
@@ -215,8 +214,7 @@ async fn run_err_without_runner_error_emits_terminal_error_frame() {
 /// drain_no_restart_on_error's exactly-one assertion).
 #[tokio::test]
 async fn run_err_with_runner_error_is_not_duplicated() {
-    let store: Arc<dyn Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "term-err-dup".into(),
@@ -244,8 +242,7 @@ async fn run_err_with_runner_error_is_not_duplicated() {
 /// Ok runs never produce a synthetic error frame.
 #[tokio::test]
 async fn run_ok_emits_no_error_frame() {
-    let store: Arc<dyn Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "term-ok".into(),
@@ -266,9 +263,9 @@ async fn run_ok_emits_no_error_frame() {
 /// `broadcast_persist_event` observable: at `append_event` time it probes the
 /// parked SSE receiver. If the live frame is already queued, the broadcast
 /// beat the persist (the old, buggy order). Everything else delegates to the
-/// inner libsql store, so persisted state stays truthful.
+/// inner turso store, so persisted state stays truthful.
 struct OrderSpyStore {
-    inner: Arc<opencoder_store::LibsqlStore>,
+    inner: Arc<opencoder_store::TursoStore>,
     rx: std::sync::Mutex<Option<broadcast::Receiver<SseEvt>>>,
     live_first: Arc<std::sync::atomic::AtomicBool>,
     fail_append: bool,
@@ -390,7 +387,7 @@ impl Store for OrderSpyStore {
 /// against here.
 #[tokio::test]
 async fn broadcast_persists_before_live_send() {
-    let inner = Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     let live_first = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let handle = SessionHandle::new();
     let spy = OrderSpyStore {
@@ -436,7 +433,7 @@ async fn broadcast_persists_before_live_send() {
 /// must not swallow the live frame (transient events degrade gracefully).
 #[tokio::test]
 async fn broadcast_persist_failure_still_delivers_live() {
-    let inner = Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     let handle = SessionHandle::new();
     let spy = OrderSpyStore {
         inner,

@@ -11,10 +11,10 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionState};
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
+use opencoder_store::{Delivery, SessionInput, Store, TursoStore};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

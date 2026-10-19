@@ -7,7 +7,7 @@ use opencoder_core::fleet::{
 };
 use opencoder_core::Message;
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, Store};
+use opencoder_store::{EventKind, SessionEventRecord, Store, TursoStore};
 use serde_json::json;
 use support::*;
 
@@ -29,7 +29,7 @@ async fn oversized_legacy_message_is_chunked_and_detail_stays_bounded() {
     })
     .await;
     settled(&node, id).await;
-    let fixture = LibsqlStore::open(dir.path().join("node/runtime.db"))
+    let fixture = TursoStore::open(dir.path().join("node/runtime.db"))
         .await
         .unwrap();
     let huge = Message::user("legacy-huge", "界".repeat(800_000));

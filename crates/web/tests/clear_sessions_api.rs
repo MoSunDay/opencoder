@@ -14,10 +14,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-use opencoder_store::{LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord};
+use opencoder_store::{SessionMeta, Store, SubagentStatus, SubagentTaskRecord, TursoStore};
 
 async fn app() -> (axum::Router, Arc<opencoder_web::AppState>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

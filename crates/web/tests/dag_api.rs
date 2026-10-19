@@ -1,7 +1,7 @@
 //! HTTP contract for the DAG control plane (`/api/dag/*` + `/api/nodes/dag/*`):
 //! defs CRUD, dispatch/claim with spec snapshot, event upload validation,
 //! SSE replay/resume, terminal status with synthetic `run_finished`, cancel
-//! piggyback on the heartbeat. Store-backed (the libsql DAG impl is live);
+//! piggyback on the heartbeat. Store-backed (the Turso DAG impl is live);
 //! harness mirrors `nodes_ops.rs`.
 
 #[path = "dag_api/support.rs"]

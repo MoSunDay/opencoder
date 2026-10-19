@@ -1,6 +1,6 @@
 //! P4 functional tests for the web HTTP surface (CRUD + SSE replay + switch).
 //!
-//! These exercise the HTTP handlers directly (no network) against a real libsql
+//! These exercise the HTTP handlers directly (no network) against a real turso
 //! store + a MockChatClient, asserting the behavioral contracts:
 //! - prompt_admit_returns_immediately: POST /prompt returns an admitted_seq
 //!   without blocking on the LLM drain
@@ -23,11 +23,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use opencoder_llm::{ChatStream, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 // Reuse the production AppState + handlers via a thin test router.
 async fn app() -> (Router, Arc<opencoder_web::AppState>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir();
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
@@ -503,7 +503,7 @@ async fn switch_model_refused_while_draining() {
 /// Build an app whose workdir is an isolated tempdir (so `Config::save` writes
 /// there, not to the shared temp dir or `~/.opencoder`).
 async fn app_with_workdir(workdir: std::path::PathBuf) -> (Router, Arc<opencoder_web::AppState>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

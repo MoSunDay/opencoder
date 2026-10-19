@@ -1,10 +1,11 @@
-use super::super::FleetStore;
+use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
-use libsql::{params, params_from_iter, TransactionBehavior};
 use opencoder_core::fleet::{Assignment, CreateExecution, ExecutionKind, RpcReply};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use turso::transaction::TransactionBehavior;
+use turso::{params, params_from_iter};
 
 /// Project sessions retain one owner while each initial admission has its own run ID.
 pub fn dispatch_key(request: &CreateExecution) -> &str {
@@ -35,9 +36,8 @@ pub struct ExecutionNames {
     pub plan_name: Option<String>,
 }
 
-impl FleetStore {
+impl FleetConnection {
     pub async fn receipt(&self, scope: &str, id: &str) -> Result<Option<Receipt>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(
@@ -57,7 +57,6 @@ impl FleetStore {
 
     /// First writer owns the original intent. Returns false on content reuse.
     pub async fn claim_request(&self, scope: &str, id: &str, fingerprint: &str) -> Result<bool> {
-        let _gate = self.gate.lock().await;
         self.conn.execute(
             "INSERT INTO dispatch_receipts VALUES (?1,?2,?3,'claimed','null') ON CONFLICT(scope,id) DO NOTHING",
             params![scope,id,fingerprint],
@@ -74,7 +73,6 @@ impl FleetStore {
 
     /// Caller holds request_lock for this key. Updates cannot change intent.
     pub async fn save_receipt(&self, scope: &str, id: &str, receipt: &Receipt) -> Result<()> {
-        let _gate = self.gate.lock().await;
         let changed = self.conn.execute(
             "UPDATE dispatch_receipts SET phase=?4,payload=?5 WHERE scope=?1 AND id=?2 AND fingerprint=?3",
             params![scope,id,receipt.fingerprint.clone(),receipt.phase.clone(),serde_json::to_string(&receipt.payload)?],
@@ -84,7 +82,6 @@ impl FleetStore {
     }
 
     pub async fn assignment(&self, id: &str) -> Result<Option<Assignment>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(
@@ -105,7 +102,6 @@ impl FleetStore {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let _gate = self.gate.lock().await;
         let placeholders = vec!["?"; ids.len()].join(",");
         let sql = format!(
             "SELECT id, json_extract(assignment,'$.request.target'), \
@@ -114,9 +110,9 @@ impl FleetStore {
              json_extract(assignment,'$.request.input.layered_request.plan.title') \
              FROM execution_assignments WHERE id IN ({placeholders})"
         );
-        let args: Vec<libsql::Value> = ids
+        let args: Vec<turso::Value> = ids
             .iter()
-            .map(|id| libsql::Value::Text(id.clone()))
+            .map(|id| turso::Value::Text(id.clone()))
             .collect();
         let mut rows = self.conn.query(&sql, params_from_iter(args)).await?;
         let mut out = HashMap::with_capacity(ids.len());
@@ -146,11 +142,11 @@ impl FleetStore {
                 && assignment.index.kind == assignment.request.kind,
             "assignment index must match request id and kind"
         );
-        let _gate = self.gate.lock().await;
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         let i = &assignment.index;
         let mut rows = tx
             .query(
@@ -229,11 +225,11 @@ impl FleetStore {
             "node acceptance required"
         );
         let accepted = serde_json::from_value(reply.body.clone())?;
-        let _guard = self.gate.lock().await;
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         super::acceptance::insert(&tx, &accepted, Some(id)).await?;
         let changed = tx.execute(
             "UPDATE dispatch_receipts SET phase='accepted',payload=?3 WHERE scope='execution' AND id=?1 AND fingerprint=?2",
@@ -245,6 +241,8 @@ impl FleetStore {
     }
 }
 
+#[path = "access/receipts.rs"]
+mod database_access;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,7 +266,10 @@ mod tests {
             r#"{{"index":{{"id":"{id}","created_at":1,"kind":"dag","node_id":"n1","status":"pending"}},"request":{{"id":"{id}","kind":"dag"{rc}{request_extra}}}{dc}{definition_extra}}}"#
         );
         store
-            .conn
+            .db
+            .connect()
+            .await
+            .unwrap()
             .execute(
                 "INSERT INTO execution_assignments VALUES (?1,?2)",
                 params![id, payload],

@@ -10,17 +10,17 @@ use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_llm::estimate_messages_for_display;
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::session_ui::replay_into_chat;
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, Arc<LibsqlStore>) {
+async fn fresh() -> (TempDir, Arc<TursoStore>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, Arc::new(store))
 }
 
-async fn make_session(store: &LibsqlStore, id: &str) {
+async fn make_session(store: &TursoStore, id: &str) {
     let meta = SessionMeta {
         id: id.to_string(),
         title: Some(format!("title-{id}")),

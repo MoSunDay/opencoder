@@ -2,12 +2,12 @@
 //! `SessionPatch::summary_images` and reading them back via `get_session`.
 //! Also covers the NULL -> empty-vec backward-compat path (old sessions).
 
-use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
+use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     store
         .create_session(&SessionMeta {
             id: "s1".into(),

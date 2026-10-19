@@ -14,7 +14,7 @@ use opencoder_session::SessionEvent;
 async fn render_then_click_arrow_targets_jump_view() {
     use crate::app_helpers::{handle_mouse, MouseOutcome};
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
     use std::sync::Arc;
 
     // Tall chat so the body scrolls (max_rows > 0) and both arrows can appear.
@@ -26,8 +26,7 @@ async fn render_then_click_arrow_targets_jump_view() {
     }
     chat.apply(&SessionEvent::Done);
 
-    let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(TursoStore::open_memory().await.unwrap());
 
     // --- jump-to-bottom arrow: rendered only when follow == false ---
     {

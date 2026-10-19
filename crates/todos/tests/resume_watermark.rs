@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use opencoder_core::{message::now_ms, Config, Message};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, SessionMeta, Store, TASK_TYPE_TODO};
+use opencoder_store::{SessionMeta, Store, TursoStore, TASK_TYPE_TODO};
 use opencoder_todos::{execution, types::*};
 use tokio_util::sync::CancellationToken;
 
@@ -88,7 +88,7 @@ async fn seed_session_with_stale_assistant(store: &Arc<dyn Store>, config: &Conf
 /// return the stale transcript candidate.
 #[tokio::test]
 async fn resume_without_new_assistant_rejects_stale_candidate() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(MockChatClient::new());
     let client: Arc<dyn ChatStream> = mock.clone();
     let config = Config::default();
@@ -144,7 +144,7 @@ async fn resume_without_new_assistant_rejects_stale_candidate() {
 #[tokio::test]
 async fn resume_with_new_assistant_uses_only_the_new_candidate() {
     let fresh_candidate = STALE_CANDIDATE.replace("stale", "fresh");
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(MockChatClient::new().push_script(vec![LlmEvent::Completed {
         text: fresh_candidate.clone(),
         tool_calls: Vec::new(),

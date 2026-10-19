@@ -1,7 +1,7 @@
 use super::{store::check_revision, Store};
 use crate::{domain::validate_vector, error::AppError};
-use libsql::params;
 use serde_json::{json, Value};
+use turso::params;
 use uuid::Uuid;
 
 impl Store {

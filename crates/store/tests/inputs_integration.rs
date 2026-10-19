@@ -1,19 +1,19 @@
-//! Inputs / follow-up-queue integration tests for the libsql-backed Store.
+//! Inputs / follow-up-queue integration tests for the turso-backed Store.
 //!
 //! Covers admit / promote / claim / swap / delete semantics for steer & queue
 //! delivery. Split out of `store_integration.rs` to keep each file focused and
-//! under the line-count limit. Runs against a real on-disk libsql file (tempdir).
+//! under the line-count limit. Runs against a real on-disk turso file (tempdir).
 
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
+async fn make_session(store: &TursoStore, id: &str, now: i64) {
     let meta = SessionMeta {
         id: id.to_string(),
         title: Some(format!("title-{id}")),

@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures::StreamExt;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, Store};
+use opencoder_store::{EventKind, SessionEventRecord, Store, TursoStore};
 use tower::ServiceExt;
 
 struct Ctx {
@@ -18,7 +18,7 @@ struct Ctx {
 }
 
 async fn app() -> Ctx {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(

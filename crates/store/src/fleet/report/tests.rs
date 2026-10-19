@@ -13,15 +13,12 @@ fn record(id: &str, created_at: i64) -> ExecutionIndex {
 
 async fn changes(store: &FleetStore) -> i64 {
     store
-        .conn
-        .query("SELECT total_changes()", ())
+        .db
+        .write(|conn| async move {
+            let mut rows = conn.query("SELECT total_changes()", ()).await?;
+            Ok(rows.next().await?.unwrap().get::<i64>(0)?)
+        })
         .await
-        .unwrap()
-        .next()
-        .await
-        .unwrap()
-        .unwrap()
-        .get(0)
         .unwrap()
 }
 

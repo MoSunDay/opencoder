@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use crate::support::auth_header;
 use futures::StreamExt;
 use opencoder_llm::MockChatClient;
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 use serde_json::Value;
 
 pub const TOKEN: &str = "nodes-e2e-token";
@@ -26,8 +26,7 @@ pub struct Server {
 /// Spawn the real router on 127.0.0.1:0 and return its base URL + the shared
 /// store (the same Arc the AppState owns, for durable-side reconciliation).
 pub async fn spawn_server() -> Server {
-    let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::mock_brain(Arc::clone(&store)),

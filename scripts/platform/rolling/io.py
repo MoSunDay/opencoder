@@ -20,7 +20,7 @@ class Operations:
             raise ValueError("credential file must contain one nonempty token")
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    def http(self, base, path, method="GET", body=None, timeout=30):
+    def http(self, base, path, method="GET", body=None, timeout=30, accepted=()):
         request = urllib.request.Request(base.rstrip("/") + path,
             data=None if body is None else json.dumps(body).encode(), method=method,
             headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
@@ -28,6 +28,8 @@ class Operations:
             with self.opener.open(request, timeout=timeout) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
+            if error.code in accepted:
+                return json.load(error)
             detail = error.read(4096).decode(errors="replace")
             raise HttpFailure(method, path, error.code, detail) from None
 

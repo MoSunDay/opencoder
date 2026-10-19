@@ -1,4 +1,4 @@
-"""SQLite online backups; independent files are never labelled one snapshot."""
+"""Online backups through the owning engine; each file has its own snapshot."""
 from pathlib import Path
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +17,9 @@ def database(source, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise ValueError(f"backup output already exists: {target}")
+    from .storage import database as storage
+    if storage.backup(source, target):
+        return
     with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as reader:
         # Pin one read snapshot so writes between backup steps cannot restart
         # the copy indefinitely. WAL writers may continue while it is copied.
@@ -99,7 +102,7 @@ def _snapshot(settings, output, stopped, runtime_data, todo_root):
             raise ValueError("backup output cannot be inside a source tree")
         if stopped:
             tree.copy_tree(root, output / name,
-                ignore=shutil.ignore_patterns("*.db", "*.db-wal", "*.db-shm", "*.lock"))
+                ignore=shutil.ignore_patterns("*.db", "*.db-wal", "*.db-shm", "*.db-tshm", "*.lock"))
     # Each database still has its own pinned read transaction and quick_check.
     # Bound parallel roots so cold historical directories cannot serialize the
     # entire backup; finish every copy before verifying or publishing output.
@@ -113,7 +116,7 @@ def _snapshot(settings, output, stopped, runtime_data, todo_root):
                     for path, reason in future.result().items()}
     # Copy files after the pinned DB snapshot: immutable versions referenced by
     # that snapshot already exist. NFS path bindings must match their hashes too.
-    ontology_root = ontology.files_root(output / 'server')
+    ontology_root = ontology.files_root(output / 'server', offline=True)
     if ontology_root is not None:
         if output.is_relative_to(ontology_root):
             raise ValueError('backup output cannot be inside Ontology files')

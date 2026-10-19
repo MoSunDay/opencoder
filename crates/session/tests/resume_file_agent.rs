@@ -11,7 +11,7 @@ use opencoder_core::agent::set_agents_dir_override;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_session::{resume, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 /// Serializes tests touching the process-global agents-root override.
 static OVERRIDE_LOCK: Mutex<()> = Mutex::new(());
@@ -54,7 +54,7 @@ async fn file_agent_session_resumes_with_that_agent() {
     set_agents_dir_override(Some(dir.path().to_path_buf()));
     write_file_agent(dir.path(), "writer", "Writer soul: small diffs.");
 
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "file-agent-sess".into(),

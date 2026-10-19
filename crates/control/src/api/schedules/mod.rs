@@ -1,7 +1,7 @@
 //! `/api/schedules` — the control-plane cron scheduler's definitions and
 //! fire history.
 //!
-//! Since schema v27 the libsql `schedules` table is the definition source
+//! Since schema v27 the Turso `schedules` table is the definition source
 //! of truth (admin CRUD in [`write`]); the legacy `schedules.json` domain
 //! file is only a one-time bootstrap seed and keeps owning the ops knob
 //! `scan_interval_secs` (reported read-only here, hot-read by the

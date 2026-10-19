@@ -4,12 +4,12 @@
 //! Every store READ path maps the stored `'sandbox'` to `'plan'`, while the
 //! raw row is never rewritten.
 
-use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
+use opencoder_store::{SessionFilter, SessionMeta, Store, TursoStore};
 
 #[tokio::test]
 async fn legacy_sandbox_agent_reads_back_as_plan_on_all_read_paths() {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
 
     store
         .create_session(&SessionMeta {

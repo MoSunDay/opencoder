@@ -24,26 +24,26 @@ async fn transaction_rollback_on_partial_failure() {
     store.append_messages("ok", &conv("ok", 2)).await.unwrap();
     assert_eq!(store.load_messages("ok").await.unwrap().len(), 2);
 
-    // Mid-tx rollback at the libsql level: 3 valid inserts followed by a
+    // Mid-tx rollback at the turso level: 3 valid inserts followed by a
     // NOT-NULL violation must roll back ALL of them.
     let conn = store.conn().await.unwrap();
-    let tx = conn.transaction().await.unwrap();
+    let tx = conn.unchecked_transaction().await.unwrap();
     tx.execute(
         "INSERT INTO messages (id, session_id, role, blocks_json, usage_json, created_at, synthetic) VALUES ('r1','ok','user','[]','{}',1,0)",
-        libsql::params![],
+        turso::params![],
     )
     .await
     .unwrap();
     tx.execute(
         "INSERT INTO messages (id, session_id, role, blocks_json, usage_json, created_at, synthetic) VALUES ('r2','ok','user','[]','{}',2,0)",
-        libsql::params![],
+        turso::params![],
     )
     .await
     .unwrap();
     let failed = tx
         .execute(
             "INSERT INTO messages (id, session_id, role, blocks_json, usage_json, created_at, synthetic) VALUES (NULL,'ok','user','[]','{}',3,0)",
-            libsql::params![],
+            turso::params![],
         )
         .await;
     assert!(failed.is_err(), "NOT NULL violation must error");
@@ -54,10 +54,10 @@ async fn transaction_rollback_on_partial_failure() {
 }
 
 // ---------------------------------------------------------------------------
-// Regression: future cancellation must not panic (no libsql::Transaction::Drop)
+// Regression: future cancellation must not panic (no turso::transaction::Transaction::Drop)
 // ---------------------------------------------------------------------------
 //
-// Before the fix, every transaction used `libsql::Transaction` whose `Drop`
+// Before the fix, every transaction used `turso::transaction::Transaction` whose `Drop`
 // calls `do_rollback().unwrap()`. When a future was cancelled mid-transaction
 // (e.g. via `tokio::select!`), the `db_lock` guard could be released before
 // the `Transaction` was dropped, allowing another task to mutate the shared

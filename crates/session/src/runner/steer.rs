@@ -358,7 +358,7 @@ mod tests {
     // biased select and the function returns its default — even though the DB
     // actually has pending items.
     //
-    // NOTE: uses an in-memory LibsqlStore. These are pub(super) fns that can
+    // NOTE: uses an in-memory TursoStore. These are pub(super) fns that can
     // only be tested inside the crate. The DB operations complete in <1ms on
     // in-memory SQLite, so timing is not a concern.
 

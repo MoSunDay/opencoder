@@ -37,7 +37,7 @@ tempfile.workspace = true
 sha2 = "0.10"
 # nodes_lost_sweep: open a SECOND connection to the file-backed test db and
 # backfill an old `nodes.last_seen_at` (in-memory dbs cannot do cross-conn).
-libsql.workspace = true
+turso.workspace = true
 opencoder-llm.workspace = true
 # Phase-4 e2e: drive a REAL worker node against the REAL build_app server.
 opencoder-node.workspace = true

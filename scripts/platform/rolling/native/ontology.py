@@ -6,12 +6,13 @@ import json
 import sqlite3
 
 
-def files_root(server_data):
+def files_root(server_data, *, offline=False):
     database = Path(server_data) / 'ontology.db'
     if not database.exists():
         return None
-    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as reader:
-        row = reader.execute('SELECT files_root FROM ontology_schema_version WHERE version=1').fetchone()
+    from ..storage.database import query
+    rows = query(database, 'SELECT files_root FROM ontology_schema_version WHERE version=1', offline=offline)
+    row = rows[0] if rows else None
     if row is None or not Path(row[0]).is_absolute():
         raise ValueError('Ontology database lacks its effective files root')
     root = Path(row[0]).resolve()

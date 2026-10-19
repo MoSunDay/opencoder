@@ -10,10 +10,7 @@ fn embedded_connections_close_safely_across_fresh_runtimes_and_last_owners() {
             .build()
             .unwrap();
         runtime.block_on(async {
-            let database = libsql::Builder::new_local(":memory:")
-                .build()
-                .await
-                .unwrap();
+            let database = turso::Builder::new_local(":memory:").build().await.unwrap();
             let connection = database.connect().unwrap();
             connection
                 .execute("CREATE TABLE teardown_probe(value INTEGER)", ())
@@ -23,15 +20,16 @@ fn embedded_connections_close_safely_across_fresh_runtimes_and_last_owners() {
 
             let connection = database.connect().unwrap();
             let clone = connection.clone();
-            let statement = connection.prepare("SELECT 42").await.unwrap();
+            let mut statement = connection.prepare("SELECT 42").await.unwrap();
             drop(connection);
-            let transaction = clone.transaction().await.unwrap();
+            let transaction = clone.unchecked_transaction().await.unwrap();
             transaction
                 .execute("CREATE TABLE transaction_probe(value INTEGER)", ())
                 .await
                 .unwrap();
-            drop(clone);
+            drop(database);
             transaction.commit().await.unwrap();
+            drop(clone);
             let mut rows = statement.query(()).await.unwrap();
             drop(statement);
             let row = rows.next().await.unwrap().unwrap();
@@ -49,7 +47,7 @@ async fn last_store_connection_owner_releases_the_native_database_file() {
 
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("store.db");
-    let store = opencoder_store::LibsqlStore::open(&path).await.unwrap();
+    let store = opencoder_store::TursoStore::open(&path).await.unwrap();
     let connection = store.conn().await.unwrap();
     drop(store);
     let mut rows = connection.query("SELECT 1", ()).await.unwrap();

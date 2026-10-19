@@ -7,18 +7,18 @@
 //! released, while leaving fresh nodes, terminal rows and `pending` rows
 //! untouched. All timestamps are passed explicitly, so no sleeping.
 
-use opencoder_store::{LibsqlStore, NodeRecord, NodeTaskStatus, Store};
+use opencoder_store::{NodeRecord, NodeTaskStatus, Store, TursoStore};
 use tempfile::TempDir;
 
 const STALE_MS: i64 = 400;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn register(store: &LibsqlStore, name: &str, now_ms: i64) -> NodeRecord {
+async fn register(store: &TursoStore, name: &str, now_ms: i64) -> NodeRecord {
     store
         .register_node(name, Some("v1"), Some("/tmp/wd"), None, now_ms)
         .await
@@ -27,7 +27,7 @@ async fn register(store: &LibsqlStore, name: &str, now_ms: i64) -> NodeRecord {
 
 #[allow(clippy::too_many_arguments)]
 async fn dispatch(
-    store: &LibsqlStore,
+    store: &TursoStore,
     task_id: &str,
     session_seq: usize,
     node_id: &str,
@@ -49,7 +49,7 @@ async fn dispatch(
 }
 
 /// Run a task through pending -> running (claimed, node marked busy).
-async fn run_to_running(store: &LibsqlStore, task_id: &str, node_id: &str, t: i64) {
+async fn run_to_running(store: &TursoStore, task_id: &str, node_id: &str, t: i64) {
     dispatch(store, task_id, t as usize, node_id, t).await;
     store.claim_next_node_task(node_id, t + 1).await.unwrap();
 }

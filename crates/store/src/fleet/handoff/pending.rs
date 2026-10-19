@@ -1,8 +1,9 @@
-//! Read the prepared receipt set before loading frozen assignment payloads.
 use super::super::FleetStore;
+// Read the prepared receipt set before loading frozen assignment payloads.
+use super::super::FleetConnection;
 use anyhow::Result;
-use libsql::params;
 use opencoder_core::fleet::Assignment;
+use turso::params;
 
 #[cfg(test)]
 mod tests;
@@ -33,10 +34,9 @@ SELECT assignment FROM (
 )
 ORDER BY id LIMIT ?2";
 
-impl FleetStore {
+impl FleetConnection {
     /// Caller serializes operations for this subject with request_lock.
     pub async fn prepared_receipt_for(&self, scope: &str, subject: &str) -> Result<Option<String>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self.conn.query(
             "SELECT id FROM dispatch_receipts WHERE scope=?1 AND phase='prepared' AND json_extract(payload,'$.subject')=?2 LIMIT 1",
             params![scope, subject],
@@ -54,7 +54,6 @@ impl FleetStore {
         after: &str,
         limit: u32,
     ) -> Result<Vec<(String, super::Receipt)>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self.conn.query(
             "SELECT id,fingerprint,phase,payload FROM dispatch_receipts WHERE scope=?1 AND phase='prepared' AND id>?2 ORDER BY id LIMIT ?3",
             params![scope, after, i64::from(limit.clamp(1,128))],
@@ -74,7 +73,6 @@ impl FleetStore {
     }
 
     pub async fn pending_assignments(&self, after: &str, limit: u32) -> Result<Vec<Assignment>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(QUERY, params![after, i64::from(limit.min(128))])
@@ -86,3 +84,6 @@ impl FleetStore {
         Ok(assignments)
     }
 }
+
+#[path = "access/pending.rs"]
+mod database_access;

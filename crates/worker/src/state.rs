@@ -6,7 +6,7 @@ use crate::{
 use anyhow::Result;
 use opencoder_core::{fleet::*, Config};
 use opencoder_llm::ChatStream;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use std::{
     collections::HashMap,
     fs::File,
@@ -133,18 +133,20 @@ impl Worker {
             runtime_db.clone(),
             data_dir.join("runtime.db-wal"),
             data_dir.join("runtime.db-shm"),
+            data_dir.join("runtime.db-tshm"),
+            data_dir.join("runtime.db.engine.json"),
         ] {
             crate::migration_io::reject_symlink(&path, "node runtime database")?;
         }
-        let libsql = Arc::new(LibsqlStore::open(runtime_db).await?);
-        let store: Arc<dyn Store> = libsql.clone();
+        let turso = Arc::new(TursoStore::open(runtime_db).await?);
+        let store: Arc<dyn Store> = turso.clone();
         let project = opencoder_project::ProjectService::new();
         // 节点执行面没有 brain 运行时：brain todo 在节点上拒绝启动（由
         // 控制面预解析后再派发）。
         project
             .init(
                 store.clone(),
-                libsql,
+                turso,
                 options.workdir.clone(),
                 client.clone(),
                 None,

@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use opencoder_store::{LibsqlStore, SessionFilter, SessionListItem, Store, TsRecord, TsRegistry};
+use opencoder_store::{SessionFilter, SessionListItem, Store, TsRecord, TsRegistry, TursoStore};
 
 const STORE_PAGE_SIZE: u32 = 500;
 const WORKDIR_MARKER: &str = "workdir";
@@ -103,7 +103,7 @@ async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
 }
 
 async fn load_store(store_dir: &Path, db: &Path) -> Result<Vec<StoredSession>> {
-    let store = LibsqlStore::open(db)
+    let store = TursoStore::open(db)
         .await
         .with_context(|| format!("open session store: {}", db.display()))?;
     let workdir = read_workdir(store_dir).await;
@@ -127,7 +127,7 @@ async fn read_workdir(store_dir: &Path) -> Option<PathBuf> {
     path.is_absolute().then_some(path)
 }
 
-async fn list_all_sessions(store: &LibsqlStore) -> Result<Vec<SessionListItem>> {
+async fn list_all_sessions(store: &TursoStore) -> Result<Vec<SessionListItem>> {
     let mut out = Vec::new();
     let mut cursor = None;
     loop {
@@ -224,7 +224,7 @@ mod tests {
         let h1 = root.join("aaaa");
         tokio::fs::create_dir_all(&h1).await.unwrap();
         {
-            let store = LibsqlStore::open(h1.join("opencoder.db")).await.unwrap();
+            let store = TursoStore::open(h1.join("opencoder.db")).await.unwrap();
             store.create_session(&meta("TSA1", None, 1)).await.unwrap();
             store
                 .create_session(&meta("PLAIN1", Some("m"), 2))
@@ -239,7 +239,7 @@ mod tests {
         let h2 = root.join("bbbb");
         tokio::fs::create_dir_all(&h2).await.unwrap();
         {
-            let store = LibsqlStore::open(h2.join("opencoder.db")).await.unwrap();
+            let store = TursoStore::open(h2.join("opencoder.db")).await.unwrap();
             store.create_session(&meta("TSB1", None, 3)).await.unwrap();
         }
 
@@ -272,7 +272,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let h1 = tmp.path().join("aaaa");
         tokio::fs::create_dir_all(&h1).await.unwrap();
-        let store = LibsqlStore::open(h1.join("opencoder.db")).await.unwrap();
+        let store = TursoStore::open(h1.join("opencoder.db")).await.unwrap();
         store.create_session(&meta("TSA1", None, 1)).await.unwrap();
         drop(store);
 
@@ -289,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_all_sessions_paginates_past_store_limit() {
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         for n in 0..=STORE_PAGE_SIZE {
             let mut session = meta(&format!("PAGE{n:04}"), None, i64::from(n));
             session.updated_at = 10_000;

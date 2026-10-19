@@ -23,7 +23,7 @@ use std::time::Duration;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use futures::StreamExt;
-use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store};
+use opencoder_store::{EventKind, SessionEventRecord, SessionMeta, Store, TursoStore};
 use opencoder_web::handle::{SessionHandle, SseEvt};
 use opencoder_web::AppState;
 use serde_json::json;
@@ -36,7 +36,7 @@ const PAIR_MARKER: &str = "__identical_pair__";
 const LIVE_MARKER: &str = "__post_subscribe_live__";
 
 async fn make_state() -> Arc<AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(AppState {
         config_home: None,
         client_override: None,

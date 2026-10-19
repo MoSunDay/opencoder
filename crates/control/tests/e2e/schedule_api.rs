@@ -1,5 +1,5 @@
 //! `/api/schedules` + the control-plane cron scheduler over the real router:
-//! store-backed definition CRUD (schema v27 — the libsql `schedules` table
+//! store-backed definition CRUD (schema v27 — the Turso `schedules` table
 //! is the source of truth), the one-time `schedules.json` seed import, a
 //! live agent fire with ledger history, `overlap: skip` gating on the last
 //! run's execution state, catch-up missing ticks, and the admin-only

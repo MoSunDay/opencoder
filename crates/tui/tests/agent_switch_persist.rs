@@ -8,7 +8,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
 use opencoder_llm::MockChatClient;
 use opencoder_session::{resume, SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
@@ -22,7 +22,7 @@ async fn running_session(
     id: &str,
     agent: &str,
 ) -> (SessionState, Arc<MockChatClient>, Arc<dyn Store>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: id.into(),

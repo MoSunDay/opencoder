@@ -14,7 +14,7 @@ use super::super::*;
 use crate::chat::ChatBlock;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Config;
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 
 mod act_clear;
 
@@ -60,7 +60,7 @@ async fn dispatch_popup(
     Option<(String, u32)>,
     Vec<String>,
 ) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut running = running;
     let mut follow = true;
     let mut task_picker = None;

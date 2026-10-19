@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
+use opencoder_store::{Delivery, SessionInput, Store, TursoStore};
 use tokio_util::sync::CancellationToken;
 
 use crate::{SessionState, SharedCancel};
@@ -27,7 +27,7 @@ pub(super) fn mock_client() -> Arc<dyn ChatStream> {
 /// wired to it. Shared by all queue/drain test setups. The caller attaches
 /// a turn_cancel token and seeds inputs as needed.
 pub(super) async fn make_session(id: &str) -> (SessionState, Arc<dyn Store>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: id.into(),

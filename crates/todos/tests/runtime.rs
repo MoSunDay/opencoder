@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store, TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW};
+use opencoder_store::{Store, TursoStore, TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
@@ -41,7 +41,7 @@ fn spec() -> WorkflowSpec {
 
 #[tokio::test]
 async fn parent_drives_focused_primary_todo_to_completion() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(done(r#"{"operation":"dispatch","todos":[{"todo_id":"step-1","context_mode":"new"}],"reason":"ready"}"#))
@@ -85,7 +85,7 @@ async fn parent_drives_focused_primary_todo_to_completion() {
 
 #[tokio::test]
 async fn normal_execution_does_not_create_a_debug_projection() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(done(r#"{"operation":"dispatch","todos":[{"todo_id":"step-1","context_mode":"new"}],"reason":"ready"}"#))
@@ -114,7 +114,7 @@ async fn normal_execution_does_not_create_a_debug_projection() {
 
 #[tokio::test]
 async fn existing_debug_projection_refreshes_after_external_state_change() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workflow = spec();
     let mut state = opencoder_todos::domain::initial_state(
         &workflow,
@@ -161,7 +161,7 @@ async fn parent_can_dispatch_multiple_independent_todos_in_one_batch() {
     second.title = "second".into();
     workflow.todos.push(second);
     let candidate = r#"{"status":"candidate","summary":"done","result":"ok","verification":"checked","evidence_refs":[],"recovery_context":{"summary":"done","refs":[]}}"#;
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(done(r#"{"operation":"dispatch","todos":[{"todo_id":"step-1","context_mode":"new"},{"todo_id":"step-2","context_mode":"new"}],"reason":"independent"}"#))
@@ -258,7 +258,7 @@ fn suspended_active_todo_becomes_recoverable_and_runnable() {
 /// the takeover path and unlocks the resume.
 #[tokio::test]
 async fn resume_rejects_running_workflow_until_interrupted() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workflow = spec();
     let mut state = opencoder_todos::domain::initial_state(
         &workflow,

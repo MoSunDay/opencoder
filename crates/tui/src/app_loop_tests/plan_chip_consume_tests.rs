@@ -16,8 +16,7 @@ async fn fold_fixture() -> (
     mpsc::Receiver<UiEvent>,
     CancellationToken,
 ) {
-    let store: Arc<dyn Store> =
-        Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
     let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (_evt_tx, evt_rx) = mpsc::channel::<UiEvent>(64);
     let chat = ChatView::default();

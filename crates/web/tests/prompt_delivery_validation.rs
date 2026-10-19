@@ -13,13 +13,13 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{Delivery, LibsqlStore, Store};
+use opencoder_store::{Delivery, Store, TursoStore};
 
 /// Fresh state: in-memory store, injected mock client, and an ISOLATED
 /// tempdir workdir + pinned model so the drain never depends on ambient
 /// config files or env keys (mirrors web_drain_contract / store_error_surfacing).
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock: Arc<dyn ChatStream> =
         Arc::new(
             MockChatClient::new().with_default(vec![LlmEvent::Completed {
@@ -208,7 +208,7 @@ async fn malformed_model_override_is_a_400() {
 async fn model_error_precedes_and_differs_from_api_key_error() {
     // No client_override + isolated config home (env_get returns None there),
     // so endpoint resolution deterministically fails on the missing key.
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,

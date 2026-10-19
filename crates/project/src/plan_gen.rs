@@ -354,15 +354,15 @@ async fn finish_plan_run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opencoder_store::{LibsqlStore, ProjectStore};
+    use opencoder_store::{ProjectStore, TursoStore};
     use std::collections::HashMap;
     use std::sync::Mutex;
 
     // commit_plan_output 的条件回写语义：Running 让路、非 Running 落
     // Planned、行缺失静默。镜像 service.rs 测试的内存库工厂。
 
-    async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<LibsqlStore>) {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<TursoStore>) {
+        let store = Arc::new(TursoStore::open_memory().await.unwrap());
         let dir = tempfile::tempdir().unwrap();
         let deps = Arc::new(Deps {
             store: store.clone(),
@@ -379,7 +379,7 @@ mod tests {
         (dir, deps, store)
     }
 
-    async fn seed_todo(p: &Arc<LibsqlStore>, id: &str, status: ProjectTodoStatus) {
+    async fn seed_todo(p: &Arc<TursoStore>, id: &str, status: ProjectTodoStatus) {
         let now = 1000;
         p.create_todo(&opencoder_store::ProjectTodoRecord {
             people: Default::default(),

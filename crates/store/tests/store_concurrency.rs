@@ -1,6 +1,6 @@
 //! Regression tests for store concurrency hardening:
 //! - busy_timeout pragma raised to 30 s
-//! - wal_autocheckpoint pragma configured
+//! - WAL mode configured
 //! - batch INSERT chunked at BATCH_CHUNK to bound transaction size
 //! - concurrent writes do not deadlock
 //!
@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 /// Build a minimal `SessionMeta` for test sessions. `SessionMeta` has no
 /// constructor, so we assemble the struct literal directly.
@@ -67,32 +67,39 @@ fn conv_mixed(seed: &str, n: usize) -> Vec<Message> {
 /// Verify the busy_timeout pragma is set to 30000 ms on the connection.
 #[tokio::test]
 async fn pragma_busy_timeout_is_30000() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let conn = store.conn().await.unwrap();
-    let stmt = conn.prepare("PRAGMA busy_timeout").await.unwrap();
+    let mut stmt = conn.prepare("PRAGMA busy_timeout").await.unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let row = rows.next().await.unwrap().unwrap();
     let timeout: i64 = row.get(0).unwrap();
     assert_eq!(timeout, 30000, "busy_timeout should be 30000 ms");
 }
 
-/// Verify wal_autocheckpoint is configured.
+/// Verify file databases use the shared WAL mode.
 #[tokio::test]
-async fn pragma_wal_autocheckpoint_is_1000() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+async fn file_database_uses_wal() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = TursoStore::open(dir.path().join("wal.db")).await.unwrap();
     let conn = store.conn().await.unwrap();
-    let stmt = conn.prepare("PRAGMA wal_autocheckpoint").await.unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    let row = rows.next().await.unwrap().unwrap();
-    let pages: i64 = row.get(0).unwrap();
-    assert_eq!(pages, 1000, "wal_autocheckpoint should be 1000 pages");
+    let mut rows = conn.query("PRAGMA journal_mode", ()).await.unwrap();
+    assert_eq!(
+        rows.next()
+            .await
+            .unwrap()
+            .unwrap()
+            .get::<String>(0)
+            .unwrap()
+            .to_lowercase(),
+        "wal"
+    );
 }
 
 /// Insert 250 messages (> BATCH_CHUNK of 200) and verify all are loaded.
 /// This exercises the chunking path: 200 + 50 across two transactions.
 #[tokio::test]
 async fn append_many_chunks_large_batch() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let m = meta("chunk-test");
     store.create_session(&m).await.unwrap();
 
@@ -109,7 +116,7 @@ async fn append_many_chunks_large_batch() {
 /// Empty batch should return empty seqs vec, not error.
 #[tokio::test]
 async fn append_many_empty_returns_empty() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let m = meta("empty-test");
     store.create_session(&m).await.unwrap();
 
@@ -120,7 +127,7 @@ async fn append_many_empty_returns_empty() {
 /// Exactly BATCH_CHUNK (200) messages — one full chunk, boundary case.
 #[tokio::test]
 async fn append_many_exact_chunk_boundary() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let m = meta("boundary-test");
     store.create_session(&m).await.unwrap();
 
@@ -135,7 +142,7 @@ async fn append_many_exact_chunk_boundary() {
 /// Import 450 messages via the import path (also chunked).
 #[tokio::test]
 async fn import_chunks_large_batch() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let m = meta("import-test");
     store.create_session(&m).await.unwrap();
 
@@ -153,7 +160,7 @@ async fn import_chunks_large_batch() {
 /// so we collect `JoinHandle`s and await them sequentially.
 #[tokio::test]
 async fn concurrent_writers_no_deadlock() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let m = meta("concurrent");
     store.create_session(&m).await.unwrap();
 

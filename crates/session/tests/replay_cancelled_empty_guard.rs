@@ -10,7 +10,7 @@ use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_session::resume::replay_cancelled_tasks;
 use opencoder_session::SessionState;
-use opencoder_store::{LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord};
+use opencoder_store::{SessionMeta, Store, SubagentStatus, SubagentTaskRecord, TursoStore};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
@@ -19,7 +19,7 @@ async fn replay_cancelled_tasks_no_empty_tool_message_when_backfill_empty() {
     // stays empty. The empty guard must skip recording a synthetic Tool
     // message — otherwise the transcript is corrupted with a stray empty
     // tool_result that providers reject.
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "s1".into(),

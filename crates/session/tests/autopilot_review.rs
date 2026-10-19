@@ -19,7 +19,7 @@ use opencoder_session::autopilot::{review_pass, ApPhase};
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::tools::registry;
 use opencoder_session::{SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store as StoreTrait};
+use opencoder_store::{SessionMeta, Store as StoreTrait, TursoStore};
 
 /// A completed idle turn (no tool calls).
 fn completed(text: &str) -> LlmEvent {
@@ -428,7 +428,7 @@ async fn review_mode_error_still_clears_and_persists_skill() {
 
     // Attach a store whose session row carries a stale skill body — exactly
     // what a resume (or any skill-persisting path) would have written.
-    let store: Arc<dyn StoreTrait> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn StoreTrait> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "ap-mode-sess".into(),

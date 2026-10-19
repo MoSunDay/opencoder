@@ -83,7 +83,9 @@ async fn agent_saved_alias_and_active_execution_block_delete_without_touching_hi
         .delete_definition("brain_plan", "saved")
         .await
         .unwrap();
-    let conn = libsql::Builder::new_local(h.dir.path().join("state/control.db"))
+    let path = h.dir.path().join("state/control.db");
+    let conn = turso::Builder::new_local(path.to_str().unwrap())
+        .experimental_multiprocess_wal(true)
         .build()
         .await
         .unwrap()

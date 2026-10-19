@@ -23,8 +23,8 @@ use axum::Router;
 use opencoder_core::Message;
 use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -203,7 +203,7 @@ async fn decode(resp: axum::response::Response) -> (StatusCode, Value) {
 /// structured 500 — NOT a 404 that masks the real failure.
 #[tokio::test]
 async fn post_skill_store_error_returns_500_not_404() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     seed(&inner, "s1").await; // row exists, but the wrapper fails to read it.
     let store: Arc<dyn Store> = Arc::new(ErrorStore {
         inner: inner.clone(),
@@ -246,7 +246,7 @@ async fn post_skill_store_error_returns_500_not_404() {
 /// Regression guard for P1#7: the legitimate not-found path still 404s.
 #[tokio::test]
 async fn post_skill_nonexistent_returns_404() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<dyn Store> = Arc::new(ErrorStore {
         inner: inner.clone(),
         fail_get_session: AtomicBool::new(false),
@@ -284,7 +284,7 @@ async fn post_skill_nonexistent_returns_404() {
 /// instead of silently swallowing the failure (`let _ = ...`).
 #[tokio::test]
 async fn post_prompt_skill_persist_error_returns_500() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     seed(&inner, "s1").await;
     let store: Arc<dyn Store> = Arc::new(ErrorStore {
         inner: inner.clone(),
@@ -335,7 +335,7 @@ async fn post_prompt_skill_persist_error_returns_500() {
 /// (only) the closure frame missing.
 #[tokio::test]
 async fn lost_node_sweep_emit_failure_does_not_500_list() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
 
     // A node heartbeating far beyond STALE_AFTER_MS with a RUNNING task:
     // registered / dispatched / claimed with backdated timestamps, so the

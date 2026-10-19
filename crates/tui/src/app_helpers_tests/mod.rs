@@ -369,8 +369,8 @@ fn pending_mirror_uses_display_text_with_prompt_fallback() {
 
 #[tokio::test]
 async fn restore_pending_mirrors_restores_display_text_at_reload() {
-    use opencoder_store::LibsqlStore;
-    let store = LibsqlStore::open_memory().await.unwrap();
+    use opencoder_store::TursoStore;
+    let store = TursoStore::open_memory().await.unwrap();
     let sid = "resume-sess";
     store
         .create_session(&SessionMeta {
@@ -517,9 +517,9 @@ fn snapshot_image_uris_empty_yields_empty() {
 #[tokio::test]
 async fn skill_only_submit_while_running_drains_images_via_queue() {
     use opencoder_store::Delivery;
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let sid = "gap1-session";
     store
         .create_session(&SessionMeta {
@@ -595,9 +595,9 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
 async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
     use opencoder_core::extract_skill_tokens;
     use opencoder_store::Delivery;
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let sid = "combined-session";
     store
         .create_session(&SessionMeta {

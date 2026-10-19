@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use libsql::Connection;
+use turso::Connection;
 
 pub(super) const OBJECT_TABLES: &[&str] = &[
     "entity_types",

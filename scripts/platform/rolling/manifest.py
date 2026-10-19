@@ -19,7 +19,7 @@ def verify(bundle):
     compatibility = manifest.get("compatibility", {})
     for key in ("protocol", "data_format"):
         limits = compatibility.get(key, {})
-        supported = (1,) if key == "protocol" else (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        supported = (1,) if key == "protocol" else tuple(range(1, 12))
         if limits.get("min") not in supported or limits.get("max") != limits.get("min"):
             raise ValueError(f"unsupported handoff {key}")
     info = _installer.build_info(bundle / "bin/opencoder-agent")
@@ -31,6 +31,8 @@ def verify(bundle):
         raise ValueError("execution IO compatibility does not match compiled binary")
     if manifest.get('todo_files_contract', 0) != info.get('todo_files_contract', 0):
         raise ValueError('TODO files contract does not match compiled binary')
+    if storage_engine(manifest) != storage_engine(info):
+        raise ValueError('storage engine does not match compiled binary')
     io_format(manifest)
     return manifest
 
@@ -50,10 +52,23 @@ def writer_preflight(candidate, current):
         raise ValueError('publish the execution IO reader bridge before enabling the writer; current rollback Server cannot read the new wire')
 
 
+def storage_engine(value):
+    engine = value.get('storage_engine', 'libsql')
+    compatibility = value.get('compatibility', value.get('release_compatibility', {}))
+    data = compatibility.get('data_format', {})
+    expected = 'turso' if data == {'min': 11, 'max': 11} else 'libsql'
+    if engine != expected:
+        raise ValueError('storage engine and handoff data format disagree')
+    return engine
+
+
 def io_format(manifest):
     io = execution_io(manifest)
     data = manifest['compatibility']['data_format']
-    if data == {'min': 10, 'max': 10}:
+    storage_engine(manifest)
+    if data == {'min': 11, 'max': 11}:
+        pass
+    elif data == {'min': 10, 'max': 10}:
         if io != {'reader': 1, 'writer': 1}:
             raise ValueError('handoff format 10 requires execution IO reader/writer 1')
     elif io['writer'] != 0:
@@ -66,6 +81,8 @@ def compatible(candidate, retained):
     new_format = io_format(candidate)
     for previous in retained:
         old_format = io_format(previous)
+        if storage_engine(candidate) != storage_engine(previous):
+            raise ValueError('retained Runtime uses a different storage engine; use --maintenance')
         if reader < execution_io(previous)['writer']:
             raise ValueError(f"release {candidate['release_id']} cannot read execution IO produced by retained release {previous['release_id']}; roll back to the reader bridge")
         for key in ("protocol", "data_format"):
@@ -84,7 +101,8 @@ def compatible(candidate, retained):
 
 
 def overlapping(journal):
-    return [r['manifest'] for r in journal['releases'].values() if not r.get('maintenance_retired')]
+    return [r.get('runtime_program', {}).get('manifest', r['manifest'])
+            for r in journal['releases'].values() if not r.get('maintenance_retired')]
 
 
 def brain_preflight(settings, candidate, releases=()):

@@ -76,7 +76,7 @@ macro_rules! store_contract_0 {
     /// `resume` on the compaction path to avoid reloading the (potentially
     /// huge) soft-deleted compacted head. The default impl falls back to a full
     /// `load_messages` + in-memory drain so test fakes need not override it;
-    /// the libsql backend overrides with an `OFFSET` query that skips without
+    /// the Turso backend overrides with an `OFFSET` query that skips without
     /// deserializing the dropped rows.
     async fn load_messages_after(&self, session_id: &str, skip_count: i64) -> Result<Vec<Message>> {
         Ok(message_projection::after(

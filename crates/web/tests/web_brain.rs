@@ -10,7 +10,7 @@ use axum::Router;
 use serde_json::json;
 use tower::ServiceExt;
 
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 const TOKEN: &str = "sekret-token-123";
 
@@ -29,7 +29,7 @@ fn payload(summary: &str) -> serde_json::Value {
 }
 
 async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),
@@ -47,7 +47,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
 /// Same shape but the brain is wired to the bail-only client — the degraded
 /// `serve()` path — so embed-dependent routes must answer 502.
 async fn degraded_state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::degraded_brain(store.clone()),

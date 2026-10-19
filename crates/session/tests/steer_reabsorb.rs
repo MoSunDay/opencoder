@@ -18,7 +18,7 @@
 //!
 //! The real race (steer committed by an external task after run_loop's last
 //! poll but before the outer re-check) is sub-microsecond and cannot be hit
-//! reliably with sleeps. Instead we wrap the real `LibsqlStore` in a
+//! reliably with sleeps. Instead we wrap the real `TursoStore` in a
 //! [`DelayedSteerStore`] that *hides* pending steers from the first
 //! `HIDE_UNTIL` (2) `pending_inputs(Delivery::Steer)` calls, then delegates
 //! transparently. The steer row is genuinely persisted (so it can be promoted
@@ -49,8 +49,8 @@ use opencoder_core::{resolve_agent, Config, Message, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{
-    Delivery, ImportReport, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 const SID: &str = "reabsorb-sess";
@@ -81,7 +81,7 @@ fn done_turn(text: &str) -> LlmEvent {
 /// Queue reads and all writes pass through untouched. This deterministically
 /// reproduces the "steer committed just after run_loop's last poll" window.
 struct DelayedSteerStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
     steer_polls: AtomicU32,
     hide_until: u32,
 }
@@ -207,7 +207,7 @@ async fn seed_session(store: &Arc<dyn Store>) {
 
 #[tokio::test]
 async fn late_steer_reabsorbed_after_run_loop_returns() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<dyn Store> = Arc::new(DelayedSteerStore {
         inner,
         steer_polls: AtomicU32::new(0),

@@ -11,7 +11,6 @@ pub(crate) use store::Store;
 pub(crate) use values::validate_structured_value;
 
 use crate::error::AppError;
-use libsql::{Builder, Connection};
 use std::{
     path::Path,
     sync::{
@@ -19,15 +18,16 @@ use std::{
         Arc,
     },
 };
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Notify;
+use turso::Connection;
 
 tokio::task_local! { pub(crate) static REQUEST_CONNECTION: Connection; }
 
 #[derive(Clone)]
 pub(crate) struct Database {
-    pub db: Arc<libsql::Database>,
+    pub db: opencoder_database::Database,
+    #[cfg(test)]
     fallback: Connection,
-    pub write_gate: Arc<Mutex<()>>,
     pub active: Arc<AtomicUsize>,
     pub changed: Arc<Notify>,
 }
@@ -37,35 +37,41 @@ impl Database {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        let db = Arc::new(Builder::new_local(path).build().await?);
-        let connection = db.connect()?;
-        let mut rows = connection.query("PRAGMA journal_mode=WAL", ()).await?;
-        while rows.next().await?.is_some() {}
-        connection.execute("PRAGMA foreign_keys=ON", ()).await?;
-        connection.busy_timeout(std::time::Duration::from_secs(30))?;
-        schema::bootstrap(&connection, files).await?;
-        let this = Self {
+        let db = opencoder_database::Database::open(path).await?;
+        let files = files.to_owned();
+        db.write(move |connection| async move {
+            schema::bootstrap(&connection, &files).await?;
+            connection.execute("BEGIN IMMEDIATE", ()).await?;
+            let store = Store {
+                connection: connection.clone(),
+                include_pending: false,
+            };
+            let result = store.initialize_debug().await;
+            connection
+                .execute(if result.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+                .await?;
+            result?;
+            Ok(())
+        })
+        .await?;
+        Ok(Self {
+            #[cfg(test)]
+            fallback: db.connect().await?,
             db,
-            fallback: connection,
-            write_gate: Arc::new(Mutex::new(())),
             active: Arc::new(AtomicUsize::new(0)),
             changed: Arc::new(Notify::new()),
-        };
-        let store = this.store().await;
-        store.connection.execute("BEGIN IMMEDIATE", ()).await?;
-        let result = store.initialize_debug().await;
-        store
-            .connection
-            .execute(if result.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
-            .await?;
-        result?;
-        Ok(this)
+        })
     }
 
     pub async fn store(&self) -> Store {
+        #[cfg(test)]
         let connection = REQUEST_CONNECTION
             .try_with(Clone::clone)
             .unwrap_or_else(|_| self.fallback.clone());
+        #[cfg(not(test))]
+        let connection = REQUEST_CONNECTION
+            .try_with(Clone::clone)
+            .expect("ontology storage requires a leased request connection");
         Store {
             connection,
             include_pending: false,
@@ -73,7 +79,12 @@ impl Database {
     }
 
     pub async fn ping(&self) -> Result<(), AppError> {
-        self.db.connect()?.query("SELECT 1", ()).await?;
+        self.db
+            .read(|connection| async move {
+                connection.query("SELECT 1", ()).await?.next().await?;
+                Ok(())
+            })
+            .await?;
         Ok(())
     }
 

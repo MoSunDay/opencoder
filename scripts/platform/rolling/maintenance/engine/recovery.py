@@ -65,8 +65,21 @@ def rollback(settings, journal, operations, seconds):
             operations.run('systemctl', 'daemon-reload')
             checkpoint(journal, 'engine_restore_services')
         if state['stage'] == 'engine_restore_services':
+            # The independent exporter may predate the origin release and
+            # reject an additive schema already supported by that release.
+            # Recover it from the origin's verified bundle, never old data.
+            bundle = settings.state_dir / 'releases' / old['id'] / 'bundle'
+            services.resource_upgrade(settings, bundle, operations)
+            operations.wait(lambda: operations.http(settings.resource_url, '/api/health'), seconds)
+            if state.get('recovery_program'):
+                # A failed candidate can already own the active registration.
+                # Its compatible program must answer before an old Host reads it.
+                operations.run('systemctl', 'start', candidate['runtime_unit'])
+                candidate_url = f"http://127.0.0.1:{candidate['runtime_port']}"
+                operations.wait(lambda: operations.http(candidate_url, '/inventory'), seconds)
             services.resume(state['scope'], operations, seconds)
             host = f"http://127.0.0.1:{old['host_port']}"
+            operations.wait(lambda: operations.http(host, '/status'), seconds)
             runtime = {'endpoint': f"http://127.0.0.1:{old['runtime_port']}"}
             gates.runtime_call(operations, runtime, 'reopen')
             operations.http(host, f"/runtimes/{old['id']}/activate", 'POST', {})

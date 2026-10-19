@@ -1,4 +1,4 @@
-Commit: 5c37f71ffb138b725a0021cdcfc3583c8eea37f8
+Commit: 7acb9aef422a95a5c0c249c4c4dacb085f907b10
 
 # control 模块
 
@@ -60,7 +60,7 @@ Commit: 5c37f71ffb138b725a0021cdcfc3583c8eea37f8
 
 - [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。
 - [outbox/resources.rs](../../crates/control/src/release/outbox/resources.rs)：资源任务受理后先持久化等待，按创建时间及 ID 扫描，获得外部授权后才创建节点执行；不可运行项不阻挡其他项。普通任务保持持久化前预留节点容量的路径，不依赖资源提供方。
-- [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的应用帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道数据库调用逐项等待阻塞线程的结果，避免同步 SQLite 占住 Tokio 线程；心跳只更新在线时间。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属连接的处理 future，迟到的数据库结果不能确认替代连接。
+- [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的应用帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道逐项等待数据库异步操作，数据库执行线程与应用 Tokio 线程分开；心跳只更新在线时间。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属连接的处理 future，迟到的数据库结果不能确认替代连接。
 - [v4/view.rs](../../crates/control/src/api/brain_runs/v4/view.rs)：层调度理由只取本层 `layer_started` 事件，不被执行终态覆盖。
 
 索引报告在 Begin 固定其负载快照的 sequence；报告中间的 RPC 负载快照可以更新连接视图，但不会抬高较早报告的持久水位。被忽略的旧 Begin 也不能替换当前报告水位。初始 pending 捕获和完整报告落库的慢调用记录节点、报告 ID、条数和耗时，不记录帧 payload 或凭据。
@@ -75,7 +75,7 @@ TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；�
 
 ## 目录写入与清理
 
-[catalog_guard](../../crates/control/src/catalog_guard/mod.rs) 在资源代理之前检查 DAG、二进制和能力目标写入。发布与删除持有跨进程目录独占锁，引用写入及首次执行冻结持有共享锁；共享锁最多等待 30 秒，超时返回可重试的 503。删除检查保存计划、能力、日程、TODO、活动执行、待派发回执、配置与 Agent 文件。Agent 文件不按扩展名跳过；文本按完整内容检查，[二进制容器检查](../../crates/control/src/catalog_guard/references/resources/mod.rs) 在临时副本中读取 SQLite 的结构与记录，核验并复制完整 WAL，验证派生索引；CPython 3.11 缓存只解析字符串，不执行代码。源数据库、索引和缓存不写入。无法读取、未知格式、损坏或正在变化的容器、超过 4 MiB 的文件及失效资源根都会阻止删除。健康接口声明 `catalog_guard: 2`；新维护工具拒绝旧版保护。GET 详情提供 ETag，条件删除在锁内复核。删除标记阻止晚到请求引用已删目标，原名重新创建后可再次使用。独立资源服务仍负责文件与 NFS 生命周期。
+[catalog_guard](../../crates/control/src/catalog_guard/mod.rs) 在资源代理之前检查 DAG、二进制和能力目标写入。发布与删除持有跨进程目录独占锁，引用写入及首次执行冻结持有共享锁；共享锁最多等待 30 秒，超时返回可重试的 503。删除检查保存计划、能力、日程、TODO、活动执行、待派发回执、配置与 Agent 文件。Agent 文件不按扩展名跳过；文本按完整内容检查，[二进制容器检查](../../crates/control/src/catalog_guard/references/resources/mod.rs) 通过 rusqlite 在临时副本中只读检查 SQLite 的结构与记录，支持 UTF-16，核验并复制完整 WAL，验证派生索引；CPython 3.11 缓存只解析字符串，不执行代码。源数据库、索引和缓存不写入。无法读取、未知格式、损坏或正在变化的容器、超过 4 MiB 的文件及失效资源根都会阻止删除。健康接口声明 `catalog_guard: 2`；新维护工具拒绝旧版保护。GET 详情提供 ETag，条件删除在锁内复核。删除标记阻止晚到请求引用已删目标，原名重新创建后可再次使用。独立资源服务仍负责文件与 NFS 生命周期。
 
 [能力目录投影](../../crates/control/src/api/brain_runs/catalog/dedup.rs) 折叠同目标、同定义与同字段约定的条目；跨名 Agent 还核验实际资源的全部文件、相对路径与执行配置。资源读取和摘要计算在阻塞线程中执行，并显式保留请求的 Agent 资源根，避免占用处理准入与健康检查的异步线程。其他说明及 ID 保留在 `equivalent_sources`；接口仍返回完整目录，`selection_ids` 仅控制新建选项，旧计划编辑和执行解析保留原 ID。
 

@@ -17,7 +17,11 @@ class RetainedProgramTests(unittest.TestCase):
             root = Path(directory)
             settings = Settings(root / 'state', root / 'token', systemd_dir=root / 'units')
             settings.systemd_dir.mkdir()
-            data = settings.state_dir / 'runtimes/old'
+            managed = settings.state_dir / 'runtimes/old'
+            managed.mkdir(parents=True)
+            alias = root / 'retained-runtimes'
+            alias.symlink_to(managed.parent, target_is_directory=True)
+            data = alias / 'old'
             image = data / 'dag/rootfs'
             (image / 'usr/bin').mkdir(parents=True)
             (image / 'workspace').mkdir()
@@ -42,6 +46,7 @@ class RetainedProgramTests(unittest.TestCase):
             accepted_unit = unit.read_bytes()
             candidate = {'release_id': 'new', 'storage_engine': 'turso'}
             prepared = programs.stage_one(settings, bundle, candidate, record, image)
+            self.assertEqual(Path(prepared['rootfs']).parent, managed / 'programs/new')
             self.assertEqual(unit.read_bytes(), accepted_unit)
             self.assertEqual((image / 'usr/bin/dag-runner').read_text(), 'old runner')
             self.assertEqual((Path(prepared['rootfs']) / 'usr/bin/dag-runner').read_text(), 'new runner')

@@ -1,4 +1,5 @@
 """Versioned systemd units and a fixed Nginx ingress."""
+import errno
 import json
 import os
 from pathlib import Path
@@ -176,15 +177,20 @@ def freeze_rootfs(record, source, binaries=None, *, target=None, link_source=Fal
     def copy_file(source_file, destination):
         stat = os.stat(source_file)
         identity = (stat.st_dev, stat.st_ino)
-        if link_source:
+        if identity in copied:
+            os.link(copied[identity], destination)
+        elif link_source:
             # Only an already frozen release image may use this path. Runner
             # replacements below unlink before copying, preserving old bytes.
-            os.link(source_file, destination)
-        elif stat.st_nlink > 1 and identity in copied:
-            os.link(copied[identity], destination)
+            try:
+                os.link(source_file, destination)
+            except OSError as error:
+                if error.errno != errno.EXDEV:
+                    raise
+                shutil.copy2(source_file, destination)
         else:
             shutil.copy2(source_file, destination)
-            copied[identity] = destination
+        copied[identity] = destination
         return destination
     shutil.copytree(source,stage,symlinks=True,ignore=ignored,copy_function=copy_file)
     if binaries:

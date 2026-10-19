@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+libsql.workspace = true
+tempfile.workspace = true
 fs2 = "0.4"
 libc = "0.2"
 tokio-util = { workspace = true, features = ["io"] }
@@ -37,8 +39,6 @@ axum = { version = "0.7", features = ["ws"] }
 reqwest.workspace = true
 
 [dev-dependencies]
-libsql.workspace = true
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
-tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
 opencoder-node.workspace = true

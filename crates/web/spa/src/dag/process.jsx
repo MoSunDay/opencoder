@@ -1,6 +1,6 @@
-import { Background, Controls, Handle, Position, ReactFlow } from '@xyflow/react';
+import { Background, Controls, Handle, Position, ReactFlow, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { graphFromSpec } from '../dagProjection.js';
 import { progressLabel } from './dynamic/model.js';
 import { statusLabel } from '../ui/statusTag.jsx';
@@ -24,9 +24,20 @@ export function DagProcess({ spec, snapshot, selectedId, onSelect }) {
       ended && step.status === 'pending' ? { ...step, status: 'skipped' } : step]));
     return graphFromSpec(spec, states);
   }, [spec, snapshot]);
-  const nodes = useMemo(() => graph.nodes.map((node) => ({ ...node, selected: node.id === selectedId })), [graph, selectedId]);
-  return <div className="dag-detail-graph"><ReactFlow nodes={nodes} edges={graph.edges} nodeTypes={types}
-    onNodeClick={(_, node) => onSelect?.(node.id)} fitView nodesDraggable={false} nodesConnectable={false}>
+  const [nodes, setNodes, onNodesChange] = useNodesState(graph.nodes);
+  useEffect(() => {
+    setNodes((previous) => {
+      const measured = new Map(previous.map((node) => [node.id, node.measured]));
+      // Polling changes status, not the measured box. Preserve dimensions even
+      // while a tab is hidden; ResizeObserver will update cards that grow.
+      return graph.nodes.map((node) => ({ ...node, measured: measured.get(node.id), selected: node.id === selectedId }));
+    });
+  }, [graph, selectedId, setNodes]);
+  // After measurement, let React Flow retain the real handle positions too.
+  const measuredNodes = useMemo(() => nodes.map((node) => node.measured?.height == null
+    ? node : { ...node, handles: undefined }), [nodes]);
+  return <div className="dag-detail-graph"><ReactFlow nodes={measuredNodes} edges={graph.edges} nodeTypes={types}
+    onNodesChange={onNodesChange} onNodeClick={(_, node) => onSelect?.(node.id)} fitView nodesDraggable={false} nodesConnectable={false}>
     <Background /><Controls showInteractive={false} />
   </ReactFlow></div>;
 }

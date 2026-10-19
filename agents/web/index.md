@@ -1,4 +1,4 @@
-Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
+Commit: 15c4559f582e2f753368b1bc84638974e89cc206
 
 # web 模块
 
@@ -51,7 +51,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [fleet/teams.jsx](../../crates/web/spa/src/fleet/teams.jsx)、[fleet/teams/](../../crates/web/spa/src/fleet/teams/) — Team 列表、成员编辑、启动及执行历史；成员以 Agent 身份配置。
 - [agentDetail.jsx](../../crates/web/spa/src/agentDetail.jsx)、[agents/](../../crates/web/spa/src/agents/) — 当前 Agent 资源编辑入口，统一读取和保存 Prompt、Skills、Tools、Memory；读取失败禁止覆盖，切换页签保留草稿。NFS 状态由 `agentNfsCard.jsx` 展示五类实际导出。
 - `spa/src/dag/resources/` — 二进制池界面；`model.js` 负责 ELF 与版本引用纯校验，`read.js` 校验池和历史响应，`editor.jsx` 发布文件，`panel.jsx` 管理下载、删除与当前版本指针，`field.jsx` 为步骤选择受理时 current 或固定版本。
-- `spa/src/dag/` — DAG 定义、运行、原生步骤与动态实例页面。图投影在 `dagProjection.js`，快照与后续事件合并在 `run/model.js`，编辑器在 `editor/`；布局与依赖变更由组件测试验证，执行约定见 [规则 04](../../rules/04-dag-execution-contract.md)。
+- `spa/src/dag/` — DAG 定义、运行、原生步骤与动态实例页面。图投影在 `dagProjection.js`，`process.jsx` 保留 React Flow 测出的节点尺寸与连线位置，状态刷新和隐藏页签不会丢失测量结果；快照与后续事件合并在 `run/model.js`，编辑器在 `editor/`；布局与依赖变更由组件测试验证，执行约定见 [规则 04](../../rules/04-dag-execution-contract.md)。
 - `spa/src/dag/specValidate.js` 与 `editor/canvasModel.js` — 校验定义并在画布编辑中保留 `max_concurrency` 等字段；运行使用已冻结的定义快照。
 - `spa/src/dag/dynamic/`、`spa/src/brain/workbench/` — 动态 DAG 与 Brain 工作台
 - [dag/step/binaryLogs.jsx](../../crates/web/spa/src/dag/step/binaryLogs.jsx) — 原生二进制步骤输出；编辑器只提供 Binary、Agent 与 Dynamic，运行页面按节点所属执行读取实例、日志与声明产物。

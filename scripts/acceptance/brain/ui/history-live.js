@@ -147,7 +147,16 @@ async function main() {
           assert.equal(detail.execution.id, op.execution_id);
           await capture(page, `child-${op.node_id}-${width}`);
           await drawer.getByRole('tab', { name: '执行过程', exact: true }).click();
-          if (op.execution_kind === 'dag') await drawer.locator('.dag-detail-graph .react-flow__node').first().waitFor();
+          const dagVisible = async (name) => {
+            const nodes = drawer.locator('.dag-detail-graph .react-flow__node');
+            await nodes.first().waitFor();
+            for (const node of await nodes.all()) await node.waitFor({ state: 'visible' });
+            await capture(page, name);
+          };
+          if (op.execution_kind === 'dag') {
+            await page.waitForResponse((response) => new URL(response.url()).pathname.endsWith(`/api/dag/runs/${encodeURIComponent(op.execution_id)}/progress`) && response.status() === 200);
+            await dagVisible(`child-process-${op.node_id}-${width}`);
+          }
           await drawer.getByRole('tab', { name: '输入与产物', exact: true }).click();
           await drawer.getByText('本次实际输入', { exact: true }).waitFor();
           const artifacts = detail.result?.scheduler_artifacts;
@@ -164,6 +173,10 @@ async function main() {
             assert.equal(bytes.length, artifact.bytes);
             assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), artifact.sha256);
             downloads.push({ execution: artifact.execution, step: artifact.step, index: artifact.index, bytes: bytes.length, sha256: artifact.sha256 });
+          }
+          if (op.execution_kind === 'dag') {
+            await drawer.getByRole('tab', { name: '执行过程', exact: true }).click();
+            await dagVisible(`child-process-return-${op.node_id}-${width}`);
           }
           await drawer.getByRole('button', { name: '返回运行详情', exact: true }).click();
           assert.equal(await drawer.getByRole('tab', { name: '执行记录', exact: true }).getAttribute('aria-selected'), 'true');

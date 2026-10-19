@@ -10,6 +10,28 @@ from fixtures import Fixture
 
 
 class MountTests(unittest.TestCase):
+    def test_compatible_active_bind_mount_keeps_its_unit_and_kernel_handles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            plan = {'path': str(Path(directory) / 'native-mount'), 'port': 2050}
+            destination = fixture.settings.systemd_dir / mounts.name(plan['path'])
+            original = '[Mount]\nWhat=/mnt/original\nType=none\nOptions=rbind\n'
+            destination.write_text(original)
+            options = 'ro,vers=3,proto=tcp,port=2050,mountport=2050,nolock,soft,retrans=1,timeo=50,lookupcache=none,acregmin=0,acregmax=0,acdirmin=0,acdirmax=0'
+            row = {'target': plan['path'], 'source': '127.0.0.1:/', 'fstype': 'nfs', 'options': options}
+            operations = Mock()
+            operations.output.side_effect = ['active', json.dumps({'filesystems': [row]})]
+            mounts.install(fixture.settings, [plan], operations)
+            operations.run.assert_not_called()
+            self.assertEqual(destination.read_text(), original)
+            for changed in (options.replace('lookupcache=none', 'lookupcache=all'), options.replace('port=2050', 'port=2051'), options.replace('ro,', 'rw,')):
+                operations = Mock()
+                operations.output.side_effect = ['active', json.dumps({'filesystems': [{**row, 'options': changed}]})]
+                with self.assertRaises(ValueError):
+                    mounts.install(fixture.settings, [plan], operations)
+                operations.run.assert_not_called()
+                self.assertEqual(destination.read_text(), original)
+
     def test_resource_mounts_pull_in_exporter_without_propagating_its_stop(self):
         for port in (2049, 2050, 2051):
             with self.subTest(port=port):

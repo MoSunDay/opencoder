@@ -6,14 +6,15 @@
 //       turnsFromMessages 快照重建，两条路径的 Say 头部标签序列（含每
 //       子轮 steps 计数）必须完全一致 —— 钉死「每子轮计数不累加」。
 import { describe, expect, it } from 'vitest';
-import { emptyStream, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
+import { emptyStream, reduceFrame, turnsFromMessages } from './reduce.js';
+import { optimisticUserState } from './test/streamState.js';
 import { sayPreview } from './sayText.js';
 
 const userTurns = (turns) => turns.filter((t) => t && t.role === 'user' && t.kind === 'text');
 
 describe('(a) optimistic echo dedup on steer/queue_consumed', () => {
   it('same-text steer_consumed folds into the optimistic echo and clears the flag', () => {
-    let s = withUserTurn(emptyStream(), '继续刚才的活', true);
+    let s = optimisticUserState('继续刚才的活');
     expect(s.turns[s.turns.length - 1].optimistic).toBe(true);
     s = reduceFrame(s, { event: 'steer_consumed', data: { text: '继续刚才的活' } }, 1);
     // 不产生第二条回显；标记被去掉（该回显从此是权威版本）。
@@ -36,7 +37,7 @@ describe('(a) optimistic echo dedup on steer/queue_consumed', () => {
   });
 
   it('different-text steer_consumed still pushes a fresh echo turn', () => {
-    let s = withUserTurn(emptyStream(), '旧的一句', true);
+    let s = optimisticUserState('旧的一句');
     s = reduceFrame(s, { event: 'steer_consumed', data: { text: '新的一句' } }, 1);
     const echoes = userTurns(s.turns);
     expect(echoes).toHaveLength(2);

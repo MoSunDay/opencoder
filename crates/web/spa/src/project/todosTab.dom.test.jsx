@@ -35,8 +35,8 @@ it('displays execution type, name and ID resolved from the index', async () => {
   fireEvent.click(screen.getByRole('tab', { name: '执行', exact: true }));
   expect(screen.queryByText('execution:agent-1')).toBeNull();
   expect(await screen.findByText('构建 Agent')).toBeTruthy();
-  expect(screen.getAllByText('已完成').length).toBeGreaterThan(0);
-  expect(screen.getByText('执行结论')).toBeTruthy();
+  expect(screen.queryByText('执行结论')).toBeNull();
+  expect(api.apiGet.mock.calls.some(([path]) => path.endsWith('/result'))).toBe(false);
   expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
   const link = screen.getByRole('link', { name: 'agent-1' });
   expect(link.getAttribute('href')).toBe('#execution=agent-1');

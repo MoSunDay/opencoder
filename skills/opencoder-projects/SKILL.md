@@ -9,15 +9,11 @@ description: 使用 opencoder-cli 管理 OpenCoder 项目、专项和 TODO，读
 
 ## 连接
 
-先检查所用 CLI 的 `--help` 和连接配置，本环境可用 `opencoder-79 --help`。用户指定的服务器优先；当前 10.199.79.43 使用 `http://10.199.79.43:18081`。可使用已配置的 `--client-config /root/.config/opencoder/ctl-79.json`。
-
-本环境已安装 `opencoder-79` 连接快捷命令，可直接用 `opencoder-79 project goals list`。它调用原生 CLI，固定连接 43，并仅为该进程将目标 IP 加入代理绕过名单。其他服务器使用原生 CLI；需要重新安装快捷命令时，将 [scripts/opencoder-79](scripts/opencoder-79) 安装到 PATH，并准备连接文件。
-
-本机新版原生 CLI 位于 `/usr/local/lib/opencoder-cli/current/opencoder-cli`；43 上的 `/usr/local/bin/opencoder-cli` 已随发布更新。以下 `opencoder-cli` 示例指对应新版客户端；在本机优先用 `opencoder-79`。
+先检查 `opencoder-cli --help` 和连接配置，使用用户指定的服务器或已有连接文件。以下地址为占位示例；可用 `--client-config /path/to/client.json` 指定独立连接文件。
 
 ```sh
-opencoder-cli --server http://10.199.79.43:18081 --no-auth raw call GET /api/auth/status
-opencoder-cli --server http://10.199.79.43:18081 --no-auth project overview
+opencoder-cli --server https://opencoder.example --no-auth raw call GET /api/auth/status
+opencoder-cli --server https://opencoder.example --no-auth project overview
 ```
 
 `/api/auth/status` 无需登录，返回 `enabled`。关闭时使用 `--no-auth` 或连接文件中的 `"auth_enabled":false`；开启时使用既有 `--token-file` 或环境变量 `OPENCODER_SERVER_TOKEN`，不创建、轮换或过期任何 Token。不要把凭证写进 Skill、Git、命令示例或报告。

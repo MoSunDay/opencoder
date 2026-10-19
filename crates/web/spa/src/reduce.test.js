@@ -1,6 +1,6 @@
 // vitest smoke tests for the pure transcript reducers (reduce.js).
 import { describe, expect, it } from 'vitest';
-import { consumedEchoText, deltaTextOf, emptyStream, ensurePendingEcho, nestedEventOf, reduceFrame, resyncState, turnsFromMessages, withUserTurn } from './reduce.js';
+import { consumedEchoText, deltaTextOf, emptyStream, ensurePendingEcho, nestedEventOf, reduceFrame, resyncState, turnsFromMessages } from './reduce.js';
 
 describe('turnsFromMessages', () => {
   it('flattens text/tool blocks and attaches tool_result to the open call', () => {
@@ -260,7 +260,7 @@ describe('reduceFrame', () => {
   });
 });
 
-describe('deltaTextOf/withUserTurn', () => {
+describe('deltaTextOf and consumed user echoes', () => {
   it('prefers text over delta and handles non-strings', () => {
     expect(deltaTextOf({ text: 'a', delta: 'b' })).toBe('a');
     expect(deltaTextOf({ delta: 'b' })).toBe('b');
@@ -268,10 +268,10 @@ describe('deltaTextOf/withUserTurn', () => {
     expect(deltaTextOf({ text: 3 })).toBe('');
   });
 
-  it('withUserTurn appends a user text turn', () => {
-    const s = withUserTurn(emptyStream(), 'hi');
+  it('steer_consumed appends a user text turn', () => {
+    const s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'hi' } }, 0);
     expect(s.turns).toEqual([{ kind: 'text', role: 'user', text: 'hi' }]);
-    expect(withUserTurn(emptyStream(), '')).toEqual(emptyStream());
+    expect(reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: '' } }, 0)).toEqual(emptyStream());
   });
 
   // Mirror of control_cmd.rs::consumed_echo_tails_compound_suppresses_bare_keeps_plain.
@@ -286,9 +286,9 @@ describe('deltaTextOf/withUserTurn', () => {
     expect(consumedEchoText('/foo bar')).toBe('/foo bar');
   });
 
-  it('remote optimistic echo never renders a bare control command', () => {
-    expect(withUserTurn(emptyStream(), consumedEchoText('/plan'))).toEqual(emptyStream());
-    const compound = withUserTurn(emptyStream(), consumedEchoText('/plan review the diff'));
+  it('consumed user echo never renders a bare control command', () => {
+    expect(reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: consumedEchoText('/plan') } }, 0)).toEqual(emptyStream());
+    const compound = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: consumedEchoText('/plan review the diff') } }, 0);
     expect(compound.turns).toEqual([{ kind: 'text', role: 'user', text: 'review the diff' }]);
   });
 });
@@ -418,11 +418,11 @@ describe('pendingEcho (TUI pending_turn_echo parity)', () => {
     expect(lag.pendingEcho).toBe('lag tail');
   });
 
-  it('withUserTurn attaches pendingEcho to the optimistic state', () => {
-    const s = withUserTurn(emptyStream(), 'optimistic');
+  it('steer_consumed remembers the pending user echo', () => {
+    const s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'optimistic' } }, 0);
     expect(s.pendingEcho).toBe('optimistic');
     // Empty text keeps the state untouched (no anchor to remember).
-    expect(withUserTurn(emptyStream(), '').pendingEcho).toBe(null);
+    expect(reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: '' } }, 0).pendingEcho).toBe(null);
   });
 });
 

@@ -30,7 +30,7 @@ Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 2. 选择能力库中的实际能力 ID，填写任务与命名参数。Agent、Operator、Team、DAG、TODO 工作流及已保存 Brain 计划复用原生执行入口。
 3. 通过 `POST /api/project/todos/:id/dispatch` 派发，携带稳定的执行 ID。Fleet 回执固定能力和输入，重试复用原执行，不重复创建任务。
 4. TODO 保存执行关联；API/CLI 仍可关联已有执行 ID，网页不再提供手动粘贴输入。关联接口核验实际执行和准入能力，重复关联幂等。已受理但关联失败时保留执行 ID，可重试关联。
-5. 打开执行结论时，通过 `GET /api/executions/:id/result` 向所属节点读取；过程、消息、步骤及完整产物从同一原生执行明细查看。
+5. TODO 执行列表只展示关联记录和状态；点击执行 ID 打开原生执行明细查看结论。过程、消息、步骤及完整产物从同一原生执行明细查看。
 
 每次指派保留独立执行引用；新指派不覆盖旧指派。解除关联只移除引用，不取消或删除原执行。
 
@@ -133,9 +133,9 @@ Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 | 标签继承、覆盖、重匹配与失败回滚 | [project_tags.rs](../crates/store/tests/project_tags.rs) |
 | 三层独立人员、空值、权限、迁移与删除清理 | [project_people.rs](../crates/store/tests/project_people.rs)、[人员 HTTP 测试](../crates/control/tests/e2e/project_api/people.rs)、[人员表单测试](../crates/web/spa/src/project/people/fields.dom.test.jsx) |
 | 六类执行关联、能力核验与幂等 | [project_links.rs](../crates/control/tests/e2e/project_links.rs) |
-| 实时结果、离线清空与读取重试 | [result.dom.test.jsx](../crates/web/spa/src/project/execute/result.dom.test.jsx)、[results/mod.rs](../crates/control/src/api/executions/results/mod.rs) |
+| 实时结果、离线错误与执行切换隔离 | [原生执行明细](../crates/web/spa/src/fleet/detail/liveTranscript.dom.test.jsx)、[结果接口](../crates/control/tests/e2e/project_links/dispatch.rs) |
 | 看板完成数与项目加权进度 | [overview.rs](../crates/store/src/project/overview.rs) 内联测试、[catalog.test.js](../crates/web/spa/src/project/model/catalog.test.js) |
-| 归属编辑、看板移动与筛选保留 | [relations.dom.test.jsx](../crates/web/spa/src/project/views/relations.dom.test.jsx)、[board.test.js](../crates/web/spa/src/project/model/board.test.js)、[project.dom.test.jsx](../crates/web/spa/src/project/project.dom.test.jsx) |
+| 归属编辑、看板移动与筛选保留 | [归属表单](../crates/web/spa/src/project/forms/editor.dom.test.jsx)、[relations.dom.test.jsx](../crates/web/spa/src/project/views/relations.dom.test.jsx)、[board.test.js](../crates/web/spa/src/project/model/board.test.js)、[project.dom.test.jsx](../crates/web/spa/src/project/project.dom.test.jsx) |
 | 详情分享、登录后定位、历史切换与草稿保护 | [navigation.dom.test.jsx](../crates/web/spa/src/project/navigation/navigation.dom.test.jsx)、[history.dom.test.jsx](../crates/web/spa/src/fleet/navigation/history.dom.test.jsx)、[浏览器验收](../scripts/acceptance/project/navigation.js) |
 | 项目内专项排序、冲突与失败回滚 | [存储测试](../crates/store/tests/project_initiative_order.rs)、[HTTP 测试](../crates/control/tests/e2e/project_api/order.rs)、[表格交互测试](../crates/web/spa/src/project/sorting/initiatives.dom.test.jsx) |
 | 执行发起、关联及详情切换 | [launcher.dom.test.jsx](../crates/web/spa/src/project/execute/launcher.dom.test.jsx)、[todoDrawer.dom.test.jsx](../crates/web/spa/src/project/tests/todoDrawer.dom.test.jsx) |

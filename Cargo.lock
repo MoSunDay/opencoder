@@ -1783,10 +1783,8 @@ dependencies = [
  "axum",
  "base64",
  "clap",
- "futures",
  "opencoder-control",
  "opencoder-core",
- "opencoder-dag",
  "opencoder-dag-runtime",
  "opencoder-llm",
  "opencoder-node",
@@ -1935,7 +1933,6 @@ dependencies = [
  "opencoder-dag-binary",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1958,7 +1955,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "chrono",
  "dirs",
  "futures",
  "libc",
@@ -1970,7 +1966,6 @@ dependencies = [
  "opencoder-node",
  "opencoder-session",
  "opencoder-store",
- "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -1986,7 +1981,6 @@ name = "opencoder-llm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "futures",
  "opencoder-core",
  "reqwest",
@@ -1994,7 +1988,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -2040,9 +2033,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
- "tower",
  "tracing",
- "ulid",
 ]
 
 [[package]]
@@ -2104,7 +2095,6 @@ dependencies = [
  "clap",
  "opencoder-control",
  "opencoder-core",
- "opencoder-store",
  "serde_json",
  "tempfile",
  "tokio",
@@ -2135,7 +2125,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "tokio-util",
  "tracing",
  "ulid",
@@ -2156,7 +2145,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "chrono",
  "fs2",
  "libsql",
  "opencoder-core",
@@ -2216,7 +2204,6 @@ dependencies = [
  "base64",
  "crossterm",
  "dirs",
- "ignore",
  "image",
  "libc",
  "opencoder-core",

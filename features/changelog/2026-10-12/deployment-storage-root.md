@@ -22,10 +22,10 @@ Commit: 3c44c26640ff289d409d1ebf1c57ae1a17f33196
 - 定向回归：`python3 -m unittest discover -s scripts/platform/storage_tests -v` → 12 passed。
 - 配置签名直接影响链路：`rolling_tests` 68 passed、`maintenance_tests` 67 passed、`signal_tests` 12 passed；未运行仓库全量测试。
 - 隔离验收：首次、第二版本与回滚后的真实 runc 探针均完成，执行目录均位于指定根；116 次公共就绪探测零失败，最大探测间隔/耗时 0.714 秒；源工作区 inode、内容、所有者与权限保持不变。证据：`/data00/workspace/artifacts/opencoder-storage-root-20261012/opencoder-smooth-n0gc3zln/storage-result.json`。
-- 未改 Rust，Clippy 不适用。验收使用已有成套 `42456123489c6fbb5f108a575e249d48de59d5eb` 二进制，仅验证部署配置及其直接影响链路；79.43 服务恢复另行验收。
+- 未改 Rust，Clippy 不适用。验收使用已有成套 `42456123489c6fbb5f108a575e249d48de59d5eb` 二进制，仅验证部署配置及其直接影响链路；远端服务恢复另行验收。
 
 相关说明：[发布配置](../../../docs/smooth-release.md)、[平台行为](../../agent-platform/index.md)、[Server 逻辑](../../../agents/server/index.md)。
 
 ## 双节点发布准备
 
-本节点发布基线为 `3c44c266`，79.43 基线为归档源码 `89a5599d`；逐项对照确认生产 Rust 代码及 SPA 相同，差异主要为测试和交付工具。本次保留本节点当前源码与代理启动器组织，仅引入本页记录的存储改造。补充验证 `smooth_release/tests` 15 项、`scripts/harness/test_codex_proxy.py` 3 项通过，SPA 重建无漂移；不重复执行未变化且已通过的定向测试。正式包、节点迁移、信号发布和 900 秒观察回执保存到 `/data00/opencoder-delivery/single-root-release/`。
+本节点发布基线为 `3c44c266`，远端基线为归档源码 `89a5599d`；逐项对照确认生产 Rust 代码及 SPA 相同，差异主要为测试和交付工具。本次保留本节点当前源码与代理启动器组织，仅引入本页记录的存储改造。补充验证 `smooth_release/tests` 15 项、`scripts/harness/test_codex_proxy.py` 3 项通过，SPA 重建无漂移；不重复执行未变化且已通过的定向测试。正式包、节点迁移、信号发布和 900 秒观察回执保存到 `/data00/opencoder-delivery/single-root-release/`。

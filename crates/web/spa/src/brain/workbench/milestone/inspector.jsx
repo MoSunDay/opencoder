@@ -1,5 +1,5 @@
 import { EditButton } from '../../../ui/permissions.jsx';
-import { Button, Input, Select, Typography } from 'antd';
+import { Input, Select, Typography } from 'antd';
 import { capabilityId } from '../scheduler/model.js';
 import { capabilityLabel, capabilityTask } from './model.js';
 

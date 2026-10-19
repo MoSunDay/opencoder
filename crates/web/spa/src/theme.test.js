@@ -1,15 +1,8 @@
-// theme.test.js — pure-node guard for the palette lockstep (no DOM, no JSX).
-// theme.js (antd cssinjs tokens) and app.css (:root --oc-* custom properties)
-// are two halves of one palette that cannot read each other: antd pins its
-// generated css vars to a `.css-var-*` class instead of :root, so the raw-CSS
-// surfaces (DAG nodes, sheets, dividers) have no way to consume them. The
-// duplication is structural, which is exactly why it needs a test — these
-// assertions turn "remember to change both" into a build failure.
-
+// Compare actual CSS declarations with antd tokens and check source references.
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { theme as antdTheme } from 'antd';
-import { cssVars, palette, shadowTertiary, theme } from './theme.js';
+import { palette, shadowTertiary, theme } from './theme.js';
 import { MONO } from './ui/mono.js';
 
 const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
@@ -38,64 +31,38 @@ const declaredVars = () => {
 /// `rgba(0,0,0,0.88)` while Prettier-style CSS writes `rgba(0, 0, 0, 0.88)`.
 const squash = (v) => String(v).replace(/\s+/g, '').toLowerCase();
 
-describe('palette lockstep: theme.js cssVars <-> app.css :root', () => {
-  it('declares exactly the same set of --oc-* variables', () => {
-    // Bidirectional on purpose: a var added to only one side means the two
-    // palettes have quietly forked.
-    expect(Object.keys(declaredVars()).sort()).toEqual(Object.keys(cssVars).sort());
+describe('CSS palette', () => {
+  it.each([
+    ['--oc-accent-user', '#13c2c2'],
+    ['--oc-accent-ai', '#9254de'],
+    ['--oc-accent-binary', '#722ed1'],
+    ['--oc-heading', '#389e0d'],
+  ])('keeps the CSS-only color %s', (name, value) => {
+    expect(declaredVars()[name]).toBe(value);
   });
 
-  it('gives every shared variable the same value', () => {
-    const declared = declaredVars();
-    const drifted = Object.keys(cssVars)
-      .filter((k) => squash(declared[k]) !== squash(cssVars[k]))
-      .map((k) => `${k}: css=${declared[k]} theme.js=${cssVars[k]}`);
-    expect(drifted, drifted.join('\n')).toEqual([]);
-  });
-
-  it('leaves no var(--oc-*) reference dangling across app.css, project.css and every src file', () => {
-    // transcript.jsx (and friends) reference --oc-* from inline styles with no
-    // fallback, so a deleted var would silently compute to an invalid value
-    // (transparent background) with a green build. Scan every surface that can
-    // name a var — the two stylesheets plus every .js/.jsx under src/ — and
-    // require each reference to be declared in :root AND present in cssVars.
+  it('leaves no var(--oc-*) reference dangling in production sources', () => {
     const declared = new Set(Object.keys(declaredVars()));
-    const inCssVars = new Set(Object.keys(cssVars));
-    // Separators are normalized before the filters below, which assume '/':
-    // recursive readdir hands back platform-native relative paths.
     const srcFiles = readdirSync(new URL('.', import.meta.url), { recursive: true })
       .filter((p) => typeof p === 'string')
       .map((p) => p.split(/[\\/]/).join('/'))
-      .filter((p) => !p.split('/').includes('node_modules'))
-      .filter((p) => /\.(js|jsx)$/.test(p));
-    const sources = [
-      ['app.css', css],
-      ['project/project.css', readFileSync(new URL('./project/project.css', import.meta.url), 'utf8')],
-      ...srcFiles.map((p) => [p, readFileSync(new URL(`./${p}`, import.meta.url), 'utf8')]),
-    ];
+      .filter((p) => /\.(css|js|jsx|ts|tsx)$/.test(p))
+      .filter((p) => !/(^|\/)(node_modules|__tests__|test|fixtures)(\/|$)|(?:\.test|testSupport|setup-dom)\./.test(p));
     const usedBy = new Map();
-    for (const [name, src] of sources) {
-      for (const m of src.matchAll(/var\((--oc-[\w-]+)/g)) {
+    for (const name of srcFiles) {
+      const src = stripComments(readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'));
+      for (const m of src.matchAll(/var\(\s*(--oc-[\w-]+)/g)) {
         if (!usedBy.has(m[1])) usedBy.set(m[1], new Set());
         usedBy.get(m[1]).add(name);
       }
     }
-    // Self-proof: a scan that reached nothing is indistinguishable from a scan
-    // that found nothing wrong. Every filter above can degrade silently (Dirent
-    // objects instead of strings, a path layout change), collapsing the walk to
-    // the two stylesheets while the dangling assertion below still passes, so
-    // assert here that the recursive walk really happened.
-    expect(srcFiles.length, 'the recursive walk must reach .js/.jsx sources').toBeGreaterThan(0);
-    expect(srcFiles.some((p) => p.endsWith('.jsx')), 'the walk must cover .jsx sources').toBe(true);
-    // ui/mono.js exports MONO_VAR from a plain JS module -- a surface no
-    // stylesheet can stand in for -- so attributing --oc-mono to it proves the
-    // scan read JS sources and not just app.css / project.css.
-    expect(
-      [...(usedBy.get('--oc-mono') || [])].some((n) => n.endsWith('ui/mono.js')),
-      'the scan must reach JS sources, not just the two stylesheets',
-    ).toBe(true);
+    // Prove the walk covers each source type and reads inline JS references.
+    for (const extension of ['css', 'js', 'jsx', 'ts', 'tsx']) {
+      expect(srcFiles.some((p) => p.endsWith(`.${extension}`)), `scan ${extension}`).toBe(true);
+    }
+    expect(usedBy.get('--oc-mono')?.has('ui/mono.js')).toBe(true);
     const dangling = [...usedBy.keys()]
-      .filter((v) => !declared.has(v) || !inCssVars.has(v))
+      .filter((v) => !declared.has(v))
       .sort()
       .map((v) => `${v} (used by ${[...usedBy.get(v)].join(', ')})`);
     expect(dangling, dangling.join('\n')).toEqual([]);
@@ -138,6 +105,7 @@ describe('palette lockstep: antd derived tokens <-> CSS twins', () => {
     ['--oc-primary-bg', 'colorPrimaryBg'],
     ['--oc-bg-layout', 'colorBgLayout'],
     ['--oc-panel-bg', 'colorBgContainer'],
+    ['--oc-bg-container', 'colorBgContainer'],
     ['--oc-border', 'colorBorderSecondary'],
     ['--oc-success', 'colorSuccess'],
     ['--oc-success-bg', 'colorSuccessBg'],
@@ -149,7 +117,7 @@ describe('palette lockstep: antd derived tokens <-> CSS twins', () => {
   ];
 
   it.each(twins)('%s equals antd %s', (cssVar, tokenKey) => {
-    expect(squash(cssVars[cssVar]), `${cssVar} vs ${tokenKey}`)
+    expect(squash(declaredVars()[cssVar]), `${cssVar} vs ${tokenKey}`)
       .toBe(squash(tokens[tokenKey]));
   });
 
@@ -158,15 +126,15 @@ describe('palette lockstep: antd derived tokens <-> CSS twins', () => {
     // overlay. The opaque #fafbfc twin belongs to the Table head and the
     // Descriptions label column, which are the surfaces raw CSS mimics.
     const { Table, Descriptions } = theme.components;
-    expect(squash(cssVars['--oc-fill-subtle'])).toBe(squash(Table.headerBg));
-    expect(squash(cssVars['--oc-fill-subtle'])).toBe(squash(Descriptions.labelBg));
+    expect(squash(declaredVars()['--oc-fill-subtle'])).toBe(squash(Table.headerBg));
+    expect(squash(declaredVars()['--oc-fill-subtle'])).toBe(squash(Descriptions.labelBg));
   });
 
   it('keeps --oc-text-tertiary an opaque hex (antd colorTextTertiary is rgba)', () => {
     // Documented exception, asserted so it stays deliberate rather than
     // drifting: raw CSS wants a flat color on the DAG canvas.
-    expect(cssVars['--oc-text-tertiary']).toBe('#8c8c8c');
-    expect(tokens.colorTextTertiary).not.toBe(cssVars['--oc-text-tertiary']);
+    expect(declaredVars()['--oc-text-tertiary']).toBe('#8c8c8c');
+    expect(tokens.colorTextTertiary).not.toBe(declaredVars()['--oc-text-tertiary']);
   });
 });
 
@@ -195,7 +163,7 @@ describe('theme config shape', () => {
     expect(components.Button.defaultBorderColor).toBe(palette.borderStrong);
     expect(components.Input.colorBorder).toBe(palette.borderStrong);
     expect(components.Select.colorBorder).toBe(palette.borderStrong);
-    expect(cssVars['--oc-border-strong']).toBe(palette.borderStrong);
+    expect(declaredVars()['--oc-border-strong']).toBe(palette.borderStrong);
   });
 
   it('keeps the deliberate radius scale 4 < 6 < 8 < 10', () => {
@@ -226,6 +194,6 @@ describe('theme config shape', () => {
     // MONO_VAR identifier (antd's own default carries Courier, no
     // ui-monospace).
     expect(theme.token.fontFamilyCode).toBe(MONO);
-    expect(theme.token.fontFamilyCode).toBe(cssVars['--oc-mono']);
+    expect(theme.token.fontFamilyCode.replace(/\s+/g, ' ').trim()).toBe(declaredVars()['--oc-mono']);
   });
 });

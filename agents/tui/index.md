@@ -1,4 +1,4 @@
-Commit: 40dd45ed4c7c3240a0e879ac5bfec391ffb5a03c
+Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
 
 # tui 模块
 
@@ -15,6 +15,7 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - [remote/](../../crates/tui/src/remote/mod.rs) — Server HTTP、SSE 重连、历史恢复、问题转发与任务绑定；远端执行不进入本地模型循环。
 - [app_task.rs](../../crates/tui/src/app_task.rs)、[task.rs](../../crates/tui/src/task.rs) — `/task` 混合列出本地任务与远端书签；切换替换消息、用量、问题和事件通道，远端旧任务只断开连接。
 - [key_handler.rs](../../crates/tui/src/key_handler.rs)、[app_submit.rs](../../crates/tui/src/app_submit.rs) — `@` 按原文提交；远端用户消息由 Server 消费事件显示，避免重复回显。
+- [control_helpers.rs](../../crates/tui/src/control_helpers.rs) — 复合控制命令保留原始技能参数；直接注册 [forward_skill.rs](../../crates/tui/src/control_helpers_tests/forward_skill.rs) 的 5 个测试。
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复

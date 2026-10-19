@@ -30,7 +30,7 @@
   （冲突解决取 theirs）。
 
 ### 资产：内建 skills
-- **`crates/core/assets/skills/{submit,review,repo-local-memory,do-and-done}/`**：随 stash 捆绑入库的
+- **内置提交、评审、记忆维护与实现循环**：随 stash 捆绑入库的
   仓库本地工作流 skill 文档（均 ≤298 行，见 review SKILL 描述）。
 
 ### 缓存相关（细节见同目录既有文档）
@@ -50,7 +50,7 @@
 
 - 全量回归：`cargo test --workspace` → 725 passed / 0 failed / 0 ignored（61 二进制）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 0 警告
-- 新文件行数：最大 298（repo-local-memory/SKILL.md）≤ 400
+- 新文件行数：最大 298（内置记忆维护说明）≤ 400
 
 ## Impact Surface
 - 新增 `tools_subagent` 能力开关：默认行为**不**派发 subagent tool-set，需显式置 `tools_subagent=true`。

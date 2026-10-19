@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import './test/setup-dom.js';
 const api = vi.hoisted(() => ({apiGet:vi.fn(),apiPut:vi.fn(),apiPost:vi.fn(),apiPatch:vi.fn()}));
 vi.mock('./api.js',() => api);
@@ -60,6 +60,19 @@ describe('AgentDetail direct resources',() => {
     tab('Memory'); expect((await screen.findByLabelText('文件内容 memory.md')).value).toBe('MEMORY');
     tab('Meta'); expect(await screen.findByText('引用变更历史')).toBeTruthy();
     expect(screen.getByText('— → shared')).toBeTruthy();
+  });
+  it.each([
+    [{prompt_files:['guide'],skills:['probe'],tools:['runner'],memory:true}, ['guide','probe','runner','memory 已接入']],
+    [{}, ['—','—','—','—']],
+  ])('renders the Meta reference snapshot %j',async (references, names) => {
+    const read = api.apiGet.getMockImplementation();
+    api.apiGet.mockImplementation(async path => path.endsWith('/meta') ? {meta:{references}} : read(path));
+    await mount(); tab('Meta');
+    const card = (await screen.findByText('解析快照（references）')).closest('.ant-card');
+    ['prompt','skills','tools','memory'].forEach((field, index) => {
+      const row = within(card).getByText(field).parentElement;
+      expect(within(row).getByText(names[index])).toBeTruthy();
+    });
   });
   it('saves only changed files with the read baseline through agent identity',async () => {
     await mount(); const baseline=views.prompts.baseline;

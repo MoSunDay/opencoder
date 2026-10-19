@@ -38,7 +38,6 @@ vi.mock('@ant-design/graphs', () => ({ FlowDirectionGraph: () => null }));
 
 import '../test/setup-dom.js';
 import {
-  HEADERLESS_PAGES,
   HEADERLESS_REASONS,
   NAV_CATEGORIES,
   PAGE_META,
@@ -102,15 +101,14 @@ afterEach(() => {
 
 describe('headerless reason registry', () => {
   it('declares a known reason for exactly the headerless pages', () => {
-    expect(Object.keys(HEADERLESS_REASONS).sort()).toEqual([...HEADERLESS_PAGES].sort());
-    for (const page of HEADERLESS_PAGES) {
+    for (const page of Object.keys(HEADERLESS_REASONS)) {
       expect(KNOWN_REASONS).toContain(HEADERLESS_REASONS[page]);
     }
   });
 
   it('gives every non-headerless page a PAGE_META title', () => {
     for (const page of ALL_PAGES) {
-      if (HEADERLESS_PAGES.includes(page)) {
+      if (Object.keys(HEADERLESS_REASONS).includes(page)) {
         expect(PAGE_META[page]).toBeUndefined();
       }
       else {

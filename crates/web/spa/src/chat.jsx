@@ -28,18 +28,10 @@ import { ModelModal } from './modelModal.jsx';
 import { commandsForInput, replaceToken, stripLastToken } from './commandMenu.js';
 import { BUILTIN_AGENT_HEADS, mergeBuiltinPrimaryAgentCards } from './agents/builtins.js';
 import { parseEnvs } from './harness/fields.jsx';
-import { clearPreselect, useStore } from './store.js';
 import { err, ok, warn } from './notice.js';
 import { MONO_VAR } from './ui/mono.js';
 
 const { Text } = Typography;
-
-/// Agent how_append 的 UTF-8 字节上限，保留为公共常量供调用方校验。
-export const HOW_APPEND_MAX = 8192;
-
-export function howAppendBytes(text) {
-  return new TextEncoder().encode(typeof text === 'string' ? text : '').length;
-}
 
 /// chat 模式持久化键（usehooks-ts useLocalStorage，与 nav 的 oc_nav_page 同
 /// 约定）：'operator' | 'agent'，缺省 'operator'。陌生/损坏值在读取处收敛为
@@ -53,7 +45,6 @@ const MODE_OPTIONS = [
 
 export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind }) {
   const canEdit = useCanEdit();
-  const { preselectNode } = useStore();
   const { nodes, error: nodesError } = useNodes();
   const [nodeSel, setNodeSel] = useState(null);
   const [dialogs, setDialogs] = useState([]);
@@ -106,14 +97,6 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
 
   const selectionRef = useRef({ node: nodeSel, kind: modeKind, dialog: dialogSel });
   selectionRef.current = { node: nodeSel, kind: modeKind, dialog: dialogSel };
-
-  // Tab 1's 打开对话 lands here with a preselected node.
-  useEffect(() => {
-    if (preselectNode) {
-      setNodeSel(preselectNode);
-      clearPreselect();
-    }
-  }, [preselectNode]);
 
   useEffect(() => {
     aliveRef.current = true;

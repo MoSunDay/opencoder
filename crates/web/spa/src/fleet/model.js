@@ -4,18 +4,17 @@ export const CREATABLE_KINDS = [
 ].map(([value, label]) => ({ value, label }));
 export const KINDS = [...CREATABLE_KINDS, { value: 'brain', label: '大脑调度' }, { value: 'maintenance', label: '维护执行' }, { value: 'system', label: '历史系统执行' }];
 export const KIND_LABELS = Object.fromEntries(KINDS.map(({ value, label }) => [value, label]));
-// 执行状态表已搬进 src/ui/statusTag.jsx（全控制台唯一状态→视觉映射）；这里
-// re-export 保持旧导入路径（executions/detail/todoRunsPanel）零改动，文案
-// 与颜色逐字不变（DOM 测试守卫）。
-export { STATUS_COLORS, STATUS_LABELS } from '../ui/statusTag.jsx';
 export function newId(kind) {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return `${kind}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
+function nodeDisabled(node, kind) {
+  return !node.online || !node.snapshot?.ready || (kind && !node.kinds?.includes(kind));
+}
 export function nodeOptions(nodes, kind) {
   return [{ value: '', label: '自动调度（活跃 loop / CPU 最低）' }, ...nodes.map((n) => ({
     value: n.id, label: `${n.name} · ${n.snapshot?.active_agent_loops ?? '?'} loops / ${n.snapshot?.cpu_capacity ?? '?'} CPU`,
-    disabled: !n.online || !n.snapshot?.ready || (kind && !n.kinds?.includes(kind)),
+    disabled: nodeDisabled(n, kind),
   }))];
 }
 // Conversation and Brain launch require an explicit, executable node.
@@ -24,14 +23,8 @@ export function explicitNodeOptions(nodes = [], kind = null) {
     ...option, label: nodes.find((node) => node.id === option.value)?.name || option.value,
   }));
 }
-export function canUseNode(nodes, id, kind = null) {
-  return !!id && explicitNodeOptions(nodes, kind).some((option) => option.value === id && !option.disabled);
-}
-
-export function textOf(message) {
-  if (message.display) return message.display;
-  if (typeof message.content === 'string') return message.content;
-  return (message.blocks || message.content || []).filter((b) => (b.kind || b.type) === 'text').map((b) => b.text).join('\n');
+export function canUseNode(nodes = [], id, kind = null) {
+  return !!id && nodes.some((node) => node.id === id && !nodeDisabled(node, kind));
 }
 
 export function executionActions(execution) {

@@ -26,7 +26,7 @@ import './test/setup-dom.js';
 import { err, info } from './notice.js';
 import { TodoPanel } from './todoPanel.jsx';
 import {specFiles} from './todo/directory/model.js';
-import { TodoRunsPanel, workflowActions } from './todoRunsPanel.jsx';
+import { TodoRunsPanel } from './todoRunsPanel.jsx';
 
 /// antd 6 Button 对两字中文自动插空格（「创 建」），按 role + 去空白匹配。
 const findButton = (txt) => [...document.querySelectorAll('button')]
@@ -206,12 +206,6 @@ describe('TodoPanel 模板 tab', () => {
 });
 
 describe('TodoRunsPanel 执行控制', () => {
-  it('以节点执行状态决定恢复与终止操作', () => {
-    expect(workflowActions('suspended', 'cancelled')).toEqual({ interrupt: false, resume: false, cancel: false });
-    expect(workflowActions('failed', 'error')).toEqual({ interrupt: false, resume: true, cancel: false });
-    expect(workflowActions('suspended', 'interrupted')).toEqual({ interrupt: false, resume: true, cancel: true });
-  });
-
   it('保留中断、取消与节点执行详情的独立语义', async () => {
     render(<TodoRunsPanel onNotice={vi.fn()} />);
     await screen.findByText(/todos-1/);

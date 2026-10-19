@@ -13,7 +13,7 @@
 import '../test/setup-dom.js';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CHAT_MODE_STORAGE_KEY, ChatPanel, HOW_APPEND_MAX, howAppendBytes } from '../chat.jsx';
+import { CHAT_MODE_STORAGE_KEY, ChatPanel } from '../chat.jsx';
 import { setState } from '../store.js';
 import { apiGet, apiPost } from '../api.js';
 vi.mock('../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiDel: vi.fn(), authFetch: vi.fn() }));
@@ -50,7 +50,7 @@ const createHits = () => apiPost.mock.calls.filter(([path]) => path === '/api/se
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
-  setState({ preselectNode: null, nodes: [] });
+  setState({ nodes: [] });
   apiGet.mockImplementation(async (path) => {
     if (path === '/api/nodes') return { nodes };
     if (path.startsWith('/api/nodes/n1/dialogs') || path.startsWith('/api/nodes/n2/dialogs')) return { dialogs: [] };
@@ -337,14 +337,6 @@ describe('creation lanes', () => {
     await waitFor(() => expect(createHits()).toHaveLength(1));
     expect(createHits()[0][1]).toMatchObject({ agent: 'hoster', kind: 'agent', prompt: 'host go' });
     expect(createHits()[0][1].run_mode).toBeUndefined();
-  });
-});
-
-describe('how_append guard (8192 UTF-8 bytes)', () => {
-  it('counts bytes not chars: 2730 CJK chars fit, 2731 breach the cap', () => {
-    expect(howAppendBytes('中'.repeat(2730))).toBe(8190);
-    expect(howAppendBytes('中'.repeat(2731))).toBe(8193);
-    expect(HOW_APPEND_MAX).toBe(8192);
   });
 });
 

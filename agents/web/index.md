@@ -1,4 +1,4 @@
-Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
+Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
 
 # web 模块
 
@@ -17,9 +17,11 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - `src/api_agents.rs`、`src/api_agent_resources.rs` — agent 目录/卡片与资源文件 API
 - [api_dag_binaries.rs](../../crates/web/src/api_dag_binaries.rs)、[api_dag_binaries_nfs.rs](../../crates/web/src/api_dag_binaries_nfs.rs)、[api_dag_workspace_nfs.rs](../../crates/web/src/api_dag_workspace_nfs.rs) — 二进制版本池与独立只读导出管理；控制面和资源服务共享处理器，上传请求使用统一体积上限。
 - [handle.rs](../../crates/web/src/handle.rs)、[handle/drain.rs](../../crates/web/src/handle/drain.rs) — `SessionHandle` 与 drain 生命周期；后台任务显式继承 Agent 资源根和执行技能根，Operator 从 `config_home` 解析冻结技能目录。嵌套任务作用域中的会话 future 使用堆分配。
+- [handle_lifecycle.rs](../../crates/web/src/handle_lifecycle.rs) — SSE 最后一个订阅者离开时，持生命周期锁核验同一 handle、订阅数为零且没有 drain 后回收；不区分订阅者是否创建 handle。
 - `src/auth_mw.rs`、`src/html.rs` — Bearer → Identity，独立指标凭据仅接受 `GET /metrics`；SPA 产物内嵌与 `/static` 白名单
 - `src/api_control.rs` — 节点对话 API
 - `spa/src/` — React18+antd SPA（vitest）；`src/html.rs` 在编译时嵌入已提交的 `spa/dist`，修改页面后须重建产物
+- [theme.js](../../crates/web/spa/src/theme.js) 只维护 antd 配置；[theme.test.js](../../crates/web/spa/src/theme.test.js) 直接核对 CSS 声明与共享 token，并扫描生产源码中的变量引用。
 - [harness/management.jsx](../../crates/web/spa/src/harness/management.jsx)、[configuration.js](../../crates/web/spa/src/harness/configuration.js) — Codex 默认配置与命名档案编辑模型和外部启动脚本；每行对应一个命令参数，空白表单保存为空数组。
 - [SPA 产物检查](../../scripts/check-spa-drift.sh) — 在临时目录用 SPA 源码与包内资源重建，逐文件比较 `dist`；不复制仓库示例目录，不重试掩盖差异。
 - `spa/src/chat.jsx`、`spa/src/chatSidebar.jsx`、`spa/src/chat/` — 会话页（Operator/Agent 双模式 lane）；Operator 创建前可选 Codex Harness 与逐行 env，随 `/api/sessions` 创建请求发送，启动后固定。`app.css` 在窄屏将会话侧栏与输入区纵向排列，保持输入区可操作；[modelModal.jsx](../../crates/web/spa/src/modelModal.jsx) 负责会话模型选择与切换。
@@ -43,13 +45,14 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [tags/panel.jsx](../../crates/web/spa/src/project/tags/panel.jsx)、[tags/tab.jsx](../../crates/web/spa/src/project/tags/tab.jsx)、[tags/editor.jsx](../../crates/web/spa/src/project/tags/editor.jsx) — Tag 独立菜单及管理表格；Overview 保留项目、子项、TODO 三个页签。定义行由 `tags/model.js` 纯投影，支持全局、项目和子项；全局隐藏归属选择，切换类型清空旧归属，保存失败保留草稿。共享 [api_project_tags.rs](../../crates/web/src/api_project_tags.rs) 校验名称与归属，全局允许省略或传空 `scope_id`，修改保留 ID。
 - `spa/src/project/board/`、`model/board.js`、`model/catalog.js` — dnd-kit 看板与纯移动、进度、Tag 解析；卡片将标题、可读说明摘要、标签、负责人分层展示，标题与卡片内容直接拖拽，更多菜单阻止拖拽冒泡；标题保留 Enter 打开、空格开始键盘排序，Escape 取消。按完整任务集合计算筛选后的拖动顺序，多 Tag 卡片共享 TODO ID，失败回退原数据。
 - [project/comments/](../../crates/web/spa/src/project/comments/) — Markdown 评论、认证用户署名、来源跳转和稳定请求 ID；失败保留正文和 ID，分页去重并保持滚动位置，可见时读取全部增量页，隐藏时取消读取并隔离迟到响应。
-- [project/todoDrawer.jsx](../../crates/web/spa/src/project/todoDrawer.jsx)、[project/execute/](../../crates/web/spa/src/project/execute/) — TODO 选择实际能力 ID，以稳定执行 ID 派发并关联；回复丢失时保留同一请求重试。执行页可见时读取执行，任务页可见时读取内嵌评论，隐藏时停止轮询；能力选择和指派按钮同行显示，网页不提供手动关联输入，派发后的自动关联及失败重试保留；结论向所属节点读取，失败清空旧结果并显示错误；执行 ID 通过新页面链接进入原生执行详情；[fleet/navigation/links.js](../../crates/web/spa/src/fleet/navigation/links.js) 编解码执行 ID 与类型，Shell 的首次页面选择优先执行链接，ExecutionsPanel 无需在当前列表页找到该记录即可挂载原生详情；评论来源与派发后的内嵌 `ExecutionView` 保留原会话、事件与引导入口。
+- [project/todoDrawer.jsx](../../crates/web/spa/src/project/todoDrawer.jsx)、[project/execute/](../../crates/web/spa/src/project/execute/) — TODO 选择实际能力 ID，以稳定执行 ID 派发并关联；回复丢失时保留同一请求重试。执行页可见时读取执行，任务页可见时读取内嵌评论，隐藏时停止轮询；能力选择和指派按钮同行显示，网页不提供手动关联输入，派发后的自动关联及失败重试保留；执行列表只展示关联记录和状态，不内嵌执行结论，执行 ID 通过新页面链接进入原生执行详情；[fleet/navigation/links.js](../../crates/web/spa/src/fleet/navigation/links.js) 编解码执行 ID 与类型，Shell 的首次页面选择优先执行链接，ExecutionsPanel 无需在当前列表页找到该记录即可挂载原生详情；评论来源与派发后的内嵌 `ExecutionView` 保留原会话、事件与引导入口。
 - [chat/inputAttempt.js](../../crates/web/spa/src/chat/inputAttempt.js) — 会话页与执行明细共享人工输入 ID 的生成与重试规则，未确认的回复保持原输入 ID，避免断线重试重复提交。
 - `spa/src/dag/editor/canvasEditor.jsx` — 用已发出的 spec 签名避免重复通知，并保证依赖边更新在节点编辑之后仍能保存
-- `spa/src/agents/`、`spa/src/agentNfsCard.jsx` — Agent 配置与资源页签；复用状态卡读取 Agent、二进制、源工作区、Ontology 正文四个实际只读 NFS 导出，停止须确认，读取失败不显示为已停止。
+- [fleet/teams.jsx](../../crates/web/spa/src/fleet/teams.jsx)、[fleet/teams/](../../crates/web/spa/src/fleet/teams/) — Team 列表、成员编辑、启动及执行历史；成员以 Agent 身份配置。
+- [agentDetail.jsx](../../crates/web/spa/src/agentDetail.jsx)、[agents/](../../crates/web/spa/src/agents/) — 当前 Agent 资源编辑入口，统一读取和保存 Prompt、Skills、Tools、Memory；读取失败禁止覆盖，切换页签保留草稿。NFS 状态由 `agentNfsCard.jsx` 展示五类实际导出。
 - `spa/src/dag/resources/` — 二进制池界面；`model.js` 负责 ELF 与版本引用纯校验，`read.js` 校验池和历史响应，`editor.jsx` 发布文件，`panel.jsx` 管理下载、删除与当前版本指针，`field.jsx` 为步骤选择受理时 current 或固定版本。
-- `spa/src/dag/` — DAG 定义/运行页签与 React Flow 图：运行图 `dagProjection.js#graphFromSpec`（纯投影）与编辑器 `editor/canvasModel.js#specToCanvas` 的节点均声明固定盒（width + handles，**不声明 height**——声明会把内联高度烤进 wrapper，钳死 auto-height 卡片并错位 handle/fitView），边 id 用 `'e-' + src + '>' + dst`（`>` 不在 slug 字符集，杜绝连字符撞 key；`onConnect` 的 addEdge 路径同样显式传 id，勿依赖默认 getEdgeId）；RF 边是「两端节点 initialized（只需宽度）才渲染」的门控，勿再移除声明盒（jsdom RO shim 不回调，DOM 测试 `.react-flow__edge` 断言依赖声明盒）；编辑器 fitView 走 `useNodesInitialized()` 门控 + once-guard（仅挂载后首帧 fit，加步骤引起的重测量不再 refit）+ autoLayout `fitEpoch` effect，勿回退定时器
-- `spa/src/dag/` spec 顶层 `max_concurrency` — 整跑并发上限（1..=30，缺省省略键、走服务端默认 4）：画布基础信息面板 `editor/stepInspector.jsx#SpecMetaForm` 可编辑；`editor/canvasModel.js#canvasToSpec` 透传 baseSpec 值（画布结构编辑不丢并发配置）；`specValidate.js` 镜像常量 `MAX_CONCURRENCY = 30` 在 `validateSpec` 校验（先于 name 检查）；只改定义、不影响在跑 run（run 持有 `dag_runs.spec_json` 快照，服务端整跑并发上限现状见 `crates/dag-runtime/src/runtime/scheduler.rs#schedule`）
+- `spa/src/dag/` — DAG 定义、运行、原生步骤与动态实例页面。图投影在 `dagProjection.js`，快照与后续事件合并在 `run/model.js`，编辑器在 `editor/`；布局与依赖变更由组件测试验证，执行约定见 [规则 04](../../rules/04-dag-execution-contract.md)。
+- `spa/src/dag/specValidate.js` 与 `editor/canvasModel.js` — 校验定义并在画布编辑中保留 `max_concurrency` 等字段；运行使用已冻结的定义快照。
 - `spa/src/dag/dynamic/`、`spa/src/brain/workbench/` — 动态 DAG 与 Brain 工作台
 - [dag/step/binaryLogs.jsx](../../crates/web/spa/src/dag/step/binaryLogs.jsx) — 原生二进制步骤输出；编辑器只提供 Binary、Agent 与 Dynamic，运行页面按节点所属执行读取实例、日志与声明产物。
 - [dag/run/context.jsx](../../crates/web/spa/src/dag/run/context.jsx) — DAG 与执行明细共用的只读运行环境；容器、工作目录、版本和摘要来自节点保存的运行资料，不从当前资源池推测历史。
@@ -63,12 +66,13 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 ## 接缝
 
 - [fleet/navigation/location.js](../../crates/web/spa/src/fleet/navigation/location.js) 监听地址和浏览器历史；执行地址持续优先于持久化的主页选择。[links.js](../../crates/web/spa/src/fleet/navigation/links.js) 生成仅含执行 ID 的片段链接，兼容旧查询参数，并在关闭详情或显式切换菜单时清除执行定位。TODO 不依赖预先取得类型或列表第一页；ExecutionView 按 ID 请求 Server 原生详情，再由返回类型展示能力过程。
+- [fleet/executions.jsx](../../crates/web/spa/src/fleet/executions.jsx) 直接按地址打开和关闭执行详情；名称等摘要取自当前列表，不再保存一份选中记录。列表没有该执行时仍按 ID 读取原生详情。
 - 项目定位同样优先于持久化主页，显式切换菜单清除定位。[fleet/navigation/history.js](../../crates/web/spa/src/fleet/navigation/history.js) 给站内历史条目标记顺序；[DraftGuard](../../crates/web/spa/src/ontology/navigation/DraftGuard.tsx) 统一注册未保存或提交中的表单，项目 [closeGuard.js](../../crates/web/spa/src/project/forms/closeGuard.js) 接入同一保护。浏览器返回时先恢复原条目再确认，确认前固定地址快照，避免异步界面更新提前卸载草稿；取消保留草稿与地址，确认后继续原方向，整页离开沿用 beforeunload。导航验收见 [navigation.js](../../scripts/acceptance/project/navigation.js)。
 
 - 原生执行详情与消息翻页兼容缺少 `Array.at`、`URLSearchParams.size` 的浏览器；会话 Markdown 无法解析时以普通文本展示，仍可读取 Session 上下文。执行深链测试挂载真实 `ExecutionView`，检查所属节点、消息、分页和离线错误。
 - 会话执行复用 session 运行时；持久化经 `Arc<dyn Store>`。
 - [serve](../../crates/web/src/lib.rs) 为会话与 `ProjectService` 提供同一 `LibsqlStore` 实例，共享连接和锁；存储接口见 [store](../store/index.md)。
-- [全站验收入口](../../scripts/acceptance/ui/main.js) 以 `nav.js` 注册页和 `ui/scope.js` 功能覆盖表为范围，校验成套构建、SPA 产物、四种屏宽、真实功能与 Server TUI；缺页、异常、超时或构建摘要不一致使验收失败。
+- [UI 验收入口](../../scripts/acceptance/ui/main.js) 与 [范围表](../../scripts/acceptance/ui/scope.js) — 按 [规则 05](../../rules/05-ui-acceptance.md) 选择受影响页面和行为；全站验收仅在用户明确要求时执行。
 - [远端会话验收](../../scripts/acceptance/conversations/README.md) 共用节点选择、会话身份核对与回复等待，验证两种模式的只读工具调用、续聊和重开。
 - 验收 `--resume` 只复用覆盖范围及二进制摘要相同的成功记录，失败保留日志并重跑，SPA 漂移检查始终执行；`--brain-test` 可使用同批构建的测试可执行文件，其原生镜像版本检查仍然执行。
 - [responsive/services.js](../../scripts/acceptance/ui/responsive/services.js) 直接绑定系统分配的空闲端口并返回实际端口，避免先查询再占用的竞争；显式端口冲突返回启动错误。

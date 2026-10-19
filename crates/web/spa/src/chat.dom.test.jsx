@@ -10,6 +10,11 @@ import { setCredentials, setState } from './store.js';
 
 import { chatTestState } from './chat/testSupport.js';
 
+const pickNode = async () => {
+  fireEvent.mouseDown(screen.getByLabelText('执行节点').closest('.ant-select'));
+  fireEvent.click(await screen.findByText('Worker', { selector: '.ant-select-item-option-content' }));
+};
+
 const turnsFixture = () => [
   { kind: 'text', role: 'user', text: '帮我跑一遍测试' },
   { kind: 'text', role: 'assistant', text: '好的，开始执行' },
@@ -44,6 +49,7 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
   const mountChat = async () => {
     setCredentials('smoke-token', '');
     const { container } = render(<ChatPanel />);
+    await pickNode();
     const textarea = await waitFor(() => {
       const el = container.querySelector('textarea.ant-sender-input');
       expect(el).toBeTruthy();
@@ -155,7 +161,7 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
   });
 
   it('keeps the typed input when a remote run is already busy', async () => {
-    setState({ page: 'chat', preselectNode: 'node-1', nodes: [], conn: 'init' });
+    setState({ page: 'chat', nodes: [], conn: 'init' });
     const { container, textarea } = await mountChat();
     await act(async () => {
       fireEvent.change(textarea, { target: { value: '第一个远程任务' } });
@@ -181,7 +187,7 @@ describe('ChatPanel full chain (Sender → signed POST → SSE)', () => {
   });
 
   it('releases the composer when a FIRST remote dispatch reaches a terminal frame (no dialog selected yet)', async () => {
-    setState({ page: 'chat', preselectNode: 'node-1', nodes: [], conn: 'init' });
+    setState({ page: 'chat', nodes: [], conn: 'init' });
     const { container, textarea } = await mountChat();
     await act(async () => {
       fireEvent.change(textarea, { target: { value: '首个远程任务' } });
@@ -211,6 +217,7 @@ describe('ChatPanel optimistic echo & transcript_reset rebuild', () => {
   const mountChat = async () => {
     setCredentials('smoke-token', '');
     const { container } = render(<ChatPanel />);
+    await pickNode();
     const textarea = await waitFor(() => {
       const el = container.querySelector('textarea.ant-sender-input');
       expect(el).toBeTruthy();
@@ -318,6 +325,7 @@ describe('ChatPanel resync (lag → snapshot rebuild at the /seq watermark)', ()
   const mountChat = async () => {
     setCredentials('smoke-token', '');
     const { container } = render(<ChatPanel />);
+    await pickNode();
     const textarea = await waitFor(() => {
       const el = container.querySelector('textarea.ant-sender-input');
       expect(el).toBeTruthy();

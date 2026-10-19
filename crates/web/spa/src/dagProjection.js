@@ -1,22 +1,13 @@
-// dagProjection.js — PURE fold/projection helpers for the DAG run view.
-// Everything here is a plain function over wire data (crates/dag/src/protocol.rs
-// shapes): SSE event frames fold into per-step states, step states project
-// onto the spec graph (pending/running/done/error/skipped incl. transitive
-// dep-failure skipping), and small display tokens map run/step statuses to
-// antd colors. No React, no DOM — fully unit-tested in dagProjection.test.js.
+// Normalize DAG events and project step snapshots onto the run graph.
 
 import { NODE_H, NODE_W, layoutGraph } from './dag/dagLayout.js';
 
 export const STEP_PENDING = 'pending';
-export const STEP_RUNNING = 'running';
-export const STEP_DONE = 'done';
 export const STEP_ERROR = 'error';
 export const STEP_SKIPPED = 'skipped';
 
 /// Event kind vocabulary (server validates uploads against the same set).
 export const RUN_EVENT_KINDS = ['run_started', 'step_started', 'step_done', 'step_progress', 'run_finished'];
-const STEP_KINDS = ['step_started', 'step_done'];
-
 /// frameToEvent(frame) — normalize one sse.js frame ({event, data, seq}) into
 /// an event record {seq, kind, step, payload, at_ms}. Returns null when the
 /// frame is not a well-formed DAG event (keep-alives, foreign frames).
@@ -42,45 +33,6 @@ export function frameToEvent(frame) {
     payload: d.payload === undefined || d.payload === null ? {} : d.payload,
     at_ms: Number.isFinite(at) ? at : null,
   };
-}
-
-/// foldStepStates(events) → Map(step → {status, output, error, at_ms}).
-/// Projection rules (per step, later events win):
-///   step_started → running; step_done {ok} → done|error (+output snapshot,
-///   +error text). Events are ordered by seq (arrival order for unpersisted
-///   frames), replay duplicates (same seq / same instant) collapse — folding
-///   the SSE replay plus the live tail is idempotent.
-export function foldStepStates(events) {
-  const list = (Array.isArray(events) ? events : []).filter(
-    (e) => e && STEP_KINDS.includes(e.kind) && e.step,
-  );
-  const rank = (e) => (Number.isFinite(e.seq) ? e.seq : Number.MAX_SAFE_INTEGER);
-  const sorted = [...list].sort((a, b) => rank(a) - rank(b)); // stable: arrival order wins on ties
-  const seen = new Set();
-  const map = new Map();
-  for (const ev of sorted) {
-    const key = Number.isFinite(ev.seq)
-      ? 'seq:' + ev.seq
-      : 'inst:' + ev.kind + ':' + ev.step + ':' + ev.at_ms;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    const cur = map.get(ev.step) || { status: STEP_PENDING, output: '', error: '', at_ms: null };
-    if (ev.kind === 'step_started') {
-      map.set(ev.step, { ...cur, status: STEP_RUNNING, at_ms: ev.at_ms });
-    } else {
-      const p = ev.payload || {};
-      const ok = p.ok !== false;
-      map.set(ev.step, {
-        status: ok ? STEP_DONE : STEP_ERROR,
-        output: typeof p.output === 'string' ? p.output : '',
-        error: ok ? '' : String(p.error || ''),
-        at_ms: ev.at_ms,
-      });
-    }
-  }
-  return map;
 }
 
 /// specSteps(spec) → the step list, degrading to [] for malformed specs.
@@ -252,17 +204,4 @@ export function graphFromSpec(spec, stepStates, opts = {}) {
 /// node id, or the unclaimed hint while the run waits in the queue.
 export function nodeBadgeText(nodeId, emptyText = '任意节点排队中') {
   return nodeId === undefined || nodeId === null || nodeId === '' ? emptyText : String(nodeId);
-}
-
-/// outputPreview(output, max) — pre-wrap feed/step-card snapshot text. The
-/// server snapshot may already carry a truncation marker; long bodies are
-/// additionally clipped client-side with an explicit 截断 marker.
-export function outputPreview(output, max = 600) {
-  if (typeof output !== 'string' || !output) {
-    return '';
-  }
-  if (output.length <= max) {
-    return output;
-  }
-  return output.slice(0, max) + '…(已截断)';
 }

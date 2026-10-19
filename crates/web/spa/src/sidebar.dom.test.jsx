@@ -32,7 +32,7 @@ vi.mock('react-dom/client', async (importOriginal) => {
 import './test/setup-dom.js';
 import App from './main.jsx';
 import { ChatPanel } from './chat.jsx';
-import { clearCredentials, getState, openChatForNode, setCredentials, setNodes, setState } from './store.js';
+import { clearCredentials, getState, setCredentials, setState } from './store.js';
 
 for (const root of strayRoots.splice(0, strayRoots.length)) {
   root.unmount();
@@ -111,7 +111,7 @@ beforeEach(() => {
   localStorage.clear();
   clearCredentials();
   // Store is a module-level singleton — reset it so cases never leak state.
-  setState({ page: 'nodes', preselectNode: 'node-local', nodes: [], conn: 'init' });
+  setState({ page: 'nodes', nodes: [], conn: 'init' });
   fixtures.localSessions = [];
   fixtures.nodeDialogs = { dialogs: [] };
   fixtures.snapshot = { messages: [] };
@@ -142,6 +142,7 @@ const snapshotFixture = () => ({
 const mountChat = async () => {
   setCredentials('smoke-token', '');
   const renderResult = render(<ChatPanel />);
+  await pickSelectOption(renderResult.container, 'Local node');
   await waitFor(() => {
     expect(hits.some((h) => h.url === '/api/nodes/node-local/dialogs?kind=operator')).toBe(true);
   });
@@ -154,7 +155,7 @@ const mountChat = async () => {
 /// `.ant-select-item-option` with a `title` attribute (probed under jsdom).
 const pickSelectOption = async (container, label) => {
   await act(async () => {
-    fireEvent.mouseDown(container.querySelector('.ant-select'));
+    fireEvent.mouseDown(container.querySelector('[aria-label="执行节点"]').closest('.ant-select'));
   });
   const option = await waitFor(() => {
     const all = [...document.querySelectorAll('.ant-select-item-option')];
@@ -176,8 +177,7 @@ describe('Conversations sidebar (T5 two-column chat)', () => {
     fixtures.nodeDialogs = {
       dialogs: [{ session_id: 'r1', title: '远端会话', first_created_at: 1, last_created_at: 2, task_count: 3 }],
     };
-    // The fleet option in the node select comes from the shared store.
-    setState({ nodes: [{ id: 'n1', name: 'Fleet-1' }] });
+    // The node select loads options from the nodes API.
     const { container } = await mountChat();
 
     // Local source: both sessions rendered with their mapped labels.
@@ -257,17 +257,16 @@ describe('Conversations sidebar (T5 two-column chat)', () => {
     expect(screen.getByText('选中节点后输入提示词，即新建对话')).toBeTruthy();
   });
 
-  it('lands the fleet tab preselect on the sidebar node select', async () => {
-    setNodes([{ id: 'n1', name: 'Fleet-1' }]);
-    openChatForNode('n1');
+  it('opens chat without selecting a node until the user chooses one', async () => {
+    setState({ page: 'chat' });
     setCredentials('smoke-token', '');
-    render(<App />);
+    const { container } = render(<App />);
 
-    // Chat page is the active tab and the node select shows the preselect.
-    expect(await screen.findByText('Fleet-1')).toBeTruthy();
+    await screen.findByLabelText('执行节点');
     expect(getState().page).toBe('chat');
-    // The preselect effect consumed the request and loaded that node's list.
-    expect(getState().preselectNode).toBeNull();
+    expect(container.querySelector('textarea.ant-sender-input').disabled).toBe(true);
+    expect(hits.some((h) => h.url.includes('/dialogs'))).toBe(false);
+    await pickSelectOption(container, 'Fleet-1');
     await waitFor(() => {
       expect(hits.some((h) => h.url.includes('/api/nodes/n1/dialogs'))).toBe(true);
     });

@@ -1,4 +1,4 @@
-import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Grid, List, Skeleton, Space, Tabs, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Grid, Skeleton, Space, Tabs, Tag, Tooltip, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../api";
 import type { AttributeDefinition, Entity, EntityType } from "../../types";

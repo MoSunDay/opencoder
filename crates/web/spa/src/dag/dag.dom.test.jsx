@@ -7,7 +7,7 @@
 // the def fetch is left pending so the loading branch renders instead.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const apiGetMock = vi.fn();
 const apiPostMock = vi.fn();
@@ -28,7 +28,7 @@ import { DefsTab } from './defsTab.jsx';
 import { DefEditor } from './defEditor.jsx';
 import { RunsTable } from './runsTable.jsx';
 import { RunDetail } from './runDetail.jsx';
-import { setNodes } from '../store.js';
+import { setState } from '../store.js';
 
 const DEFS = [
   { id: 'dag-etl', name: 'etl', spec: { name: 'etl', steps: [{ name: 'fetch', kind: { type: 'binary', resource: 'tool' } }, { name: 'review', depends_on: ['fetch'], kind: { type: 'agent', prompt: 'r' } }] }, updated_at: 1700000000000 },
@@ -65,10 +65,10 @@ beforeEach(() => {
   apiPostMock.mockReset().mockResolvedValue({ run_id: 'run-new12345678' });
   apiDelMock.mockReset().mockResolvedValue({ ok: true });
   openStreamMock.mockReset().mockReturnValue({ abort: vi.fn() });
-  setNodes([{
+  setState({ nodes: [{
     id: 'node-1', name: 'worker-a', online: true, kinds: ['dag'],
     snapshot: { ready: true, active_agent_loops: 0, cpu_capacity: 4 },
-  }]);
+  }] });
 });
 
 describe('DefsTab', () => {
@@ -107,7 +107,7 @@ describe('DefsTab', () => {
   });
 
   it('loads dispatch nodes without first visiting the fleet page', async () => {
-    setNodes([]);
+    setState({ nodes: [] });
     render(<DefsTab onNotice={vi.fn()} onDispatched={vi.fn()} />);
     fireEvent.click((await screen.findAllByText('派发'))[0]);
     expect(await screen.findByText(/整个工作流会在同一个节点完成/)).toBeTruthy();

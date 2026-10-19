@@ -7,18 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { EDIT_NODE_W } from './canvasLayout.js';
-import {
-  canConnect,
-  canvasToSpec,
-  editNodeBox,
-  changeStepKind,
-  newStep,
-  renameStep,
-  specLevelProblems,
-  specProblemIndex,
-  specToCanvas,
-  uniqueSlug,
-} from './canvasModel.js';
+import { canConnect, canvasToSpec, editNodeBox, changeStepKind, newStep, renameStep, specProblemIndex, specToCanvas, uniqueSlug } from './canvasModel.js';
 
 const SPEC = {
   name: 'etl',
@@ -227,11 +216,6 @@ describe('canvasModel specProblemIndex', () => {
     expect(idx.get('a')).toEqual(['steps[0].kind.type 必须是 agent | binary']);
     expect(idx.get('b')).toEqual(['steps[1].depends_on 存在重复项']);
     expect(idx.size).toBe(2);
-  });
-
-  it('specLevelProblems 只返回非 steps[N] 的 spec 级问题', () => {
-    expect(specLevelProblems(PROBLEMS)).toEqual(['spec.name 必须是非空字符串']);
-    expect(specLevelProblems([])).toEqual([]);
   });
 });
 

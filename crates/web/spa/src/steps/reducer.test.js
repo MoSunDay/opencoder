@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyStream, reduceFrame, turnsFromMessages, withUserTurn } from '../reduce.js';
+import { emptyStream, reduceFrame, turnsFromMessages } from '../reduce.js';
 import { clearSayStreaming, markSayStreaming } from './reducer.js';
 
 describe('steps ladder (live, mirror of chat_steps.rs)', () => {
@@ -78,7 +78,7 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
   });
 
   it('(c2d) a new Say freezes the ladder ABOVE it and the next round re-arms', () => {
-    let s = withUserTurn(emptyStream(), 'go');
+    let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'go' } }, 0);
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'r1' } }, 1);
     expect(s.turns[1].progressActive).toBe(true);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'say one' } }, 2);
@@ -114,7 +114,7 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
   });
 
   it('(c2c) reasoning after a closed boundary (tail is a user turn) inserts the steps turn right after it', () => {
-    let s = withUserTurn(emptyStream(), 'do the thing');
+    let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'do the thing' } }, 0);
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'fresh round' } }, 1);
     expect(s.turns.map((x) => x.kind)).toEqual(['text', 'steps']);
     expect(s.turns[0]).toMatchObject({ kind: 'text', role: 'user', text: 'do the thing' });
@@ -355,7 +355,7 @@ describe('steps ladder (snapshot, message-pair semantics)', () => {
 });
 
 it('live SSE and snapshot replay produce the same Turn/Step/call hierarchy', () => {
-  let live = withUserTurn(emptyStream(), 'go');
+  let live = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'go' } }, 0);
   live = reduceFrame(live, { event: 'reasoning_delta', data: { text: 'first' } }, 1);
   live = reduceFrame(live, { event: 'text_delta', data: { text: 'checking' } }, 2);
   live = reduceFrame(live, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 3);

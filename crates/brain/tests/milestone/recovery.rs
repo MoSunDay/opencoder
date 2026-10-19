@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn forward_after_rework_rejects_copied_reflection_and_accepts_null_without_another_round() {
+    let req = request();
+    let initial = snap(initialize("brain-rework-forward", &req, 1).unwrap());
+    let first = finish(
+        snap(dispatch(&initial, &req, 1)),
+        &req,
+        LayeredOperationStatus::Done,
+    );
+    let failed = finish(
+        snap(dispatch(&first, &req, 2)),
+        &req,
+        LayeredOperationStatus::Error,
+    );
+    let mut repaired = finish(
+        snap(dispatch(&failed, &req, 1)),
+        &req,
+        LayeredOperationStatus::Done,
+    );
+    repaired.run.phase = LayeredPhase::Deciding;
+    let mut copied = proposal(&repaired, &req, 2);
+    let LayeredDecision::DispatchLayer { reflection, .. } = &mut copied else {
+        unreachable!()
+    };
+    *reflection = repaired.run.reflection.clone();
+    assert!(reflection.is_some());
+    let error = decide(&repaired, &req, &catalog(), &copied, 30)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("set reflection to null"), "{error}");
+    let corrected = decide(
+        &repaired,
+        &req,
+        &catalog(),
+        &proposal(&repaired, &req, 2),
+        31,
+    )
+    .unwrap();
+    assert_eq!(corrected.run.layer, 2);
+    assert_eq!(corrected.run.round, 2);
+    assert_eq!(corrected.run.activation, 4);
+    assert_eq!(corrected.run.valid_layers, 1);
+    assert_eq!(corrected.run.reflection, repaired.run.reflection);
+    assert_eq!(corrected.operations.len(), repaired.operations.len() + 1);
+}
+
+#[test]
 fn stopped_shared_run_recovers_same_execution_without_spending_a_round() {
     let mut req = request();
     req.plan.shared_workspace = true;

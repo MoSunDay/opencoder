@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import "../../../testSetup";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { apiMock, graphHandlers, graphMock, entityTypes, entities, relationshipTypes, graphNodes, aspect, edge, pageElement, finishSelection, expandFilters, renderPage, chooseScope } from "./pageFixture";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { apiMock, entities, relationshipTypes, graphNodes, aspect, edge, pageElement, finishSelection, expandFilters, renderPage, chooseScope } from "./pageFixture";
 describe("GraphPage", () => {
 
 

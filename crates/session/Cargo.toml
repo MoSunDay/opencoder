@@ -10,7 +10,6 @@ opencoder-llm.workspace = true
 opencoder-shellguard.workspace = true
 opencoder-store.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 futures.workspace = true
 async-trait.workspace = true

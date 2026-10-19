@@ -78,11 +78,6 @@ export const ALL_PAGES = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => i.page
 /// Fallbacks mirror the pre-IA shell: unknown pages land on the node
 /// category / the nodes page.
 export const DEFAULT_CATEGORY = 'admin';
-export const DEFAULT_PAGE = 'nodes';
-
-/// Category labels for the scrollable tabs (Sider + mobile row 1).
-export const CATEGORY_OPTIONS = NAV_CATEGORIES.map((c) => ({ value: c.key, label: c.label }));
-
 /// localStorage key mirroring the last explicitly chosen category and page
 /// so a reload restores the selection. Read and
 /// written exclusively through the usehooks-ts `useLocalStorage` hook in
@@ -118,9 +113,6 @@ export const HEADERLESS_REASONS = {
   ontologyRelationships: 'menu-only',
 };
 
-/// Derived from the reasons registry so the two lists can never drift.
-export const HEADERLESS_PAGES = Object.keys(HEADERLESS_REASONS);
-
 /// Per-page header copy for the pages whose panel actually mounts PageShell
 /// with its own key: pageShell.jsx renders
 /// title + desc from here. An entry no panel renders is dead copy — the
@@ -135,30 +127,9 @@ function findCategory(categoryKey) {
     || NAV_CATEGORIES.find((c) => c.key === DEFAULT_CATEGORY);
 }
 
-/// Active category for a store `page`: unknown pages fall back to node.
-export function categoryOf(page) {
-  const hit = NAV_CATEGORIES.find((c) => c.items.some((i) => i.page === page));
-  return hit ? hit.key : DEFAULT_CATEGORY;
-}
-
 /// First page of a category — where a category click lands.
 export function categoryHome(categoryKey) {
   return findCategory(categoryKey).items[0].page;
-}
-
-/// Page keys of one category, in menu order (mobile Select options + tests).
-export function pagesOf(categoryKey) {
-  return findCategory(categoryKey).items.map((i) => i.page);
-}
-
-/// antd Menu items for one category (createElement keeps this file .js).
-export function menuOf(categoryKey) {
-  return menuItemsOf(findCategory(categoryKey).items);
-}
-
-/// antd Select options for the mobile page picker of one category.
-export function selectOptionsOf(categoryKey) {
-  return selectItemsOf(findCategory(categoryKey).items);
 }
 
 /// antd Menu items for a raw item LIST (e.g. one category object handed out
@@ -185,10 +156,4 @@ export function visibleCategories(identity) {
 /// both ask this; non-admins may open topics and every Ontology page).
 export function allowedPages(identity) {
   return visibleCategories(identity).flatMap((c) => c.items.map((i) => i.page));
-}
-
-/// Sider highlight key: anything not in the active category's menu falls
-/// back to the default page so the highlight never dangles.
-export function menuKey(page) {
-  return pagesOf(categoryOf(page)).includes(page) ? page : DEFAULT_PAGE;
 }

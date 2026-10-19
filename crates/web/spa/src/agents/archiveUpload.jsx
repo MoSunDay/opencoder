@@ -1,6 +1,6 @@
 import { EditButton } from '../ui/permissions.jsx';
 import {useState} from 'react';
-import {Button, Modal, Typography, Upload} from 'antd';
+import { Modal, Typography, Upload } from 'antd';
 import {mergeArchive, unzipArchive} from './resourceModel.js';
 
 // 单个压缩包体积上限：解包后的合并集才受 1.5 MiB 资源上限约束，这里只挡

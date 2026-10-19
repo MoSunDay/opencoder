@@ -17,6 +17,7 @@ async-trait.workspace = true
 libsql.workspace = true
 ulid.workspace = true
 fs2 = "0.4"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

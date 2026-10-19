@@ -68,7 +68,31 @@ pub async fn update_with_vector(
     eng_inputs: &[BrainEngInputRecord],
     vector: &BrainVectorWrite,
 ) -> Result<()> {
+    update_with_vector_if_version(conn, capability, eng_inputs, vector, None).await
+}
+
+pub async fn update_with_vector_if_version(
+    conn: &Connection,
+    capability: &BrainCapabilityRecord,
+    eng_inputs: &[BrainEngInputRecord],
+    vector: &BrainVectorWrite,
+    expected: Option<&str>,
+) -> Result<()> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        if let Some(expected) = expected {
+            let current = get(conn, &capability.id).await?;
+            if current
+                .as_ref()
+                .map(BrainCapabilityDetail::content_version)
+                .as_deref()
+                != Some(expected)
+            {
+                return Err(crate::BrainContentConflict {
+                    id: capability.id.clone(),
+                }
+                .into());
+            }
+        }
         update_capability_fields(conn, capability).await?;
         replace_eng_inputs(conn, &capability.id, eng_inputs).await?;
         insert_or_replace_vector(conn, &capability.id, vector).await

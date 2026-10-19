@@ -11,8 +11,20 @@ use opencoder_core::fleet::RpcReply;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+mod selection;
+use selection::{Entry, Origin};
+
+pub struct Library {
+    pub capabilities: Vec<Value>,
+    pub selection_ids: Vec<String>,
+}
+
 pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
-    let mut capabilities = vec![
+    Ok(load(state).await?.capabilities)
+}
+
+pub async fn load(state: &Arc<AppState>) -> anyhow::Result<Library> {
+    let builtins = vec![
         json!({
             "id":"builtin-agent-act",
             "kind":"agent",
@@ -38,6 +50,10 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
             "maturity":"stable"
         }),
     ];
+    let mut capabilities: Vec<_> = builtins
+        .into_iter()
+        .map(|value| Entry::new(Origin::Builtin, value))
+        .collect();
     for capability in state.store.list_brain_capabilities().await? {
         let Some(target) = state
             .fleet
@@ -60,7 +76,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
         }
         value["version"] = json!("stored");
         value["maturity"] = json!("draft");
-        capabilities.push(value);
+        capabilities.push(Entry::new(Origin::Stored, value));
     }
     let config = opencoder_core::Config::load(&state.workdir)?;
     let agents =
@@ -71,7 +87,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
                 .collect::<Vec<_>>()
         });
     for agent in agents {
-        capabilities.push(json!({"id":format!("agent-{}",agent.name),"kind":"agent","target":agent.name,"summary":agent.description,"input_desc":"Named engineering inputs for this agent","output_desc":"The agent response and execution evidence","required_inputs":[],"definition":{"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools},"version":"current","maturity":"draft"}));
+        capabilities.push(Entry::new(Origin::Generated, json!({"id":format!("agent-{}",agent.name),"kind":"agent","target":agent.name,"summary":agent.description,"input_desc":"Named engineering inputs for this agent","output_desc":"The agent response and execution evidence","required_inputs":[],"definition":{"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools},"version":"current","maturity":"draft"})));
     }
     let (_, share) = crate::api_todo_util::share_root(&state.workdir).await?;
     for name in opencoder_core::list_child_dirs(&share.join("todo")) {
@@ -85,7 +101,7 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
                 continue;
             }
             let definition = crate::api::template::snapshot(&share, &name, &version)?;
-            capabilities.push(json!({"id":format!("todos-{name}-{version}"),"kind":"todos","target":format!("{name}/{version}"),"summary":definition["objective"],"input_desc":"Named inputs for this TODO workflow","output_desc":"Accepted TODO results and evidence","required_inputs":[],"definition":definition,"version":version,"maturity":"draft"}));
+            capabilities.push(Entry::new(Origin::Generated, json!({"id":format!("todos-{name}-{version}"),"kind":"todos","target":format!("{name}/{version}"),"summary":definition["objective"],"input_desc":"Named inputs for this TODO workflow","output_desc":"Accepted TODO results and evidence","required_inputs":[],"definition":definition,"version":version,"maturity":"draft"})));
         }
     }
     for kind in ["dag", "team"] {
@@ -113,12 +129,25 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
                 Ok(None) => capability["unavailable_reason"] = json!("definition missing"),
                 Err(reply) => capability["unavailable_reason"] = reply.body,
             }
-            capabilities.push(capability);
+            capabilities.push(Entry::new(Origin::Generated, capability));
         }
     }
-    capabilities.extend(state.fleet.definitions("brain_capability").await?);
-    capabilities.extend(super::plan_capabilities::list(state).await?);
-    for capability in &mut capabilities {
+    capabilities.extend(
+        state
+            .fleet
+            .definitions("brain_capability")
+            .await?
+            .into_iter()
+            .map(|value| Entry::new(Origin::Stored, value)),
+    );
+    capabilities.extend(
+        super::plan_capabilities::list(state)
+            .await?
+            .into_iter()
+            .map(|value| Entry::new(Origin::Plan, value)),
+    );
+    for entry in &mut capabilities {
+        let capability = &mut entry.value;
         if let Some(meta) = state
             .fleet
             .definition(
@@ -131,7 +160,11 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
             capability["evidence"] = meta["evidence"].clone();
         }
     }
-    Ok(capabilities)
+    let selection_ids = selection::ids(&capabilities);
+    Ok(Library {
+        capabilities: capabilities.into_iter().map(|entry| entry.value).collect(),
+        selection_ids,
+    })
 }
 async fn registered_definition(state: &Arc<AppState>, target: &Value) -> anyhow::Result<Value> {
     let target: opencoder_core::fleet::CapabilityTarget = serde_json::from_value(target.clone())?;
@@ -159,8 +192,10 @@ async fn registered_definition(state: &Arc<AppState>, target: &Value) -> anyhow:
 }
 
 pub async fn list(State(state): State<Arc<AppState>>) -> Response {
-    match capabilities(&state).await {
-        Ok(capabilities) => response(RpcReply::ok(json!({"capabilities":capabilities}))),
+    match load(&state).await {
+        Ok(library) => response(RpcReply::ok(
+            json!({"capabilities":library.capabilities,"selection_ids":library.selection_ids}),
+        )),
         Err(e) => error_500(e.to_string()),
     }
 }

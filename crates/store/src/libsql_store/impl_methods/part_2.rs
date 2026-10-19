@@ -192,6 +192,17 @@ macro_rules! store_implementation_1 {
         brain::update_with_vector(&self.conn, capability, eng_inputs, vector).await
     }
 
+    async fn update_brain_capability_if_version(
+        &self,
+        capability: &BrainCapabilityRecord,
+        eng_inputs: &[BrainEngInputRecord],
+        vector: &BrainVectorWrite,
+        expected: Option<&str>,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        brain::update_with_vector_if_version(&self.conn, capability, eng_inputs, vector, expected).await
+    }
+
     async fn search_brain_vectors(
         &self,
         model: &str,

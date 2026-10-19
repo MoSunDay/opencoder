@@ -1,3 +1,5 @@
+mod resources;
+
 use super::model;
 use crate::AppState;
 use anyhow::{Context, Result};
@@ -106,6 +108,9 @@ fn files(root: &Path, name: &str, dag: bool, agent: bool) -> Result<Vec<String>>
                 ));
                 continue;
             }
+            if resources::sidecar(&path)? {
+                continue;
+            }
             // Tools and skill packages accept arbitrary file names. An unknown
             // extension or encoding cannot prove that a resource is unused.
             let mut bytes = Vec::new();
@@ -115,6 +120,14 @@ fn files(root: &Path, name: &str, dag: bool, agent: bool) -> Result<Vec<String>>
             let text = std::str::from_utf8(&bytes)
                 .ok()
                 .filter(|text| !text.contains('\0'));
+            if bytes.len() <= 4 * 1024 * 1024 && text.is_none() {
+                if let Some(values) = resources::values(&path, &bytes)? {
+                    if values.iter().any(|value| matches(value, name, dag, agent)) {
+                        found.push(format!("agent-file:{}", path.strip_prefix(root)?.display()));
+                    }
+                    continue;
+                }
+            }
             if bytes.len() > 4 * 1024 * 1024 || text.is_none() {
                 found.push(format!(
                     "unverified-agent-file:{}",

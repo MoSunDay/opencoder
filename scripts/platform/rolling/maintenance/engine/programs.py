@@ -28,6 +28,10 @@ def stage(settings, bundle, candidate, original, registered, fallback, operation
                 or config['endpoint'] != f"http://127.0.0.1:{record['runtime_port']}"):
             raise ValueError('Runtime registration differs from its release record')
         result[identifier] = stage_one(settings, bundle, candidate, record, fallback)
+        # Check the copied configuration with the actual candidate before
+        # closing admission. The command only displays redacted configuration.
+        operations.output(str(bundle / 'bin/opencoder'), '--workdir',
+                          result[identifier]['workdir'], 'config', 'show')
         from ...manifest import _installer
         expected = _installer.build_info(bundle / 'bin/opencoder-agent')
         image = Path(result[identifier]['rootfs'])
@@ -66,6 +70,10 @@ def stage_one(settings, bundle, candidate, record, fallback):
     image = units.freeze_rootfs(record, source, bundle / 'bin', target=home / 'rootfs', link_source=True)
     config.setdefault('dag', {})['rootfs_dir'] = str(image)
     config['dag'].setdefault('data_dir', str(runtime_data / 'dag/runs'))
+    # These fields belonged to removed execution backends. Only the new
+    # program's private config changes; old configs and resource paths remain.
+    for key in ('ops', 'wasm_dir'):
+        config['dag'].pop(key, None)
     workdir = home / 'workdir'
     config_bytes = (json.dumps(config, indent=2, sort_keys=True) + '\n').encode()
     target = workdir / 'opencoder.json'

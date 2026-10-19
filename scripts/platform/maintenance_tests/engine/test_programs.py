@@ -30,7 +30,8 @@ class RetainedProgramTests(unittest.TestCase):
                 (bundle / 'bin' / name).write_text('new runner')
             workdir = data / 'workdir'
             workdir.mkdir()
-            original = {'dag': {'rootfs_dir': str(image), 'data_dir': str(data / 'saved-runs')},
+            original = {'dag': {'rootfs_dir': str(image), 'data_dir': str(data / 'saved-runs'),
+                                'ops': {'legacy': 'retained'}, 'wasm_dir': str(data / 'old-wasm')},
                         'llm': {'model': 'retained-model'}}
             (workdir / 'opencoder.json').write_text(json.dumps(original))
             record = {'id': 'old', 'runtime_data': str(data), 'runtime_unit': 'old.service',
@@ -51,6 +52,8 @@ class RetainedProgramTests(unittest.TestCase):
             config = json.loads((Path(prepared['workdir']) / 'opencoder.json').read_text())
             self.assertEqual(config['llm'], original['llm'])
             self.assertEqual(config['dag']['data_dir'], original['dag']['data_dir'])
+            self.assertNotIn('ops', config['dag'])
+            self.assertNotIn('wasm_dir', config['dag'])
             journal = Journal(settings.state_dir)
             journal.data['releases']['old'] = record
             programs.install(settings, journal, {'old': prepared})

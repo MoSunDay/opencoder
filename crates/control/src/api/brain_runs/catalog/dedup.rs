@@ -1,9 +1,33 @@
 //! Presentation merges do not remove identifiers used by saved plans. Execution
 //! resolution continues to read the complete catalog and immutable snapshots.
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 #[path = "agents.rs"]
 mod agents;
+
+pub(super) async fn select(
+    root: Option<PathBuf>,
+    mut values: Vec<Value>,
+) -> anyhow::Result<(Vec<Value>, Vec<Value>)> {
+    read_resources(root, move || {
+        prepare(&mut values);
+        let selected = collapse(values.clone());
+        (values, selected)
+    })
+    .await
+}
+
+async fn read_resources<T: Send + 'static>(
+    root: Option<PathBuf>,
+    read: impl FnOnce() -> T + Send + 'static,
+) -> anyhow::Result<T> {
+    // Resource content hashing can involve large files. Keep it off the async
+    // workers that also serve admission and health checks, retaining its scope.
+    Ok(tokio::task::spawn_blocking(move || {
+        opencoder_core::agent::scope::with_root_sync(root, read)
+    })
+    .await?)
+}
 
 fn key(value: &Value) -> Option<String> {
     if !value["definition"].is_object() || value.get("unavailable_reason").is_some() {
@@ -87,6 +111,27 @@ pub(super) fn collapse(mut values: Vec<Value>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn slow_resource_reads_yield_to_requests_and_keep_their_root() {
+        let (started, pending) = tokio::sync::oneshot::channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        let root = PathBuf::from("/catalog-resource-test");
+        let expected = root.clone();
+        let task = tokio::spawn(read_resources(Some(root), move || {
+            started
+                .send(opencoder_core::agent::scope::current_root())
+                .unwrap();
+            gate.recv_timeout(std::time::Duration::from_secs(5))
+        }));
+        assert_eq!(pending.await.unwrap(), Some(expected));
+        assert!(opencoder_core::agent::scope::current_root().is_none());
+        // This task must run before the blocking read can finish. An inline
+        // read stalls this single async worker and the gate times out.
+        release.send(()).unwrap();
+        task.await.unwrap().unwrap().unwrap();
+    }
+
     #[test]
     fn authored_descriptions_win_without_losing_alternative_ids_or_contracts() {
         let stored = json!({"id":"registered","kind":"dag","target":"one","version":"stored","definition":{"spec":{}},"input_desc":"specific inputs","required_inputs":["b","a"]});

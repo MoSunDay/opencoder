@@ -66,7 +66,7 @@ class BackupTests(unittest.TestCase):
             connection.close()
             binaries = root / 'binaries'; binaries.mkdir()
             plan = {'data_dir': str(state), 'binary_root': str(binaries)}
-            receipt = {'status': 'deleted', 'kind': 'binary', 'name': 'tool', 'backup': str(backup)}
+            receipt = {'status': 'deleted', 'kind': 'binary', 'name': 'tool', 'backup': str(backup), 'digest': digest(snapshot)}
             self.assertEqual(restore(plan, receipt)['status'], 'restored')
             verify_pool(binaries / 'tool', snapshot)
             self.assertEqual(restore(plan, receipt)['status'], 'restored')
@@ -83,7 +83,7 @@ class BackupTests(unittest.TestCase):
             connection.execute('CREATE TABLE fleet_definitions(kind TEXT,id TEXT,body TEXT,PRIMARY KEY(kind,id))')
             connection.execute("INSERT INTO fleet_definitions VALUES('unrelated','keep','{}')"); connection.commit()
             plan = {'data_dir': str(root)}
-            receipt = {'status': 'deleted', 'kind': 'dag', 'name': 'workflow', 'backup': str(backup)}
+            receipt = {'status': 'deleted', 'kind': 'dag', 'name': 'workflow', 'backup': str(backup), 'digest': digest(snapshot)}
             restore(plan, receipt)
             self.assertEqual(connection.execute("SELECT body FROM fleet_definitions WHERE kind='unrelated'").fetchone()[0], '{}')
             connection.execute("UPDATE fleet_definitions SET body='{}' WHERE kind='dag'"); connection.commit()

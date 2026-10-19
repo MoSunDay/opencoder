@@ -2,7 +2,7 @@ use super::model;
 use crate::AppState;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::path::Path;
+use std::{io::Read, path::Path};
 
 pub(super) async fn find(state: &AppState, name: &str, dag: bool) -> Result<Vec<String>> {
     let mut found = Vec::new();
@@ -44,9 +44,10 @@ pub(super) async fn find(state: &AppState, name: &str, dag: bool) -> Result<Vec<
 }
 
 fn files(root: &Path, name: &str, dag: bool) -> Result<Vec<String>> {
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
+    anyhow::ensure!(
+        std::fs::symlink_metadata(root)?.file_type().is_dir(),
+        "agent resource root is not a directory"
+    );
     let mut pending = vec![root.to_path_buf()];
     let mut found = Vec::new();
     while let Some(directory) = pending.pop() {
@@ -69,24 +70,29 @@ fn files(root: &Path, name: &str, dag: bool) -> Result<Vec<String>> {
                 continue;
             }
             if !meta.is_file() {
-                continue;
-            }
-            let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if !matches!(
-                extension,
-                "" | "json" | "md" | "yaml" | "yml" | "toml" | "py" | "sh" | "mjs" | "js"
-            ) {
-                continue;
-            }
-            if entry.metadata()?.len() > 4 * 1024 * 1024 {
                 found.push(format!(
                     "unverified-agent-file:{}",
                     path.strip_prefix(root)?.display()
                 ));
                 continue;
             }
-            let bytes = std::fs::read(&path)?;
-            if let Ok(text) = std::str::from_utf8(&bytes) {
+            // Tools and skill packages accept arbitrary file names. An unknown
+            // extension or encoding cannot prove that a resource is unused.
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path)?
+                .take(4 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)?;
+            let text = std::str::from_utf8(&bytes)
+                .ok()
+                .filter(|text| !text.contains('\0'));
+            if bytes.len() > 4 * 1024 * 1024 || text.is_none() {
+                found.push(format!(
+                    "unverified-agent-file:{}",
+                    path.strip_prefix(root)?.display()
+                ));
+                continue;
+            }
+            if let Some(text) = text {
                 if model::references(&Value::String(text.into()), name, dag) {
                     found.push(format!("agent-file:{}", path.strip_prefix(root)?.display()));
                 }

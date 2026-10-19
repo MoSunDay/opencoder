@@ -3,6 +3,10 @@ use anyhow::{ensure, Result};
 
 impl Host {
     pub async fn hibernate(&self, id: &str) -> Result<()> {
+        self.hibernate_runtime(id, false).await.map(|_| ())
+    }
+
+    async fn hibernate_runtime(&self, id: &str, automatic: bool) -> Result<bool> {
         let _activation = self.store.request_lock("release", "activation").await?;
         // A long RPC must not let idle collection retain the fleet-wide
         // activation lock. Retry collection after readers release ownership.
@@ -12,6 +16,16 @@ impl Host {
         )
         .await
         .map_err(|_| anyhow::anyhow!("runtime has in-flight requests; retry hibernation"))??;
+        if automatic {
+            let current = self
+                .store
+                .definition("host", "current")
+                .await?
+                .unwrap_or_default();
+            if current["instance"] != self.instance || self.activity.recent(id) {
+                return Ok(false);
+            }
+        }
         let runtime = self.runtime(id).await?;
         ensure!(
             runtime.mode == "retired",
@@ -26,6 +40,9 @@ impl Host {
             inventory.can_hibernate,
             "runtime has live executions, tools or writes"
         );
+        if automatic && self.activity.recent(id) {
+            return Ok(false);
+        }
         self.store
             .put_definition("runtime_sleep", id, &serde_json::to_value(&inventory)?)
             .await?;
@@ -36,7 +53,7 @@ impl Host {
             .status()
             .await?;
         ensure!(status.success(), "runtime unit did not stop cleanly");
-        Ok(())
+        Ok(true)
     }
 
     pub async fn handoff_acknowledged(&self, current: &serde_json::Value) -> Result<bool> {
@@ -73,6 +90,7 @@ impl Host {
         }
         for runtime in self.store.runtimes().await? {
             if runtime.mode != "retired"
+                || self.activity.recent(&runtime.id)
                 || !self.store.runtime_tickets(&runtime.id).await?.is_empty()
                 || self
                     .store
@@ -84,9 +102,10 @@ impl Host {
             }
             match self.inventory(&runtime, false).await {
                 Ok(inventory) if inventory.can_hibernate => {
-                    let result = self.hibernate(&runtime.id).await;
+                    let result = self.hibernate_runtime(&runtime.id, true).await;
                     let status = match result {
-                        Ok(()) => serde_json::json!({"state":"hibernated"}),
+                        Ok(true) => serde_json::json!({"state":"hibernated"}),
+                        Ok(false) => continue,
                         Err(error) => {
                             serde_json::json!({"state":"failed","error":error.to_string()})
                         }

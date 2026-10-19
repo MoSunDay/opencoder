@@ -181,6 +181,7 @@ impl Host {
                     .await;
             }
         }
+        let _activity = self.activity.begin(runtime_id);
         if !matches!(operation, NodeOperation::Admission { .. })
             && self
                 .store

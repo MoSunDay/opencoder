@@ -20,7 +20,7 @@ async fn large_inventory_preserves_owners_across_activation_and_duplicate_ids() 
     register(&store, "old").await;
     register(&store, "new").await;
     store.activate_runtime("old").await.unwrap();
-    let names: Vec<_> = (0..1500).map(|n| format!("execution-{n}")).collect();
+    let names: Vec<_> = (0..20_000).map(|n| format!("execution-{n}")).collect();
     let mut ids: Vec<_> = names.iter().map(String::as_str).collect();
     ids.push(ids[0]);
     store.assign_runtime_inventory("old", &ids).await.unwrap();
@@ -40,16 +40,39 @@ async fn large_inventory_preserves_owners_across_activation_and_duplicate_ids() 
         .unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        1500
+        20_000
     );
     assert_eq!(
         store
-            .owner("execution-1499")
+            .owner("execution-19999")
             .await
             .unwrap()
             .unwrap()
             .runtime_id,
         "old"
+    );
+}
+
+#[tokio::test]
+async fn inventory_owner_lookup_uses_primary_key_search() {
+    let store = FleetStore::open_memory().await.unwrap();
+    let connection = store.db.connect().await.unwrap();
+    let mut rows = connection
+        .query(
+            &format!("EXPLAIN QUERY PLAN {OWNER_LOOKUP}"),
+            [r#"["execution-one","execution-two"]"#],
+        )
+        .await
+        .unwrap();
+    let mut indexed = false;
+    while let Some(row) = rows.next().await.unwrap() {
+        let detail: String = row.get(3).unwrap();
+        assert!(!detail.contains("SCAN runtime_owners"), "{detail}");
+        indexed |= detail.contains("SEARCH owner") && detail.contains("execution_id=?");
+    }
+    assert!(
+        indexed,
+        "inventory lookup must seek the ownership primary key"
     );
 }
 

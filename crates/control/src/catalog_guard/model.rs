@@ -73,7 +73,7 @@ pub(super) fn declares(value: &Value, name: &str, dag: bool) -> bool {
     }
 }
 
-fn uploaded_files_reference(value: &Value, name: &str, dag: bool) -> bool {
+pub(super) fn uploaded_files_reference(value: &Value, name: &str, dag: bool) -> bool {
     use base64::Engine;
     value.as_array().is_some_and(|files| {
         files.iter().any(|file| {

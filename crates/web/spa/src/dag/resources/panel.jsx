@@ -40,7 +40,7 @@ export function BinaryResources() {
     {editor && <BinaryEditor pool={editor.name ? editor : null} onClose={() => setEditor(null)} onSaved={async () => { await reload(); setRevision((value) => value + 1); }} />}
     {selected && <BinaryHistory key={`${selected}:${revision}`} name={selected} onClose={() => setSelected(null)} onChanged={reload} />}
     <Modal open={!!removing} title={`删除二进制资源 · ${removing?.name || ''}`} okText="确认删除资源" cancelText="取消" okButtonProps={{ danger: true }} confirmLoading={busy} onOk={remove} onCancel={() => { if (!busy) setRemoving(null); }}>
-      删除资源及全部版本后，引用它的新任务无法启动。已受理任务的固定副本和执行历史保留。
+      仅能删除没有被工作流、计划、定时任务或执行引用的资源。服务端会再次核对引用；删除全部版本后，执行历史仍保留。
     </Modal>
   </Space>;
 }

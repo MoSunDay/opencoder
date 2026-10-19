@@ -1,4 +1,4 @@
-Commit: 22ad6e74e838cd16c90b75f94283c1d9c2223b8b
+Commit: 33d91d7cd47127fbf15b8d38a1b4a62ac08d9c8e
 
 # agent 模块
 
@@ -33,3 +33,5 @@ Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点，启动前�
 Host 报告计时分别覆盖 report_gate、全部 Runtime 清单汇总和 Brain 帧收集，只记录节点、条数与毫秒值；慢同步不能通过跳过旧 Runtime 清单、改变执行 owner 或缓存未确认的活跃清单来标记就绪。
 
 Host 在创建与能力探测时使用相同的父 Runtime 归属。共享工作区按 `brain_layered.run_id` 查找本机父归属，嵌套 Brain 使用 `layered_request.parent`；普通子执行若父在本机则继承，若父在其他节点则保持该节点的独立选择。探测不保存子执行 owner，已接受执行始终保留原 owner。Worker 继续核对原生父运行与 operation 身份。
+
+历史读取验收使用 [history/retired.py](../../scripts/acceptance/brain/history/retired.py) 固定执行与退役 Runtime。每次读前后核对同一归属和配置，读取后记录真实 PID、启动时间与可执行文件；归属缺失、指向当前 Runtime、读取失败或进程身份不完整都不能通过。观察期间固定这些证据，不能替换历史样本。

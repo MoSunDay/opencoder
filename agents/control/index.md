@@ -1,4 +1,4 @@
-Commit: f6768ad434907a739f0271f52cdc3f9c991a40aa
+Commit: 193485e8252346c03c267321445f9a3d6a654156
 
 # control 模块
 
@@ -75,6 +75,6 @@ TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；�
 
 ## 目录写入与清理
 
-[catalog_guard](../../crates/control/src/catalog_guard/mod.rs) 在资源代理之前检查 DAG、二进制和能力目标写入。发布与删除持有跨进程目录独占锁，引用写入及首次执行冻结持有共享锁；删除检查保存计划、能力、日程、TODO、活动执行、待派发回执、配置与 Agent 文件，读取失败拒绝删除。GET 详情提供 ETag，条件删除在锁内复核。删除标记阻止晚到请求引用已删目标，原名重新创建后可再次使用。独立资源服务仍负责文件与 NFS 生命周期。
+[catalog_guard](../../crates/control/src/catalog_guard/mod.rs) 在资源代理之前检查 DAG、二进制和能力目标写入。发布与删除持有跨进程目录独占锁，引用写入及首次执行冻结持有共享锁；共享锁最多等待 30 秒，超时返回可重试的 503。删除检查保存计划、能力、日程、TODO、活动执行、待派发回执、配置与 Agent 文件，读取失败拒绝删除。GET 详情提供 ETag，条件删除在锁内复核。删除标记阻止晚到请求引用已删目标，原名重新创建后可再次使用。独立资源服务仍负责文件与 NFS 生命周期。
 
 [能力目录投影](../../crates/control/src/api/brain_runs/catalog/dedup.rs) 折叠同目标、同定义与同字段约定的条目；跨名 Agent 还核验实际资源的全部文件、相对路径与执行配置。其他说明及 ID 保留在 `equivalent_sources`；接口仍返回完整目录，`selection_ids` 仅控制新建选项，旧计划编辑和执行解析保留原 ID。

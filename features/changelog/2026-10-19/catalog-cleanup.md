@@ -9,6 +9,7 @@ Commit: f6768ad434907a739f0271f52cdc3f9c991a40aa
 - 删除与引用写入共用跨进程锁，引用不完整或内容变化时拒绝；历史执行和鉴权数据不变。
 - 清理默认保留最近 7 天创建、更新或受理执行的独立条目，仅处理定义与二进制池，不配置自动调度。备份校验全部版本及字节摘要，恢复只处理指定对象，不回滚数据库。
 - 发布探针复用已有相同字节的固定版本，避免每次演练生成相同资源。
+- 任务受理和引用写入可等待目录修改最多 30 秒，超时返回可重试的 503；清理请求之间留出读取机会，避免连续删除让任务受理超时。
 
 ## 验证映射
 
@@ -16,6 +17,7 @@ Commit: f6768ad434907a739f0271f52cdc3f9c991a40aa
 | --- | --- |
 | 幂等、异名冲突、跨 Server 并发 | `catalog_guard::definitions`、`catalog_guard::binaries` |
 | 保存版本、活动执行、日程、文件与晚到引用保护 | `catalog_guard::references` |
+| 慢目录修改期间的受理与引用写入 | `admission_and_reference_writes_wait_through_a_slow_catalog_mutation` |
 | 目录折叠及实际 Agent 资源约束 | `catalog_guard::library`、Control `catalog` 单元测试 |
 | 独立资源代理及原始下载 | `resource_service_native`、`dag_binary_scope` |
 | 能力绑定、DAG 定义及定时提交兼容 | e2e `brain_api`、`teams_dag_defs::dag`、`schedule_api` |

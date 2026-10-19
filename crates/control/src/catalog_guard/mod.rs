@@ -15,14 +15,21 @@ use axum::{
 use opencoder_core::fleet::RpcReply;
 use std::{fs::File, sync::Arc, time::Duration};
 
-pub(crate) async fn read_lock(state: &AppState) -> anyhow::Result<File> {
-    tokio::time::timeout(
-        Duration::from_secs(5),
+pub(crate) async fn read_lock(state: &AppState) -> Result<File, RpcReply> {
+    // Admission can wait for a catalog mutation within the release continuity
+    // budget. A busy catalog is a retryable service condition, not an internal error.
+    match tokio::time::timeout(
+        Duration::from_secs(30),
         state
             .fleet
             .shared_request_lock("catalog-maintenance", "registry"),
     )
-    .await?
+    .await
+    {
+        Ok(Ok(lock)) => Ok(lock),
+        Ok(Err(error)) => Err(RpcReply::error(500, error.to_string())),
+        Err(_) => Err(RpcReply::error(503, "目录正在更新，请稍后重试")),
+    }
 }
 
 fn guarded(path: &str) -> bool {
@@ -80,24 +87,22 @@ pub(crate) async fn protect(
         return next.run(request).await;
     }
     let lock = if exclusive(request.method().as_str(), request.uri().path()) {
-        tokio::time::timeout(
+        match tokio::time::timeout(
             Duration::from_secs(5),
             state.fleet.request_lock("catalog-maintenance", "registry"),
         )
         .await
+        {
+            Ok(Ok(lock)) => Ok(lock),
+            Ok(Err(error)) => Err(RpcReply::error(500, error.to_string())),
+            Err(_) => Err(RpcReply::error(503, "目录正在更新，请稍后重试")),
+        }
     } else {
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            state
-                .fleet
-                .shared_request_lock("catalog-maintenance", "registry"),
-        )
-        .await
+        read_lock(&state).await
     };
     let _lock = match lock {
-        Ok(Ok(lock)) => lock,
-        Ok(Err(error)) => return response(RpcReply::error(500, error.to_string())),
-        Err(_) => return response(RpcReply::error(503, "目录正在更新，请稍后重试")),
+        Ok(lock) => lock,
+        Err(reply) => return response(reply),
     };
     // Keep the guard until the owner acknowledges its atomic mutation.
     match retired::validate(&state, &mut request).await {

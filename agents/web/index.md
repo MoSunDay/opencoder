@@ -1,4 +1,4 @@
-Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
+Commit: f0590b1bbb4cb1fd82f880c885ef3b9290558bf4
 
 # web 模块
 
@@ -75,7 +75,7 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [UI 验收入口](../../scripts/acceptance/ui/main.js) 与 [范围表](../../scripts/acceptance/ui/scope.js) — 按 [规则 05](../../rules/05-ui-acceptance.md) 选择受影响页面和行为；全站验收仅在用户明确要求时执行。
 - [远端会话验收](../../scripts/acceptance/conversations/README.md) 共用节点选择、会话身份核对与回复等待，验证两种模式的只读工具调用、续聊和重开。
 - 验收 `--resume` 只复用覆盖范围及二进制摘要相同的成功记录，失败保留日志并重跑，SPA 漂移检查始终执行；`--brain-test` 可使用同批构建的测试可执行文件，其原生镜像版本检查仍然执行。
-- [responsive/services.js](../../scripts/acceptance/ui/responsive/services.js) 直接绑定系统分配的空闲端口并返回实际端口，避免先查询再占用的竞争；显式端口冲突返回启动错误。
+- [responsive/services.js](../../scripts/acceptance/ui/responsive/services.js) 直接绑定系统分配的空闲端口并返回实际端口，避免先查询再占用的竞争；显式端口冲突返回启动错误。 [响应式验收夹具](../../scripts/acceptance/spa_responsive_fixtures.js) 包含页面启动时的 `/api/auth/status` 读取；未知 API 请求仍使验收失败。
 - [大脑运行画布验收](../../scripts/acceptance/brain/ui/run-canvas.js) — 只读打开已有运行，在四种屏宽核对画布尺寸、全屏和每层实际执行详情；可用本地候选页面代理真实 API。
 - [大脑编辑画布验收](../../scripts/acceptance/brain/ui/editor.js) — 对实际 SPA 产物执行键盘及批量删除、取消、拖动、连续修改、关闭重开和新版本保存，核验计划层级与位置；使用临时 HTTP 数据，不操作已有计划。
 - [项目能力对接验收](../../scripts/acceptance/project/README.md) 的 `capabilities/main.js` 覆盖浏览器创建项目、子项和 TODO，连接 Agent、Operator、DAG、Brain，核验同一执行详情、实时结果读取、完整结果绑定与看板进度；隔离环境只替换模型传输，正式环境模式保留具名数据和版本回执。

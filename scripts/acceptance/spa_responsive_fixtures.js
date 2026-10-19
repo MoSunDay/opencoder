@@ -71,6 +71,7 @@ const ABSENT = ['/api/models', '/api/project/todos/todo-0/runs',
   '/api/sessions/ses-1/questions', '/api/sessions/ses-1/inputs'];
 
 const FIXTURES = {
+  '/api/auth/status': { enabled: true },
   ...ONTOLOGY_FIXTURES,
   '/api/health': { ok: true, version: '0.0.0-fixture' },
   // main.jsx re-probes /api/me per token; `name` unlocks IdentityBadge and

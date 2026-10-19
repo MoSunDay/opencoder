@@ -7,6 +7,27 @@ use serde_json::{json, Value};
 pub(super) const DYNAMIC_DAG: &str = "dag_dynamic_v1";
 const MILESTONE_BRAIN: &str = "brain_scheduler_v7";
 
+pub(super) fn probe_input(request: &CreateExecution) -> Value {
+    if request.kind == ExecutionKind::Brain {
+        return request.input.clone();
+    }
+    let mut input = request.input["_brain"]["action"].clone();
+    if !input.is_object() {
+        input = json!({});
+    }
+    // The Host must probe the same runtime that will accept this child.
+    // Keep legacy manifest negotiation, without forwarding prompts or files.
+    for key in ["brain_layered", "brain_workspace"] {
+        if let Some(value) = request.input.get(key) {
+            input[key] = value.clone();
+        }
+    }
+    if let Some(parent) = request.input["_brain"].get("parent") {
+        input["_brain"] = json!({"parent": parent});
+    }
+    input
+}
+
 pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) -> Vec<&'static str> {
     let mut features = Vec::new();
     let plan = &request.input["layered_request"]["plan"];
@@ -138,6 +159,37 @@ pub(super) fn operation_requires_dynamic(operation: &NodeOperation) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probes_keep_parent_affinity_and_legacy_manifests_without_task_content() {
+        let mut request = CreateExecution {
+            id: "operator-child".into(),
+            kind: ExecutionKind::Operator,
+            target: None,
+            node_id: None,
+            input: json!({"prompt":"private task", "brain_workspace":true,
+                "brain_layered":{"run_id":"brain-parent","activation":2},
+                "_brain":{"action":{"agent_manifests":{"agent":"digest"}}}}),
+        };
+        assert_eq!(
+            probe_input(&request),
+            json!({"brain_workspace":true,
+            "brain_layered":{"run_id":"brain-parent","activation":2},
+            "agent_manifests":{"agent":"digest"}})
+        );
+        request.input = json!({"prompt":"ordinary"});
+        assert_eq!(probe_input(&request), json!({}));
+        request.kind = ExecutionKind::Brain;
+        request.input = json!({"layered_request":{"parent":{"run_id":"brain-parent"}}});
+        assert_eq!(probe_input(&request), request.input);
+        request.kind = ExecutionKind::Agent;
+        request.input =
+            json!({"_brain":{"parent":{"run_id":"legacy"},"action":{"private_files":true}}});
+        assert_eq!(
+            probe_input(&request),
+            json!({"_brain":{"parent":{"run_id":"legacy"}},"private_files":true})
+        );
+    }
 
     #[test]
     fn old_positive_probes_do_not_advertise_new_protocol_operations() {

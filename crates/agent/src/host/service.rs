@@ -259,16 +259,12 @@ impl Host {
             }
         }
         let runtime = if let NodeOperation::Create { assignment } = &operation {
-            let parent = assignment.request.input["_brain"]["parent"]["run_id"].as_str();
-            let inherited = match parent {
-                Some(id) => Some(
-                    self.store
-                        .owner(id)
+            let inherited = match self.store.owner(&assignment.index.id).await? {
+                Some(owner) => Some(owner.runtime_id),
+                None => {
+                    self.inherited_runtime(assignment.request.kind, &assignment.request.input)
                         .await?
-                        .context("parent runtime not found")?
-                        .runtime_id,
-                ),
-                None => None,
+                }
             };
             self.store
                 .assign_runtime(&assignment.index.id, inherited.as_deref())
@@ -276,8 +272,18 @@ impl Host {
         } else if let Some(id) = execution_id(&operation) {
             match self.store.owner(id).await? {
                 Some(owner) => owner.runtime_id,
-                None if matches!(&operation, NodeOperation::Brain { action, .. } if action == "capability_probe") => {
-                    self.active_runtime().await?
+                None if matches!(&operation, NodeOperation::Brain { action, .. } if action == "capability_probe") =>
+                {
+                    let NodeOperation::Brain {
+                        execution, input, ..
+                    } = &operation
+                    else {
+                        unreachable!()
+                    };
+                    match self.inherited_runtime(execution.kind, input).await? {
+                        Some(runtime) => runtime,
+                        None => self.active_runtime().await?,
+                    }
                 }
                 None => {
                     return Ok(RpcReply::error(

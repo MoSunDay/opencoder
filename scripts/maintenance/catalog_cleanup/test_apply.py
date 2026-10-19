@@ -19,7 +19,7 @@ class ApplyTests(unittest.TestCase):
         class Client:
             def call(self, method, path, etag=None):
                 if path == '/api/health':
-                    return 200, {'catalog_guard': 1}, None
+                    return 200, {'catalog_guard': 2}, None
                 name = path.rsplit('/', 1)[-1]
                 if method == 'DELETE':
                     attempts.append((name, etag))
@@ -47,10 +47,10 @@ class ApplyTests(unittest.TestCase):
     def test_old_server_is_refused_before_reading_or_deleting_data(self):
         class Client:
             def call(self, *args, **kwargs):
-                return 200, {}, None
+                return 200, {'catalog_guard': 1}, None
         with tempfile.TemporaryDirectory() as directory, patch(
                 'scripts.maintenance.catalog_cleanup.apply.inventory') as scan:
-            with self.assertRaisesRegex(ValueError, 'guarded server'):
+            with self.assertRaisesRegex(ValueError, 'catalog guard version 2'):
                 apply({}, directory, Client())
             scan.assert_not_called()
 
@@ -63,7 +63,7 @@ class ApplyTests(unittest.TestCase):
             deleted = False
             def call(self, method, path, etag=None):
                 if path == '/api/health':
-                    return 200, {'catalog_guard': 1}, None
+                    return 200, {'catalog_guard': 2}, None
                 if method == 'DELETE':
                     self.deleted = True
                     raise KeyboardInterrupt()

@@ -13,7 +13,7 @@ def apply(plan, directory, client):
     directory = Path(directory)
     require(directory.is_dir(), 'evidence directory must exist')
     status, health, _ = client.call('GET', '/api/health')
-    require(status == 200 and health.get('catalog_guard') == 1, 'guarded server is required before cleanup')
+    require(status == 200 and health.get('catalog_guard') == 2, 'catalog guard version 2 is required before cleanup')
     receipts_path = directory / 'receipts.json'
     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []
     # Readback recovery is independent of a new inventory. An unrelated unreadable

@@ -6,6 +6,10 @@ use serde_json::{json, Value};
 async fn every_legal_tool_extension_protects_referenced_pools_and_definitions() {
     let h = Harness::new().await;
     assert_eq!(
+        h.call("GET", "/api/health", Value::Null).await.1["catalog_guard"],
+        2
+    );
+    assert_eq!(
         h.call("POST", "/api/dag/binaries", binary("tool", "bytes"))
             .await
             .0,

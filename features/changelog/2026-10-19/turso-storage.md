@@ -8,6 +8,8 @@ Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异
 
 开发和测试构建单独优化 Turso 的 Rust 查询引擎，避免未优化的数据库执行耗尽应用心跳时限；应用自身仍保留调试构建设置。
 
+Fleet 从 JSON 清单关联历史任务时，显式将 ID 转为文本，让 Turso 使用主键索引，避免逐条扫描全部历史归属。归属冲突校验与批量写入仍在原有连接和事务内执行；已有归属保持只读，新增归属仍原子提交。
+
 发布数据格式升级到 11，并增加存储引擎标记，拒绝两个引擎同时打开同一份在线数据库。本机维护先关闭接收并等待任务完成，再停止写入、备份和切换程序；所有登记的历史 Runtime 保留 ID、数据、执行归属与资源快照，程序和镜像使用独立关联。开放写入前仅回退程序和路由，开放后使用修正版发布；引擎切换流程不恢复旧数据库。
 
 历史 Runtime 中已废弃的 DAG 配置字段只从新程序的配置副本中移除，原配置及资源保留。关闭接收前，候选程序逐个检查这些配置副本，避免历史 Runtime 唤醒时才发现配置不兼容。
@@ -31,6 +33,7 @@ Store、项目存储、Fleet、TsRegistry 和 Ontology 改用 Turso 0.8.3 的异
 | 现有 schema 的索引补齐及分页、历史保留 | `existing_schema_reopens_with_activity_pagination_and_unchanged_history`、`list_activity_order` |
 | 单项延迟与混合吞吐 | `store_perf`、`examples/storage_mixed.rs` |
 | 大批量节点上报期间的心跳与取消回复 | `slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply` |
+| 历史归属索引查找及两万条清单校验 | `inventory_owner_lookup_uses_primary_key_search`、`large_inventory_preserves_owners_across_activation_and_duplicate_ids` |
 | Ontology 事务与查询 | Ontology 单元测试及存储、实体查找、图查询集成测试 |
 | 本机切换与程序回退保留数据库 | `maintenance_tests/engine/test_engine.py` |
 | 历史 Runtime 程序关联保留旧镜像与配置 | `maintenance_tests/engine/test_programs.py` |

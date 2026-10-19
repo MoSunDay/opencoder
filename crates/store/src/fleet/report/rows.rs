@@ -9,7 +9,7 @@ pub(super) async fn apply(conn: &Connection, encoded: &str) -> Result<()> {
     let mut conflicts = conn
         .query(
             "SELECT old.id FROM json_each(?1) AS incoming
-             JOIN execution_index AS old ON old.id=json_extract(incoming.value,'$.id')
+             JOIN execution_index AS old ON old.id=CAST(json_extract(incoming.value,'$.id') AS TEXT)
              WHERE old.created_at<>json_extract(incoming.value,'$.created_at')
                 OR old.kind<>json_extract(incoming.value,'$.kind')
                 OR old.node_id<>json_extract(incoming.value,'$.node_id')
@@ -23,7 +23,7 @@ pub(super) async fn apply(conn: &Connection, encoded: &str) -> Result<()> {
     drop(conflicts);
     let mut conflicts = conn.query(
         "SELECT a.id FROM json_each(?1) AS incoming
-         JOIN execution_assignments AS a ON a.id=json_extract(incoming.value,'$.id')
+         JOIN execution_assignments AS a ON a.id=CAST(json_extract(incoming.value,'$.id') AS TEXT)
          WHERE json_extract(a.assignment,'$.index.created_at')<>json_extract(incoming.value,'$.created_at')
             OR json_extract(a.assignment,'$.index.kind')<>json_extract(incoming.value,'$.kind')
             OR json_extract(a.assignment,'$.index.node_id')<>json_extract(incoming.value,'$.node_id')

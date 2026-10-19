@@ -25,3 +25,7 @@ Commit: 42456123489c6fbb5f108a575e249d48de59d5eb
 
 - [Ontology 能力](../../features/ontology/index.md)
 - [正文根绑定测试](../../crates/ontology/tests/storage_root.rs)、[HTTP 存储测试](../../crates/ontology/tests/storage.rs)、[图谱与权限测试](../../crates/ontology/tests/graph.rs)、[控制面与 NFS 测试](../../crates/control/tests/ontology.rs)
+
+## 实体查询范围
+
+结构化属性与文本版本按环境、实体 ID 使用已有索引读取；文本版本继续按属性筛选并倒序返回。普通实体加入目录只检查自身归属，目录实体仍检查父级链和环。对应回归见 `crates/ontology/tests/entity_lookup.rs`。

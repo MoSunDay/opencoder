@@ -234,7 +234,7 @@ export function ExecutionView({ executionRef, summary, onNotice, mode = 'full', 
   return <div className={`execution-view-${mode}`}>
     {error && <Alert type="error" showIcon title={error} action={<Button aria-label="重试" onClick={load}>重试</Button>} />}
     {!detail && !error && <Spin />}
-    {execution && <Descriptions size="small" column={presentation === 'brain' ? 2 : 3} items={[
+    {execution && <Descriptions size="small" column={presentation === 'brain' ? { xs: 1, sm: 2 } : 3} items={[
       { key: 'node', label: '所属节点', children: execution.node_id },
       { key: 'kind', label: '类型', children: KIND_LABELS[kind] || kind },
       ...(presentation === 'brain' ? [] : [{ key: 'harness', label: 'Harness', children: detail?.session?.harness || detail?.harness || detail?.request?.input?.harness || 'opencoder' }]),

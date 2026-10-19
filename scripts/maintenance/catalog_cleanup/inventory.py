@@ -5,6 +5,7 @@ import json
 import sqlite3
 import time
 from .model import mentions, stamp, select, dag_key, pool_key, ReferenceNames
+from .files import resource_texts
 
 
 def connection(path):
@@ -67,18 +68,8 @@ def inventory(data_dir, binary_root, agents_root, config_path, retention_days=7)
     for row in store.execute('SELECT id,capability_id,executor_ref,executor_spec,plan_md,draft FROM project_todos'):
         scan(list(row[1:]), 'todo:' + row[0])
     scan(json.loads(Path(config_path).read_text()), 'server-config')
-    for path in agents_root.rglob('*'):
-        if path.is_symlink():
-            raise ValueError('unverified agent link: ' + str(path))
-        if not path.is_file() or path.suffix not in ('', '.json', '.md', '.yaml', '.yml', '.toml', '.py', '.sh', '.mjs', '.js'):
-            continue
-        if path.stat().st_size > 4 * 1024 * 1024:
-            raise ValueError('unverified agent file: ' + str(path))
-        try:
-            content = path.read_text()
-        except UnicodeDecodeError:
-            continue
-        scan(content, 'agent-file:' + str(path.relative_to(agents_root)))
+    for path, content in resource_texts(agents_root):
+        scan(content, 'agent-file:' + str(path))
     dags, retained_dags = select(definitions, dag_refs, dag_use, dag_success, now, retention_days, dag_key)
     binaries, retained_binaries = select(pools, pool_refs, pool_use, pool_success, now, retention_days, pool_key)
     return {'schema': 1, 'created_at': now, 'retention_days': retention_days,

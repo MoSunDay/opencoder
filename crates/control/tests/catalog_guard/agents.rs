@@ -243,3 +243,38 @@ async fn agent_file_writer_lock_is_held_through_reference_validation() {
     drop(held);
     assert_eq!(delete.await.unwrap().0, 409);
 }
+
+#[tokio::test]
+async fn agent_card_pool_links_do_not_block_card_removal_but_unknown_dependencies_do() {
+    let h = Harness::new().await;
+    create(&h, "sample").await;
+    create(&h, "consumer").await;
+    assert_eq!(
+        h.call(
+            "PUT",
+            "/api/agents/consumer",
+            json!({"current":{"prompt":"sample"}})
+        )
+        .await
+        .0,
+        200
+    );
+    let metadata = h.dir.path().join("agents/consumer/meta.json");
+    let mut value: Value = serde_json::from_slice(&std::fs::read(&metadata).unwrap()).unwrap();
+    value["future_dependency"] = json!("agent-sample");
+    std::fs::write(&metadata, value.to_string()).unwrap();
+    assert_eq!(
+        h.call("DELETE", "/api/agents/sample", Value::Null).await.0,
+        409
+    );
+    value.as_object_mut().unwrap().remove("future_dependency");
+    std::fs::write(&metadata, value.to_string()).unwrap();
+    let removed = h.call("DELETE", "/api/agents/sample", Value::Null).await;
+    assert_eq!(removed.0, 200, "{}", removed.1);
+    assert_eq!(
+        h.call("GET", "/api/agents/consumer/meta", Value::Null)
+            .await
+            .1["meta"]["current"]["prompt"],
+        "sample"
+    );
+}

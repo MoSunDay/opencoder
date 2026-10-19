@@ -82,3 +82,5 @@ TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；�
 Agent 卡片删除由 [catalog_guard/agents.rs](../../crates/control/src/catalog_guard/agents.rs) 处理：持有目录独占锁与资源写锁，检查保存版本、绑定、日程、TODO、活动任务、配置及资源文件后才删除。`GET /api/agents/:name/meta` 返回 ETag；DELETE 可带 `If-Match`，不匹配返回 412，有引用返回 409。资源读取与删除在阻塞线程执行，锁保留到删除完成。移除标记阻止晚到请求引用被删 Agent，原名重建后重新允许。健康接口新增 `agent_delete_guard: 1`，保留 `catalog_guard: 2` 供既有工具使用。
 
 所有目录引用检查与资源 API 使用同一有效 Agent 根目录。没有 `agents_dir` 配置时，继续解析运行作用域、进程覆盖、`OPENCODER_AGENTS_DIR` 或默认目录。在进入阻塞线程前固定解析结果；默认目录缺失、不是目录或文件无法确认时也拒绝删除，不能跳过检查。
+
+Agent 卡片的已知元数据字段只描述自身、共享资源池和执行配置，不作为其他 Agent 的依赖；未识别字段继续检查，资源文件正文仍按完整引用判断。

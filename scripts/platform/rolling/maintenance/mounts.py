@@ -71,16 +71,19 @@ def install(settings, plans, operations):
         unit_name = name(path)
         content = unit(plan)
         destination = settings.systemd_dir / unit_name
-        # Replace native mounts within the stopped window. Existing Agent
-        # mounts keep their handles and are intentionally outside this list.
+        # Permanent storage can expose the same NFS export through a bind
+        # mount. Preserve compatible live mounts and their persistence units.
         if operations.output('systemctl', 'show', unit_name, '-p', 'ActiveState', '--value').strip() == 'active':
-            if destination.exists() and destination.read_text() == content:
-                from .preflight import mount
-                actual = mount(path, operations)
-                if f"port={plan['port']}" not in actual['options'].split(','):
-                    raise ValueError('retained native resource mount changed port')
-                continue
-            operations.run('systemctl', 'stop', unit_name)
+            rows = mounted(plan['path'], operations)
+            if not rows:
+                raise ValueError('active native resource mount is missing')
+            validate(plan, rows)
+            expected = {'ro', 'vers=3', 'proto=tcp', f"mountport={plan['port']}",
+                        'nolock', 'soft', 'retrans=1', 'timeo=50', 'lookupcache=none',
+                        'acregmin=0', 'acregmax=0', 'acdirmin=0', 'acdirmax=0'}
+            if any(not expected.issubset(row['options'].split(',')) for row in rows):
+                raise ValueError('retained native resource mount has incompatible options')
+            continue
         # A failed mount job can leave a kernel mount behind. Do not trust
         # ActiveState alone or stack a new export above an orphaned mount.
         clear(plan, operations)

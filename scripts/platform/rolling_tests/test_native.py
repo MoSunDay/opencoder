@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import json
 import os
@@ -5,6 +6,7 @@ from pathlib import Path
 import sys
 import unittest
 import tempfile
+from unittest.mock import patch
 from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.io import HttpFailure
@@ -13,6 +15,36 @@ from rolling.units import service, freeze_rootfs
 
 
 class PublisherTests(unittest.TestCase):
+    def test_retained_image_copies_across_mounts_and_preserves_internal_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'resource').write_bytes(b'frozen resource')
+            os.link(source / 'resource', source / 'same-resource')
+            link = os.link
+            def cross_mount(src, dst):
+                if Path(src).parent == source:
+                    raise OSError(errno.EXDEV, 'different mounts')
+                return link(src, dst)
+            with patch('rolling.units.os.link', side_effect=cross_mount):
+                image = freeze_rootfs({'runtime_data': str(root / 'runtime')}, source, link_source=True)
+            self.assertEqual((image / 'resource').read_bytes(), b'frozen resource')
+            self.assertEqual((image / 'resource').stat().st_ino, (image / 'same-resource').stat().st_ino)
+            self.assertNotEqual((image / 'resource').stat().st_ino, (source / 'resource').stat().st_ino)
+            (image / 'resource').write_bytes(b'private copy')
+            self.assertEqual((source / 'resource').read_bytes(), b'frozen resource')
+
+    def test_retained_image_does_not_hide_link_permission_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'resource').write_bytes(b'frozen resource')
+            with patch('rolling.units.os.link', side_effect=PermissionError(errno.EACCES, 'denied')):
+                with self.assertRaisesRegex(Exception, 'denied'):
+                    freeze_rootfs({'runtime_data': str(root / 'runtime')}, source, link_source=True)
+
     def test_managed_startup_image_pins_platform_cli_and_does_not_change_legacy_image(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

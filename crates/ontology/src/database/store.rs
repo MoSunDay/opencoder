@@ -42,10 +42,10 @@ impl Store {
         env: i64,
         entity: Uuid,
     ) -> Result<Vec<Value>, AppError> {
-        let mut rows = self.connection.query(
-            &format!("SELECT body FROM {table} WHERE env_num=?1 AND json_extract(body,'$.entity_id')=?2 ORDER BY id"),
-            params![env, entity.to_string()],
-        ).await?;
+        let mut rows = self
+            .connection
+            .query(&entity_values_sql(table), params![env, entity.to_string()])
+            .await?;
         let mut items = Vec::new();
         while let Some(row) = rows.next().await? {
             items.push(decode(&row.get::<String>(0)?)?);
@@ -167,5 +167,38 @@ pub(super) fn name(value: &str) -> Result<String, AppError> {
         Err(AppError::invalid("name is required"))
     } else {
         Ok(value.trim().into())
+    }
+}
+
+fn entity_values_sql(table: &str) -> String {
+    format!("SELECT body FROM {table} INDEXED BY {table}_entity_id WHERE env_num=?1 AND json_extract(body,'$.entity_id')=?2 ORDER BY id")
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn entity_value_queries_use_the_entity_indexes_without_statistics() {
+        let temp = tempfile::tempdir().unwrap();
+        let database =
+            crate::database::Database::open(&temp.path().join("db"), &temp.path().join("files"))
+                .await
+                .unwrap();
+        let store = database.store().await;
+        for table in ["structured_values", "text_revisions"] {
+            let mut rows = store
+                .connection
+                .query(
+                    &format!("EXPLAIN QUERY PLAN {}", super::entity_values_sql(table)),
+                    libsql::params![1, uuid::Uuid::new_v4().to_string()],
+                )
+                .await
+                .unwrap();
+            let mut plan = String::new();
+            while let Some(row) = rows.next().await.unwrap() {
+                plan.push_str(&row.get::<String>(3).unwrap());
+            }
+            assert!(plan.contains(&format!("{table}_entity_id")), "{plan}");
+            assert!(plan.contains("<expr>="), "{plan}");
+        }
     }
 }

@@ -17,6 +17,22 @@ from rolling.state import write
 
 
 class BackupTreeTests(unittest.TestCase):
+    def test_directory_restore_preserves_existing_root_and_nested_inodes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target = root / 'saved', root / 'live'
+            for path in (source, target):
+                (path / 'nested').mkdir(parents=True)
+            (source / 'nested/program').write_bytes(b'restored program')
+            (source / 'relative-link').symlink_to('nested/program')
+            (target / 'nested/program').write_bytes(b'candidate program')
+            (target / 'obsolete').write_bytes(b'candidate only')
+            identities = [path.stat().st_ino for path in (target, target / 'nested')]
+            restore.replace(source, target)
+            self.assertEqual([path.stat().st_ino for path in (target, target / 'nested')], identities)
+            self.assertEqual(tree.inventory(target), tree.inventory(source))
+            self.assertFalse((target / 'obsolete').exists())
+
     @unittest.skipUnless(os.geteuid() == 0, 'device snapshots require root')
     def test_devices_and_pipes_copy_restore_and_verify_without_reading_streams(self):
         with tempfile.TemporaryDirectory() as directory:

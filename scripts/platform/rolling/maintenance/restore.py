@@ -32,6 +32,22 @@ def prior_controller(settings, release_id, compatible_manifest=None):
 
 
 def replace(source, target):
+    if (source.is_dir() and not source.is_symlink()
+            and target.is_dir() and not target.is_symlink()):
+        # A program directory can be a permanent bind mount. Restore its
+        # contents in place instead of deleting the mounted directory inode.
+        for child in target.iterdir():
+            saved = source / child.name
+            if not saved.exists() and not saved.is_symlink():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        for child in source.iterdir():
+            replace(child, target / child.name)
+        shutil.copystat(source, target, follow_symlinks=False)
+        shutil.chown(target, user=source.stat().st_uid, group=source.stat().st_gid)
+        return
     if target.is_symlink() or (target.exists() and not target.is_dir()):
         target.unlink()
     elif target.exists():

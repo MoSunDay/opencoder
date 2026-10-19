@@ -1,6 +1,14 @@
 const { chromium } = require('../../../crates/web/spa/node_modules/playwright-core');
 const fs = require('fs');
 const path = require('path');
+async function closeDrawers(page) {
+  while (await page.locator('.ant-drawer-open').count()) {
+    const drawer = await page.locator('.ant-drawer-open').last().elementHandle();
+    await (await drawer.$('.ant-drawer-close')).click();
+    await page.waitForFunction((element) => !element.isConnected || !element.classList.contains('ant-drawer-open'), drawer);
+    await drawer.dispose();
+  }
+}
 async function projectPage(page) {
   await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
   await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).waitFor();
@@ -41,25 +49,26 @@ async function createHierarchy(page) {
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
   await page.getByPlaceholder('一句话标题').fill('Another project');
   await save('/api/project/goals', /保\s*存/);
-  await page.getByRole('tab', { name: '专项', exact: true }).click();
-  await page.getByRole('button', { name: '新建专项', exact: true }).click();
+  await page.getByRole('tab', { name: '子项', exact: true }).click();
+  await page.getByRole('button', { name: '新建子项', exact: true }).click();
   await page.getByRole('combobox', { name: 'goal_id' }).click();
   await page.locator('.ant-select-item-option-content').getByText('Project replay acceptance', { exact: true }).click();
   await page.getByPlaceholder('一句话标题').fill('Project initiative');
   const initiative = await save('/api/project/initiatives', /保\s*存/);
   await page.getByPlaceholder('一句话标题').waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: '新建专项', exact: true }).click();
+  await page.getByRole('button', { name: '新建子项', exact: true }).click();
   await page.getByPlaceholder('一句话标题').fill('Standalone initiative');
   const standaloneInitiative = await save('/api/project/initiatives', /保\s*存/);
   await page.getByRole('tab', { name: 'TODO', exact: true }).click();
   async function todo(title, draft, groupId, capability) {
+    await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: 'TODO', exact: true }).click();
     await page.getByRole('button', { name: '新建 TODO', exact: true }).click();
     const drawer = page.locator('.ant-drawer:visible').last();
     await drawer.locator('input#title').fill(title);
     await drawer.locator('textarea#draft').fill(draft);
     if (groupId) {
       await drawer.getByRole('tab', { name: '设置', exact: true }).click();
-      await drawer.getByRole('combobox', { name: '所属专项' }).click();
+      await drawer.getByRole('combobox', { name: '所属子项' }).click();
       const label = groupId === initiative.id ? 'Project initiative' : 'Standalone initiative';
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: label }).click();
     }
@@ -74,7 +83,7 @@ async function createHierarchy(page) {
       await detail.getByRole('button', { name: '保存 TODO' }).click();
       if (!(await updated).ok()) throw new Error('Failed to save TODO capability');
     }
-    await page.locator('.ant-drawer-close').click();
+    await closeDrawers(page);
     await page.getByText(`TODO · ${title}`, { exact: true }).waitFor({ state: 'hidden' });
     return created;
   }
@@ -111,7 +120,8 @@ async function verifyWorkbench(page, root, executionId) {
   fs.writeFileSync(path.join(root, 'workbench-browser.json'), JSON.stringify({ linked_execution_id: executionId, detail_opened: true }, null, 2));
 }
 async function launchFromTodo(page, todoTitle, agent) {
-  await page.locator('.ant-drawer-close').click();
+  await closeDrawers(page);
+  await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: 'TODO', exact: true }).click();
   await page.getByRole('button', { name: todoTitle, exact: true }).click();
   await page.getByRole('tab', { name: '执行', exact: true }).click();
   if (agent) {

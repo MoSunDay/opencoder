@@ -11,6 +11,8 @@ mod forwarding;
 mod hibernation;
 #[path = "tests/maintenance.rs"]
 mod maintenance;
+#[path = "tests/parent_affinity.rs"]
+mod parent_affinity;
 #[path = "tests/read_reports.rs"]
 mod read_reports;
 #[path = "tests/result_upgrade.rs"]

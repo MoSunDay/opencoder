@@ -1,4 +1,4 @@
-Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
+Commit: 00f0d5d3036841c6bac43069c4e08d8c8288fe38
 
 # Agent 调度平台
 
@@ -108,3 +108,5 @@ Server/Node 调度、DAG 定义管理、执行查看与平滑发布；细节以�
 - [agents/worker](../../agents/worker/index.md)、[agents/node](../../agents/node/index.md) — 节点执行与出站连接
 
 取消执行会先保存停止意图与相关重跑状态，再向原归属 Runtime 的进程发出信号。这两个持久步骤共用一次 journal 锁，不在已保存取消后重新排队；慢请求记录锁等待、落盘和信号阶段耗时，日志不包含用户输入或凭据。取消回执与最终进程、容量清理是不同阶段。
+
+共享工作区 Brain 在平滑发布后继续使用原 Runtime 执行后续子任务；能力探测与创建采用相同归属。原有执行不会因新活动版本改变位置，普通跨节点子任务仍按冻结的选点约束运行。

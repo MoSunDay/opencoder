@@ -1,4 +1,4 @@
-import { getState } from '../store.js';
+import { getState, urlFor } from '../store.js';
 
 const ARTIFACT_PATH = /^\/api\/executions\/[A-Za-z0-9_-]+\/artifact\?/;
 
@@ -16,26 +16,53 @@ function randomId() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function activeWorker() {
-  if (!('serviceWorker' in navigator)) throw new Error('浏览器不支持流式文件下载');
-  const registration = await navigator.serviceWorker.register('/static/download-sw.js', { scope: '/' });
-  await navigator.serviceWorker.ready;
-  if (!navigator.serviceWorker.controller) {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('下载服务接管页面超时')), 10_000);
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        clearTimeout(timer);
-        resolve();
-      }, { once: true });
-    });
-  }
-  return navigator.serviceWorker.controller
-    || registration.active || registration.waiting || registration.installing;
+function downloadBase() {
+  const url = new URL(urlFor('/'), window.location.href);
+  if (url.origin !== window.location.origin) throw new Error('文件下载需要使用同源服务入口');
+  return url.pathname.replace(/\/$/, '');
 }
 
-let workerReady;
-export function prepareArtifactDownloads() {
-  if (!workerReady) workerReady = activeWorker().catch((error) => {
+function downloadFrame(url) {
+  const frame = document.createElement('iframe');
+  frame.src = url;
+  frame.title = 'artifact-download';
+  frame.hidden = true;
+  document.body.appendChild(frame);
+  setTimeout(() => frame.remove(), 60_000);
+}
+
+function workerFor(base) {
+  const worker = navigator.serviceWorker?.controller;
+  return worker?.scriptURL === new URL(`${base}/static/download-sw.js`, window.location.href).href ? worker : null;
+}
+
+async function activeWorker(base) {
+  if (!('serviceWorker' in navigator)) throw new Error('浏览器不支持流式文件下载');
+  await navigator.serviceWorker.register(`${base}/static/download-sw.js`, { scope: `${base}/` });
+  await navigator.serviceWorker.ready;
+  if (!workerFor(base)) {
+    await new Promise((resolve, reject) => {
+      const changed = () => {
+        if (!workerFor(base)) return;
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener('controllerchange', changed);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        navigator.serviceWorker.removeEventListener('controllerchange', changed);
+        reject(new Error('下载服务接管页面超时'));
+      }, 10_000);
+      navigator.serviceWorker.addEventListener('controllerchange', changed);
+    });
+  }
+  return workerFor(base);
+}
+
+let workerReady, workerBase;
+export async function prepareArtifactDownloads() {
+  const base = downloadBase();
+  if (workerBase !== base) { workerReady = null; workerBase = base; }
+  if (!workerReady) workerReady = activeWorker(base).catch((error) => {
     workerReady = null;
     throw error;
   });
@@ -58,7 +85,10 @@ function register(worker, record) {
 export async function downloadArtifact(id, step, file, index) {
   const { token, authEnabled } = getState();
   if (!token && authEnabled !== false) throw new Error('请先登录');
-  let worker = navigator.serviceWorker?.controller;
+  const base = downloadBase();
+  const path = base + artifactPath(id, step, file, index);
+  if (authEnabled === false) { downloadFrame(path); return; }
+  let worker = workerFor(base);
   const retainsUserGesture = !!worker;
   if (!worker) worker = await prepareArtifactDownloads();
   if (!worker) throw new Error('下载服务尚未就绪');
@@ -66,19 +96,14 @@ export async function downloadArtifact(id, step, file, index) {
   const popup = retainsUserGesture ? window.open('about:blank', '_blank') : null;
   if (retainsUserGesture && !popup) throw new Error('浏览器阻止了下载窗口');
   const registered = register(worker, {
-    id: requestId, path: artifactPath(id, step, file, index), token: authEnabled === false ? '' : token,
+    id: requestId, path, token, clientUrl: window.location.href.split('#')[0],
   });
   if (retainsUserGesture) {
     await registered;
-    popup.location.replace(`/__opencoder_download/${requestId}`);
+    popup.location.replace(`${base}/__opencoder_download/${requestId}`);
   } else {
     await registered;
-    const frame = document.createElement('iframe');
-    frame.src = `/__opencoder_download/${requestId}`;
-    frame.title = 'artifact-download';
-    frame.hidden = true;
-    document.body.appendChild(frame);
-    setTimeout(() => frame.remove(), 60_000);
+    downloadFrame(`${base}/__opencoder_download/${requestId}`);
   }
   await registered;
 }

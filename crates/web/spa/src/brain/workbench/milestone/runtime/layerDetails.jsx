@@ -15,12 +15,13 @@ export function LayerDetails({ layerId, view, plan, executionId, onExecution, te
       options={rows.map((row) => ({ value: row.execution_id || row.operation_id, disabled: !canOpenExecution(row),
         label: `${nodeTitle(row)} · 第 ${row.round || 1} 轮 · ${LAYERED_STATUS[row.status] || row.status}` }))} />}
     {execution ? <>
+      <Typography.Title level={5}>{nodeTitle(execution)}</Typography.Title>
       <Space wrap className="brain-layer-execution-heading"><Tag>第 {execution.round || 1} 轮</Tag>
         <Typography.Text copyable code>{execution.execution_id}</Typography.Text>
         {latestExecutions(rows).length > 1 && <Button onClick={() => onExecution(null)}>本层全部任务</Button>}
       </Space>
       <ExecutionView key={execution.execution_id} executionRef={{ id: execution.execution_id, kind: execution.execution_kind }}
-        managed allowGuidance={!terminal} onGuidance={onGuidance} onNotice={onNotice} />
+        presentation="brain" managed allowGuidance={!terminal} onGuidance={onGuidance} onNotice={onNotice} />
     </> : rows.length ? <div className="brain-layer-execution-list">{latestExecutions(rows).map((row) =>
       <Button key={row.operation_id} disabled={!canOpenExecution(row)} onClick={() => onExecution(row.execution_id)}>
         <span>{nodeTitle(row)}</span><Tag>{LAYERED_STATUS[row.status] || row.status}</Tag><span>{canOpenExecution(row) ? '查看执行详情 →' : '等待创建'}</span>

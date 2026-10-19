@@ -31,6 +31,8 @@ pub struct ExecutionNames {
     pub target: Option<String>,
     pub definition_name: Option<String>,
     pub spec_name: Option<String>,
+    #[serde(default)]
+    pub plan_name: Option<String>,
 }
 
 impl FleetStore {
@@ -108,7 +110,8 @@ impl FleetStore {
         let sql = format!(
             "SELECT id, json_extract(assignment,'$.request.target'), \
              json_extract(assignment,'$.definition.name'), \
-             json_extract(assignment,'$.definition.spec.name') \
+             json_extract(assignment,'$.definition.spec.name'), \
+             json_extract(assignment,'$.request.input.layered_request.plan.title') \
              FROM execution_assignments WHERE id IN ({placeholders})"
         );
         let args: Vec<libsql::Value> = ids
@@ -124,6 +127,7 @@ impl FleetStore {
                     target: row.get::<Option<String>>(1)?,
                     definition_name: row.get::<Option<String>>(2)?,
                     spec_name: row.get::<Option<String>>(3)?,
+                    plan_name: row.get::<Option<String>>(4)?,
                 },
             );
         }
@@ -289,7 +293,11 @@ mod tests {
                 r#""definition":{"name":"demo"}"#,
             ),
             ("dag-d", "", r#""definition":{"spec":{"name":"legacy"}}"#),
-            ("brain-e", "", ""),
+            (
+                "brain-e",
+                r#""input":{"layered_request":{"plan":{"title":"Frozen plan"}}}"#,
+                "",
+            ),
         ];
         for (id, request_extra, definition_extra) in rows {
             put_raw_assignment(&store, id, request_extra, definition_extra).await;
@@ -307,7 +315,7 @@ mod tests {
         assert_eq!(names["team-c"].target.as_deref(), Some("stale-name"));
         assert_eq!(names["dag-d"].definition_name, None, "spec-only snapshot");
         assert_eq!(names["dag-d"].spec_name.as_deref(), Some("legacy"));
-        assert_eq!(names["brain-e"], ExecutionNames::default());
+        assert_eq!(names["brain-e"].plan_name.as_deref(), Some("Frozen plan"));
     }
 
     #[tokio::test]

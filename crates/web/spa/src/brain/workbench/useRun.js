@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from '../../api.js';
 import { openStream } from '../../sse.js';
 import { isLayeredView, terminalPhase } from './layered/model.js';
-async function readView(id) {
-  const view = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}/layered`);
+async function readView(id, signal) {
+  const view = await apiGet(`/api/brain/runs/${encodeURIComponent(id)}/layered`, { signal });
   if (!isLayeredView(view)) throw new Error('运行缺少分层调度数据');
   return view;
 }
@@ -17,12 +17,13 @@ export function useBrainRun(id) {
   const [events, setEvents] = useState([]); const lifetime = useRef(0);
   const reload = useRef(null);
   useEffect(() => {
+    const controller = new AbortController();
     const epoch = ++lifetime.current; let stream; let timer; let retryTimer; let pollTimer; let loading = false; let pending = false; let finished = false;
     const alive = () => lifetime.current === epoch;
     setRun(null); setEvents([]); setError('');
     const load = async () => {
       if (loading) { pending = true; return null; } loading = true;
-      try { const value = await readView(id); if (alive()) { finished = terminalPhase(value.run.phase); setRun(value); setError(''); } return watermarkOf(value); }
+      try { const value = await readView(id, controller.signal); if (alive()) { finished = terminalPhase(value.run.phase); setRun(value); setError(''); } return watermarkOf(value); }
       catch (e) { if (alive()) setError(e.message); throw e; }
       finally { loading = false; if (pending && alive()) { pending = false; timer = setTimeout(() => load().catch(() => {}), 50); } }
     };
@@ -41,7 +42,7 @@ export function useBrainRun(id) {
     };
     start();
     pollTimer = setInterval(() => { if (alive() && !finished && !loading) load().catch(() => {}); }, 3000);
-    return () => { lifetime.current++; clearTimeout(timer); clearTimeout(retryTimer); clearInterval(pollTimer); stream?.abort(); };
+    return () => { controller.abort(); lifetime.current++; clearTimeout(timer); clearTimeout(retryTimer); clearInterval(pollTimer); stream?.abort(); };
   }, [id]);
   const refresh = useCallback(() => reload.current?.(), []);
   return { run, events, error, connection, refresh };

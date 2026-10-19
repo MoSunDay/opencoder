@@ -1,4 +1,4 @@
-Commit: 060b4a24
+Commit: 0a9472601a636ddaa5e097b69e269fb04faa2396
 
 # store 模块
 
@@ -40,3 +40,5 @@ Commit: 060b4a24
 - [project_store/reopen.rs](../../crates/store/tests/project_store/reopen.rs)：关闭重开后核验项目、Tag、看板、执行引用与旧运行结果；无效 Tag 修改不能部分提交。完整存储回归入口为 [project-store-tests.yml](../../.github/workflows/project-store-tests.yml)。
 
 能力详情的 `content_version` 指纹包含记录和有序样例。带版本的更新在 `BEGIN IMMEDIATE` 内重读比较，再原子提交文字、样例和向量；冲突抛出 `BrainContentConflict`，不写任何一部分。见 [brain 持久化](../../crates/store/src/libsql_store/brain.rs)。
+
+[fleet/catalog.rs](../../crates/store/src/fleet/catalog.rs) 为目录删除提供只读候选：全部定义、不可变计划版本、非终态及缺少索引的 Assignment、未完成派发回执。SQL 先按名称筛选，Control 再按完整 JSON 校验引用；不删除执行历史。

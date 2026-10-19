@@ -22,11 +22,12 @@ pub async fn dag_definition(
         Err(e) => response(RpcReply::error(500, e.to_string())),
     }
 }
-pub async fn delete_dag(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    match state.fleet.delete_definition("dag", &id).await {
-        Ok(()) => response(RpcReply::ok(json!({"ok":true}))),
-        Err(e) => response(RpcReply::error(500, e.to_string())),
-    }
+pub async fn delete_dag(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    response(crate::catalog_guard::delete_dag(&state, &id, &headers).await)
 }
 async fn dispatch(
     state: Arc<AppState>,

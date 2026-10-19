@@ -59,6 +59,9 @@ def publish_binary(base, prefix, data, operations):
     except (HttpFailure, urllib.error.HTTPError) as error:
         if error.code != 404:
             raise
+        shared = matching_binary(base, digest, len(data), operations)
+        if shared:
+            return shared
         try:
             operations.http(base, '/api/dag/binaries', 'POST', {
                 'name': name, 'description': 'Immutable native execution resource',
@@ -66,8 +69,23 @@ def publish_binary(base, prefix, data, operations):
         except (HttpFailure, urllib.error.HTTPError) as collision:
             if collision.code != 409:
                 raise
+            shared = matching_binary(base, digest, len(data), operations)
+            if shared:
+                return shared
         metadata = operations.http(base, endpoint)
     versions = metadata.get('history', [])
     if len(versions) != 1 or versions[0]['sha256'] != digest or versions[0]['size_bytes'] != len(data):
         raise ValueError('release probe resource differs from its immutable binary')
     return name + '@v' + str(versions[0]['version'])
+
+
+def matching_binary(base, digest, size, operations):
+    """Reuse a verified immutable version, even when another caller named it."""
+    pools = operations.http(base, '/api/dag/binaries')['pools']
+    for pool in sorted(pools, key=lambda row: row['name']):
+        name = pool['name']
+        metadata = operations.http(base, '/api/dag/binaries/' + name)
+        for version in metadata['history']:
+            if version and version['sha256'] == digest and version['size_bytes'] == size:
+                return name + '@v' + str(version['version'])
+    return None

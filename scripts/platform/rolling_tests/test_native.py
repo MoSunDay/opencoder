@@ -90,6 +90,8 @@ class PublisherTests(unittest.TestCase):
             exists = mode == 'existing'
             def http(self, base, path, method='GET', body=None):
                 self.calls.append((path, method, body))
+                if method == 'GET' and path == '/api/dag/binaries':
+                    return {'pools': []}
                 if method == 'POST':
                     self.exists = True
                     if mode == 'race':
@@ -112,7 +114,20 @@ class PublisherTests(unittest.TestCase):
             operations = self.operations(mode)
             result = publish_binary('http://private', 'probe', b'binary', operations)
             self.assertTrue(result.endswith('@v1'))
-            self.assertEqual([row[1] for row in operations.calls], ['GET', 'POST', 'GET'])
+            self.assertEqual([row[1] for row in operations.calls], ['GET', 'GET', 'POST'] + (['GET'] if mode == 'race' else []) + ['GET'])
+
+    def test_identical_binary_under_another_name_is_reused_without_upload(self):
+        digest = hashlib.sha256(b'binary').hexdigest()
+        class Operations:
+            def http(self, base, path, method='GET', body=None):
+                if method != 'GET':
+                    raise AssertionError('must not publish a duplicate')
+                if path == '/api/dag/binaries':
+                    return {'pools': [{'name': 'shared'}]}
+                if path.endswith('/shared'):
+                    return {'history': [{'version': 3, 'sha256': digest, 'size_bytes': 6}]}
+                raise HttpFailure(method, path, 404, 'missing')
+        self.assertEqual(publish_binary('http://private', 'probe', b'binary', Operations()), 'shared@v3')
 
     def test_corrupt_publication_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'differs'):

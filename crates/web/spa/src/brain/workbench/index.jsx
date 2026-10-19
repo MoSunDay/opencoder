@@ -21,7 +21,7 @@ export function BrainWorkbench({ onNotice }) {
     setCatalog((previous) => ({ ...previous, loading: true, error: '' }));
     try {
       const result = await apiGet('/api/brain/library', { signal: request.signal });
-      if (!request.signal.aborted) setCatalog({ capabilities: result.capabilities || [], loading: false, error: '' });
+      if (!request.signal.aborted) setCatalog({ capabilities: result.capabilities || [], selectionIds: result.selection_ids, loading: false, error: '' });
     } catch (e) {
       if (!request.signal.aborted) setCatalog((previous) => ({ ...previous, loading: false, error: e.message }));
     }
@@ -39,7 +39,7 @@ export function BrainWorkbench({ onNotice }) {
       { key: 'workspace', label: '工作台', children: <><Space style={{ marginBottom: 16 }}><Button onClick={reload}>刷新运行</Button><Button disabled={!runCursor} onClick={olderRuns}>更早运行</Button></Space><Table rowKey="id" dataSource={runs} pagination={{ pageSize: 10 }} columns={[
         { title: '运行', dataIndex: 'id', render: (id) => <Button type="link" onClick={() => setRunId(id)}>{id}</Button> }, { title: '节点', dataIndex: 'node_id' }, { title: '执行状态', dataIndex: 'status', render: (status) => status === 'idle' ? <Tag color="blue">等待事件</Tag> : <StatusTag status={status} /> },
       ]} locale={{ emptyText: <Empty description="从目标开始，让能力组成可观察的执行计划" /> }} /></> },
-      { key: 'plans', label: '计划库', children: <Plans plans={plans} capabilities={capabilities} reload={reload} onRun={executePlan} /> },
+      { key: 'plans', label: '计划库', children: <Plans plans={plans} capabilities={capabilities} selectionIds={catalog.selectionIds} reload={reload} onRun={executePlan} /> },
       { key: 'capabilities', label: '能力库', children: <BrainPanel onNotice={onNotice} executionCatalog={catalog.capabilities} catalogLoading={catalog.loading} catalogError={catalog.error} onRefreshCatalog={reloadCapabilities} /> },
     ]} />
   </>}

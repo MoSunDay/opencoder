@@ -6,7 +6,7 @@ import { useStore } from '../../store.js';
 import { draftKey } from './scheduler/draft.js';
 import { PlanEditor, PlanPreview } from './scheduler/editor.jsx';
 
-export function Plans({ plans, capabilities, reload, onRun }) {
+export function Plans({ plans, capabilities, selectionIds, reload, onRun }) {
   const { identity, base } = useStore(); const editorRef = useRef(null);
   const owner = `${base || location.origin}:${identity?.name || 'anonymous'}`;
   const [editor, setEditor] = useState(null); const [view, setView] = useState(null); const [versions, setVersions] = useState([]);
@@ -48,7 +48,7 @@ export function Plans({ plans, capabilities, reload, onRun }) {
       {diff && <pre className="brain-json">{JSON.stringify(diff, null, 2)}</pre>}
     </>}</Drawer>
     <Drawer className="brain-plan-drawer" title={editor?.creating ? '新建计划' : '修改计划'} placement="right" size="100%" open={!!editor} onClose={() => editorRef.current?.close()} destroyOnHidden styles={{ body: { padding: 0 } }}>
-      {editor && <PlanEditor ref={editorRef} key={draftKey(owner, editor.creating ? null : editor)} cacheKey={draftKey(owner, editor.creating ? null : editor)} version={editor.creating ? undefined : editor} capabilities={capabilities} onClose={() => setEditor(null)} onSaved={async () => { await reload(); setEditor(null); }} />}
+      {editor && <PlanEditor ref={editorRef} key={draftKey(owner, editor.creating ? null : editor)} cacheKey={draftKey(owner, editor.creating ? null : editor)} version={editor.creating ? undefined : editor} capabilities={capabilities} selectionIds={selectionIds} onClose={() => setEditor(null)} onSaved={async () => { await reload(); setEditor(null); }} />}
     </Drawer>
   </>;
 }

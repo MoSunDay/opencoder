@@ -34,3 +34,7 @@ async fn seed_cap(h: &Harness, summary: &str) -> String {
 mod agents;
 mod capabilities;
 mod contracts;
+
+mod content_guard;
+
+mod selection;

@@ -1,4 +1,4 @@
-Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
+Commit: 060b4a24
 
 # store 模块
 
@@ -38,3 +38,5 @@ Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 - [fleet/handoff/pending.rs](../../crates/store/src/fleet/handoff/pending.rs)：先筛选 prepared 回执，再读取冻结请求，校验 ID 与类型一致性。
 - [fleet/handoff/capacity.rs](../../crates/store/src/fleet/handoff/capacity.rs)：复用活跃票据部分索引，保持全机 FIFO 与事务内容量复核；容量恢复按 ticket、execution、runtime 三重身份校验，只恢复精确匹配的 running 票据，重复恢复幂等。
 - [project_store/reopen.rs](../../crates/store/tests/project_store/reopen.rs)：关闭重开后核验项目、Tag、看板、执行引用与旧运行结果；无效 Tag 修改不能部分提交。完整存储回归入口为 [project-store-tests.yml](../../.github/workflows/project-store-tests.yml)。
+
+能力详情的 `content_version` 指纹包含记录和有序样例。带版本的更新在 `BEGIN IMMEDIATE` 内重读比较，再原子提交文字、样例和向量；冲突抛出 `BrainContentConflict`，不写任何一部分。见 [brain 持久化](../../crates/store/src/libsql_store/brain.rs)。

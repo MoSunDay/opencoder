@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rolling.config import Settings
@@ -12,6 +13,25 @@ from rolling.units import service
 
 
 class RetainedProgramTests(unittest.TestCase):
+    def test_private_image_check_requires_metadata_from_every_program(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory)
+            (image / 'usr/bin').mkdir(parents=True)
+            (image / 'usr/bin/opencoder').write_text('launcher')
+            expected = {'storage_engine': 'turso', 'git_commit': 'candidate'}
+            operations = Mock()
+            operations.output.return_value = '\n'.join(json.dumps(expected) for _ in range(4))
+            programs.verify_image(image, expected, operations)
+            command = operations.output.call_args.args
+            self.assertEqual(command[:6], ('unshare', '--mount', '--propagation', 'private', '--', 'sh'))
+            self.assertEqual(command[-4:], ('dag-runner', 'agent-step-runner', 'agent-session-runner', 'opencoder'))
+            operations.output.return_value = json.dumps(expected)
+            with self.assertRaisesRegex(ValueError, 'differs'):
+                programs.verify_image(image, expected, operations)
+            operations.output.return_value = '\n'.join(json.dumps({'git_commit': 'old'}) for _ in range(4))
+            with self.assertRaisesRegex(ValueError, 'differs'):
+                programs.verify_image(image, expected, operations)
+
     def test_separate_program_preserves_identity_config_resources_and_old_image(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

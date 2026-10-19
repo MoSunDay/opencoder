@@ -1,4 +1,4 @@
-Commit: 24ccca767038c83d23ed613eb7ddbec1c42a7486
+Commit: 00f0d5d3036841c6bac43069c4e08d8c8288fe38
 
 # agent 模块
 
@@ -31,3 +31,5 @@ Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点，启动前�
 原生 DAG 约定见 [规则 04](../../rules/04-dag-execution-contract.md)，发布与维护边界见 [平滑发布](../../docs/smooth-release.md)。
 
 Host 报告计时分别覆盖 report_gate、全部 Runtime 清单汇总和 Brain 帧收集，只记录节点、条数与毫秒值；慢同步不能通过跳过旧 Runtime 清单、改变执行 owner 或缓存未确认的活跃清单来标记就绪。
+
+Host 在创建与能力探测时使用相同的父 Runtime 归属。共享工作区按 `brain_layered.run_id` 查找本机父归属，嵌套 Brain 使用 `layered_request.parent`；普通子执行若父在本机则继承，若父在其他节点则保持该节点的独立选择。探测不保存子执行 owner，已接受执行始终保留原 owner。Worker 继续核对原生父运行与 operation 身份。

@@ -4,6 +4,7 @@ mod client;
 pub mod config;
 mod deployment;
 mod lifecycle;
+mod routing;
 pub mod runtime;
 mod service;
 #[cfg(test)]

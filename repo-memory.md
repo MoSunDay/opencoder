@@ -1,4 +1,4 @@
-Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # OpenCoder 逻辑地图
 
@@ -12,7 +12,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 - [agents/core](agents/core/index.md) — 共享类型与 Config。
 - [agents/llm](agents/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
-- [agents/store](agents/store/index.md) — `Store` trait + libsql（WAL）持久化层。
+- [agents/store](agents/store/index.md) — `Store` trait、Turso WAL 与异步数据库执行。
 - [agents/session](agents/session/index.md) — 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
 - [agents/shellguard](agents/shellguard/index.md) — shell 安全分类器：rable AST 判定、释放集仅 `/tmp`+`/dev/null`、fail-closed。
 - [agents/tui](agents/tui/index.md) — ratatui 交互界面。

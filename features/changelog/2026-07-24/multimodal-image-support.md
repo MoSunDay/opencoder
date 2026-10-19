@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # feat(core,llm,store,session,cli): multimodal image prompts (vision)
 
@@ -29,10 +29,10 @@ Commit: (working-tree, pre-initial-commit)
 ### 持久化（store）
 - **`crates/store/src/types.rs`**：`SessionInput` 新增 `images: Vec<String>`
   （`serde(default, skip_serializing_if = Vec::is_empty)`）。
-- **`crates/store/src/libsql_store/schema.rs`**：schema v3→v4，`session_inputs`
+- **`crates/store/src/turso_store/bootstrap/schema.rs`**：schema v3→v4，`session_inputs`
   新增 `images_json TEXT NOT NULL DEFAULT '[]'`；`migrate` 在 `from < 4` 时
   `add_column_if_absent`（schema.rs:173-183），旧纯文本行读回为空数组。
-- **`crates/store/src/libsql_store/inputs.rs`**：admit/pending/claim_next_queue
+- **`crates/store/src/turso_store/conversation/inputs.rs`**：admit/pending/claim_next_queue
   全部读写 `images_json`；`row_to_input*` 反序列化为 `Vec<String>`。
 
 ### 会话运行时（session）
@@ -88,7 +88,7 @@ Commit: (working-tree, pre-initial-commit)
 - 不影响：store `Store` trait 抽象边界、Web SSE 协议、subagent 调度语义。
 
 ## Related Docs
-- [agents/core](../../agents/core/index.md)
-- [agents/llm](../../agents/llm/index.md)
-- [agents/store](../../agents/store/index.md)
-- [agents/session](../../agents/session/index.md)
+- [agents/core](../../../agents/core/index.md)
+- [agents/llm](../../../agents/llm/index.md)
+- [agents/store](../../../agents/store/index.md)
+- [agents/session](../../../agents/session/index.md)

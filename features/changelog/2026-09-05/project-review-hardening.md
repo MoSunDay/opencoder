@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # opencoder-project：评审修复轮（execute CAS / panic 收敛 / plan 快照 / SPA 净化 / CI 接线）
 
 日期：2026-09-05 ｜ 提交：6cb5ea1
@@ -11,7 +13,7 @@
 ### #1 start_execute TOCTOU 关死（P1）
 
 - `crates/store/src/project.rs`：`ProjectStore` trait 新增 `claim_todo_running(id, now_ms) -> Result<bool>`（单条条件 UPDATE：`SET status='running', updated_at=? WHERE id=? AND status<>'running'`，matched 行必然被改写，无 MySQL affected-rows 歧义）与 `list_running_todo_runs() -> Result<Vec<ProjectTodoRunRecord>>`。
-- libsql（`libsql_store/project_runs.rs` + `project.rs`，db_lock 临界区）与 sqlx（`sql_store/project_crud_runs.rs` + `mod.rs`，StarRocks 自动走 raw_sql 内联约定）双后端实现。
+- libsql（`turso_store/projects/project_runs.rs` + `project.rs`，db_lock 临界区）与 sqlx（`sql_store/project_crud_runs.rs` + `mod.rs`，StarRocks 自动走 raw_sql 内联约定）双后端实现。
 - `crates/project/src/service.rs::start_execute`：读后写 `patch_todo(Running)` 替换为 `claim_todo_running`，false 即 bail（并发双 execute 不可能同时通过）。
 
 ### #2 panic 收敛 + 机会式 stale run 清扫（P1）

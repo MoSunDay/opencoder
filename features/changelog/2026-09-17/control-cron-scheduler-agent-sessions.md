@@ -1,4 +1,4 @@
-Commit: 272b2b13f497ba839a2e137c55813f9ec3fec7f7
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # control 定时调度器与 agent 会话执行面
 
@@ -9,7 +9,7 @@ Commit: 272b2b13f497ba839a2e137c55813f9ec3fec7f7
 - 声明式 cronjob：控制面 `schedules.json` 领域配置（`id/cron/kind/target/params/enabled/timezone/overlap`），触发 agent/team/todos/dag/brain 既有执行入口；确定性执行 id `<kind>-<schedule_id>-<scheduled_for_ms>`（幂等，同 tick 重放只记一行）。
 - cron 原语在 `crates/core/src/schedule/`（`cron.rs`/`time_param.rs`：时区解析、参数渲染、UTC 对齐）。
 - 调度循环 `crates/control/src/scheduler.rs`（仅控制面运行）：默认 15s 扫描；outbox 模式防双启；24h 追赶窗内补跑只取最近一次到期 tick，更老 tick 折叠一条 `missed` 代表行；`overlap: skip` 看上一条 fired 行的执行索引防堆叠；error 行 1h 重试窗内原地重试；单次扫描候选 tick 上限 2000。
-- 台账：store `schedule_runs`（fired/missed/error，schema v26；`crates/store/src/schedule_types.rs`、`libsql_store/schedule.rs`、`schema.rs` 迁移）。
+- 台账：store `schedule_runs`（fired/missed/error，schema v26；`crates/store/src/schedule_types.rs`、`turso_store/execution/schedule.rs`、`schema.rs` 迁移）。
 - 查询面：`GET /api/schedules`（定义 + last_run/next_run）、`GET /api/schedules/:id/runs?limit=`，admin-only（`crates/control/src/api/schedules/`）；CLI `opencoder-cli schedule list|runs`（`crates/ctl/src/cmd/schedule.rs`）。
 
 ## agent 会话执行面

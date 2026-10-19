@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # 子 agent 支持 + 工具重构 + TUI 交互优化
 
 ## 变更摘要
@@ -62,8 +64,8 @@
 | `crates/session/src/runner.rs` | run_subagent 重写 + libsql 追踪 + plan 模式 bash 拦截 |
 | `crates/session/src/lib.rs` | 注册 bash_guard 模块 |
 | `crates/session/src/tools/task.rs` | 工具描述更新 |
-| `crates/store/src/libsql_store/schema.rs` | subagent_tasks 表 + 索引 |
-| `crates/store/src/libsql_store/subagent_tasks.rs` | **新增** — libsql CRUD |
+| `crates/store/src/turso_store/bootstrap/schema.rs` | subagent_tasks 表 + 索引 |
+| `crates/store/src/turso_store/conversation/subagent_tasks.rs` | **新增** — libsql CRUD |
 | `crates/store/src/store.rs` | Store trait 新增 3 个方法 |
 | `crates/store/src/types.rs` | SubagentStatus + SubagentTaskRecord |
 | `crates/tui/src/chat.rs` | thinking 折叠 + say: 标识 + Clone derive |

@@ -1,3 +1,5 @@
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+
 # 文档测试计数去硬编码 + 冗余 dead_code/桩函数清理
 
 ## Context
@@ -19,7 +21,7 @@
 
 - `crates/web/src/handle.rs`：`DropGuardStream` 结构体、`DropGuardStream::new`、
   `release_events_subscriber` 三处。
-- `crates/store/src/libsql_store/sessions.rs`：`extract_preview`。
+- `crates/store/src/turso_store/conversation/sessions.rs`：`extract_preview`。
 
 **删除无用桩函数 + 随之失效的 import**
 

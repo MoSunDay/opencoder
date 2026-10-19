@@ -1,4 +1,4 @@
-Commit: (working-tree, post-860831d)
+Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 
 # 输入投递 recorded 状态机：F1 claim 拆分 + F2 逐条落账 + F3 有界 drain 重启 + F4 提交失败可见
 
@@ -16,9 +16,9 @@ web `POST /prompt` admit 成功即对客户端承诺消费该输入，但投递�
 - **`crates/session/src/runner/steer.rs`**：`claim_steers` 的 select 拆为两段——只读 `pending_inputs` 轮询保留 cancel-guard（db_lock 争用不得阻塞硬取消，放弃读无害：行保持 pending）；变更 `promote_inputs` 移出 select、不与硬取消竞速（其 BEGIN→UPDATE→COMMIT 手工事务被 biased select 中途丢弃会造搁浅行）。语义对齐 `claim_one_queued`。
 
 ### store：recorded 标记列 + v10 迁移
-- **`crates/store/src/libsql_store/schema.rs`**：`session_inputs` 新增 `recorded INTEGER NOT NULL DEFAULT 0`（SCHEMA_VERSION 9→10）；迁移回填——列落地时已 promoted 的历史行视为已消费（audit 语义，已在 transcript 中）。
+- **`crates/store/src/turso_store/bootstrap/schema.rs`**：`session_inputs` 新增 `recorded INTEGER NOT NULL DEFAULT 0`（SCHEMA_VERSION 9→10）；迁移回填——列落地时已 promoted 的历史行视为已消费（audit 语义，已在 transcript 中）。
 - **`crates/store/src/store.rs`**：`Store` trait 新增 `mark_inputs_recorded`（幂等落账）与 `recover_orphan_inputs`（promoted 且未 recorded 的孤儿行翻回 pending，返回行数），默认 no-op 保测试 fake 编译。
-- **`crates/store/src/libsql_store/inputs.rs`**：libsql 实现；re-promote 时重置 recorded 标记。
+- **`crates/store/src/turso_store/conversation/inputs.rs`**：libsql 实现；re-promote 时重置 recorded 标记。
 
 ### session：F2 入口恢复 + 逐条落账
 - **`crates/session/src/runner/input_recovery.rs`**（新，57 行）：`recover_orphaned_inputs`（run 入口回收孤儿行）、`mark_input_recorded`（消费一条落账一条）、`unpromote_batch`（失败批次整体翻回 pending）。
@@ -60,6 +60,6 @@ web `POST /prompt` admit 成功即对客户端承诺消费该输入，但投递�
 - 不影响：CLI 单 prompt 路径、消息/事件 schema。TUI 侧 Enter steer 提交失败新增 flash 反馈（F4），交互语义不变。
 
 ## Related Docs
-- [agents/store](../../agents/store/index.md)
-- [agents/web](../../agents/web/index.md)
-- [agents/session](../../agents/session/index.md)
+- [agents/store](../../../agents/store/index.md)
+- [agents/web](../../../agents/web/index.md)
+- [agents/session](../../../agents/session/index.md)

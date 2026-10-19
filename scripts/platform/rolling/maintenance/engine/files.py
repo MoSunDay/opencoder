@@ -76,6 +76,14 @@ def mark(paths):
         if marker.exists() and json.loads(marker.read_text()) != value:
             raise ValueError('database belongs to an unknown engine')
         owner = path.stat()
+        # A stopped checkpoint can run as the deployment user. Preserve the
+        # database service's access to any shared-memory or journal file it left.
+        for suffix in ('-wal', '-shm', '-tshm'):
+            sidecar = Path(str(path) + suffix)
+            if sidecar.is_symlink():
+                raise ValueError('database sidecar cannot be a symlink')
+            if sidecar.exists():
+                os.chown(sidecar, owner.st_uid, owner.st_gid)
         atomic_bytes(marker, json.dumps(value).encode(), 0o644, (owner.st_uid, owner.st_gid))
 
 

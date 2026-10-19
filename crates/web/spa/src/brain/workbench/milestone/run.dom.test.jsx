@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import '../../../test/setup-dom.js';
+import { ConfigProvider } from 'antd';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react';
 import { apiPost } from '../../../api.js';
 import { MilestoneRunBody } from './run.jsx';
 vi.mock('../../../api.js', () => ({ apiPost: vi.fn() }));
@@ -9,6 +10,8 @@ vi.mock('../../../fleet/detail.jsx', () => ({ ExecutionView: ({ executionRef, al
   <span data-testid="execution-identity">{executionRef.kind}:{executionRef.id}:{String(allowGuidance)}</span><button onClick={() => onGuidance('执行详情引导')}>提交执行引导</button>
 </div> }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+const Wrapper = ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>;
+const render = (element) => testingRender(element, { wrapper: Wrapper });
 function view(kind) {
   const op = (activation) => ({ activation, round: activation, layer: 1, operation_id: `operation-${activation}`, node_id: 'code', capability_id: 'cap', execution_kind: kind, execution_id: `${kind}-visit-${activation}`, status: activation === 1 ? 'error' : 'running' });
   return { schema_version: 7, plan: { schema_version: 7, title: '闭环计划', objective: '交付', layers: [{ layer_id: 'coding', title: 'Coding', task: '整改', objective: '整改', success_criteria: '验证通过' }], nodes: [{ node_id: 'code', layer_id: 'coding', title: 'Coding 任务', objective: '整改', capability_id: 'cap' }], transitions: [{ from: 'coding', to: 'coding', condition: '需整改' }] },
@@ -25,6 +28,7 @@ it('人工输入从运行页送入大脑事件', async () => {
   render(<MilestoneRunBody view={view('agent')} id="brain-run" refresh={refresh} />);
   expect(screen.queryByLabelText('大脑人工输入')).toBeNull();
   fireEvent.click(screen.getByText('查看详情'));
+  fireEvent.click(screen.getByRole('button', { name: '补充信息' }));
   fireEvent.change(screen.getByLabelText('大脑人工输入'), { target: { value: '优先核对验证结果' } });
   fireEvent.click(screen.getByRole('button', { name: '发送大脑输入' }));
   await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/brain/runs/brain-run/inputs',
@@ -34,6 +38,7 @@ it('人工输入从运行页送入大脑事件', async () => {
 it('大脑对话按 UTF-8 字节限制输入并保留超限草稿', async () => {
   render(<MilestoneRunBody view={view('agent')} id="brain-run" refresh={vi.fn()} />);
   fireEvent.click(screen.getByText('查看详情'));
+  fireEvent.click(screen.getByRole('button', { name: '补充信息' }));
   const input = screen.getByLabelText('大脑人工输入');
   fireEvent.change(input, { target: { value: '中'.repeat(1366) } });
   expect(screen.getByText('4098 / 4096 字节')).toBeTruthy();
@@ -45,6 +50,7 @@ it('输入已记录但刷新失败时清空草稿并提示刷新错误', async (
   apiPost.mockResolvedValue({});
   render(<MilestoneRunBody view={view('agent')} id="brain-run" refresh={vi.fn().mockRejectedValue(new Error('连接中断'))} />);
   fireEvent.click(screen.getByText('查看详情'));
+  fireEvent.click(screen.getByRole('button', { name: '补充信息' }));
   fireEvent.change(screen.getByLabelText('大脑人工输入'), { target: { value: '更新判断依据' } });
   fireEvent.click(screen.getByRole('button', { name: '发送大脑输入' }));
   await waitFor(() => expect(screen.getByLabelText('大脑人工输入').value).toBe(''));
@@ -54,30 +60,33 @@ it('执行详情的引导也只发送大脑输入事件', async () => {
   apiPost.mockResolvedValue({});
   render(<MilestoneRunBody view={view('agent')} id="brain-run" refresh={vi.fn()} />);
   fireEvent.click(screen.getByText('查看详情'));
+  fireEvent.click(screen.getByRole('tab', { name: '执行记录' }));
   fireEvent.click(screen.getByText('第 2 轮 · 1 层 · 1 项执行'));
-  fireEvent.click(screen.getByText('agent-visit-2'));
+  fireEvent.click(screen.getByText('查看执行详情'));
   fireEvent.click(screen.getByText('提交执行引导'));
   await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/brain/runs/brain-run/inputs', { text: '执行详情引导' }));
   expect(apiPost).toHaveBeenCalledTimes(1);
 });
-it('顶部仅显示状态操作和画布，右侧详情按轮次汇总层级执行记录', async () => {
+it('详情默认概览，历史轮次及调度依据分开阅读，返回保留选择', async () => {
   render(<MilestoneRunBody view={view('agent')} id="brain-run" refresh={vi.fn()} />);
   expect(screen.queryByRole('heading', { name: '闭环计划' })).toBeNull();
-  expect(screen.queryByText('交付')).toBeNull();
   fireEvent.click(screen.getByText('查看详情'));
   expect(await screen.findByRole('heading', { name: '闭环计划' })).toBeTruthy();
+  expect(screen.getByText('尚未生成最终结果')).toBeTruthy();
+  expect(screen.queryByLabelText('大脑人工输入')).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: '执行记录' }));
+  expect(screen.getByText('agent-visit-2')).toBeTruthy();
   fireEvent.click(screen.getByText('第 1 轮 · 1 层 · 1 项执行'));
   expect(screen.getByText('agent-visit-1')).toBeTruthy();
-  fireEvent.click(screen.getByText('第 1 层 · 调度依据'));
-  expect(screen.getByText('派发依据')).toBeTruthy();
-  expect(screen.getByText(/任务-1/)).toBeTruthy();
-  fireEvent.click(screen.getByText('agent-visit-1'));
+  fireEvent.click(screen.getByText('查看执行详情'));
   expect((await screen.findByTestId('execution-identity')).textContent).toBe('agent:agent-visit-1:true');
-  fireEvent.click(screen.getByText('返回轮次列表'));
-  fireEvent.click(screen.getByText('第 2 轮 · 1 层 · 1 项执行'));
-  expect(screen.getByText('agent-visit-2')).toBeTruthy();
-  fireEvent.click(screen.getByText('第 1 层 · 调度依据'));
+  fireEvent.click(screen.getByText('返回运行详情'));
+  expect(screen.getByText('第 1 轮 · 1 层 · 1 项执行').closest('button').getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('tab', { name: '调度记录' }));
   expect(screen.getByText('修复首轮问题')).toBeTruthy();
+  fireEvent.click(screen.getAllByText('查看依据')[1]);
+  fireEvent.click(screen.getByText('展开 2 项'));
+  expect(screen.getByText('任务-1')).toBeTruthy();
 });
 it('同一轮的多层执行在同一张表中展示', async () => {
   const data = view('agent');
@@ -89,10 +98,11 @@ it('同一轮的多层执行在同一张表中展示', async () => {
   data.run = { ...data.run, activation: 3, layer: 2 };
   render(<MilestoneRunBody view={data} id="brain-run" refresh={vi.fn()} />);
   fireEvent.click(screen.getByText('查看详情'));
+  fireEvent.click(screen.getByRole('tab', { name: '执行记录' }));
   fireEvent.click(await screen.findByText('第 2 轮 · 2 层 · 2 项执行'));
   expect(screen.getByText('agent-visit-2')).toBeTruthy();
   expect(screen.getByText('agent-visit-3')).toBeTruthy();
-  expect(screen.getByText('第 2 层 · Verify')).toBeTruthy();
+  expect(screen.getByText('第 2 层 · Verify', { selector: 'h5' })).toBeTruthy();
 });
 it('层级与执行节点同名时画布仍展示两层全部执行状态', () => {
   const data = view('agent');
@@ -114,6 +124,7 @@ it('耗尽预算后可以显式增加预算并继续调度', async () => {
   const refresh = vi.fn(); apiPost.mockResolvedValue({});
   render(<MilestoneRunBody view={data} id="brain-run" refresh={refresh} />);
   fireEvent.click(screen.getByText('查看详情'));
+  fireEvent.click(screen.getByRole('button', { name: '补充信息' }));
   fireEvent.change(screen.getByLabelText('新的轮次预算'), { target: { value: '8' } });
   fireEvent.click(screen.getByText('调整预算'));
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
@@ -132,11 +143,11 @@ it('运行推进到下一层后，点击前一层和节点仍打开该层最新�
   expect(container.querySelector('[data-id="layer:coding"]').style.visibility).toBe('visible');
   fireEvent.click(container.querySelector('[data-id="layer:coding"]'));
   expect((await screen.findByTestId('execution-identity')).textContent).toBe('dag:dag-visit-2:false');
-  expect(screen.getByRole('dialog', { name: '第 1 层 · Coding' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '第 1 层 · Coding' })).toBeTruthy();
   expect(screen.getByRole('combobox', { name: '选择层执行记录' })).toBeTruthy();
   expect(container.querySelector('[data-id="layer:report"]').style.visibility).toBe('visible');
 });
-it('并行层展示全部任务，未派发层显示明确说明', async () => {
+it('并行层可以从子执行返回全部任务，再打开另一个任务和运行详情', async () => {
   const data = view('agent');
   data.plan.nodes.push({ node_id: 'review', layer_id: 'coding', title: '审查任务', capability_id: 'cap' });
   data.operations.push({ ...data.operations[1], node_id: 'review', execution_id: 'review-2', operation_id: 'op-review' });
@@ -145,6 +156,14 @@ it('并行层展示全部任务，未派发层显示明确说明', async () => {
   expect(screen.queryByTestId('execution-identity')).toBeNull();
   fireEvent.click(await screen.findByRole('button', { name: /审查任务.*查看执行详情/ }));
   expect((await screen.findByTestId('execution-identity')).textContent).toBe('agent:review-2:true');
+  fireEvent.click(screen.getByText('本层全部任务'));
+  expect(screen.queryByTestId('execution-identity')).toBeNull();
+  expect(screen.getByRole('heading', { name: '第 1 层 · Coding' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Coding 任务.*查看执行详情/ }));
+  expect((await screen.findByTestId('execution-identity')).textContent).toBe('agent:agent-visit-2:true');
+  fireEvent.click(screen.getByText('返回运行详情'));
+  expect(screen.queryByTestId('execution-identity')).toBeNull();
+  expect(screen.getByText('交付摘要')).toBeTruthy();
 });
 it('未派发层支持键盘打开且不伪造执行记录', async () => {
   const data = view('dag'); data.operations = []; data.events = [];
@@ -165,4 +184,20 @@ it('全屏画布支持退出按钮和 Escape，完成后不展示无效的调度
   fireEvent.click(screen.getByText('全屏画布'));
   fireEvent.click(screen.getByText('退出全屏'));
   expect(container.querySelector('.brain-run-workspace.is-fullscreen')).toBeNull();
+});
+
+it('发送失败保留人工输入，历史版本不展示调度控制', async () => {
+  apiPost.mockRejectedValueOnce(new Error('输入未被接受'));
+  const data = view('agent');
+  const { rerender } = render(<MilestoneRunBody view={data} id="brain-run" refresh={vi.fn()} />);
+  fireEvent.click(screen.getByText('查看详情'));
+  fireEvent.click(screen.getByText('补充信息'));
+  fireEvent.change(screen.getByLabelText('大脑人工输入'), { target: { value: '保留这段说明' } });
+  fireEvent.click(screen.getByLabelText('发送大脑输入'));
+  expect(await screen.findByText('输入未被接受')).toBeTruthy();
+  expect(screen.getByLabelText('大脑人工输入').value).toBe('保留这段说明');
+  rerender(<MilestoneRunBody view={{ ...data, schema_version: 6 }} id="brain-run" refresh={vi.fn()} />);
+  expect(screen.queryByText('暂停调度')).toBeNull();
+  expect(screen.queryByLabelText('大脑人工输入')).toBeNull();
+  expect(screen.getByText('历史版本 · 只读')).toBeTruthy();
 });

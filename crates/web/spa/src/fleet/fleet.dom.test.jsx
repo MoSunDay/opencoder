@@ -203,7 +203,7 @@ describe('fleet execution boundaries', () => {
     } }} />);
     fireEvent.click(screen.getByText('会话记录'));
     expect(await screen.findByText('会话片段', { exact: true })).toBeTruthy();
-    expect(apiGet).toHaveBeenCalledWith('/api/executions/todos-owner/detail-field?field=todo.item.child.session_history&offset=0');
+    expect(apiGet).toHaveBeenCalledWith('/api/executions/todos-owner/detail-field?field=todo.item.child.session_history&offset=0', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
   it('renders readable team statements and captain summaries through bounded record requests', async () => {
     apiGet.mockImplementation(async (path) => {

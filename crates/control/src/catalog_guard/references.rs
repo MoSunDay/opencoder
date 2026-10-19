@@ -124,6 +124,34 @@ fn files(root: &Path, name: &str, dag: bool, agent: bool) -> Result<Vec<String>>
             }
             if let Some(text) = text {
                 let mut value = Value::String(text.into());
+                let relative = path.strip_prefix(root)?;
+                // Card fields name shared pools and execution configuration;
+                // they do not declare dependencies on other Agent cards.
+                // Unknown fields remain checked for forward compatibility.
+                if agent
+                    && relative.components().count() == 2
+                    && path.file_name().is_some_and(|file| file == "meta.json")
+                    && relative.components().next().is_some_and(|part| {
+                        part.as_os_str().to_str().is_some_and(|card| {
+                            opencoder_core::agent::validate_agent_name(card).is_ok()
+                        })
+                    })
+                {
+                    value = serde_json::from_str(text)?;
+                    let fields = value.as_object_mut().context("invalid Agent metadata")?;
+                    for field in [
+                        "name",
+                        "current",
+                        "history",
+                        "references",
+                        "harness",
+                        "harness_profile",
+                        "created_at",
+                        "updated_at",
+                    ] {
+                        fields.remove(field);
+                    }
+                }
                 // A pool's own name identifies that pool, not an Agent binding.
                 // Keep all remaining metadata fields in the reference scan.
                 if agent

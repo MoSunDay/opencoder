@@ -143,6 +143,61 @@ async fn deletion_waits_for_concurrent_reference_writer_and_then_rechecks() {
 }
 
 #[tokio::test]
+async fn admission_and_reference_writes_wait_through_a_slow_catalog_mutation() {
+    let h = Harness::new().await;
+    h.call("POST", "/api/dag/defs", spec("first")).await;
+    let lock = h
+        .state
+        .fleet
+        .request_lock("catalog-maintenance", "registry")
+        .await
+        .unwrap();
+    let app = h.app.clone();
+    let schedule =
+        tokio::spawn(async move {
+            super::support::call(&app, "POST", "/api/schedules", json!({
+            "id":"daily", "cron":"0 0 * * *", "kind":"dag", "target":"first", "enabled":false
+        }), None).await
+        });
+    let app = h.app.clone();
+    let admission = tokio::spawn(async move {
+        super::support::call(
+            &app,
+            "POST",
+            "/api/executions",
+            json!({
+                "id":"dag-lock-admission", "kind":"dag", "target":"first", "input":{}
+            }),
+            None,
+        )
+        .await
+    });
+    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+    assert!(
+        !schedule.is_finished(),
+        "reference write expired during the mutation"
+    );
+    assert!(
+        !admission.is_finished(),
+        "admission expired during the mutation"
+    );
+    drop(lock);
+    assert_eq!(schedule.await.unwrap().0, 200);
+    let admitted = admission.await.unwrap();
+    assert_ne!(admitted.0, 500, "{}", admitted.1);
+    assert!(
+        !admitted.1.to_string().contains("目录正在更新"),
+        "{}",
+        admitted.1
+    );
+    assert!(
+        !admitted.1.to_string().contains("deadline"),
+        "{}",
+        admitted.1
+    );
+}
+
+#[tokio::test]
 async fn disabled_schedules_and_agent_files_protect_objects_and_late_writes_fail() {
     let h = Harness::new().await;
     h.call("POST", "/api/dag/defs", spec("first")).await;

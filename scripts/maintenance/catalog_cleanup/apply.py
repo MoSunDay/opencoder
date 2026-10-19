@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import time
 from .client import endpoint, write, require, sync_tree
 from .inventory import inventory
 from .model import digest
@@ -81,7 +82,12 @@ def apply(plan, directory, client):
                 receipt.update(status='pending', digest=item['digest'], etag=etag)
                 receipts.append(receipt)
                 write(receipts_path, receipts)
-                status, body, _ = client.call('DELETE', path, etag=etag)
+                try:
+                    status, body, _ = client.call('DELETE', path, etag=etag)
+                finally:
+                    # Give queued admission/reference readers a chance to acquire
+                    # the shared lock before the next exclusive catalog mutation.
+                    time.sleep(0.2)
                 receipt.update(http_status=status, response=body)
                 if status != 200:
                     raise ValueError('conditional delete refused')

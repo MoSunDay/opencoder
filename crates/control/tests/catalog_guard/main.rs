@@ -6,3 +6,5 @@ mod library;
 mod references;
 mod resource_files;
 mod support;
+
+mod binary_resources;

@@ -3,8 +3,8 @@ pub(crate) mod outbox;
 mod proxy;
 mod relay;
 pub mod resources;
-pub mod todo_resources;
 pub mod signals;
+pub mod todo_resources;
 pub use proxy::{forward_resources, status};
 
 use axum::{

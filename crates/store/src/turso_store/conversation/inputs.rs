@@ -253,29 +253,34 @@ pub async fn claim_next_queue(
 ) -> Result<Option<(i64, SessionInput)>> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let mut stmt = conn
-            .prepare_cached("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL AND recorded = 0 ORDER BY admitted_seq ASC LIMIT 1")
+            .prepare_cached(
+                "UPDATE session_inputs SET promoted_seq = \
+                 (SELECT COALESCE(MAX(seq), 0) + 1 FROM session_inputs WHERE session_id = ?1) \
+                 WHERE seq = (SELECT seq FROM session_inputs WHERE session_id = ?1 \
+                 AND delivery = 'queue' AND promoted_seq IS NULL AND recorded = 0 \
+                 ORDER BY admitted_seq ASC LIMIT 1) AND recorded = 0 \
+                 RETURNING seq, id, session_id, delivery, prompt, images_json, \
+                 admitted_seq, promoted_seq, display_text",
+            )
             .await?;
         let mut rows = stmt.query(params![session_id]).await?;
         let claimed = match rows.next().await? {
             Some(r) => {
                 let seq: i64 = r.get(0)?;
-                let input = row_to_input_full(&r, seq)?;
+                let input = row_to_input(&r)?;
+                // Finish RETURNING before committing; decoding errors still
+                // roll back the promotion in this immediate transaction.
+                anyhow::ensure!(
+                    rows.next().await?.is_none(),
+                    "claim returned multiple inputs"
+                );
                 Some((seq, input))
             }
             None => None,
         };
         drop(stmt);
         drop(rows);
-        if let Some((seq, mut input)) = claimed {
-            let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
-            conn.prepare_cached("UPDATE session_inputs SET promoted_seq = ? WHERE seq = ? AND recorded = 0")
-                .await?.execute(params![promoted_seq, seq])
-            .await?;
-            input.promoted_seq = Some(promoted_seq);
-            Ok(Some((seq, input)))
-        } else {
-            Ok(None)
-        }
+        Ok(claimed)
     })
     .await
 }
@@ -368,23 +373,6 @@ fn row_to_input(r: &turso::Row) -> Result<SessionInput> {
     let images: Vec<String> = serde_json::from_str(&r.get::<String>(5)?).unwrap_or_default();
     Ok(SessionInput {
         seq: Some(r.get(0)?),
-        id: r.get(1)?,
-        session_id: r.get(2)?,
-        delivery: Delivery::parse(&delivery_s).unwrap_or_default(),
-        prompt: r.get(4)?,
-        images,
-        admitted_seq: r.get(6)?,
-        promoted_seq: r.get::<Option<i64>>(7)?,
-        display_text: r.get(8)?,
-    })
-}
-
-/// Row layout for the claim query: seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text.
-fn row_to_input_full(r: &turso::Row, seq: i64) -> Result<SessionInput> {
-    let delivery_s: String = r.get(3)?;
-    let images: Vec<String> = serde_json::from_str(&r.get::<String>(5)?).unwrap_or_default();
-    Ok(SessionInput {
-        seq: Some(seq),
         id: r.get(1)?,
         session_id: r.get(2)?,
         delivery: Delivery::parse(&delivery_s).unwrap_or_default(),

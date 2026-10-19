@@ -47,6 +47,30 @@ def existing(path):
     return path
 
 
+def retained_programs(candidate, fallback, original, registered):
+    """Reserve full image copies on each retained Runtime's actual disk."""
+    images, budgets = {}, {}
+    programs = sum(item['bytes'] for item in candidate.get('files', {}).values())
+    for identifier in registered:
+        record = original['releases'][identifier]
+        data = Path(record['runtime_data'])
+        source = Path(record.get('runtime_program', {}).get('rootfs') or data / 'dag/rootfs')
+        if not source.is_dir():
+            source = Path(fallback)
+        stat = source.stat()
+        identity = (stat.st_dev, stat.st_ino)
+        if identity not in images:
+            images[identity] = tree_bytes(source, {'dev', 'proc', 'sys', 'tmp', 'workspace/context'}, 4096)
+        destination = existing(data / 'programs' / candidate['release_id'])
+        device = destination.stat().st_dev
+        item = budgets.setdefault(device, {'path': str(destination), 'required': MARGIN})
+        # Hardlinks are an optimization: bind mounts and separate disks can
+        # require copying every file. Configuration and directory entries also
+        # need space before the final admission/capacity recheck.
+        item['required'] += images[identity] + programs + 16 * 1024 * 1024
+    return {'filesystems': list(budgets.values())}
+
+
 def plan(settings, candidate, rootfs, original, scope):
     from ..archive import managed_units
     from ...backup import roots as backup_roots

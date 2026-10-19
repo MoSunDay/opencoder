@@ -5,6 +5,18 @@ use std::{
     path::Path,
 };
 
+fn bounded_read(path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() <= 4 * 1024 * 1024,
+        "resource database file size limit exceeded"
+    );
+    Ok(bytes)
+}
+
 /// Query only an isolated copy. The source database and its sidecars are never opened.
 /// WAL frames are validated and copied; the derived WAL index is rebuilt privately.
 pub(super) async fn strings(source: &Path, bytes: &[u8]) -> Result<Vec<String>> {
@@ -30,12 +42,12 @@ pub(super) async fn strings(source: &Path, bytes: &[u8]) -> Result<Vec<String>> 
         Err(error) => return Err(error.into()),
     };
     ensure!(
-        std::fs::read(source)? == bytes,
+        bounded_read(source)? == bytes,
         "resource database changed during inspection"
     );
     match &wal_bytes {
         Some(data) => ensure!(
-            std::fs::read(&source_wal)? == *data,
+            bounded_read(&source_wal)? == *data,
             "resource WAL changed during inspection"
         ),
         None => ensure!(

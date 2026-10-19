@@ -48,7 +48,7 @@ pub fn build_app_with_auth(
         .merge(api::schedules::routes())
         .route("/api/metrics/scheduler", get(api::scheduler_metrics::json))
         .route("/metrics", get(api::scheduler_metrics::prometheus))
-        .route("/api/health", get(|| async { axum::Json(json!({"ok":true,"protocol_version":opencoder_core::fleet::PROTOCOL_VERSION,"role":"control","commit":opencoder_core::version::VERSION_LONG,"catalog_guard":1})) }))
+        .route("/api/health", get(|| async { axum::Json(json!({"ok":true,"protocol_version":opencoder_core::fleet::PROTOCOL_VERSION,"role":"control","commit":opencoder_core::version::VERSION_LONG,"catalog_guard":2})) }))
         .route("/api/ready", get(admission::ready))
         .route("/api/admin/release", get(crate::release::status))
         .route("/api/admin/release/retire", post(crate::release::retire))

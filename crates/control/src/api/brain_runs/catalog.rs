@@ -170,14 +170,11 @@ async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
 
 pub async fn load(state: &Arc<AppState>) -> anyhow::Result<Library> {
     let Library {
-        mut capabilities,
+        capabilities,
         selection_ids: initial_ids,
     } = raw_load(state).await?;
     let config = opencoder_core::Config::load(&state.workdir)?;
-    let selected = opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir, || {
-        dedup::prepare(&mut capabilities);
-        dedup::collapse(capabilities.clone())
-    });
+    let (mut capabilities, selected) = dedup::select(config.agent.agents_dir, capabilities).await?;
     let selection_ids = selected
         .iter()
         .filter_map(|value| {

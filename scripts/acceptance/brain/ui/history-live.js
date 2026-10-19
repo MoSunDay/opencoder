@@ -47,6 +47,18 @@ async function main() {
     await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
     checks.push({ name, ...geometry });
   };
+  const readable = async (page, drawer, content, id, width) => {
+    const retryable = drawer.getByRole('alert').filter({ hasText: 'runtime request timed out; retry using the same execution id' });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await Promise.race([content.waitFor(), retryable.waitFor()]);
+      if (await content.isVisible()) return;
+      recoveries.push({ type: 'page', id, width, attempt: attempt + 1, error: await retryable.innerText() });
+      await page.screenshot({ path: path.join(output, `read-timeout-${width}-${recoveries.length}.png`) });
+      assert(attempt < 2, 'Historical detail did not recover using the same execution ID');
+      await retryable.getByRole('button', { name: '重试', exact: true }).click();
+      await retryable.waitFor({ state: 'hidden' });
+    }
+  };
   try {
     for (const width of [1920, 1280, 768, 390]) {
       const page = await browser.newPage({ viewport: { width, height: 1000 }, acceptDownloads: true });
@@ -62,12 +74,20 @@ async function main() {
       });
       try {
         await page.goto(`${base.replace(/\/$/, '')}/?base=${encodeURIComponent(prefix)}`, { waitUntil: 'domcontentloaded' });
-        const get = (route) => page.evaluate(async ({ route, prefix }) => {
-          const headers = localStorage.oc_token ? { Authorization: `Bearer ${localStorage.oc_token}` } : {};
-          const response = await fetch(prefix + route, { headers });
-          if (!response.ok) throw new Error(`${route}: HTTP ${response.status}`);
-          return response.json();
-        }, { route, prefix });
+        const get = async (route) => {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const result = await page.evaluate(async ({ route, prefix }) => {
+              const headers = localStorage.oc_token ? { Authorization: `Bearer ${localStorage.oc_token}` } : {};
+              const response = await fetch(prefix + route, { headers });
+              return { status: response.status, ok: response.ok, body: response.ok ? await response.json() : null };
+            }, { route, prefix });
+            if (result.ok) return result.body;
+            if (result.status !== 504 || !/^\/api\/executions\/[^/]+$/.test(route) || attempt === 2) {
+              throw new Error(`${route}: HTTP ${result.status}`);
+            }
+            recoveries.push({ type: 'readback', route, width, attempt: attempt + 1, status: result.status });
+          }
+        };
         if (commit !== '-') {
           assert.equal((await get('/api/admin/release')).instance_release, `rel-${commit}`);
           for (const file of ['app.js', 'app.css', 'download-sw.js']) {
@@ -122,7 +142,7 @@ async function main() {
         for (const op of operations.slice(0, 3)) {
           const row = drawer.locator(`tr[data-row-key=${JSON.stringify(op.operation_id)}]`);
           await row.getByRole('button', { name: '查看执行详情', exact: true }).click();
-          await drawer.getByRole('tab', { name: '结果', exact: true }).waitFor();
+          await readable(page, drawer, drawer.getByRole('tab', { name: '结果', exact: true }), op.execution_id, width);
           const detail = await get(`/api/executions/${encodeURIComponent(op.execution_id)}`);
           assert.equal(detail.execution.id, op.execution_id);
           await capture(page, `child-${op.node_id}-${width}`);
@@ -153,17 +173,7 @@ async function main() {
         await capture(page, `events-${width}`);
         await drawer.getByRole('tab', { name: '输入与产物', exact: true }).click();
         const actualInput = drawer.getByText('本次实际输入', { exact: true });
-        const retryable = drawer.getByRole('alert').filter({ hasText: 'runtime request timed out; retry using the same execution id' });
-        for (let attempt = 0; attempt < 3; attempt++) {
-          await Promise.race([actualInput.waitFor(), retryable.waitFor()]);
-          if (await actualInput.isVisible()) break;
-          recoveries.push({ id, width, attempt: attempt + 1, error: await retryable.innerText() });
-          await page.screenshot({ path: path.join(output, `input-timeout-${width}-${attempt + 1}.png`) });
-          assert(attempt < 2, 'Historical input did not recover using the same execution ID');
-          await retryable.getByRole('button', { name: '重试', exact: true }).click();
-          await retryable.waitFor({ state: 'hidden' });
-        }
-        await actualInput.waitFor();
+        await readable(page, drawer, actualInput, id, width);
         const frozen = await get(`/api/executions/${encodeURIComponent(id)}`);
         const actual = frozen.request?.input?.layered_request?.inputs;
         if (actual && typeof actual.request === 'string' && actual.request.length < 200) {
@@ -177,6 +187,7 @@ async function main() {
         await page.screenshot({ path: path.join(output, `failure-${width}.png`) }).catch(() => {});
         const diagnostic = {
           error: String(error),
+          recoveries,
           worker: await page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL).catch(() => null),
           popups: await Promise.all(page.context().pages().filter((child) => child !== page).map(async (child) => ({
             url: child.url(), text: (await child.locator('body').innerText().catch(() => '')).slice(0, 2000),

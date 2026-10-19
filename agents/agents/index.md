@@ -1,4 +1,4 @@
-Commit: 84c013e1afb63028f7187bd9fb5250cd2425b8a4
+Commit: c139569c708859863cadc589ce49a6dcaf371f13
 
 # agents 模块
 
@@ -16,3 +16,5 @@ Commit: 84c013e1afb63028f7187bd9fb5250cd2425b8a4
 ## 相关
 - [agents/core](../core/index.md) — 引用卡与资源根类型
 - [dag-runtime](../dag-runtime/index.md)、[执行约定](../../rules/04-dag-execution-contract.md)
+
+[write/deletion.rs](../../crates/agents/src/write/deletion.rs) 提供 `LockedAgentDeletion`：读取卡片前取得资源写锁，调用方可在锁内异步核对目录引用，随后在阻塞线程删除。只删除卡片目录，共享资源池保留；严格读取拒绝损坏文件和软链接。Server 的目录保护层负责引用与条件请求检查。

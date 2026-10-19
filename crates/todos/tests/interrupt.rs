@@ -12,7 +12,7 @@ use std::{
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
@@ -105,7 +105,7 @@ async fn wait_until_running(store: &Arc<dyn Store>, workflow_id: &str) {
 
 #[tokio::test]
 async fn external_interrupt_cancels_inflight_todo_and_is_resumable() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let hang = Arc::new(tokio::sync::Notify::new());
     let mock = Arc::new(
         MockChatClient::new()
@@ -170,7 +170,7 @@ async fn external_interrupt_cancels_inflight_todo_and_is_resumable() {
 
 #[tokio::test]
 async fn local_cancel_mid_todo_marks_item_interrupted_and_stops_cleanly() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let hang = Arc::new(tokio::sync::Notify::new());
     let mock = Arc::new(
         MockChatClient::new()
@@ -216,7 +216,7 @@ async fn local_cancel_mid_todo_marks_item_interrupted_and_stops_cleanly() {
 
 #[tokio::test]
 async fn generation_conflict_stops_the_run() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let hang = Arc::new(tokio::sync::Notify::new());
     let mock = Arc::new(
         MockChatClient::new()
@@ -279,7 +279,7 @@ async fn generation_conflict_stops_the_run() {
 
 #[tokio::test]
 async fn interrupt_rejects_terminal_workflow() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(dispatch("step-1", "new"))
@@ -312,7 +312,7 @@ async fn interrupt_rejects_terminal_workflow() {
 /// persisted Suspended state must survive untouched.
 #[tokio::test]
 async fn external_interrupt_window_keeps_max_attempt_todo_unfailed() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let hang = Arc::new(tokio::sync::Notify::new());
     let mock = Arc::new(
         MockChatClient::new()
@@ -384,7 +384,7 @@ async fn external_interrupt_window_keeps_max_attempt_todo_unfailed() {
 /// (with "local interrupt requested") over it.
 #[tokio::test]
 async fn local_cancel_after_external_write_adopts_external_state() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let hang = Arc::new(tokio::sync::Notify::new());
     let mock = Arc::new(
         MockChatClient::new()
@@ -563,7 +563,7 @@ async fn wait_for_session_message(
 /// runtime_error suspension — and drive must adopt the external state.
 #[tokio::test]
 async fn external_interrupt_after_successful_todo_discards_result_cleanly() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let notify = Arc::new(tokio::sync::Notify::new());
     let mut workflow = spec();
     workflow.todos[0].instructions = "hold-me-then-succeed".into();
@@ -625,7 +625,7 @@ async fn external_interrupt_after_successful_todo_discards_result_cleanly() {
 /// tripping `candidate`'s Running guard and failing the whole round.
 #[tokio::test]
 async fn rewound_sibling_discards_late_successful_result() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let notify = Arc::new(tokio::sync::Notify::new());
     let workflow = WorkflowSpec {
         schema_version: 1,

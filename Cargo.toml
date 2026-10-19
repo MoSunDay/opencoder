@@ -5,6 +5,7 @@ members = [
     "crates/shellguard",
     "crates/llm",
     "crates/store",
+    "crates/database",
     "crates/session",
     "crates/tui",
     "crates/web",
@@ -59,6 +60,7 @@ license = "MIT"
 [workspace.dependencies]
 opencoder-core   = { path = "crates/core" }
 opencoder-llm    = { path = "crates/llm" }
+opencoder-database = { path = "crates/database" }
 opencoder-store  = { path = "crates/store" }
 opencoder-session = { path = "crates/session" }
 opencoder-shellguard = { path = "crates/shellguard" }
@@ -87,8 +89,7 @@ tokio-util = "0.7"
 futures = "0.3"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["json", "ws"] }
-# Published 0.9.30 double-closes SQLite handles; pin the upstream fix (#2282).
-libsql = { git = "https://github.com/tursodatabase/libsql.git", rev = "0070ff3331cd6d09425b812e1cd3ebe32e1d4206", default-features = false, features = ["core", "libsql-sys", "parser", "serde"] }
+turso = { version = "=0.8.3", default-features = false }
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "gzip", "socks"] }
 serde = { version = "1", features = ["derive"] }
@@ -111,6 +112,11 @@ arboard = "3"
 # nfsserve 0.11 drops READDIR's continuation cookie, looping on large
 # directories. Pin the reviewed one-line fix (upstream PR #50) until released.
 nfsserve = { git = "https://github.com/huggingface/nfsserve.git", rev = "9833110399019cf67308aece811ffa47bfe365f1" }
+
+# The database VM executes SQL in Rust; keep it optimized in development and
+# tests so database work does not consume application heartbeat deadlines.
+[profile.dev.package.turso_core]
+opt-level = 2
 
 [profile.release]
 opt-level = 3

@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 
-use opencoder_store::{LibsqlStore, Store, TsRecord, TsRegistry};
+use opencoder_store::{Store, TsRecord, TsRegistry, TursoStore};
 
 use crate::Cli;
 
@@ -367,7 +367,7 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     let mut kept = Vec::<String>::new();
     for (dir, entries) in targets {
         let db = dir.join("opencoder.db");
-        let store = LibsqlStore::open(&db)
+        let store = TursoStore::open(&db)
             .await
             .with_context(|| format!("open store for cleanup: {}", db.display()))?;
         for entry in entries {
@@ -464,7 +464,7 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
     if let Some(record) = record {
         if let Some(dir) = &record.store_dir {
             let db = dir.join("opencoder.db");
-            let store = LibsqlStore::open(&db)
+            let store = TursoStore::open(&db)
                 .await
                 .with_context(|| format!("open session store for delete: {}", db.display()))?;
             store.delete_session(&record.id).await.with_context(|| {

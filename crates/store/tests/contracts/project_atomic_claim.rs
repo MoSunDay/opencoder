@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use opencoder_store::{
-    LibsqlStore, ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind,
-    ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
+    ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
+    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, TursoStore,
 };
 use tokio::sync::Barrier;
 
@@ -54,7 +54,7 @@ fn execute_run(id: &str, todo_id: &str, version: i64, now: i64) -> ProjectTodoRu
 #[tokio::test]
 async fn concurrent_claims_create_exactly_one_run() {
     const CALLERS: usize = 20;
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_todo(&todo("todo", ProjectTodoStatus::Planned, 1))
         .await
@@ -94,7 +94,7 @@ async fn concurrent_claims_create_exactly_one_run() {
 
 #[tokio::test]
 async fn run_insert_failure_rolls_back_claim() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("target", ProjectTodoStatus::Planned, 1))
         .await
@@ -130,7 +130,7 @@ async fn run_insert_failure_rolls_back_claim() {
 
 #[tokio::test]
 async fn existing_running_and_terminal_run_replay_do_not_duplicate() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("todo", ProjectTodoStatus::Planned, 1))
         .await
@@ -182,7 +182,7 @@ async fn existing_running_and_terminal_run_replay_do_not_duplicate() {
 
 #[tokio::test]
 async fn plan_claim_blocks_execute_and_finalization_commits_todo_and_run_together() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("atomic", ProjectTodoStatus::Planned, 1))
         .await
@@ -268,7 +268,7 @@ async fn plan_claim_blocks_execute_and_finalization_commits_todo_and_run_togethe
 
 #[tokio::test]
 async fn medium_fields_respect_total_page_budget_without_losing_history() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("pages", ProjectTodoStatus::Planned, 1))
         .await

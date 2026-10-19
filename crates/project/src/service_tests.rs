@@ -4,8 +4,8 @@
 
 use super::*;
 use opencoder_store::{
-    LibsqlStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
-    ProjectTodoRunStatus as RunStatus, ProjectTodoStatus,
+    ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch, ProjectTodoRunRecord,
+    ProjectTodoRunStatus as RunStatus, ProjectTodoStatus, TursoStore,
 };
 
 use crate::recover;
@@ -25,8 +25,8 @@ async fn cancel_unknown_or_uninitialized_returns_false() {
 
 // ---- recover: panic 兜底 + stale 清扫（手工构造 Deps，内存库） ----
 
-async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<LibsqlStore>) {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<TursoStore>) {
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
     let deps = Arc::new(Deps {
         store: store.clone(),
@@ -43,7 +43,7 @@ async fn test_deps() -> (tempfile::TempDir, Arc<Deps>, Arc<LibsqlStore>) {
     (dir, deps, store)
 }
 
-async fn seed_todo(p: &Arc<LibsqlStore>, id: &str, status: ProjectTodoStatus) {
+async fn seed_todo(p: &Arc<TursoStore>, id: &str, status: ProjectTodoStatus) {
     let now = 1000;
     p.create_todo(&ProjectTodoRecord {
         people: Default::default(),
@@ -68,12 +68,12 @@ async fn seed_todo(p: &Arc<LibsqlStore>, id: &str, status: ProjectTodoStatus) {
     .unwrap();
 }
 
-async fn seed_run(p: &Arc<LibsqlStore>, id: &str, todo_id: &str, kind: ProjectTodoRunKind) {
+async fn seed_run(p: &Arc<TursoStore>, id: &str, todo_id: &str, kind: ProjectTodoRunKind) {
     seed_run_at(p, id, todo_id, kind, 1000).await;
 }
 
 async fn seed_run_at(
-    p: &Arc<LibsqlStore>,
+    p: &Arc<TursoStore>,
     id: &str,
     todo_id: &str,
     kind: ProjectTodoRunKind,
@@ -104,11 +104,11 @@ async fn seed_run_at(
     .unwrap();
 }
 
-async fn todo_status(p: &Arc<LibsqlStore>, id: &str) -> ProjectTodoStatus {
+async fn todo_status(p: &Arc<TursoStore>, id: &str) -> ProjectTodoStatus {
     p.get_todo(id).await.unwrap().unwrap().status
 }
 
-async fn run_status(p: &Arc<LibsqlStore>, id: &str) -> RunStatus {
+async fn run_status(p: &Arc<TursoStore>, id: &str) -> RunStatus {
     p.get_todo_run(id).await.unwrap().unwrap().status
 }
 
@@ -217,7 +217,7 @@ async fn sweep_converges_only_unregistered_runs_past_grace() {
 
 #[tokio::test]
 async fn start_execute_rejects_while_plan_run_in_flight() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
     let service = ProjectService::new();
     service

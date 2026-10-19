@@ -24,13 +24,12 @@ pub(super) async fn acknowledge(
     .await?
 }
 
-// Local libsql futures call SQLite synchronously, including its busy timeout.
-// A connection awaits each call before starting the next; no report fan-out.
+// The database layer owns its execution threads. Await each report before
+// starting the next, preserving connection ordering and bounded backpressure.
 pub(super) async fn storage<T: Send + 'static>(
     operation: impl std::future::Future<Output = anyhow::Result<T>> + Send + 'static,
 ) -> anyhow::Result<T> {
-    let runtime = tokio::runtime::Handle::current();
-    tokio::task::spawn_blocking(move || runtime.block_on(operation)).await?
+    operation.await
 }
 
 async fn send<W>(writer: &mut W, message: Message) -> anyhow::Result<()>

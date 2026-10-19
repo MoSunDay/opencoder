@@ -2,7 +2,7 @@ use axum::{body::Body, http::Request};
 use opencoder_core::agent::scope::with_root;
 use opencoder_llm::tool_call::CompletedToolCall;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use serde_json::json;
 use std::{path::Path, sync::Arc, time::Duration};
 use tower::ServiceExt;
@@ -78,7 +78,7 @@ async fn check(scoped: bool, missing: bool) {
                 usage: None,
             }]),
     );
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "probe-session".into(),

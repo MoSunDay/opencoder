@@ -1,5 +1,5 @@
 use opencoder_store::{
-    LibsqlStore, SessionMeta, Store, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    SessionMeta, Store, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TursoStore,
     TASK_TYPE_TODO_WORKFLOW,
 };
 
@@ -57,7 +57,7 @@ fn event(kind: &str) -> TodoEventRecord {
 
 #[tokio::test]
 async fn workflow_projection_and_event_commit_are_atomic_and_versioned() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store.create_session(&parent("parent-1")).await.unwrap();
     let seq = store
         .create_todo_workflow(
@@ -98,7 +98,11 @@ async fn schema_v8_reopens_at_v9_with_todo_tables() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("v8.db");
     {
-        let db = libsql::Builder::new_local(&path).build().await.unwrap();
+        let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -107,7 +111,7 @@ async fn schema_v8_reopens_at_v9_with_todo_tables() {
             .await
             .unwrap();
     }
-    let store = LibsqlStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     store.create_session(&parent("parent-1")).await.unwrap();
     store
         .create_todo_workflow(
@@ -121,7 +125,7 @@ async fn schema_v8_reopens_at_v9_with_todo_tables() {
 
 #[tokio::test]
 async fn reverse_todo_history_skips_global_sequence_gaps_and_respects_byte_budget() {
-    let store = LibsqlStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store.create_session(&parent("parent-1")).await.unwrap();
     store
         .create_todo_workflow(&workflow(0, "running"), &[], &event("created"))

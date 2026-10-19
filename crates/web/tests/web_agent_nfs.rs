@@ -16,7 +16,7 @@ use axum::Router;
 use tower::ServiceExt;
 
 use opencoder_llm::{ChatStream, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 fn app(state: Arc<opencoder_web::AppState>) -> Router {
     Router::new()
@@ -31,7 +31,7 @@ fn app(state: Arc<opencoder_web::AppState>) -> Router {
 /// State whose workdir carries an `opencoder.json` steering the NFS opts:
 /// ephemeral port + the given export root.
 async fn state_with_config(agents_dir: &std::path::Path) -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir().join(format!("oc-web-nfs-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).unwrap();
     std::fs::write(

@@ -1,8 +1,8 @@
 use crate::error::AppError;
-use libsql::{params, Connection};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use turso::{params, Connection};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -189,7 +189,7 @@ mod tests {
                 .connection
                 .query(
                     &format!("EXPLAIN QUERY PLAN {}", super::entity_values_sql(table)),
-                    libsql::params![1, uuid::Uuid::new_v4().to_string()],
+                    turso::params![1, uuid::Uuid::new_v4().to_string()],
                 )
                 .await
                 .unwrap();
@@ -198,7 +198,12 @@ mod tests {
                 plan.push_str(&row.get::<String>(3).unwrap());
             }
             assert!(plan.contains(&format!("{table}_entity_id")), "{plan}");
-            assert!(plan.contains("<expr>="), "{plan}");
+            let compact: String = plan.chars().filter(|c| !c.is_whitespace()).collect();
+            assert!(compact.contains("env_num=?"), "{plan}");
+            assert!(
+                compact.contains("json_extract(body,'$.entity_id')=?"),
+                "{plan}"
+            );
         }
     }
 }

@@ -5,10 +5,10 @@
 //! to an empty preview instead of erroring the listing.
 
 use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
-use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
+use opencoder_store::{SessionFilter, SessionMeta, Store, TursoStore};
 
-async fn mem() -> LibsqlStore {
-    LibsqlStore::open_memory().await.unwrap()
+async fn mem() -> TursoStore {
+    TursoStore::open_memory().await.unwrap()
 }
 
 fn meta(id: &str) -> SessionMeta {
@@ -48,7 +48,7 @@ fn user_msg(id: &str, blocks: Vec<ContentBlock>) -> Message {
     }
 }
 
-async fn first_preview(store: &LibsqlStore) -> String {
+async fn first_preview(store: &TursoStore) -> String {
     let items = store
         .list_sessions(&SessionFilter::default())
         .await

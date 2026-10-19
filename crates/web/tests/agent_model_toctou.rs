@@ -8,7 +8,7 @@ use std::sync::Arc;
 use axum::response::IntoResponse;
 use opencoder_core::Config;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{Delivery, LibsqlStore, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionMeta, Store, TursoStore};
 use opencoder_web::handle::SessionHandle;
 use tokio::sync::mpsc;
 
@@ -37,7 +37,7 @@ impl ChatStream for HangingStream {
 }
 
 async fn state(sid: &str) -> (Arc<opencoder_web::AppState>, Arc<SessionHandle>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: sid.into(),

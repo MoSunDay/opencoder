@@ -31,43 +31,32 @@ pub(crate) async fn transaction(
     // waits for Active guards, including requests whose client already left.
     let task = tokio::spawn(async move {
         let _active = active;
-        let _gate = if write {
-            Some(state.database.write_gate.lock().await)
+        let work = move |connection: turso::Connection| async move {
+            if write {
+                connection.execute("BEGIN IMMEDIATE", ()).await?;
+            }
+            let response = REQUEST_CONNECTION
+                .scope(connection.clone(), next.run(request))
+                .await;
+            if write {
+                let finish = if response.status().is_success() {
+                    "COMMIT"
+                } else {
+                    "ROLLBACK"
+                };
+                connection.execute(finish, ()).await?;
+            }
+            Ok::<_, anyhow::Error>(response)
+        };
+        let result = if write {
+            state.database.db.write(work).await
         } else {
-            None
+            state.database.db.read(work).await
         };
-        let connection = match state.database.db.connect() {
-            Ok(connection) => connection,
-            Err(error) => return AppError::from(error).into_response(),
-        };
-        if let Err(error) = connection.busy_timeout(std::time::Duration::from_secs(30)) {
-            return AppError::from(error).into_response();
-        }
-        let begin = if write { "BEGIN IMMEDIATE" } else { "BEGIN" };
-        let begin_connection = connection.clone();
-        let handle = tokio::runtime::Handle::current();
-        let result = tokio::task::spawn_blocking(move || {
-            handle.block_on(begin_connection.execute(begin, ()))
-        })
-        .await;
         match result {
-            Ok(Ok(_)) => {}
-            Ok(Err(error)) => return AppError::from(error).into_response(),
-            Err(error) => return AppError::dependency(error.to_string()).into_response(),
+            Ok(response) => response,
+            Err(error) => AppError::from(error).into_response(),
         }
-        let response = REQUEST_CONNECTION
-            .scope(connection.clone(), next.run(request))
-            .await;
-        let finish = if response.status().is_success() {
-            "COMMIT"
-        } else {
-            "ROLLBACK"
-        };
-        if let Err(error) = connection.execute(finish, ()).await {
-            let _ = connection.execute("ROLLBACK", ()).await;
-            return AppError::from(error).into_response();
-        }
-        response
     });
     match task.await {
         Ok(response) => response,

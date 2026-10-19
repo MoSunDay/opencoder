@@ -13,6 +13,7 @@ import uuid
 if __name__ == '__main__':
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from rolling.storage.connection import connect as engine_connect
 from rolling import backup
 from rolling.state import Journal, write
 from rolling.state import atomic_bytes
@@ -84,7 +85,7 @@ def recover(settings, operations, runtime, execution, ticket):
     database = host / 'host.db'
     key = hashlib.sha256(('runtime-use\0' + runtime).encode()).hexdigest()
     with lock(host / 'host.locks' / key):
-        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=rw', uri=True)) as conn:
+        with closing(engine_connect(database)) as conn:
             row = conn.execute('SELECT config,mode FROM host_runtimes WHERE id=?', (runtime,)).fetchone()
             if row is None or row[1] != 'retired':
                 raise ValueError('recovery requires the registered retired Runtime')
@@ -174,7 +175,7 @@ def release(conn, settings, operations, database, runtime, execution, ticket, re
 def _live_rows(database):
     # Read WAL state as well; immutable connections intentionally ignore the
     # live WAL and could hand recovery an obsolete reservation set.
-    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+    with closing(engine_connect(database, readonly=True)) as conn:
         return conn.execute(
             "SELECT ticket,runtime_id,execution_id,phase FROM capacity_queue WHERE phase='running' ORDER BY sequence"
         ).fetchall()
@@ -195,7 +196,7 @@ def recover_running(settings, operations, wait_seconds=90):
         return {'stage': 'complete', 'recovered': [], 'next': 'start managed services'}
     node = (host / 'node-id').read_text().strip()
     grouped = {}
-    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+    with closing(engine_connect(database, readonly=True)) as conn:
         for ticket, runtime, execution, phase in rows:
             registration = conn.execute(
                 'SELECT config,mode FROM host_runtimes WHERE id=?', (runtime,)
@@ -241,7 +242,7 @@ def recover_running(settings, operations, wait_seconds=90):
             write(path, json.loads(admission.read_text()) if admission.exists() else None)
         before[runtime] = str(path)
         atomic_bytes(admission, b'{"version":1,"mode":"frozen"}\n')
-    with closing(sqlite3.connect(database)) as conn:
+    with closing(engine_connect(database)) as conn:
         conn.execute('PRAGMA synchronous=FULL')
         conn.execute('BEGIN IMMEDIATE')
         released = []

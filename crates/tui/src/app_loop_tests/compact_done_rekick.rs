@@ -17,10 +17,10 @@ use crate::worker::process_cmd;
 /// runner must consume the queued row.
 #[tokio::test]
 async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
-    use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+    use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 
     let sid = "compact-rekick";
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: sid.into(),

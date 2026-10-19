@@ -12,7 +12,7 @@ use opencoder_session::autopilot::{drive, ApOutcome, ApPhase};
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::tools::registry;
 use opencoder_session::{SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 /// A completed turn with optional tool calls (empty tools = idle/Done).
 fn completed(text: &str, tool_calls: Vec<CompletedToolCall>) -> LlmEvent {
@@ -584,7 +584,7 @@ async fn drive_iteration_two_persists_true_store_handoff_boundary() {
             .push_script(vec![completed("yes", vec![])]), // Complete
     ) as Arc<dyn ChatStream>;
     let (_dir, mut session) = make_session(mock, autopilot_config(10, 3));
-    session.store = Some(Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn Store>);
+    session.store = Some(Arc::new(TursoStore::open_memory().await.unwrap()) as Arc<dyn Store>);
     session
         .record(Message::user("u1", "implement feature X"))
         .await;

@@ -298,7 +298,7 @@ async fn execute_proceeds_after_stale_plan_run_is_converged() {
 
 #[tokio::test]
 async fn atomic_claim_failure_leaves_todo_and_runs_untouched() {
-    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
     let service = ProjectService::new();
     service

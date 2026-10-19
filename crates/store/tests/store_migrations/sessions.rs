@@ -1,19 +1,19 @@
 //! Requirement, autopilot, and supporting-index migrations.
 
-use opencoder_store::{LibsqlStore, SessionPatch, Store};
+use opencoder_store::{SessionPatch, Store, TursoStore};
 
 // ===========================================================================
 // v7 -> v8 migration: the `sessions.requirement` column.
 // ===========================================================================
 
 /// Hand-write a faithful v7 sessions table (carries `summary_images_json` but
-/// NOT `requirement`), then reopen through `LibsqlStore::open` so
+/// NOT `requirement`), then reopen through `TursoStore::open` so
 /// `migrate(conn, 7)` runs the `if from < 8` block. Asserts the column is
 /// added (NULL by default), round-trips through `SessionPatch`, and that the
 /// schema version bumps to the latest (12).
 #[tokio::test]
 async fn schema_migration_v7_to_v8_adds_requirement() {
-    use libsql::Builder;
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate-v8.db");
@@ -21,7 +21,11 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
     // Phase 1: hand-write a v7 sessions table. It has the full v7 column set
     // (including summary_images_json) but NO requirement column.
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -51,12 +55,12 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
 
     // Phase 2: reopen — migrate(conn, 7) runs the `if from < 8` block, adding
     // the requirement column to sessions.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // (1) The requirement column now exists on sessions (and is NULL).
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn.prepare("PRAGMA table_info(sessions)").await.unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(sessions)").await.unwrap();
         let mut rows = stmt.query(()).await.unwrap();
         let mut found = false;
         while let Some(row) = rows.next().await.unwrap() {
@@ -102,7 +106,7 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
     // (4) Schema version bumped to 9.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -110,8 +114,9 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 38,
-            "schema version must be latest (38) after v7->v8 migration"
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after v7->v8 migration"
         );
     }
 }
@@ -122,12 +127,12 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
 
 /// Hand-write a faithful v10 sessions table (carries `plan_snapshot` and
 /// `plan_input_count` but NOT `autopilot_mode`), then reopen through
-/// `LibsqlStore::open` so `migrate(conn, 10)` runs the `if from < 11` block.
+/// `TursoStore::open` so `migrate(conn, 10)` runs the `if from < 11` block.
 /// Asserts the column is added (NULL by default), round-trips through
 /// `SessionPatch`, and that the schema version bumps to the latest (12).
 #[tokio::test]
 async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
-    use libsql::Builder;
+    use turso::Builder;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migrate-v11.db");
@@ -135,7 +140,11 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
     // Phase 1: hand-write a v10 sessions table. It has the full v10 column
     // set (including plan_snapshot / plan_input_count) but NO autopilot_mode.
     {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
             .await
@@ -166,12 +175,12 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
 
     // Phase 2: reopen — migrate(conn, 10) runs the `if from < 11` block,
     // adding the autopilot_mode column to sessions.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
+    let store = TursoStore::open(&db_path).await.unwrap();
 
     // (1) The autopilot_mode column now exists on sessions (and is NULL).
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn.prepare("PRAGMA table_info(sessions)").await.unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(sessions)").await.unwrap();
         let mut rows = stmt.query(()).await.unwrap();
         let mut found = false;
         while let Some(row) = rows.next().await.unwrap() {
@@ -217,7 +226,7 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
     // (4) Schema version bumped to 12.
     {
         let conn = store.conn().await.unwrap();
-        let stmt = conn
+        let mut stmt = conn
             .prepare("SELECT version FROM schema_version LIMIT 1")
             .await
             .unwrap();
@@ -225,8 +234,9 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 38,
-            "schema version must be latest (38) after v10->v11 migration"
+            v,
+            opencoder_store::turso_store::schema_watermark(),
+            "schema version must be current watermark after v10->v11 migration"
         );
     }
 }

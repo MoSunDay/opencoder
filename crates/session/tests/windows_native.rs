@@ -175,8 +175,8 @@ async fn native_codex_streams_and_resumes_the_persisted_thread() {
     configure();
     let root = tempfile::tempdir().unwrap();
     let _home = opencoder_core::scoped_config_home(root.path().join("config-home"));
-    use opencoder_store::{LibsqlStore, Store};
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    use opencoder_store::{Store, TursoStore};
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let config = Config::default();
     let mut session = SessionState::new(
         "windows-codex",

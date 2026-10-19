@@ -2,9 +2,7 @@
 import json
 from pathlib import Path
 import shutil
-import sqlite3
 import subprocess
-from contextlib import closing
 from . import configuration as configuration_files
 
 
@@ -13,8 +11,8 @@ def configs(settings):
 
 
 def configuration(agent, server):
-    if server.get('storage', {}).get('backend', 'libsql') != 'libsql':
-        raise ValueError('maintenance requires verified local libsql recovery')
+    if server.get('storage', {}).get('backend', 'libsql') not in ('libsql', 'turso'):
+        raise ValueError('maintenance requires verified local libsql recovery or Turso recovery')
     paths = {}
     allowed = {'binary_dir', 'workspace_dir', 'data_dir', 'rootfs_dir',
                'knowledge_root', 'nfs', 'workspace_nfs'}
@@ -176,14 +174,15 @@ def database_inventory(path):
     """Expose migration size and source revision without reading credentials."""
     if not path.is_file():
         raise ValueError('maintenance requires an existing definitions database')
-    with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as conn:
-        version = conn.execute('SELECT version FROM schema_version LIMIT 1').fetchone()
-        if version is None or version[0] > 38:
-            raise ValueError('unsupported definitions database schema')
-        names = conn.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'project_%'").fetchall()
-        tables = {name: conn.execute('SELECT count(*) FROM "' + name.replace('"', '""') + '"').fetchone()[0]
-                  for (name,) in names}
-        indexes = conn.execute("SELECT count(*) FROM sqlite_schema WHERE type='index' AND tbl_name LIKE 'project_%'").fetchone()[0]
+    from ..storage.database import query
+    versions = query(path, 'SELECT version FROM schema_version LIMIT 1')
+    if not versions or versions[0][0] > 39:
+        raise ValueError('unsupported definitions database schema')
+    names = query(path, "SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'project_%'")
+    tables = {name: query(path, 'SELECT count(*) FROM "' + name.replace('"', '""') + '"')[0][0]
+              for (name,) in names}
+    indexes = query(path, "SELECT count(*) FROM sqlite_schema WHERE type='index' AND tbl_name LIKE 'project_%'")[0][0]
+    version = versions[0]
     return {'schema_version': version[0], 'bytes': path.stat().st_size,
             'tables': tables, 'indexes': indexes}
 
@@ -192,6 +191,10 @@ def receipt(settings, candidate, operations):
     from ..state import Journal
     journal = Journal(settings.state_dir)
     scope = check(settings, candidate, operations)
+    from ..manifest import storage_engine
+    engine_switch = storage_engine(candidate) != storage_engine(journal.record(journal.data['current'])['manifest'])
     return {**scope, 'current_release': journal.data['current'],
-            'maintenance': 'wait for idle; close admission; stop writers; back up; upgrade resources and schema',
-            'rollback': 'restore old projects and services before writes reopen; use a corrective release afterwards'}
+            'maintenance': ('close local admission; wait for idle; stop local writers; back up; upgrade all retained Runtime programs'
+                            if engine_switch else 'wait for idle; close admission; stop writers; back up; upgrade resources and schema'),
+            'rollback': ('restore programs and routing only before writes reopen; never restore databases'
+                         if engine_switch else 'restore old projects and services before writes reopen; use a corrective release afterwards')}

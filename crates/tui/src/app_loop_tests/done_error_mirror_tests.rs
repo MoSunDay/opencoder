@@ -4,7 +4,7 @@
 
 use super::*;
 
-use opencoder_store::LibsqlStore;
+use opencoder_store::TursoStore;
 
 // ----- Done/Error queue_items mirror semantics -----
 //
@@ -29,8 +29,8 @@ use opencoder_store::LibsqlStore;
 /// `drain_pending` stays false (no auto-restart after an error).
 #[tokio::test]
 async fn fold_error_resyncs_mirrors_from_store() {
-    use opencoder_store::{Delivery, LibsqlStore, SessionMeta};
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    use opencoder_store::{Delivery, SessionMeta, TursoStore};
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: "test-session".into(),
@@ -126,7 +126,7 @@ async fn fold_error_resyncs_mirrors_from_store() {
 /// in-memory mirror should be wiped.
 #[tokio::test]
 async fn fold_done_clears_queue_items() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![
         (20, "queued prompt C".into()),
@@ -181,7 +181,7 @@ async fn fold_done_clears_queue_items() {
 /// time — it only appears when the queued prompt actually starts executing.
 #[tokio::test]
 async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![
         (30, "queued prompt X".into()),
@@ -250,7 +250,7 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
 /// all entries.
 #[tokio::test]
 async fn fold_queue_consumed_unknown_seq_is_noop() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![(40, "queued prompt Z".into())];
     let mut running = true;
@@ -302,7 +302,7 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
 /// a stale turn and items may belong to a fresh turn.
 #[tokio::test]
 async fn fold_error_when_cancelled_preserves_queue_items() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![(30, "queued after steer".into())];
     let mut running = true;
@@ -356,7 +356,7 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
 /// normalizes to the compound tail.
 #[tokio::test]
 async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![(30, "/plan".into())];
     let mut running = true;
@@ -444,7 +444,7 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
 /// post-boundary rounds merged into the previous turn's ladder).
 #[tokio::test]
 async fn fold_queue_consumed_reanchors_ladder_below_echo() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     // A settled previous turn with its own ladder, so a stale floor would
     // find and merge into it.

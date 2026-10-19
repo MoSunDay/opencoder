@@ -13,6 +13,9 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from rolling.storage.connection import connect as engine_connect
 
 
 def convert(raw):
@@ -90,7 +93,7 @@ def read_anchor(path, database):
 def migrate(database, journal=None, restore=False):
     database = Path(database).resolve(strict=True)
     if journal is None:
-        with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as conn:
+        with closing(engine_connect(database, readonly=True)) as conn:
             return {'mode': 'preview', 'rows': len(scan(conn))}
     journal = Path(journal).absolute()
     if journal.parent.is_symlink() or not journal.parent.is_dir():
@@ -98,7 +101,7 @@ def migrate(database, journal=None, restore=False):
     lock_fd = os.open(str(journal) + '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock_fd, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        with closing(sqlite3.connect(database.as_uri() + '?mode=rw', uri=True, timeout=30)) as conn, conn:
+        with closing(engine_connect(database)) as conn, conn:
             conn.execute('BEGIN IMMEDIATE')
             if not journal.exists() and not journal.is_symlink():
                 if restore:

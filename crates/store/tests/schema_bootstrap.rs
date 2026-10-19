@@ -1,12 +1,9 @@
 //! Functional tests for cold-start schema bootstrap behavior on a real
-//! on-disk libsql file (WAL semantics exercised truthfully, tempdir-backed).
+//! on-disk turso file (WAL semantics exercised truthfully, tempdir-backed).
 //!
 //! Behavior contracts:
-//! - synchronous_is_normal_after_open: the connection ends up with
-//!   `synchronous=NORMAL` (1) and `journal_mode=wal`. Order matters: the WAL
-//!   switch on a fresh database fsyncs under the *currently active*
-//!   synchronous policy, so pragmas must be applied in the safe order or a
-//!   cold start pays FULL fsyncs (seconds-minutes inside a ZFS I/O storm).
+//! - synchronous_is_full_after_open: the connection uses FULL (2) and WAL.
+//!   Turso does not support NORMAL; durability is verified on the live connection.
 //! - fresh_open_then_reopen_is_idempotent: fresh open -> one session via the
 //!   Store trait -> drop -> two re-opens on the same path. Every re-open
 //!   re-runs bootstrap, which must be idempotent: the session survives, the
@@ -29,11 +26,11 @@
 //!   the old state intact, so the database reopens once the defect is
 //!   repaired.
 //! - checkpoint_gate_existing_path_reopen_converges: the `if existed` gate in
-//!   `LibsqlStore::open` (fresh file skips the checkpoint, existing file runs
+//!   `TursoStore::open` (fresh file skips the checkpoint, existing file runs
 //!   it) - decision unit-pinned on `should_checkpoint_wal`, here the
 //!   existing-path reopen converges with integrity_check ok.
 
-use opencoder_store::{LibsqlStore, SessionMeta, Store, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT};
+use opencoder_store::{SessionMeta, Store, TursoStore, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT};
 
 #[tokio::test]
 async fn newer_schema_is_rejected_before_creating_or_modifying_tables() {
@@ -42,7 +39,7 @@ async fn newer_schema_is_rejected_before_creating_or_modifying_tables() {
     let conn = raw_open(&path).await;
     conn.execute_batch("CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(999);
         CREATE TABLE future_data(value TEXT); INSERT INTO future_data VALUES('unchanged');").await.unwrap();
-    let error = match LibsqlStore::open(&path).await {
+    let error = match TursoStore::open(&path).await {
         Ok(_) => panic!("future database was accepted"),
         Err(error) => error,
     };
@@ -59,15 +56,15 @@ async fn newer_schema_is_rejected_before_creating_or_modifying_tables() {
 }
 
 // Read a single-row single-column scalar pragma off a raw connection.
-async fn scalar(conn: &libsql::Connection, pragma: &str) -> String {
-    let stmt = conn.prepare(pragma).await.unwrap();
+async fn scalar(conn: &turso::Connection, pragma: &str) -> String {
+    let mut stmt = conn.prepare(pragma).await.unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let row = rows.next().await.unwrap().expect("pragma row");
     row.get::<String>(0).unwrap()
 }
 
-async fn count_schema_version_rows(conn: &libsql::Connection) -> i64 {
-    let stmt = conn
+async fn count_schema_version_rows(conn: &turso::Connection) -> i64 {
+    let mut stmt = conn
         .prepare("SELECT COUNT(*) FROM schema_version")
         .await
         .unwrap();
@@ -76,7 +73,7 @@ async fn count_schema_version_rows(conn: &libsql::Connection) -> i64 {
 }
 
 // Contract 1: pragma order invariant holds on the *opened* connection, not
-// just in the PRAGMAS const — synchronous must read back NORMAL (1) and the
+// just in the PRAGMAS const — synchronous must read back FULL (2) and the
 // journal must actually be WAL after a cold open.
 
 // Contract 2: bootstrap re-runs (two re-opens on the same path) stay
@@ -96,15 +93,19 @@ async fn count_schema_version_rows(conn: &libsql::Connection) -> i64 {
 // `idx_sessions_task_type` fails - aborting the single bootstrap transaction
 // and re-failing on every later open (permanently unopenable database).
 
-async fn raw_open(db_path: &std::path::Path) -> libsql::Connection {
-    let db = libsql::Builder::new_local(db_path).build().await.unwrap();
+async fn raw_open(db_path: &std::path::Path) -> turso::Connection {
+    let db = turso::Builder::new_local((db_path).to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
     db.connect().unwrap()
 }
 
 // Mirror of the crate-internal `column_exists`: reads `PRAGMA table_info`,
 // where the column name lives at result index 1.
-async fn has_column(conn: &libsql::Connection, table: &str, column: &str) -> bool {
-    let stmt = conn
+async fn has_column(conn: &turso::Connection, table: &str, column: &str) -> bool {
+    let mut stmt = conn
         .prepare(&format!("PRAGMA table_info({table})"))
         .await
         .unwrap();
@@ -117,18 +118,18 @@ async fn has_column(conn: &libsql::Connection, table: &str, column: &str) -> boo
     false
 }
 
-async fn table_named(conn: &libsql::Connection, name: &str) -> bool {
-    let stmt = conn
+async fn table_named(conn: &turso::Connection, name: &str) -> bool {
+    let mut stmt = conn
         .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1")
         .await
         .unwrap();
-    let mut rows = stmt.query(libsql::params![name]).await.unwrap();
+    let mut rows = stmt.query(turso::params![name]).await.unwrap();
     rows.next().await.unwrap().is_some()
 }
 
 // `Some(v)` from the version row; caller ensures the table exists.
-async fn version_of(conn: &libsql::Connection) -> i64 {
-    let stmt = conn
+async fn version_of(conn: &turso::Connection) -> i64 {
+    let mut stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")
         .await
         .unwrap();
@@ -197,7 +198,7 @@ async fn seed_legacy_db(db_path: &std::path::Path, inputs_without_promoted_seq: 
     for id in ["parent", "child"] {
         conn.execute(
             "INSERT INTO sessions (id, created_at, updated_at) VALUES (?1, 1, 1)",
-            libsql::params![id],
+            turso::params![id],
         )
         .await
         .unwrap();

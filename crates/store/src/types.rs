@@ -553,7 +553,7 @@ pub struct MessageRow {
 }
 
 /// Bounded raw slice of one persisted `blocks_json` value. The slice is taken
-/// in SQL before libsql materializes it, so legacy oversized rows stay bounded.
+/// in SQL before Turso materializes it, so legacy oversized rows stay bounded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageChunkRecord {
     pub seq: i64,

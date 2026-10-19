@@ -170,7 +170,7 @@ async fn malformed_prepared_kind_is_an_explicit_error() {
     let store = FleetStore::open_memory().await.unwrap();
     prepare(&store, "dag-broken", "dag", None, "prepared").await;
     // Simulate a damaged persisted payload in this isolated in-memory store.
-    store.conn.execute(
+    store.db.connect().await.unwrap().execute(
         "UPDATE execution_assignments SET assignment=json_set(assignment,'$.request.kind',NULL) WHERE id='dag-broken'",
         (),
     ).await.unwrap();

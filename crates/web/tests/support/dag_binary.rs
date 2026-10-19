@@ -14,7 +14,7 @@ use axum::Router;
 use tower::ServiceExt;
 
 use opencoder_llm::{ChatStream, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use sha2::{Digest, Sha256};
 
 /// Serializes tests that touch the process-global native-pool override.
@@ -82,7 +82,7 @@ pub fn app(state: Arc<opencoder_web::AppState>) -> Router {
 }
 
 pub async fn state() -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir().join(format!("oc-web-dag-binary-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {

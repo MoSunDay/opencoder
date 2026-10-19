@@ -24,8 +24,8 @@ use opencoder_core::{resolve_agent, Config, Message, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, spawn_event_flusher, SessionState};
 use opencoder_store::{
-    Delivery, ImportReport, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 fn config(model: &str) -> Config {
@@ -35,10 +35,10 @@ fn config(model: &str) -> Config {
     }
 }
 
-/// Wraps a real `LibsqlStore`, counting `append_events` calls so we can assert
+/// Wraps a real `TursoStore`, counting `append_events` calls so we can assert
 /// the write count is O(turn) under a token storm while losing zero events.
 struct CountingStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
     events_calls: Arc<AtomicUsize>,
 }
 
@@ -130,7 +130,7 @@ impl Store for CountingStore {
 
 #[tokio::test]
 async fn token_storm_persists_losslessly_with_oturn_writes() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<CountingStore> = Arc::new(CountingStore {
         inner: inner.clone(),
         events_calls: Arc::new(AtomicUsize::new(0)),
@@ -222,7 +222,7 @@ async fn token_storm_persists_losslessly_with_oturn_writes() {
 // distinct `reasoning_delta` sse_kind, monotonic seqs, and O(turn) writes.
 #[tokio::test]
 async fn reasoning_deltas_buffered_on_same_path_as_text() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<CountingStore> = Arc::new(CountingStore {
         inner: inner.clone(),
         events_calls: Arc::new(AtomicUsize::new(0)),

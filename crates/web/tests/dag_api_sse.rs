@@ -12,7 +12,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use futures::StreamExt;
 use opencoder_llm::MockChatClient;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -33,7 +33,7 @@ struct Ctx {
 }
 
 async fn app() -> Ctx {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),

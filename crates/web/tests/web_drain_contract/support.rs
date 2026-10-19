@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use opencoder_core::ContentBlock;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 /// Fresh in-memory AppState (drain tests call handlers/fns directly, no router).
 pub(super) async fn state() -> Arc<opencoder_web::AppState> {
@@ -16,7 +16,7 @@ pub(super) async fn state() -> Arc<opencoder_web::AppState> {
 pub(super) async fn state_with_workdir(
     workdir: std::path::PathBuf,
 ) -> Arc<opencoder_web::AppState> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

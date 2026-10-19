@@ -14,7 +14,7 @@ use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_local::run::rewrite_legacy_sandbox_prefix;
 use opencoder_session::{run, SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 fn mock_client() -> Arc<dyn ChatStream> {
     Arc::new(
@@ -30,7 +30,7 @@ fn mock_client() -> Arc<dyn ChatStream> {
 /// agent switches and message records persist exactly as in a real headless
 /// run, deterministically and offline.
 async fn make_session(id: &str) -> SessionState {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: id.into(),

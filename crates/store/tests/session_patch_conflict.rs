@@ -8,10 +8,10 @@
 //! `summary_images_json`; `clear_handoff` NULLs `handoff_seq` AND `handoff_plan`.
 //! Setting any of those fields together with the matching clear flag is rejected.
 
-use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
+use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
 
-async fn mem() -> LibsqlStore {
-    let store = LibsqlStore::open_memory().await.unwrap();
+async fn mem() -> TursoStore {
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_session(&SessionMeta {
             id: "s1".into(),

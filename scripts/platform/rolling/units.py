@@ -64,7 +64,7 @@ def inherited_environment(settings, unit):
     return '\n'.join(lines)
 
 
-def prepare(settings, bundle, record):
+def install_bundle(settings, bundle, record):
     root = settings.state_dir / "releases" / record["id"]
     installed = root / "bundle"
     if not installed.exists():
@@ -99,6 +99,11 @@ def prepare(settings, bundle, record):
     allow_server_traversal(settings, installed / "bin")
     for binary in (installed / "bin").iterdir():
         binary.chmod(0o755)
+    return installed
+
+
+def prepare(settings, bundle, record):
+    installed = install_bundle(settings, bundle, record)
     node_id = (settings.state_dir / "host/node-id").read_text().strip()
     runtime_data = Path(record["runtime_data"])
     if (runtime_data / "node-id").exists() and (runtime_data / "node-id").read_text().strip() != node_id:
@@ -133,8 +138,17 @@ def prepare(settings, bundle, record):
     prepare_server(settings, record)
 
 
-def freeze_rootfs(record, source, binaries=None):
-    target = Path(record["runtime_data"]) / "dag/rootfs"
+def image_programs(image):
+    names = ['dag-runner', 'agent-step-runner', 'agent-session-runner']
+    for name in ('opencoder', 'opencoder-cli', 'opencoder-server', 'opencoder-agent'):
+        if ((image / 'usr/bin' / name).exists()
+                or (name == 'opencoder-cli' and (image / 'usr/share/opencoder/codex-startup.json').exists())):
+            names.append(name)
+    return names
+
+
+def freeze_rootfs(record, source, binaries=None, *, target=None, link_source=False):
+    target = target or Path(record["runtime_data"]) / "dag/rootfs"
     if not source.is_absolute() or not source.exists():
         raise ValueError('configured DAG rootfs is unavailable')
     if source == target:
@@ -147,9 +161,7 @@ def freeze_rootfs(record, source, binaries=None):
         if target.is_symlink() or not target.is_dir():
             raise ValueError("Runtime OCI image must be a real directory")
         if binaries:
-            names = ['dag-runner', 'agent-step-runner', 'agent-session-runner']
-            if (target / 'usr/share/opencoder/codex-startup.json').exists():
-                names.append('opencoder-cli')
+            names = image_programs(target)
             for name in names:
                 if (target / 'usr/bin' / name).read_bytes() != (binaries / name).read_bytes():
                     raise ValueError('retained DAG runner differs from the candidate release')
@@ -164,7 +176,11 @@ def freeze_rootfs(record, source, binaries=None):
     def copy_file(source_file, destination):
         stat = os.stat(source_file)
         identity = (stat.st_dev, stat.st_ino)
-        if stat.st_nlink > 1 and identity in copied:
+        if link_source:
+            # Only an already frozen release image may use this path. Runner
+            # replacements below unlink before copying, preserving old bytes.
+            os.link(source_file, destination)
+        elif stat.st_nlink > 1 and identity in copied:
             os.link(copied[identity], destination)
         else:
             shutil.copy2(source_file, destination)
@@ -172,9 +188,7 @@ def freeze_rootfs(record, source, binaries=None):
         return destination
     shutil.copytree(source,stage,symlinks=True,ignore=ignored,copy_function=copy_file)
     if binaries:
-        names = ['dag-runner', 'agent-step-runner', 'agent-session-runner']
-        if (stage / 'usr/share/opencoder/codex-startup.json').exists():
-            names.append('opencoder-cli')
+        names = image_programs(stage)
         for name in names:
             runner = stage / 'usr/bin' / name
             runner.unlink(missing_ok=True)

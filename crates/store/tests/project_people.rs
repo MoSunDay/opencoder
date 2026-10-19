@@ -1,9 +1,9 @@
 use opencoder_core::identity::Role;
-use opencoder_store::{LibsqlStore, ProjectStore, Store};
+use opencoder_store::{ProjectStore, Store, TursoStore};
 use serde_json::{json, Value};
 
-async fn setup() -> LibsqlStore {
-    let store = LibsqlStore::open_memory().await.unwrap();
+async fn setup() -> TursoStore {
+    let store = TursoStore::open_memory().await.unwrap();
     for name in ["alice", "bob"] {
         store
             .create_user(name, &format!("test-{name}"), Role::Viewer, 1)
@@ -177,7 +177,7 @@ async fn deleting_users_or_objects_cleans_only_their_people_relations() {
 async fn people_migration_preserves_credentials_and_starts_empty() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("store.db");
-    let s = LibsqlStore::open(&path).await.unwrap();
+    let s = TursoStore::open(&path).await.unwrap();
     s.create_user("alice", "fixed-test-digest", Role::Editor, 1)
         .await
         .unwrap();
@@ -199,7 +199,7 @@ async fn people_migration_preserves_credentials_and_starts_empty() {
     drop(conn);
     drop(s);
     for _ in 0..2 {
-        let s = LibsqlStore::open(&path).await.unwrap();
+        let s = TursoStore::open(&path).await.unwrap();
         let conn = s.conn().await.unwrap();
         let mut rows = conn
             .query(

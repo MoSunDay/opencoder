@@ -1,8 +1,9 @@
-use super::super::FleetStore;
+use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Context, Result};
-use libsql::{params, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use turso::params;
+use turso::transaction::TransactionBehavior;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeRecord {
@@ -19,7 +20,7 @@ pub struct RuntimeOwner {
     pub release_id: String,
 }
 
-impl FleetStore {
+impl FleetConnection {
     pub async fn register_runtime(&self, runtime: &RuntimeRecord) -> Result<()> {
         ensure!(
             opencoder_core::fleet::valid_id(&runtime.id),
@@ -30,7 +31,6 @@ impl FleetStore {
             "invalid release id"
         );
         ensure!(runtime.mode == "staged", "runtime must register staged");
-        let _gate = self.gate.lock().await;
         let config = serde_json::to_string(&runtime.config)?;
         self.conn
             .execute(
@@ -58,7 +58,6 @@ impl FleetStore {
     }
 
     pub async fn runtimes(&self) -> Result<Vec<RuntimeRecord>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(
@@ -80,11 +79,11 @@ impl FleetStore {
 
     /// Activation affects only previously unseen IDs. Ownership never moves.
     pub async fn activate_runtime(&self, id: &str) -> Result<()> {
-        let _gate = self.gate.lock().await;
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         let mut rows = tx
             .query("SELECT 1 FROM host_runtimes WHERE id=?1", [id])
             .await?;
@@ -105,7 +104,6 @@ impl FleetStore {
     }
 
     pub async fn owner(&self, execution_id: &str) -> Result<Option<RuntimeOwner>> {
-        let _gate = self.gate.lock().await;
         let mut rows = self.conn.query("SELECT o.runtime_id,r.release_id FROM runtime_owners o JOIN host_runtimes r ON r.id=o.runtime_id WHERE o.execution_id=?1", [execution_id]).await?;
         rows.next()
             .await?
@@ -135,11 +133,11 @@ impl FleetStore {
             );
             return Ok(owner.runtime_id);
         }
-        let _gate = self.gate.lock().await;
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
         let mut rows = tx
             .query(
                 "SELECT runtime_id FROM runtime_owners WHERE execution_id=?1",
@@ -176,3 +174,6 @@ impl FleetStore {
         Ok(runtime)
     }
 }
+
+#[path = "access/runtimes.rs"]
+mod database_access;

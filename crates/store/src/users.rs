@@ -1,5 +1,5 @@
 //! Platform user records (name + role + token digest). The SQL lives in
-//! `libsql_store::users`; this module owns the wire-shaped record type only.
+//! `turso_store::users`; this module owns the wire-shaped record type only.
 
 use opencoder_core::identity::Role;
 use serde::{Deserialize, Serialize};

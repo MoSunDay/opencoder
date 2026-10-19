@@ -5,10 +5,10 @@
 //! deliberately does not (history backfill must not masquerade as activity).
 
 use opencoder_core::Message;
-use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store, TASK_TYPE_PARENT};
+use opencoder_store::{SessionFilter, SessionMeta, Store, TursoStore, TASK_TYPE_PARENT};
 
-async fn mem() -> LibsqlStore {
-    LibsqlStore::open_memory().await.unwrap()
+async fn mem() -> TursoStore {
+    TursoStore::open_memory().await.unwrap()
 }
 
 fn meta(id: &str, created_at: i64, updated_at: i64) -> SessionMeta {
@@ -39,7 +39,7 @@ fn msg(text: &str, created_at: i64) -> Message {
     m
 }
 
-async fn seed(store: &LibsqlStore) {
+async fn seed(store: &TursoStore) {
     // Activity order (desc): s_hot(9_000) > s_mid(5_000) > s_old(1_000) >
     // s_never(300: updated_at=0 -> falls back to created_at) > s_import(100).
     store
@@ -64,7 +64,7 @@ async fn seed(store: &LibsqlStore) {
         .unwrap();
 }
 
-async fn list_ids(store: &LibsqlStore, filter: &SessionFilter) -> Vec<String> {
+async fn list_ids(store: &TursoStore, filter: &SessionFilter) -> Vec<String> {
     store
         .list_sessions(filter)
         .await
@@ -83,6 +83,51 @@ async fn orders_by_recent_activity_not_creation() {
         ids,
         vec!["s_hot", "s_mid", "s_old", "s_never", "s_import"],
         "activity desc; updated_at=0 rows fall back to created_at"
+    );
+}
+
+#[tokio::test]
+async fn existing_schema_reopens_with_activity_pagination_and_unchanged_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("existing.db");
+    {
+        let store = TursoStore::open(&path).await.unwrap();
+        seed(&store).await;
+        store
+            .append_message("s_old", &msg("retained", 7_000))
+            .await
+            .unwrap();
+        // Reproduce an existing v39 file written before the optional index.
+        store
+            .conn()
+            .await
+            .unwrap()
+            .execute("DROP INDEX idx_sessions_activity", ())
+            .await
+            .unwrap();
+    }
+    let store = TursoStore::open(&path).await.unwrap();
+    let filter = SessionFilter {
+        limit: 2,
+        ..Default::default()
+    };
+    assert_eq!(list_ids(&store, &filter).await, ["s_hot", "s_old"]);
+    let next = SessionFilter {
+        cursor: Some("7000|s_old".into()),
+        ..filter
+    };
+    assert_eq!(list_ids(&store, &next).await, ["s_mid", "s_never"]);
+    assert_eq!(store.load_messages("s_old").await.unwrap().len(), 1);
+    let mut rows = store
+        .conn()
+        .await
+        .unwrap()
+        .query("SELECT version FROM schema_version", ())
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+        39
     );
 }
 

@@ -1,7 +1,7 @@
 use opencoder_core::{Config, Role};
 use opencoder_llm::{LlmEvent, MockChatClient, RequestPurpose};
 use opencoder_session::{resume, run};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use std::sync::Arc;
 
 fn mock() -> Arc<MockChatClient> {
@@ -38,7 +38,7 @@ async fn operator_defaults_survive_compaction_context_clear_and_resume() {
     )
     .unwrap();
     opencoder_core::skill::with_execution(Some(skills.clone()), async {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         seed(store.as_ref(), Some("operator")).await;
         let mock = mock();
         let mut config = Config {
@@ -125,7 +125,7 @@ async fn operator_defaults_survive_compaction_context_clear_and_resume() {
 async fn other_session_kinds_do_not_receive_operator_defaults() {
     let root = tempfile::tempdir().unwrap();
     for kind in [None, Some("agent"), Some("maintenance"), Some("brain")] {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         seed(store.as_ref(), kind).await;
         let mock = mock();
         let mut session = resume(

@@ -81,7 +81,7 @@ pub async fn fork_session_in(
 mod tests {
     use super::*;
     use opencoder_core::{ContentBlock, Message};
-    use opencoder_store::LibsqlStore;
+    use opencoder_store::TursoStore;
 
     fn assistant_with_text(id: &str, text: &str) -> Message {
         let mut m = Message::assistant(id);
@@ -125,7 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn fork_copies_messages_and_resets_meta() {
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         // Seed with a non-default task_type (fork resets it) and a pinned
         // session autopilot mode (fork inherits it, model-style).
         seed(&store, "parent", Some("subagent"), Some("review")).await;
@@ -161,7 +161,7 @@ mod tests {
 
     #[tokio::test]
     async fn fork_nonexistent_session_errors() {
-        let store = LibsqlStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         let err = fork_session(&store, "ghost").await;
         assert!(err.is_err(), "forking a nonexistent session should fail");
     }

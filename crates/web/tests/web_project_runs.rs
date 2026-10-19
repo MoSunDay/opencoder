@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use opencoder_llm::LlmEvent;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::json;
 use support::project_app::{call, done, harness, todo_row, tool_turn, wait_until, TOKEN};
 use tokio::sync::Notify;
@@ -147,7 +147,7 @@ async fn cancel_unknown_run_returns_false_and_503_shape() {
     assert_eq!(v["goals"].as_array().unwrap().len(), 0);
 
     // Uninitialized service (AppState built without init) → 503 everywhere.
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         client_override: None,

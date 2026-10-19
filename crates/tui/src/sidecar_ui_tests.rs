@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use tokio::sync::mpsc;
 
 use crate::sidecar_ui::{spawn_actor, SidecarCmd};
@@ -34,7 +34,7 @@ fn done(text: &str, total: u64) -> LlmEvent {
 /// In-memory store seeded with a two-message main transcript (the sidecar's
 /// background context) and its session row (events FK on sessions).
 async fn seeded_store() -> Arc<dyn Store> {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: SID.into(),

@@ -13,8 +13,8 @@ pub use runtimes::{RuntimeOwner, RuntimeRecord};
 
 use super::FleetStore;
 use anyhow::{Context, Result};
-use libsql::Connection;
 use std::fs::{File, OpenOptions};
+use turso::Connection;
 
 pub(super) async fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(

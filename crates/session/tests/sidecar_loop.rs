@@ -17,7 +17,7 @@ use opencoder_session::{
     new_conv, parse_sidecar_question, run_sidecar_turn, spawn_event_flusher, SessionEvent,
     SessionState,
 };
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 const PARENT: &str = "parent-1";
 
@@ -44,7 +44,7 @@ fn done(text: &str, total: u64, input: u64, output: u64) -> LlmEvent {
 /// Parent session with a real memory store + mock client. `record` auto-creates
 /// the session row, so seeded history is durably countable.
 async fn parent_session() -> (SessionState, Arc<dyn Store>, Arc<MockChatClient>) {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = Arc::new(MockChatClient::new());
     let agent = resolve_agent("act").expect("act agent registered");
     let session = SessionState::new(

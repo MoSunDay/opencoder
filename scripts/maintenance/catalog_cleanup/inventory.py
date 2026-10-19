@@ -1,6 +1,9 @@
 """Read only the definition/execution tables needed for catalog cleanup."""
 from collections import defaultdict
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+from rolling.storage.connection import connect as engine_connect
 import json
 import sqlite3
 import time
@@ -9,7 +12,7 @@ from .files import resource_texts
 
 
 def connection(path):
-    conn = sqlite3.connect('file:' + str(Path(path).resolve()) + '?mode=ro', uri=True)
+    conn = engine_connect(path, readonly=True)
     conn.execute('PRAGMA query_only=ON')
     return conn
 

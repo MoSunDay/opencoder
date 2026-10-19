@@ -10,7 +10,7 @@ use opencoder_core::agent::set_agents_dir_override;
 use opencoder_core::{AgentKind, Config};
 use opencoder_llm::MockChatClient;
 use opencoder_session::{SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::agent_menu::{handle_agent_key, AgentMenu, AgentOutcome};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 
@@ -49,7 +49,7 @@ fn write_file_agent(root: &std::path::Path, name: &str, soul: &str) {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 /// A session whose config points at the fixture agents root.

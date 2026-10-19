@@ -57,7 +57,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 
 use crate::control_state::ControlHub;
 use crate::handle::HandleMap;
@@ -114,9 +114,9 @@ pub async fn serve(
 ) -> Result<()> {
     let data_dir = data_dir_for(&workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
-    // Project and session operations share one libsql connection and lock.
-    let libsql = Arc::new(LibsqlStore::open(data_dir.join("opencoder.db")).await?);
-    let store: Arc<dyn Store> = libsql.clone();
+    // Project and session operations share one Turso database pool.
+    let turso = Arc::new(TursoStore::open(data_dir.join("opencoder.db")).await?);
+    let store: Arc<dyn Store> = turso.clone();
 
     // Brain (capability library) rides the dedicated embedding endpoint when
     // `embedding_provider` is configured (local embedding server), else the
@@ -153,7 +153,7 @@ pub async fn serve(
     project
         .init(
             store.clone(),
-            libsql,
+            turso,
             workdir.clone(),
             None,
             Some(brain.clone()),
@@ -611,7 +611,7 @@ mod tests {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use opencoder_store::{LibsqlStore, Store};
+    use opencoder_store::{Store, TursoStore};
     use tower::ServiceExt;
 
     #[test]
@@ -635,7 +635,7 @@ mod tests {
     /// argument (`_web: bool`) and `build_app` always wired `/`, so passing
     /// `--web false` still exposed the manager UI.
     async fn make_app() -> axum::Router {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         let state = Arc::new(AppState {
             brain: crate::api_brain::mock_brain(store.clone()),
             store,
@@ -652,7 +652,7 @@ mod tests {
     }
 
     async fn make_api_only_app() -> axum::Router {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         let state = Arc::new(AppState {
             brain: crate::api_brain::mock_brain(store.clone()),
             store,

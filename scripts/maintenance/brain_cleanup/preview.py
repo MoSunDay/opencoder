@@ -2,12 +2,15 @@
 import json
 import sqlite3
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+from rolling.storage.connection import connect as engine_connect
 from . import inventory
 from .model import ID_COLUMNS, ALLOWED_TABLES, RETIRED_TABLES, digest, execution_scope, selected_row
 
 
 def connect(path):
-    connection = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)
+    connection = engine_connect(path, readonly=True)
     connection.row_factory = sqlite3.Row
     return connection
 

@@ -8,7 +8,7 @@
 //!
 //! This test is **deterministic** — it would FAIL against a tree where the
 //! re-absorb tail only consulted `has_pending_steers`. To make the timing
-//! deterministic we wrap the real `LibsqlStore` in a `GatedStore` that hides
+//! deterministic we wrap the real `TursoStore` in a `GatedStore` that hides
 //! queue-delivery inputs from `pending_inputs` / `claim_next_queue` until an
 //! `AtomicBool` gate is flipped open inside the `Done` event callback. That
 //! ordering guarantees the in-loop late-peek sees nothing (gate still closed)
@@ -23,8 +23,8 @@ use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 /// Store wrapper that conceals queue inputs until `reveal` is set true.
@@ -215,7 +215,7 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
 /// consults `has_pending_queues` alongside `has_pending_steers`.
 #[tokio::test]
 async fn reabsorb_tail_picks_up_queued_input_missed_by_in_loop_poll() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let reveal = Arc::new(AtomicBool::new(false));
     let store: Arc<dyn Store> = Arc::new(GatedStore {
         inner: inner.clone(),

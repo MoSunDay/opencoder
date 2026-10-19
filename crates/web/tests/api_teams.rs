@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_store::{
-    LibsqlStore, NodeRecord, Store, TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED,
+    NodeRecord, Store, TeamTopicRunRecord, TursoStore, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED,
 };
 use opencoder_team::fs_store;
 use opencoder_team::types::{MemberRef, TeamMember, TeamMeta, TopicMeta};
@@ -41,7 +41,7 @@ struct Env {
 async fn env() -> Env {
     let db = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open(db.path().join("t.db")).await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open(db.path().join("t.db")).await.unwrap());
     Env {
         store,
         team_root: root.path().to_path_buf(),

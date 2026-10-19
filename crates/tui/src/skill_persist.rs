@@ -225,10 +225,10 @@ pub(crate) async fn apply_skill_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opencoder_store::{LibsqlStore, SessionMeta};
+    use opencoder_store::{SessionMeta, TursoStore};
 
     async fn fresh_store() -> Arc<dyn Store> {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
                 id: "s".into(),

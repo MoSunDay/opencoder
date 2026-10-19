@@ -21,8 +21,8 @@ use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{
-    Delivery, ImportReport, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ use opencoder_store::{
 // ---------------------------------------------------------------------------
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {
@@ -139,7 +139,7 @@ async fn pending_seqs(store: &Arc<dyn Store>, sid: &str) -> Vec<i64> {
 // ---------------------------------------------------------------------------
 
 struct FailingUpdateStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
 }
 
 #[async_trait]
@@ -353,7 +353,7 @@ async fn partial_batch_failure_unpromotes_only_remaining() {
 /// steer is consumed EXACTLY ONCE — no error-path re-absorb may re-fire it.
 #[tokio::test]
 async fn runner_consumes_batch_steers_with_failing_store() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let failing: Arc<dyn Store> = Arc::new(FailingUpdateStore { inner });
 
     let mock = mock_reply("ok");

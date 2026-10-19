@@ -11,7 +11,7 @@
 //! (Empty semantics → Done) instead of erroring the whole run.
 //!
 //! The failing store is a thin delegating wrapper around a real in-memory
-//! libsql store whose `claim_next_queue` ALWAYS returns Err; every other
+//! Turso store whose `claim_next_queue` ALWAYS returns Err; every other
 //! method (notably `pending_inputs`, so `has_pending_queues` sees the row and
 //! the drain path actually engages) delegates unchanged.
 
@@ -23,8 +23,8 @@ use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, Store, SubagentTaskRecord, TursoStore,
 };
 
 /// Delegating store wrapper whose queue claim always fails.
@@ -181,7 +181,7 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
 /// stranded row (exactly one LLM call for the kickoff turn).
 #[tokio::test]
 async fn persistent_claim_failure_emits_error_event_and_run_terminates() {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<dyn Store> = Arc::new(FailingClaimStore {
         inner: inner.clone(),
     });

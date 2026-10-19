@@ -25,12 +25,17 @@ async fn bindings_saved_versions_and_pending_dispatch_prevent_removal() {
         .delete_definition("capability_target", "registered")
         .await
         .unwrap();
-    let conn = libsql::Builder::new_local(h.dir.path().join("state/control.db"))
-        .build()
-        .await
-        .unwrap()
-        .connect()
-        .unwrap();
+    let conn = turso::Builder::new_local(
+        (h.dir.path().join("state/control.db"))
+            .to_str()
+            .expect("UTF-8 database path"),
+    )
+    .experimental_multiprocess_wal(true)
+    .build()
+    .await
+    .unwrap()
+    .connect()
+    .unwrap();
     conn.execute(
         "INSERT INTO brain_plan_versions VALUES('saved',1,?1)",
         [json!({"plan":{"nodes":[{"capability_id":"dag-first"}]}}).to_string()],
@@ -62,12 +67,17 @@ async fn bindings_saved_versions_and_pending_dispatch_prevent_removal() {
 async fn active_assignments_protect_resources_but_finished_history_is_unchanged() {
     let h = Harness::new().await;
     h.call("POST", "/api/dag/defs", spec("first")).await;
-    let conn = libsql::Builder::new_local(h.dir.path().join("state/control.db"))
-        .build()
-        .await
-        .unwrap()
-        .connect()
-        .unwrap();
+    let conn = turso::Builder::new_local(
+        (h.dir.path().join("state/control.db"))
+            .to_str()
+            .expect("UTF-8 database path"),
+    )
+    .experimental_multiprocess_wal(true)
+    .build()
+    .await
+    .unwrap()
+    .connect()
+    .unwrap();
     conn.execute(
         "INSERT INTO execution_index VALUES('dag-run',1,'dag','node','running')",
         (),

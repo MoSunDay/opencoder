@@ -6,19 +6,19 @@
 //! the node_tasks protocols (see `nodes_lost_converge.rs` for the originals).
 
 use opencoder_dag::DagRunStatus;
-use opencoder_store::{DagDefRecord, DagEventRecord, DagRunRecord, LibsqlStore, NodeRecord, Store};
+use opencoder_store::{DagDefRecord, DagEventRecord, DagRunRecord, NodeRecord, Store, TursoStore};
 use serde_json::json;
 use tempfile::TempDir;
 
 const STALE_MS: i64 = 400;
 
-async fn fresh() -> (TempDir, LibsqlStore) {
+async fn fresh() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn register(store: &LibsqlStore, name: &str, now_ms: i64) -> NodeRecord {
+async fn register(store: &TursoStore, name: &str, now_ms: i64) -> NodeRecord {
     store
         .register_node(name, Some("v1"), Some("/tmp/wd"), None, now_ms)
         .await
@@ -50,7 +50,7 @@ fn run(id: &str, node: Option<&str>, created_at: i64, spec_json: &str) -> DagRun
     }
 }
 
-async fn dispatch(store: &LibsqlStore, id: &str, node: Option<&str>, created_at: i64) {
+async fn dispatch(store: &TursoStore, id: &str, node: Option<&str>, created_at: i64) {
     store
         .dispatch_dag_run(&run(id, node, created_at, r#"{"v":1}"#))
         .await

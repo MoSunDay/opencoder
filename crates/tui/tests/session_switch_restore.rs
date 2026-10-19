@@ -27,7 +27,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, ProviderConfig};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{resume, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::chat::block_text;
 use opencoder_tui::session_ui::{replay_into_chat, SessionUiState};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
@@ -66,7 +66,7 @@ fn restore_home(prev: Option<std::ffi::OsString>) {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn config_with(model: &str) -> Config {

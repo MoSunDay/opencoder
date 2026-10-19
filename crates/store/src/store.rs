@@ -16,11 +16,11 @@ use crate::{
     TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
-/// Storage abstraction — the single seam that lets us swap libsql for another
+/// Storage abstraction — the single seam that lets us swap turso for another
 /// Rust SQLite implementation later without touching upper layers.
 ///
 /// Upper-layer code depends on `Arc<dyn Store>`; concrete impls live in
-/// `libsql_store` (primary) and any future backend.
+/// `turso_store` (primary) and any future backend.
 // Rust traits and trait implementations cannot be split into partial items.
 // Assemble method groups first so async_trait sees one complete declaration.
 macro_rules! store_contract_finish {

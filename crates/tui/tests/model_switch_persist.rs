@@ -15,12 +15,12 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, ProviderConfig};
 use opencoder_llm::MockChatClient;
 use opencoder_session::{resume, SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn switched_config() -> Config {

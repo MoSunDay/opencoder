@@ -20,7 +20,7 @@ use opencoder_core::{Config, ContentBlock, Message, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::compaction::compact;
 use opencoder_session::resume;
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 
 fn cfg() -> Config {
     Config {
@@ -40,7 +40,7 @@ fn assistant(id: &str, text: &str) -> Message {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 /// A compaction-capable mock: one canned summary response reused on demand.

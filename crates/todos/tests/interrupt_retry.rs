@@ -15,8 +15,8 @@ use std::{
 use opencoder_core::{Config, Message};
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_store::{
-    LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
-    SessionPatch, Store, SubagentTaskRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch,
+    Store, SubagentTaskRecord, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TursoStore,
 };
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 /// event lands), but only for the interrupt commit — simulating the driving
 /// process winning the CAS race on the first attempt.
 struct ConflictOnceStore {
-    inner: Arc<LibsqlStore>,
+    inner: Arc<TursoStore>,
     fired: AtomicBool,
 }
 
@@ -241,7 +241,7 @@ fn spec() -> WorkflowSpec {
 
 #[tokio::test]
 async fn interrupt_retries_past_generation_conflict() {
-    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
     let store: Arc<dyn Store> = Arc::new(ConflictOnceStore {
         inner: inner.clone(),
         fired: AtomicBool::new(false),
@@ -295,7 +295,7 @@ async fn interrupt_retries_past_generation_conflict() {
 /// dispatchable and the resume must run to completion.
 #[tokio::test]
 async fn max_attempt_one_todo_survives_external_interrupt_and_resumes() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let hang = Arc::new(tokio::sync::Notify::new());
     let mock = Arc::new(
         MockChatClient::new()

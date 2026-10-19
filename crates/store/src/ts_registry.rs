@@ -6,18 +6,15 @@
 //! All ts commands now read this single index (`<data_root>/ts.db`) instead;
 //! session content stays in the per-workdir stores.
 //!
-//! The registry is a small libsql database with the same WAL + serialized
-//! access pattern as `LibsqlStore`. Rows are the ts session index: id, durable
+//! The registry uses Turso WAL with independent reader connections and a
+//! serialized writer, as does `TursoStore`. Rows are the session index: id, durable
 //! workdir, owning store dir, timestamps, title and preview. A `meta` table
 //! carries the `migrated=1` marker for the one-time legacy import.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use libsql::{Builder, Connection};
-use tokio::sync::Mutex;
-
-use crate::libsql_store::schema;
+use opencoder_database::Database;
 
 const CREATE_TS_SESSIONS: &str = "\
 CREATE TABLE IF NOT EXISTS ts_sessions (
@@ -45,174 +42,168 @@ pub struct TsRecord {
     pub preview: String,
 }
 
-/// Serialized-access registry over `ts_sessions` + `meta`. Same pragma/WAL
-/// setup and `Mutex` discipline as `LibsqlStore`; every method is one
-/// statement, so no transaction helper is needed.
+/// Registry over `ts_sessions` + `meta`, using the shared connection pool.
 pub struct TsRegistry {
-    conn: Connection,
-    db_lock: Mutex<()>,
+    db: Database,
 }
 
 impl TsRegistry {
-    /// Open (or create) the registry database and bootstrap its schema.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let db = Builder::new_local(path.as_ref())
-            .build()
-            .await
-            .with_context(|| format!("open ts registry db at {}", path.as_ref().display()))?;
-        let conn = db.connect().context("connect ts registry")?;
-        schema::apply_connection_pragmas(&conn).await?;
-        let _ = conn.busy_timeout(std::time::Duration::from_secs(30));
-        for create in [CREATE_TS_SESSIONS, CREATE_META] {
-            conn.execute(create, ())
-                .await
-                .with_context(|| format!("bootstrap ts registry: {create}"))?;
-        }
-        Ok(TsRegistry {
-            conn,
-            db_lock: Mutex::new(()),
+        let db = Database::open(path).await?;
+        db.write(|conn| async move {
+            conn.execute_batch(CREATE_TS_SESSIONS).await?;
+            conn.execute_batch(CREATE_META).await?;
+            Ok(())
         })
+        .await?;
+        Ok(Self { db })
     }
 
-    /// Open an in-memory registry (tests and ephemeral callers).
     pub async fn open_memory() -> Result<Self> {
-        let db = Builder::new_local(":memory:")
-            .build()
-            .await
-            .context("open in-memory ts registry")?;
-        let conn = db.connect().context("connect ts registry")?;
-        schema::apply_connection_pragmas(&conn).await?;
-        for create in [CREATE_TS_SESSIONS, CREATE_META] {
-            conn.execute(create, ())
-                .await
-                .with_context(|| format!("bootstrap ts registry: {create}"))?;
-        }
-        Ok(TsRegistry {
-            conn,
-            db_lock: Mutex::new(()),
-        })
+        Self::open(":memory:").await
     }
 
     /// Idempotent insert-or-replace of one session row.
     pub async fn upsert(&self, record: &TsRecord) -> Result<()> {
-        let _guard = self.db_lock.lock().await;
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO ts_sessions \
+        let record = record.to_owned();
+        self.db
+            .write(move |conn| async move {
+                let record = &record;
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO ts_sessions \
                  (id, workdir, store_dir, created_at, updated_at, title, preview) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                libsql::params![
-                    record.id.clone(),
-                    record
-                        .workdir
-                        .as_ref()
-                        .map(|p| p.to_string_lossy().into_owned()),
-                    record
-                        .store_dir
-                        .as_ref()
-                        .map(|p| p.to_string_lossy().into_owned()),
-                    record.created_at,
-                    record.updated_at,
-                    record.title.clone(),
-                    record.preview.clone(),
-                ],
-            )
+                    turso::params![
+                        record.id.clone(),
+                        record
+                            .workdir
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().into_owned()),
+                        record
+                            .store_dir
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().into_owned()),
+                        record.created_at,
+                        record.updated_at,
+                        record.title.clone(),
+                        record.preview.clone(),
+                    ],
+                )
+                .await
+                .with_context(|| format!("upsert ts session {}", record.id))?;
+                Ok(())
+            })
             .await
-            .with_context(|| format!("upsert ts session {}", record.id))?;
-        Ok(())
     }
 
     /// All registered sessions, ordered by id for deterministic iteration.
     pub async fn list(&self) -> Result<Vec<TsRecord>> {
-        let _guard = self.db_lock.lock().await;
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT id, workdir, store_dir, created_at, updated_at, title, preview \
+        self.db
+            .read(move |conn| async move {
+                let mut rows = conn
+                    .query(
+                        "SELECT id, workdir, store_dir, created_at, updated_at, title, preview \
                     FROM ts_sessions ORDER BY id",
-                (),
-            )
+                        (),
+                    )
+                    .await
+                    .context("list ts sessions")?;
+                let mut out = Vec::new();
+                while let Some(row) = rows.next().await? {
+                    out.push(TsRecord {
+                        id: row.get::<String>(0)?,
+                        workdir: row.get::<Option<String>>(1)?.map(PathBuf::from),
+                        store_dir: row.get::<Option<String>>(2)?.map(PathBuf::from),
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                        title: row.get(5)?,
+                        preview: row.get::<Option<String>>(6)?.unwrap_or_default(),
+                    });
+                }
+                Ok(out)
+            })
             .await
-            .context("list ts sessions")?;
-        let mut out = Vec::new();
-        while let Some(row) = rows.next().await? {
-            out.push(TsRecord {
-                id: row.get::<String>(0)?,
-                workdir: row.get::<Option<String>>(1)?.map(PathBuf::from),
-                store_dir: row.get::<Option<String>>(2)?.map(PathBuf::from),
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                title: row.get(5)?,
-                preview: row.get::<Option<String>>(6)?.unwrap_or_default(),
-            });
-        }
-        Ok(out)
     }
 
     /// One session row by id.
     pub async fn get(&self, id: &str) -> Result<Option<TsRecord>> {
-        let _guard = self.db_lock.lock().await;
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT id, workdir, store_dir, created_at, updated_at, title, preview \
+        let id = id.to_owned();
+        self.db
+            .read(move |conn| async move {
+                let id = id.as_str();
+
+                let mut rows = conn
+                    .query(
+                        "SELECT id, workdir, store_dir, created_at, updated_at, title, preview \
                  FROM ts_sessions WHERE id = ?1",
-                libsql::params![id.to_string()],
-            )
+                        turso::params![id.to_string()],
+                    )
+                    .await
+                    .context("get ts session")?;
+                let Some(row) = rows.next().await? else {
+                    return Ok(None);
+                };
+                Ok(Some(TsRecord {
+                    id: row.get::<String>(0)?,
+                    workdir: row.get::<Option<String>>(1)?.map(PathBuf::from),
+                    store_dir: row.get::<Option<String>>(2)?.map(PathBuf::from),
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    title: row.get(5)?,
+                    preview: row.get::<Option<String>>(6)?.unwrap_or_default(),
+                }))
+            })
             .await
-            .context("get ts session")?;
-        let Some(row) = rows.next().await? else {
-            return Ok(None);
-        };
-        Ok(Some(TsRecord {
-            id: row.get::<String>(0)?,
-            workdir: row.get::<Option<String>>(1)?.map(PathBuf::from),
-            store_dir: row.get::<Option<String>>(2)?.map(PathBuf::from),
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-            title: row.get(5)?,
-            preview: row.get::<Option<String>>(6)?.unwrap_or_default(),
-        }))
     }
 
     /// Remove one session row (no-op when absent).
     pub async fn delete(&self, id: &str) -> Result<()> {
-        let _guard = self.db_lock.lock().await;
-        self.conn
-            .execute(
-                "DELETE FROM ts_sessions WHERE id = ?1",
-                libsql::params![id.to_string()],
-            )
+        let id = id.to_owned();
+        self.db
+            .write(move |conn| async move {
+                let id = id.as_str();
+
+                conn.execute(
+                    "DELETE FROM ts_sessions WHERE id = ?1",
+                    turso::params![id.to_string()],
+                )
+                .await
+                .with_context(|| format!("delete ts session {id}"))?;
+                Ok(())
+            })
             .await
-            .with_context(|| format!("delete ts session {id}"))?;
-        Ok(())
     }
 
     /// Whether the one-time legacy store scan has completed.
     pub async fn is_migrated(&self) -> Result<bool> {
-        let _guard = self.db_lock.lock().await;
-        let mut rows = self
-            .conn
-            .query("SELECT value FROM meta WHERE key = 'migrated'", ())
+        self.db
+            .read(move |conn| async move {
+                let mut rows = conn
+                    .query("SELECT value FROM meta WHERE key = 'migrated'", ())
+                    .await
+                    .context("read ts registry meta")?;
+                let Some(row) = rows.next().await? else {
+                    return Ok(false);
+                };
+                Ok(row.get::<Option<String>>(0)?.as_deref() == Some("1"))
+            })
             .await
-            .context("read ts registry meta")?;
-        let Some(row) = rows.next().await? else {
-            return Ok(false);
-        };
-        Ok(row.get::<Option<String>>(0)?.as_deref() == Some("1"))
     }
 
     /// Mark the legacy migration as complete.
     pub async fn mark_migrated(&self) -> Result<()> {
-        let _guard = self.db_lock.lock().await;
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated', '1')",
-                (),
-            )
+        self.db
+            .write(move |conn| async move {
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated', '1')",
+                    (),
+                )
+                .await
+                .context("mark ts registry migrated")?;
+                Ok(())
+            })
             .await
-            .context("mark ts registry migrated")?;
-        Ok(())
     }
 }
 

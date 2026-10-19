@@ -13,7 +13,7 @@ pub const SCHEDULE_RUN_ERROR: &str = "error";
 /// so re-firing the same tick is idempotent. Terminal execution state lives
 /// in the execution index — the scheduler reads it from there, the Store
 /// only persists the ledger. Pure data: scheduling lives above the Store
-/// (see `libsql_store/schedule.rs`).
+/// (see `turso_store/schedule.rs`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduleRunRecord {
     /// `ScheduleJob::id` from `schedules.json`.

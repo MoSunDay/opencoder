@@ -1,7 +1,7 @@
 use super::wire::*;
 use opencoder_core::{resolve_agent, ContentBlock, Message};
 use opencoder_session::{run, SessionState};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{Store, TursoStore};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -41,7 +41,7 @@ async fn coding_rounds_persist_replay_and_resume_with_full_provider_state() {
     let mut cfg = config(&server.url);
     cfg.interleaved_thinking = Some(false);
     let db = dir.path().join("session.db");
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open(&db).await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open(&db).await.unwrap());
     let mut session = SessionState::new(
         "responses-coding",
         resolve_agent("act").unwrap(),
@@ -92,7 +92,7 @@ async fn coding_rounds_persist_replay_and_resume_with_full_provider_state() {
     );
     drop(session);
     drop(store);
-    let reopened: Arc<dyn Store> = Arc::new(LibsqlStore::open(&db).await.unwrap());
+    let reopened: Arc<dyn Store> = Arc::new(TursoStore::open(&db).await.unwrap());
     let mut resumed = opencoder_session::resume::resume(
         reopened,
         "responses-coding",

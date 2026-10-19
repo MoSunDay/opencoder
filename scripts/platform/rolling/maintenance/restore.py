@@ -11,10 +11,13 @@ from ..backup_files import tree
 from . import archive
 
 
-def prior_controller(settings, release_id):
+def prior_controller(settings, release_id, compatible_manifest=None):
     policy = settings.state_dir / 'todo-files-policy.json'
     if policy.exists() and json.loads(policy.read_text())['minimum_contract']:
-        raise ValueError('retain the controller enforcing the TODO rollback floor')
+        if compatible_manifest is None:
+            raise ValueError('retain the controller enforcing the TODO rollback floor')
+        from ..todo_resources.policy import require_candidate
+        require_candidate(settings, compatible_manifest)
     path = settings.state_dir / 'maintenance-controller.json'
     if not path.exists():
         return

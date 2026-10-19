@@ -1,13 +1,12 @@
-use super::FleetStore;
+use super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
 use serde_json::Value;
 
-impl FleetStore {
+impl FleetConnection {
     /// Count admission-blocking work in one snapshot without materializing and
     /// sorting every historical execution for each readiness request.
     pub async fn active_execution_count(&self) -> Result<u64> {
-        let _guard = self.gate.lock().await;
         let mut rows = self
             .conn
             .query(
@@ -44,5 +43,7 @@ impl FleetStore {
     }
 }
 
+#[path = "access/counts.rs"]
+mod database_access;
 #[cfg(test)]
 mod tests;

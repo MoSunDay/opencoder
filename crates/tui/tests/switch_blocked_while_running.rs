@@ -9,12 +9,12 @@ use std::time::Duration;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::MockChatClient;
 use opencoder_session::{SessionEvent, SessionState};
-use opencoder_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::worker::{gate_switch, process_cmd, SwitchGate, UiCmd, UiEvent};
 use tokio::sync::{mpsc, Notify};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 async fn act_session(id: &str, mock: Arc<MockChatClient>) -> SessionState {

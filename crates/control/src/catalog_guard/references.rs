@@ -5,6 +5,22 @@ use serde_json::Value;
 use std::{io::Read, path::Path};
 
 pub(super) async fn find(state: &AppState, name: &str, dag: bool) -> Result<Vec<String>> {
+    scan(state, name, dag, false).await
+}
+
+pub(super) async fn find_agent(state: &AppState, name: &str) -> Result<Vec<String>> {
+    scan(state, name, false, true).await
+}
+
+fn matches(value: &Value, name: &str, dag: bool, agent: bool) -> bool {
+    if agent {
+        super::agents::references(value, name)
+    } else {
+        model::references(value, name, dag)
+    }
+}
+
+async fn scan(state: &AppState, name: &str, dag: bool, agent: bool) -> Result<Vec<String>> {
     let mut found = Vec::new();
     for (source, value) in state.fleet.catalog_reference_candidates(name).await? {
         if source.starts_with("definition:catalog_retired:") {
@@ -13,37 +29,48 @@ pub(super) async fn find(state: &AppState, name: &str, dag: bool) -> Result<Vec<
         if dag && source == format!("definition:dag:{name}") {
             continue;
         }
-        if model::references(&value, name, dag) {
+        if matches(&value, name, dag, agent) {
             found.push(source);
         }
     }
     for schedule in state.store.list_schedules().await? {
-        if model::references(&serde_json::to_value(&schedule.job)?, name, dag) {
+        if matches(&serde_json::to_value(&schedule.job)?, name, dag, agent) {
             found.push(format!("schedule:{}", schedule.job.id));
         }
     }
     for todo in state.projects.list_todos(None).await? {
         let value = serde_json::json!({"capability_id":todo.capability_id,"executor_ref":todo.executor_ref,
             "executor_spec":todo.executor_spec,"plan_md":todo.plan_md,"draft":todo.draft});
-        if model::references(&value, name, dag) {
+        if matches(&value, name, dag, agent) {
             found.push(format!("todo:{}", todo.id));
         }
     }
     let config = opencoder_core::Config::load(&state.workdir)?;
     // Never expose configuration values or file contents in conflict responses.
-    if model::references(&serde_json::to_value(&config)?, name, dag) {
+    if matches(&serde_json::to_value(&config)?, name, dag, agent) {
         found.push("server-config".into());
     }
-    if let Some(root) = config.agent.agents_dir {
+    if agent {
+        for capability in state.store.list_brain_capabilities().await? {
+            if matches(&serde_json::to_value(&capability)?, name, dag, agent) {
+                found.push(format!("capability:{}", capability.capability.id));
+            }
+        }
+    }
+    if let Some(root) = config
+        .agent
+        .agents_dir
+        .or_else(|| agent.then(opencoder_core::agent::agents_dir).flatten())
+    {
         let name = name.to_owned();
-        found.extend(tokio::task::spawn_blocking(move || files(&root, &name, dag)).await??);
+        found.extend(tokio::task::spawn_blocking(move || files(&root, &name, dag, agent)).await??);
     }
     found.sort();
     found.dedup();
     Ok(found)
 }
 
-fn files(root: &Path, name: &str, dag: bool) -> Result<Vec<String>> {
+fn files(root: &Path, name: &str, dag: bool, agent: bool) -> Result<Vec<String>> {
     anyhow::ensure!(
         std::fs::symlink_metadata(root)?.file_type().is_dir(),
         "agent resource root is not a directory"
@@ -57,6 +84,9 @@ fn files(root: &Path, name: &str, dag: bool) -> Result<Vec<String>> {
             let entry = entry?;
             let path = entry.path();
             let meta = entry.file_type()?;
+            if agent && path == root.join(name).join("meta.json") {
+                continue;
+            }
             if meta.is_symlink() {
                 // Symlinks require explicit review; never silently traverse outside the root.
                 found.push(format!(
@@ -93,7 +123,28 @@ fn files(root: &Path, name: &str, dag: bool) -> Result<Vec<String>> {
                 continue;
             }
             if let Some(text) = text {
-                if model::references(&Value::String(text.into()), name, dag) {
+                let mut value = Value::String(text.into());
+                // A pool's own name identifies that pool, not an Agent binding.
+                // Keep all remaining metadata fields in the reference scan.
+                if agent
+                    && path.file_name().is_some_and(|file| file == "meta.json")
+                    && path
+                        .strip_prefix(root)?
+                        .components()
+                        .next()
+                        .is_some_and(|part| {
+                            ["prompts", "skills", "tools", "memory"]
+                                .iter()
+                                .any(|category| part.as_os_str() == *category)
+                        })
+                {
+                    value = serde_json::from_str(text)?;
+                    value
+                        .as_object_mut()
+                        .context("invalid resource metadata")?
+                        .remove("name");
+                }
+                if matches(&value, name, dag, agent) {
                     found.push(format!("agent-file:{}", path.strip_prefix(root)?.display()));
                 }
             }

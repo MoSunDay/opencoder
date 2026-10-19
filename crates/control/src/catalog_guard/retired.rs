@@ -65,10 +65,28 @@ pub(crate) async fn validate_value(
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("invalid removal marker"))?;
         let dag = marker["kind"] == "dag";
-        if !super::model::declares(value, name, dag) {
+        let agent = marker["kind"] == "agent";
+        if !(if agent {
+            super::agents::declares(value, name)
+        } else {
+            super::model::declares(value, name, dag)
+        }) {
             continue;
         }
-        let exists = if dag {
+        let exists = if agent {
+            let config = opencoder_core::Config::load(&state.workdir)?;
+            let root = config
+                .agent
+                .agents_dir
+                .or_else(opencoder_core::agent::agents_dir);
+            let name = name.to_owned();
+            tokio::task::spawn_blocking(move || {
+                opencoder_core::agent::scope::with_root_sync(root, || {
+                    opencoder_core::agent::read_agent_meta(&name).is_some()
+                })
+            })
+            .await?
+        } else if dag {
             state.fleet.definition("dag", name).await?.is_some()
         } else {
             if pools.is_none() {
@@ -81,7 +99,13 @@ pub(crate) async fn validate_value(
                 "catalog_removed",
                 format!(
                     "引用的{}已删除: {name}",
-                    if dag { "工作流" } else { "二进制资源" }
+                    if agent {
+                        "Agent"
+                    } else if dag {
+                        "工作流"
+                    } else {
+                        "二进制资源"
+                    }
                 ),
                 json!({"name":name,"kind":marker["kind"]}),
             )));

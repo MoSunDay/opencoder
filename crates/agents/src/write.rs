@@ -317,5 +317,7 @@ pub fn delete_agent(name: &str) -> io::Result<()> {
     }
 }
 
+pub mod deletion;
+
 #[cfg(test)]
 mod tests;

@@ -1,4 +1,4 @@
-Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
+Commit: 0047ac2515f865d7f33f99cc22764a1e80765391
 
 # dag 模块
 
@@ -11,6 +11,7 @@ DAG 纯域 + 线协议；DTO LOCKED，无 IO，线协议变更需跨端同步。
 - `src/artifacts.rs` — 逻辑节点、实例路径与保留目录名称约束；动态实例使用 `<step>/instances/<index>`。
 - [artifacts/declarations.rs](../../crates/dag/src/artifacts/declarations.rs) — 共享的任务产物文件声明校验纯函数，解析 `artifacts.json` 及输出中的 `report_archive`；拒绝路径逃逸、保留目录冲突、重复路径与无效大小或摘要，供 DAG 归档和 Worker 文件索引共用。
 - `src/protocol.rs` — 生命周期事件
+- [control/mod.rs](../../crates/dag/src/control/mod.rs) — 可选 `recovery_policy: operator` 的单步命令、尝试次数和持久回执；默认失败语义保持。
 
 ## 相关
 - [dag-runtime](../dag-runtime/index.md) — 执行与原子持久化

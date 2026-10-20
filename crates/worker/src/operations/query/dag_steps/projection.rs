@@ -45,7 +45,11 @@ pub(super) fn project(name: &str, meta: &Value, event: Option<&DagStepEvent>, ru
         ("pending", Value::Null, 0)
     };
     let status = match status {
-        "running" if matches!(run, "interrupted" | "cancelled" | "error") => run,
+        "running" | "paused" | "waiting_recovery"
+            if matches!(run, "interrupted" | "cancelled" | "error") =>
+        {
+            run
+        }
         status => status,
     };
     json!({"name":name,"status":status,"error":error,"at_ms":at_ms,

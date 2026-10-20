@@ -351,3 +351,75 @@ async fn dag_cancel_interrupts_binary_step_and_releases_node_capacity() {
     assert_eq!(meta["outcome"], "cancelled");
     node.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn dag_step_commands_are_durable_attempt_checked_and_do_not_cancel_the_run() {
+    let _host_config = support::isolated_config();
+    let dir = tempfile::tempdir().unwrap();
+    let (node, _native, _bridge) = dag_worker(dir.path(), mock()).await;
+    support::stage_spin_binary(&dir.path().join("node"));
+    let id = "dag-controlled-step";
+    let spec = json!({"name":"controlled","steps":[{"name":"loop","recovery_policy":"operator","kind":{"type":"binary","resource":"spin"}}]});
+    assert_eq!(
+        node.handle(NodeOperation::Create {
+            assignment: assignment(&node, id, ExecutionKind::Dag, json!({}), Some(spec))
+        })
+        .await
+        .status,
+        200
+    );
+    let send = |action: &str, input: Value| {
+        node.handle(NodeOperation::Command {
+            execution: ExecutionRef {
+                id: id.into(),
+                kind: ExecutionKind::Dag,
+            },
+            command: ExecutionCommand {
+                action: action.into(),
+                input,
+            },
+        })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let reply = send("step-status", json!({})).await;
+            if reply.body["steps"][0]["phase"] == "running" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let command =
+        json!({"step":"loop","operation_id":"pause-loop","expected_attempt":1,"reason":"inspect"});
+    assert_eq!(send("step-pause", command.clone()).await.status, 200);
+    assert_eq!(send("step-pause", command.clone()).await.status, 200);
+    assert_eq!(send("step-pause",json!({"step":"loop","operation_id":"wrong-attempt","expected_attempt":2,"reason":"inspect"})).await.status,409);
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while send("step-status", json!({"operation_id":"pause-loop"}))
+            .await
+            .body["phase"]
+            != "applied"
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        send("step-status", json!({})).await.body["steps"][0]["phase"],
+        "paused"
+    );
+    assert_eq!(node.snapshot().active_runs, 1);
+    assert_eq!(send("step-fail",json!({"step":"loop","operation_id":"fail-loop","expected_attempt":1,"reason":"explicit unresolved failure"})).await.status,200);
+    assert_eq!(settled(&node, id).await["execution"]["status"], "error");
+    assert_eq!(node.snapshot().active_runs, 0);
+    assert_eq!(
+        send("step-status", json!({"operation_id":"fail-loop"}))
+            .await
+            .body["phase"],
+        "applied"
+    );
+    node.shutdown().await.unwrap();
+}

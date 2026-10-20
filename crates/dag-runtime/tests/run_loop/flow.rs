@@ -116,6 +116,7 @@ async fn native_step_output_is_mirrored_to_the_run_session() {
                 args: vec![],
             },
             timeout_secs: None,
+            recovery_policy: Default::default(),
         }],
     };
     let run = claimed(spec);

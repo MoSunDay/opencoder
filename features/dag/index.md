@@ -1,4 +1,4 @@
-Commit: 10fce90760adbfbea493ac0203a208e21adb5a2b
+Commit: 0047ac2515f865d7f33f99cc22764a1e80765391
 
 # DAG 工作流
 
@@ -19,6 +19,8 @@ Commit: 10fce90760adbfbea493ac0203a208e21adb5a2b
 - 同一执行节点的宿主与 DAG Codex 共用账号并发占用。容器只向每次执行的私有 broker 请求账号，取消完成进程树回收后才释放；Runtime 异常退出不会因为容器 PID 与宿主不同而提前释放。续轮保留平台创建的 session/thread/input 与共享会话索引。
 
 ## 输入与结果
+
+- [单步恢复](../../docs/dag-step-control.md) 通过显式 `recovery_policy: operator` 启用。失败可等待巡检，ctl 支持暂停、继续、重试和明确失败，按操作标识去重并核对尝试次数。未决步骤不触发依赖和收尾，已完成分支保留。
 
 - 二进制步骤指定 `resource` 和参数数组 `args`；资源池管理不可变版本并允许回滚 current 指针。Agent 可以使用 OpenCoder 或 Codex 执行器。
 - 静态二进制、Agent 与动态实例读取 `OPENCODER_STEP_CONTEXT` 指向的只读上下文，取得本次运行的完整冻结输入；动态实例还取得实例编号和实际输入。通过 `output.json` 返回结构化结果，需要下载的文件必须在 `artifacts.json` 声明相对路径、大小与 SHA-256。恢复时输入漂移会明确失败。

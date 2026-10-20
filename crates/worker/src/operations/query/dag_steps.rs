@@ -119,6 +119,8 @@ pub(in crate::operations) async fn dag_steps(
                 "pending": pending,
                 "running": statuses.iter().filter(|s| **s == "running").count(),
                 "interrupted": statuses.iter().filter(|s| **s == "interrupted").count(),
+                "paused": statuses.iter().filter(|s| **s == "paused").count(),
+                "waiting_recovery": statuses.iter().filter(|s| **s == "waiting_recovery").count(),
                 "head_seq": snapshot.head_seq,
                 "execution_error": execution_error.as_deref().map(truncate_error_ref),
                 "steps": rows,
@@ -132,6 +134,8 @@ pub(in crate::operations) async fn dag_steps(
 pub(in crate::operations) fn outcome_status(meta: &Value) -> &'static str {
     match meta["outcome"].as_str() {
         Some("running") => "running",
+        Some("paused") => "paused",
+        Some("waiting_recovery") => "waiting_recovery",
         Some("done") => "done",
         Some("error") => "error",
         Some("cancelled") => "cancelled",
@@ -178,7 +182,15 @@ pub(in crate::operations) async fn execution_meta(
             anyhow::ensure!(
                 matches!(
                     value["outcome"].as_str(),
-                    Some("pending" | "running" | "done" | "error" | "cancelled")
+                    Some(
+                        "pending"
+                            | "running"
+                            | "paused"
+                            | "waiting_recovery"
+                            | "done"
+                            | "error"
+                            | "cancelled"
+                    )
                 ),
                 "unknown DAG step outcome"
             );

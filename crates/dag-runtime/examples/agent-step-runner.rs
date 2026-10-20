@@ -164,6 +164,13 @@ fn run() -> Result<(), i32> {
             }
         };
         runtime.block_on(async {
+            let managed = std::env::var("OPENCODER_STEP_RECOVERY").as_deref() == Ok("operator");
+            let prompt =
+                if managed && opencoder_dag_runtime::exec::recovery::restore(&mut session).await? {
+                    opencoder_dag_runtime::exec::recovery::CONTINUE_PROMPT.to_string()
+                } else {
+                    prompt
+                };
             let mut terminate =
                 tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
             let signal = tokio::spawn(async move {
@@ -172,6 +179,14 @@ fn run() -> Result<(), i32> {
             });
             let result = run_session(&mut session, prompt, on_event).await;
             signal.abort();
+            if managed
+                && session
+                    .cancel
+                    .as_ref()
+                    .is_some_and(|token| token.is_cancelled())
+            {
+                anyhow::bail!("step interrupted before completion");
+            }
             result
         })
     };

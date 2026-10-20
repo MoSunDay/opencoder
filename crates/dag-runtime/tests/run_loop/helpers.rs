@@ -59,6 +59,7 @@ pub(super) fn one_step_spec() -> DagSpec {
                 how_append: None,
             },
             timeout_secs: None,
+            recovery_policy: Default::default(),
         }],
     }
 }
@@ -75,6 +76,7 @@ pub(super) fn agent_step(name: &str, deps: &[&str], timeout: Option<u64>) -> Ste
             how_append: None,
         },
         timeout_secs: timeout,
+        recovery_policy: Default::default(),
     }
 }
 

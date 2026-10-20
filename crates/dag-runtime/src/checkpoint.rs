@@ -8,6 +8,7 @@ pub(crate) fn restore(
     states: &mut StepStates,
     outputs: &mut StepOutputs,
 ) -> Result<()> {
+    let controls = crate::control::status(root, &run.run_id)?;
     for step in &run.spec.steps {
         let dir = opencoder_dag::artifacts::step_dir(root, &run.run_id, &step.name)
             .map_err(anyhow::Error::msg)?;
@@ -16,7 +17,17 @@ pub(crate) fn restore(
             continue;
         }
         let meta: serde_json::Value = serde_json::from_slice(&std::fs::read(meta)?)?;
-        let collected_failure = meta["outcome"] == "error"
+        let managed = step.recovery_policy == opencoder_dag::RecoveryPolicy::Operator;
+        let preserved = controls
+            .iter()
+            .find(|row| row.step == step.name && row.instance.is_none())
+            .and_then(|row| match row.phase {
+                opencoder_dag::control::Phase::Error => Some(StepOutcome::Error),
+                opencoder_dag::control::Phase::Cancelled => Some(StepOutcome::Cancelled),
+                _ => None,
+            });
+        let collected_failure = !managed
+            && meta["outcome"] == "error"
             && matches!(
                 step.kind,
                 opencoder_dag::StepKind::Dynamic {
@@ -24,13 +35,15 @@ pub(crate) fn restore(
                     ..
                 }
             );
-        if meta["outcome"] != "done" && !collected_failure {
+        if meta["outcome"] != "done" && !collected_failure && preserved.is_none() {
             continue;
         }
         let output = serde_json::from_slice(&std::fs::read(dir.join("output.json"))?)?;
         states.insert(
             step.name.clone(),
-            if collected_failure {
+            if let Some(outcome) = preserved {
+                outcome
+            } else if collected_failure {
                 StepOutcome::Error
             } else {
                 StepOutcome::Done

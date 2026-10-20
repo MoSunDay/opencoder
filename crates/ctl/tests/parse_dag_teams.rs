@@ -52,6 +52,55 @@ wrap!(dag, DagCmd);
 wrap!(teams, TeamsCmd);
 
 #[test]
+fn dag_step_control_preserves_attempt_and_operation_identity() {
+    for action in ["pause", "resume", "retry", "fail"] {
+        let cmd = dag(&[
+            "steps",
+            action,
+            "run-original",
+            "work",
+            "--instance",
+            "2",
+            "--expected-attempt",
+            "3",
+            "--operation-id",
+            "operation-original",
+            "--reason",
+            "inspect",
+        ]);
+        assert_plan(
+            &dag_plan(&cmd).unwrap(),
+            Method::POST,
+            "/api/executions/run-original/commands",
+            &[],
+            Some(
+                json!({"action":format!("step-{action}"),"input":{"step":"work","instance":2,"expected_attempt":3,"operation_id":"operation-original","reason":"inspect"}}),
+            ),
+        );
+    }
+    assert_plan(
+        &dag_plan(&dag(&["steps", "status", "run-original"])).unwrap(),
+        Method::POST,
+        "/api/executions/run-original/commands",
+        &[],
+        Some(json!({"action":"step-status","input":{}})),
+    );
+    assert!(dag_plan(&dag(&[
+        "steps",
+        "pause",
+        "run-original",
+        "work",
+        "--expected-attempt",
+        "1",
+        "--operation-id",
+        "../bad",
+        "--reason",
+        "inspect"
+    ]))
+    .is_err());
+}
+
+#[test]
 fn dag_defs_crud() {
     assert_plan(
         &dag_plan(&dag(&["defs", "list"])).unwrap(),

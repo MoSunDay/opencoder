@@ -23,6 +23,7 @@
 //! execution and artifact writes happen on the claiming node.
 
 pub mod artifacts;
+pub mod control;
 pub mod domain;
 pub mod policies;
 pub mod protocol;
@@ -41,8 +42,8 @@ pub use protocol::{
     DagEventBatch, DagEventIn, DagEventView, DagRunView, DagStatusReport,
 };
 pub use spec::{
-    decode_spec, decode_spec_str, DagSpec, FailurePolicy, StepKind, StepSpec, TriggerRule,
-    MAX_HOW_APPEND_BYTES,
+    decode_spec, decode_spec_str, DagSpec, FailurePolicy, RecoveryPolicy, StepKind, StepSpec,
+    TriggerRule, MAX_HOW_APPEND_BYTES,
 };
 pub use transitions::{transition_allowed, DagRunStatus, StepOutcome};
 

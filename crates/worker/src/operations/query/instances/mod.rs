@@ -149,7 +149,11 @@ pub(in crate::operations) async fn query(
 
 pub(in crate::operations) fn status<'a>(meta: &Value, run: &'a str) -> &'a str {
     match dag_steps::outcome_status(meta) {
-        "running" | "pending" if matches!(run, "interrupted" | "cancelled" | "error") => run,
+        "running" | "pending" | "paused" | "waiting_recovery"
+            if matches!(run, "interrupted" | "cancelled" | "error") =>
+        {
+            run
+        }
         status => status,
     }
 }

@@ -7,6 +7,7 @@ pub mod how_copy;
 pub mod logs;
 pub mod native;
 mod private_files;
+pub mod recovery;
 mod runc_events;
 
 use std::path::PathBuf;

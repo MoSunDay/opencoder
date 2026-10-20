@@ -1,4 +1,4 @@
-Commit: 060b4a24
+Commit: 0391933f
 
 # brain 模块
 
@@ -35,3 +35,5 @@ Brain 默认各执行独立工作区；计划 `shared_workspace: true` 时仅允
 [调度规则](../../rules/06-brain-scheduling-contract.md) · [运行协议](../../docs/brain-orchestration.md) · [工作台](../../features/brain/index.md)
 
 能力更新可携带内容版本：Runtime 在 embedding 前检查一次，Store 在提交事务内再次检查，覆盖计算期间的并发编辑。旧调用兼容，embedding 失败不修改已有文字、样例和向量。见 [runtime](../../crates/brain/src/runtime.rs)。
+
+能力目录核对显式 Codex profile 引用：先检查中央登记，再通过在线节点只读 `execution_profiles` 操作取得 Agent 与 Operator 各自的配置名称。确认缺失时保留完整目录记录并标记不可用，选择目录过滤不可用项；旧节点不支持查询或暂时不可达时保留原兼容行为。查询不返回配置值，不修改已受理执行的冻结配置。见 [可用性检查](../../crates/control/src/api/brain_runs/catalog/availability.rs)。

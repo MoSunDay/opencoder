@@ -46,6 +46,7 @@ fn equivalent(a: &Value, b: &Value) -> bool {
 pub(super) fn ids(entries: &[Entry]) -> Vec<String> {
     entries
         .iter()
+        .filter(|entry| entry.value["unavailable_reason"].is_null())
         .filter(|entry| {
             entry.origin != Origin::Generated
                 || !entries.iter().any(|stored| {

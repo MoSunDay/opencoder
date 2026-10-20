@@ -10,6 +10,20 @@ pub(super) async fn run(worker: &Worker, command: ExecutionCommand) -> Result<Rp
 }
 async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcReply> {
     match command.action.as_str() {
+        "execution_profiles" => {
+            let agent = worker.configuration()?;
+            let directory = super::operator_config::dir(&worker.inner.layout);
+            // Discovery must not bootstrap or change the operator plane.
+            let operator = if directory.join("config.json").is_file() {
+                opencoder_core::Config::load_operator(&directory)?
+            } else {
+                agent.clone()
+            };
+            Ok(RpcReply::ok(json!({
+                "agent": agent.agent.runtime.profiles.keys().collect::<Vec<_>>(),
+                "operator": operator.agent.runtime.profiles.keys().collect::<Vec<_>>()
+            })))
+        }
         "scheduling" => {
             if let Some(host) = &worker.inner.host_capacity {
                 // Same capability flag as the host side: no node-level workdir.

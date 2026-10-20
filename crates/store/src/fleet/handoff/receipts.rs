@@ -163,6 +163,8 @@ impl FleetConnection {
                 "assignment ownership conflict"
             );
             if old.request == assignment.request {
+                drop(rows);
+                tx.commit().await?;
                 return Ok(());
             }
             ensure!(

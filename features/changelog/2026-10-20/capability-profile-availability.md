@@ -15,4 +15,4 @@ Commit: 0391933f
 | 只读名称查询、不泄露配置值、不生成文件 | `execution_profile_discovery_is_read_only_and_does_not_expose_settings` |
 | 选择目录与历史 ID 兼容 | `brain_api::selection::library_and_tui_share_selection_while_hidden_ids_remain_valid` |
 
-[能力目录](../../../brain/index.md) · [模块边界](../../../../agents/brain/index.md)
+[能力目录](../../brain/index.md) · [模块边界](../../../agents/brain/index.md)

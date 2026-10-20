@@ -3,10 +3,12 @@ use crate::Worker;
 use anyhow::ensure;
 use anyhow::Result;
 use opencoder_core::fleet::Assignment;
+#[cfg(not(windows))]
+mod image;
 
 pub(super) fn validate(
     worker: &Worker,
-    config: &opencoder_core::Config,
+    config: &mut opencoder_core::Config,
     spec: &opencoder_dag::DagSpec,
     assignment: &Assignment,
     legacy: bool,
@@ -22,6 +24,14 @@ pub(super) fn validate(
             !legacy,
             "old DAG checkpoints cannot resume; start a new container run"
         );
+        let configured = worker.configuration_for(assignment.request.kind)?;
+        if let Some(rootfs) = image::resolve(
+            &worker.inner.data_dir,
+            config.dag.rootfs_dir.as_deref(),
+            configured.dag.rootfs_dir.as_deref(),
+        )? {
+            config.dag.rootfs_dir = Some(rootfs);
+        }
         if let Some(arguments) = assignment.request.input.get("args") {
             let arguments: Vec<String> = serde_json::from_value(arguments.clone())?;
             ensure!(

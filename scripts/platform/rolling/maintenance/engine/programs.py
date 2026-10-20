@@ -89,6 +89,8 @@ def stage_one(settings, bundle, candidate, record, fallback):
             source = managed / source.relative_to(runtime_data)
     home = program_data / 'programs' / candidate['release_id']
     image = units.freeze_rootfs(record, source, bundle / 'bin', target=home / 'rootfs', link_source=True)
+    from . import images
+    replacement = images.stage(runtime_data, source, image)
     config.setdefault('dag', {})['rootfs_dir'] = str(image)
     config['dag'].setdefault('data_dir', str(runtime_data / 'dag/runs'))
     # These fields belonged to removed execution backends. Only the new
@@ -109,7 +111,8 @@ def stage_one(settings, bundle, candidate, record, fallback):
     staged = home / 'runtime.service'
     atomic_bytes(staged, content.replace(starts[0], new_start).encode())
     return {'release_id': candidate['release_id'], 'manifest': candidate,
-            'rootfs': str(image), 'workdir': str(workdir), 'unit_source': str(staged),
+            'rootfs': str(image), 'image_replacement': replacement,
+            'workdir': str(workdir), 'unit_source': str(staged),
             'unit_sha256': hashlib.sha256(staged.read_bytes()).hexdigest(),
             'prior_unit_sha256': hashlib.sha256(unit.read_bytes()).hexdigest()}
 

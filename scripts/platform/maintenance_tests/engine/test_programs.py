@@ -66,6 +66,9 @@ class RetainedProgramTests(unittest.TestCase):
             accepted_unit = unit.read_bytes()
             candidate = {'release_id': 'new', 'storage_engine': 'turso'}
             prepared = programs.stage_one(settings, bundle, candidate, record, image)
+            from rolling.maintenance.engine import images
+            replacement = images.read(Path(prepared['image_replacement']), data.resolve(), Path(prepared['rootfs']).resolve())
+            self.assertEqual(replacement['source_rootfs'], [str(image.resolve())])
             self.assertEqual(Path(prepared['rootfs']).parent, managed / 'programs/new')
             self.assertEqual(unit.read_bytes(), accepted_unit)
             self.assertEqual((image / 'usr/bin/dag-runner').read_text(), 'old runner')

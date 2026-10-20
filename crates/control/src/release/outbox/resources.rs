@@ -31,6 +31,12 @@ pub(super) async fn dispatch(
         if reply.status == 202 {
             retries.deferred(id, generation.clone(), Instant::now());
         } else {
+            tracing::warn!(
+                %id,
+                status = reply.status,
+                error_category = if reply.status >= 500 { "dispatch_unavailable" } else { "dispatch_rejected" },
+                "resource dispatch retry failed; assignment retained"
+            );
             retries.completed(id, generation.clone(), reply.status, Instant::now());
         }
     }

@@ -1,4 +1,4 @@
-Commit: 8eef2858b435e869c541d6ae8222d9d66687b839
+Commit: 309c02570d3cbef348279d7db7839b45e3538294
 
 # store 模块
 
@@ -19,7 +19,7 @@ Commit: 8eef2858b435e869c541d6ae8222d9d66687b839
 - `src/turso_store/conversation/sessions.rs` 泳道栅栏 — `SessionFilter.kind=None` 的默认清单排除 `kind='operator'`（`s.kind IS NULL OR s.kind <> 'operator'`），精确泳道用 `s.kind = ?`；存量 NULL 行仍走 id 前缀/标题回退
 - `src/schedule_types.rs`、`src/turso_store/execution/schedule.rs` — 调度台账与定义表（schema v26/v27）
 - `src/fleet/` — 节点容量/归属/派发回执（`handoff/`），容量领取在 `handoff/capacity.rs`
-- [fleet/handoff/acceptance.rs](../../crates/store/src/fleet/handoff/acceptance.rs)、[receipts.rs](../../crates/store/src/fleet/handoff/receipts.rs) — Agent/Operator 准备派发只保存冻结请求与回执，远端持久接收后才发布执行索引；确认和节点上报都核对冻结归属，迟到确认不覆盖较新的状态。其他执行种类保留准备阶段索引。
+- [fleet/handoff/acceptance.rs](../../crates/store/src/fleet/handoff/acceptance.rs)、[receipts.rs](../../crates/store/src/fleet/handoff/receipts.rs) — Agent/Operator 准备派发只保存冻结请求与回执，远端持久接收后才发布执行索引；确认和节点上报都核对冻结归属，迟到确认不覆盖较新的状态。其他执行种类保留准备阶段索引。 相同请求重复准备时结束当前事务，保持冻结的 Assignment、回执和执行状态；连接池仍拒绝未结束的成功写事务。
 - `src/fleet/records.rs` — 终态执行索引批删
 - `src/turso_store/execution/brain_layered.rs` + `brain_layered/schema.rs` — v4 分层画布 run/operation/event 投影（additive 建表，不推动 `SCHEMA_VERSION`；`schema_watermark()` 仅供断言，版本以 [schema.rs](../../crates/store/src/turso_store/bootstrap/schema.rs) 为准）；当前 activation 的 Error 仅在 paused/blocked 且阶段不变、无取消请求、来源序号递增和身份不变时可恢复为 Done，generation CAS 与暂停状态保留。
 - [project.rs](../../crates/store/src/project.rs)、[project_links.rs](../../crates/store/src/turso_store/projects/project_links.rs) — TODO 看板及执行引用；关联只保存能力 ID、执行 ID、类型、名称和创建时间，删除关联不删除节点执行；排序按专项或未归属范围校验，拒绝缺失或外部 TODO，在 Turso 事务内提交。

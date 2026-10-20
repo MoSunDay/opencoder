@@ -1,4 +1,4 @@
-Commit: 7acb9aef422a95a5c0c249c4c4dacb085f907b10
+Commit: 309c02570d3cbef348279d7db7839b45e3538294
 
 # control 模块
 
@@ -59,7 +59,7 @@ Commit: 7acb9aef422a95a5c0c249c4c4dacb085f907b10
 ## 派发与报告
 
 - [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。
-- [outbox/resources.rs](../../crates/control/src/release/outbox/resources.rs)：资源任务受理后先持久化等待，按创建时间及 ID 扫描，获得外部授权后才创建节点执行；不可运行项不阻挡其他项。普通任务保持持久化前预留节点容量的路径，不依赖资源提供方。
+- [outbox/resources.rs](../../crates/control/src/release/outbox/resources.rs)：资源任务受理后先持久化等待，按创建时间及 ID 扫描，获得外部授权后才创建节点执行；不可运行项不阻挡其他项。普通任务保持持久化前预留节点容量的路径，不依赖资源提供方。 重试失败记录执行 ID、HTTP 状态与固定错误分类，不写入请求正文或凭据。
 - [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的应用帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道逐项等待数据库异步操作，数据库执行线程与应用 Tokio 线程分开；心跳只更新在线时间。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属连接的处理 future，迟到的数据库结果不能确认替代连接。
 - [v4/view.rs](../../crates/control/src/api/brain_runs/v4/view.rs)：层调度理由只取本层 `layer_started` 事件，不被执行终态覆盖。
 

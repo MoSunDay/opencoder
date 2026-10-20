@@ -484,7 +484,7 @@ fn prepare_with_config(
                         opencoder_dag::decode_spec(value.get("spec").unwrap_or(value))
                             .map_err(|e| anyhow::anyhow!(e))?;
                     opencoder_dag::validate(&spec).map_err(|e| anyhow::anyhow!(e.join("; ")))?;
-                    super::dag_preflight::validate(worker, &config, &spec, assignment, legacy)?;
+                    super::dag_preflight::validate(worker, &mut config, &spec, assignment, legacy)?;
                     agents.extend(spec.steps.into_iter().filter_map(
                         |s| match s.kind.executable() {
                             opencoder_dag::StepKind::Agent { agent, .. } => {

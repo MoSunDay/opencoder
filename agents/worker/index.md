@@ -1,4 +1,4 @@
-Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
+Commit: f90df21319a94ee4e7d2b560c32a25a61dff68ad
 
 # worker 模块
 
@@ -39,6 +39,8 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 - [state.rs](../../crates/worker/src/state.rs)、[state/tests.rs](../../crates/worker/src/state/tests.rs) — 关闭时等待执行和后台任务的整个 future 析构；最后一个 Worker 持有者释放 `NodeLock` 时显式解锁，避免 fork 或复制的文件描述符延长节点目录占用。未获得锁的打开失败不能解锁其他 Worker。
 - `runtime/health.rs` 统一计算节点存储准入：可用磁盘块低于 10% 或可用 inode 低于 20% 拒绝新执行；Windows 读取字节容量，inode 字段为 `None`，不伪造值。容量读取失败、零容量仍拒绝准入。健康查询和新执行入口共用纯函数判断，已接收的工作可继续完成。
 - `operations/dag_preflight.rs` 使用本次冻结配置校验静态步骤和动态模板。所有 DAG 都要求配套 rootfs、runc 与只读源挂载；Codex Agent 额外校验 guest CLI 与节点登录目录，纯二进制与纯 Codex 不要求原生 provider 凭证。实际执行和私有挂载由 dag-runtime 负责。
+- 保留 Runtime 经受控程序升级后，`operations/dag_preflight/image.rs` 只接受维护流程保存的镜像替换回执：原镜像、原 Runtime 数据目录、新私有镜像和运行器摘要必须匹配；随后仍校验完整节点构建信息。普通配置变更不替换已受理镜像。恢复不改原输入、资源、workspace 或历史配置，已完成步骤继续复用。
+- [休眠 Runtime 程序修复](../../scripts/platform/rolling/maintenance/engine/repair.py)只使用已完成发布且存储格式兼容的程序。工具核对 Host 休眠记录、预留和原 unit，在 Host 与节点锁内替换程序并保留回退文件；不启动 Runtime。原任务之后仍经原节点的正常恢复入口执行。
 - [layout/dag.rs](../../crates/worker/src/layout/dag.rs)、[workloads/dag.rs](../../crates/worker/src/workloads/dag.rs) — 受理保存 UTC 日期目录、资源版本与配置；恢复沿用固定目录与资源。启动先清理遗留容器和挂载，再更新 journal；缺少本次固定数据的未终态运行明确拒绝恢复。
 - [operations/query/dag_context.rs](../../crates/worker/src/operations/query/dag_context.rs) — DAG Inspect 从 journal 的冻结定义和原受理目录读取资源快照，校验步骤身份、版本与摘要后投影只读 `context`。未固定为 `preparing`，非待受理运行缺少快照为 `unavailable`，损坏快照明确报错；公开结果不返回宿主路径或 Agent 依赖摘要。
 - DAG 的 how 追加由 dag-runtime 写入本地副本；普通 Agent 会话资源追加由 `agent_how.rs` 管理。

@@ -26,13 +26,12 @@ def idle(identifier, node, inventory):
 
 def capture(settings, operations):
     node = (settings.state_dir / 'host/node-id').read_text().strip()
-    path = settings.state_dir / 'host/host.db'
-    from ..storage.database import query
-    rows = query(path, "SELECT r.id,r.config,d.body FROM host_runtimes r "
-                            "LEFT JOIN fleet_definitions d ON d.kind='runtime_sleep' AND d.id=r.id "
-                      "WHERE r.mode!='staged'")
+    from .engine import programs
     saved = {}
-    for identifier, config, body in rows:
+    for identifier, item in programs.registrations(settings).items():
+        if item['mode'] == 'staged':
+            continue
+        config, body = item['config'], item['sleep']
         inventory = json.loads(body) if body else None
         if inventory is None:
             endpoint = json.loads(config)['endpoint']

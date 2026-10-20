@@ -76,7 +76,10 @@ def deploy(settings, bundle, operations, seconds=90):
             bundle = units.install_bundle(settings, bundle, record)
         rootfs = units.freeze_rootfs(record, Path(scope['rootfs']), bundle / 'bin')
         if engine_switch:
+            all_registered = programs.registrations(settings, include_unavailable=True)
             registered = programs.registrations(settings)
+            scope['unavailable_registered'] = {key: value for key, value in all_registered.items()
+                                               if key not in registered}
             scope['registered'] = registered
             from .planning import capacity
             scope['program_capacity'] = capacity.check(

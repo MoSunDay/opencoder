@@ -39,4 +39,5 @@ mod history;
 
 mod content_guard;
 
+mod availability;
 mod selection;

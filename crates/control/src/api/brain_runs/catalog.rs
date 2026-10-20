@@ -11,6 +11,7 @@ use opencoder_core::fleet::RpcReply;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+mod availability;
 #[path = "catalog/dedup.rs"]
 mod dedup;
 mod selection;
@@ -162,6 +163,7 @@ async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
             capability["evidence"] = meta["evidence"].clone();
         }
     }
+    availability::annotate(state, &config, &mut capabilities).await?;
     Ok(Library {
         selection_ids: selection::ids(&capabilities),
         capabilities: capabilities.into_iter().map(|entry| entry.value).collect(),

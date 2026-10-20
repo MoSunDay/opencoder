@@ -26,6 +26,100 @@ fn assignment() -> Assignment {
 }
 
 #[tokio::test]
+async fn repeated_prepare_closes_transactions_and_preserves_frozen_dispatch() {
+    for kind in [ExecutionKind::Agent, ExecutionKind::Dag] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control.db");
+        let mut original = assignment();
+        original.index.id = format!("{}-replay", kind.prefix());
+        original.index.kind = kind;
+        original.request.id = original.index.id.clone();
+        original.request.kind = kind;
+        let store = FleetStore::open(&path).await.unwrap();
+        assert!(store
+            .claim_request("execution", &original.index.id, "original")
+            .await
+            .unwrap());
+        store
+            .prepare_assignment(&original, "original")
+            .await
+            .unwrap();
+        drop(store);
+
+        for _ in 0..3 {
+            let store = FleetStore::open(&path).await.unwrap();
+            let mut replay = original.clone();
+            replay.definition = Some(json!({"version":2}));
+            store.prepare_assignment(&replay, "original").await.unwrap();
+            assert_eq!(
+                serde_json::to_value(store.assignment(&original.index.id).await.unwrap().unwrap())
+                    .unwrap(),
+                serde_json::to_value(&original).unwrap()
+            );
+            assert_eq!(store.pending_assignments("", 128).await.unwrap().len(), 1);
+            assert_eq!(
+                store
+                    .receipt("execution", &original.index.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .phase,
+                "prepared"
+            );
+            // A conflicting operation must roll back without poisoning replay.
+            replay.index.node_id = "node-other".into();
+            assert!(store.prepare_assignment(&replay, "original").await.is_err());
+            replay = original.clone();
+            replay.request.input = json!({"prompt":"changed"});
+            assert!(store.prepare_assignment(&replay, "original").await.is_err());
+            store
+                .prepare_assignment(&original, "original")
+                .await
+                .unwrap();
+        }
+
+        let store = FleetStore::open(&path).await.unwrap();
+        let mut accepted = original.index.clone();
+        accepted.status = ExecutionStatus::Running;
+        let reply = RpcReply {
+            status: 202,
+            body: json!(accepted),
+        };
+        store
+            .finish_dispatch(&original.index.id, "original", &reply)
+            .await
+            .unwrap();
+        store
+            .apply_index_report("node-one", &[accepted], None)
+            .await
+            .unwrap();
+        store
+            .prepare_assignment(&original, "original")
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .index(&original.index.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            ExecutionStatus::Running
+        );
+        assert_eq!(
+            store
+                .receipt("execution", &original.index.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .phase,
+            "accepted"
+        );
+        assert!(store.pending_assignments("", 128).await.unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn dispatch_survives_reopen_and_preserves_original_assignment() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("control.db");

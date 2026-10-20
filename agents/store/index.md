@@ -14,6 +14,7 @@ Commit: 309c02570d3cbef348279d7db7839b45e3538294
 - `src/turso_store/` — Turso 实现（WAL）
 - [Cargo.toml](../../Cargo.toml) 固定 Turso 0.8.3；[database](../../crates/database/src/lib.rs) 统一执行 Store、Fleet、TsRegistry 和 Ontology 的数据库操作，应用线程只等待异步结果。
 - `src/turso_store/conversation/sessions.rs` — 会话批删（FK 级联）；`node_tasks.rs` — 节点任务与终态清扫
+- [session_index](../../scripts/maintenance/session_index/README.md) — 历史会话排序索引的维护入口。默认只读预览；按数据库文件和表结构身份在有界事务中创建部分表达式索引、刷新会话统计并确认查询计划，失败回滚。应用行和鉴权表不在写入范围内。
 - [turso_store/conversation/messages.rs](../../crates/store/src/turso_store/conversation/messages.rs) — `load_transcript_page` 在 SQL 中投影并按字节切块，保留消息角色、展示原文、合成标记和用量，排除私有 provider 状态；与已有消息块读取共用游标和预算。
 - `src/types.rs` — `SessionMeta.kind` 泳道标签（schema v28 起 `sessions.kind TEXT`；创建时定值：`operator`/`agent`/`team`/`dag`/`todos`/`project`/`brain`，存量行为 NULL）
 - `src/turso_store/conversation/sessions.rs` 泳道栅栏 — `SessionFilter.kind=None` 的默认清单排除 `kind='operator'`（`s.kind IS NULL OR s.kind <> 'operator'`），精确泳道用 `s.kind = ?`；存量 NULL 行仍走 id 前缀/标题回退

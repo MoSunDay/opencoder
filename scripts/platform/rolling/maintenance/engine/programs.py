@@ -9,12 +9,15 @@ from ...state import atomic_bytes, write
 from ...storage.database import query
 
 
-def registrations(settings):
+def registrations(settings, include_unavailable=False):
     rows = query(settings.state_dir / 'host/host.db',
                  "SELECT r.id,r.mode,r.config,d.body FROM host_runtimes r "
                  "LEFT JOIN fleet_definitions d ON d.kind='runtime_sleep' AND d.id=r.id")
-    return {identifier: {'mode': mode, 'config': config, 'sleep': body}
-            for identifier, mode, config, body in rows}
+    registered = {identifier: {'mode': mode, 'config': config, 'sleep': body}
+                  for identifier, mode, config, body in rows}
+    from .unavailable import partition
+    retained, unavailable = partition(settings, registered)
+    return registered if include_unavailable else retained
 
 
 def stage(settings, bundle, candidate, original, registered, fallback, operations):

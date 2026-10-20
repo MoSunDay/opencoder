@@ -14,6 +14,56 @@ use serde_json::json;
 use std::sync::Arc;
 use support::*;
 
+#[tokio::test]
+async fn execution_profile_discovery_is_read_only_and_does_not_expose_settings() {
+    let _config = isolated_config();
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), mock()).await;
+    std::fs::write(
+        dir.path().join("work/opencoder.json"),
+        json!({"agent":{"runtime":{"profiles":{"private-profile":{
+            "revision":1,"settings":{"envs":{"EXAMPLE_SECRET":"private-value"}}}}}}})
+        .to_string(),
+    )
+    .unwrap();
+    let reply = node
+        .handle(NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: "execution_profiles".into(),
+                input: json!({}),
+            },
+        })
+        .await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(
+        reply.body,
+        json!({"agent":["private-profile"],"operator":["private-profile"]})
+    );
+    assert!(!dir.path().join("node/operator-config/config.json").exists());
+    assert!(!reply.body.to_string().contains("private-value"));
+    let operator = dir.path().join("node/operator-config");
+    std::fs::create_dir_all(&operator).unwrap();
+    std::fs::write(
+        operator.join("config.json"),
+        json!({"agent":{"runtime":{"profiles":{"operator-profile":{
+            "revision":1,"settings":{}}}}}})
+        .to_string(),
+    )
+    .unwrap();
+    let reply = node
+        .handle(NodeOperation::Maintenance {
+            command: ExecutionCommand {
+                action: "execution_profiles".into(),
+                input: json!({}),
+            },
+        })
+        .await;
+    assert_eq!(
+        reply.body,
+        json!({"agent":["private-profile"],"operator":["operator-profile"]})
+    );
+}
+
 /// A chat client that never answers until released, keeping an execution in
 /// the running state while the maintenance call is exercised.
 struct Hold {

@@ -193,6 +193,12 @@ def receipt(settings, candidate, operations):
     scope = check(settings, candidate, operations)
     from ..manifest import storage_engine
     engine_switch = storage_engine(candidate) != storage_engine(journal.record(journal.data['current'])['manifest'])
+    if engine_switch:
+        from .engine import programs
+        registered = programs.registrations(settings, include_unavailable=True)
+        retained = programs.registrations(settings)
+        scope['unavailable_registered'] = {key: value for key, value in registered.items()
+                                           if key not in retained}
     return {**scope, 'current_release': journal.data['current'],
             'maintenance': ('close local admission; wait for idle; stop local writers; back up; upgrade all retained Runtime programs'
                             if engine_switch else 'wait for idle; close admission; stop writers; back up; upgrade resources and schema'),

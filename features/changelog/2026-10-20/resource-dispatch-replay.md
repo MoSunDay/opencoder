@@ -20,3 +20,5 @@ Commit: 309c02570d3cbef348279d7db7839b45e3538294
 | 原生容器与任务跨版本继续执行、公共入口持续受理 | `scripts/acceptance/smooth_release/main.py`、`live.py`，发布证据保存在仓库外 |
 
 相关职责见 [Store](../../../agents/store/index.md) 和 [Control](../../../agents/control/index.md)。
+
+隔离发布验收的运行归属查询使用数据库引擎选择器及同一发布包的 CLI，避免用 SQLite 读取正在写入的 Turso 数据库。真实三版本切换、回滚和原生容器演练通过；可用发布 CLI 后，原先跳过的原生数据库事务与快照用例已补跑通过。服务二进制仍使用已核验的发布包，验收脚本修正单独记录。

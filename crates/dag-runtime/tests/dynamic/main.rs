@@ -1,4 +1,5 @@
 mod finalizers;
+mod managed;
 mod persistence;
 mod recovery;
 mod support;

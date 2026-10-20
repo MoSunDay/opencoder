@@ -26,6 +26,7 @@ use crate::dag_events::{run_finished_event, run_started_event, RunEventSink};
 use crate::exec::{execute_agent_step, ExecDeps, StepCtx, StepResult};
 mod dynamic;
 mod input;
+mod managed;
 mod scheduler;
 
 /// Everything the run loop needs besides the claimed run itself.

@@ -40,7 +40,7 @@ pub async fn handle(
         if let Err(error) = matches {
             return Ok(RpcReply::error(412, error.to_string()));
         }
-        let mut body = json!({"compatible":true,"features":["dag_container_v1","dag_dynamic_v1","brain_scheduler_v7",opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,opencoder_core::brain::EXECUTION_IO_CAPABILITY,opencoder_core::fleet::private_files::CAPABILITY]});
+        let mut body = json!({"compatible":true,"features":["dag_container_v1","dag_dynamic_v1",opencoder_dag::control::CAPABILITY,"brain_scheduler_v7",opencoder_core::brain::BRAIN_CONTRACT_CAPABILITY,opencoder_core::brain::EXECUTION_IO_CAPABILITY,opencoder_core::fleet::private_files::CAPABILITY]});
         body["features"]
             .as_array_mut()
             .unwrap()

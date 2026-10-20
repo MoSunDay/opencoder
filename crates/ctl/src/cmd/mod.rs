@@ -6,6 +6,7 @@
 pub mod agents;
 pub mod brain;
 pub mod dag;
+pub mod dag_steps;
 pub mod executions;
 pub mod nodes;
 pub mod project;

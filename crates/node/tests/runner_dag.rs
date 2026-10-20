@@ -237,6 +237,7 @@ fn queued_run(run_id: &str) -> DagClaimedRun {
                     how_append: None,
                 },
                 timeout_secs: None,
+                recovery_policy: Default::default(),
             }],
         },
         created_at: 0,

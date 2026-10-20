@@ -58,6 +58,7 @@ pub(super) fn open(
         started: opencoder_core::message::now_ms(),
     };
     if resume {
+        let controls = crate::control::status(root, &run.run_id)?;
         for i in 0..group.items.len() {
             let dir = dir.join("instances").join(i.to_string());
             let path = dir.join("meta.json");
@@ -65,9 +66,25 @@ pub(super) fn open(
                 continue;
             }
             let meta: Value = serde_json::from_slice(&std::fs::read(path)?)?;
+            let managed = step.recovery_policy == opencoder_dag::RecoveryPolicy::Operator;
+            let controlled = controls
+                .iter()
+                .find(|r| r.step == step.name && r.instance == Some(i));
             let saved_outcome = match meta["outcome"].as_str() {
                 Some("done") => Some(StepOutcome::Done),
-                Some("error") if group.collect_all => Some(StepOutcome::Error),
+                Some("error")
+                    if !managed && group.collect_all
+                        || controlled
+                            .is_some_and(|r| r.phase == opencoder_dag::control::Phase::Error) =>
+                {
+                    Some(StepOutcome::Error)
+                }
+                Some("cancelled")
+                    if controlled
+                        .is_some_and(|r| r.phase == opencoder_dag::control::Phase::Cancelled) =>
+                {
+                    Some(StepOutcome::Cancelled)
+                }
                 _ => None,
             };
             if let Some(outcome) = saved_outcome {
@@ -82,8 +99,10 @@ pub(super) fn open(
             }
         }
         for i in 0..group.items.len() {
-            if group.outcomes[i].is_none() {
-                reset(root, &run.run_id, &step.name, Some(i), None)?;
+            if group.outcomes[i].is_none()
+                && step.recovery_policy != opencoder_dag::RecoveryPolicy::Operator
+            {
+                reset(root, &run.run_id, &step.name, Some(i), None, false)?;
             }
         }
     }
@@ -91,14 +110,14 @@ pub(super) fn open(
 }
 
 impl Group {
-    pub fn next(&self) -> Option<usize> {
+    pub fn next(&self, ready: impl Fn(usize) -> bool) -> Option<usize> {
         if self.token.is_cancelled() {
             return None;
         }
         self.outcomes
             .iter()
             .enumerate()
-            .find_map(|(i, s)| (s.is_none() && !self.running.contains(&i)).then_some(i))
+            .find_map(|(i, s)| (s.is_none() && !self.running.contains(&i) && ready(i)).then_some(i))
     }
     pub fn result(&self) -> Option<StepResult> {
         let outcome = dynamic::group_outcome(&self.outcomes)?;
@@ -165,11 +184,19 @@ pub(super) fn start(
     step: &str,
     index: Option<usize>,
     at: i64,
+    preserve_session: bool,
 ) -> Result<()> {
-    reset(root, run, step, index, Some(at))
+    reset(root, run, step, index, Some(at), preserve_session)
 }
 
-fn reset(root: &Path, run: &str, step: &str, index: Option<usize>, at: Option<i64>) -> Result<()> {
+fn reset(
+    root: &Path,
+    run: &str,
+    step: &str,
+    index: Option<usize>,
+    at: Option<i64>,
+    preserve_session: bool,
+) -> Result<()> {
     let dir = opencoder_dag::artifacts::execution_dir(root, run, step, index)
         .map_err(anyhow::Error::msg)?;
     std::fs::create_dir_all(&dir)?;
@@ -185,7 +212,9 @@ fn reset(root: &Path, run: &str, step: &str, index: Option<usize>, at: Option<i6
             Err(e) => return Err(e.into()),
         }
     }
-    crate::checkpoint::write(&dir.join("session.json"), b"{}")?;
+    if !preserve_session || !dir.join("session.json").exists() {
+        crate::checkpoint::write(&dir.join("session.json"), b"{}")?;
+    }
     crate::checkpoint::write(
         &dir.join("meta.json"),
         &serde_json::to_vec(&json!({

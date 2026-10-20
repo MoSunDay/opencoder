@@ -2,7 +2,7 @@ use anyhow::{ensure, Context, Result};
 use opencoder_dag::{StepKind, StepOutcome};
 use tokio_util::sync::CancellationToken;
 
-use super::agent::{build_prompt_with_knowledge, create_session_meta, step_agent_name};
+use super::agent::{build_prompt_with_knowledge, step_agent_name};
 use super::native::io;
 use super::{ExecDeps, StepCtx, StepResult};
 use crate::step_log::StepOutputLog;
@@ -12,10 +12,19 @@ pub(crate) async fn execute_agent_step_runc(
     deps: &ExecDeps,
     cancel: CancellationToken,
 ) -> StepResult {
-    let session_id = match create_session_meta(deps, &ctx.step, &ctx.run_id).await {
+    let session_id = match super::recovery::session_id(ctx, deps).await {
         Ok(id) => id,
         Err(error) => return io::error_result(format!("create session: {error:#}")),
     };
+    match super::recovery::completed(ctx, deps, &session_id).await {
+        Ok(Some(result)) => return result,
+        Ok(None) => {}
+        Err(error) => {
+            return io::error_result(format!(
+                "original session completion unavailable: {error:#}"
+            ))
+        }
+    }
     crate::step_io::write_session_artifact(
         &ctx.workflow_root,
         &ctx.run_id,
@@ -65,6 +74,9 @@ async fn execute_session(
     );
     opencoder_core::atomic_write(&meta.join("prompt.txt"), prompt.as_bytes())?;
     let mut env = io::step_env(ctx);
+    if ctx.step.recovery_policy == opencoder_dag::RecoveryPolicy::Operator {
+        env.push(("OPENCODER_STEP_RECOVERY".into(), "operator".into()));
+    }
     env.extend(opencoder_core::net::proxy_bypass_environment(|key| {
         std::env::var(key).ok()
     }));
@@ -205,6 +217,7 @@ async fn execute_session(
             "transcript.txt",
             "output.json",
             "artifacts.json",
+            "messages.json",
         ],
     )?;
     let messages_present = super::runc_events::import_messages(

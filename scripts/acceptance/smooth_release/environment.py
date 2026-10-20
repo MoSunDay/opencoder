@@ -256,10 +256,11 @@ class Environment:
         until(lambda:self.api('/api/ready')['ready_nodes'] == 1,'Server crash recovery')
 
     def owner(self,identifier):
-        import sqlite3
-        with sqlite3.connect(f'file:{self.settings.state_dir}/host/host.db?mode=ro',uri=True) as conn:
-            row = conn.execute('SELECT runtime_id FROM runtime_owners WHERE execution_id=?',(identifier,)).fetchone()
-            return row[0] if row else None
+        from rolling.storage.database import query, using
+        with using(self.bin / 'opencoder-cli'):
+            rows = query(self.settings.state_dir / 'host/host.db',
+                'SELECT runtime_id FROM runtime_owners WHERE execution_id=?', (identifier,))
+        return rows[0][0] if rows else None
 
     def release_work(self):
         self.model.release.set()

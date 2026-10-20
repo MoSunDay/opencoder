@@ -1,4 +1,4 @@
-Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
+Commit: 0047ac2515f865d7f33f99cc22764a1e80765391
 
 # dag-runtime 模块
 
@@ -17,6 +17,8 @@ Commit: 02c66f83d42154b41b0dddfdea8dc5947ea5a555
 [runc/cleanup.rs](../../crates/dag-runtime/src/sandbox/runc/cleanup.rs) 回收删除进程并核验状态目录消失；若 runc 自身的退出期限先到，[init_exit.rs](../../crates/dag-runtime/src/sandbox/runc/init_exit.rs) 核对容器 ID、PID 与启动时间，仅等待正在退出或已收到 SIGKILL 的原初始化进程，再重试删除。普通运行中的进程、复用的 PID 和真实删除错误不会被当作清理成功。
 
 ## 输入、输出与资源
+
+- [runtime/managed](../../crates/dag-runtime/src/runtime/managed/mod.rs) 保存单步暂停和等待恢复状态；[control](../../crates/dag-runtime/src/control/mod.rs) 保存命令、回执和历史。未决步骤不进入依赖终态表，暂停回执须等执行器返回；动态组只操作未完成实例。[exec/recovery](../../crates/dag-runtime/src/exec/recovery/mod.rs) 恢复原 Agent session，核对已有结果并继续原消息历史。接口见[单步恢复](../../docs/dag-step-control.md)。
 
 - [StepCtx](../../crates/dag-runtime/src/exec/mod.rs) 从运行的冻结输入生成 context：静态二进制、Agent 与动态实例都包含 `run_id`、完整 `inputs` 和声明依赖的 `steps`，实例另有 `instance.index` 与 `instance.input`。[native/io.rs](../../crates/dag-runtime/src/exec/native/io.rs) 写入只读步骤元数据；Agent 提示词读取同一份 context。
 - [runtime/input.rs](../../crates/dag-runtime/src/runtime/input.rs) 在启动容器前独占发布完整 `inputs.json`，与受理的 `input.json` 比较；恢复拒绝快照缺失、链接、非法 JSON、容量超限或输入漂移，不按变更后的文件重建快照。全部步骤与动态展开读取这一份冻结值。

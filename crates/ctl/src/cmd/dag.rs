@@ -49,6 +49,9 @@ pub enum DagRunsCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum DagCmd {
+    /// Inspect, pause, resume, retry or fail an operator-managed step.
+    #[command(subcommand)]
+    Steps(super::dag_steps::StepsCmd),
     /// Definitions: list / put / get / delete.
     #[command(subcommand)]
     Defs(DagDefsCmd),
@@ -74,6 +77,7 @@ pub enum DagCmd {
 /// list/dispatch handlers take no query extractors, so no invented filters.
 pub fn plan(sub: &DagCmd) -> Result<RequestPlan> {
     Ok(match sub {
+        DagCmd::Steps(command) => return super::dag_steps::plan(command),
         DagCmd::Defs(DagDefsCmd::List) => RequestPlan::get("/api/dag/defs"),
         DagCmd::Defs(DagDefsCmd::Put { json }) => {
             RequestPlan::post("/api/dag/defs").with_opt_body(parse_body(Some(json.as_str()))?)

@@ -98,6 +98,9 @@ pub(super) async fn command(
         );
     }
     match command.action.as_str() {
+        "step-status" | "step-pause" | "step-resume" | "step-retry" | "step-fail" => {
+            super::dag_control::handle(worker, id, &command.action, command.input).await
+        }
         "annotate" => {
             if !command.input.is_object() || serde_json::to_vec(&command.input)?.len() > 64 * 1024 {
                 return Ok(RpcReply::error(

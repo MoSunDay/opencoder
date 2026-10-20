@@ -1,6 +1,7 @@
 mod admission;
 mod command;
 mod create;
+mod dag_control;
 mod dag_preflight;
 mod launch;
 mod maintenance;

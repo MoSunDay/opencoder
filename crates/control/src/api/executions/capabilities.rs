@@ -49,6 +49,9 @@ pub(super) fn required(request: &CreateExecution, definition: Option<&Value>) ->
     if requires_dynamic(request.kind, definition) {
         features.push(DYNAMIC_DAG);
     }
+    if requires_step_control(request.kind, definition) {
+        features.push(opencoder_dag::control::CAPABILITY);
+    }
     if (request.kind == ExecutionKind::Brain
         && request.input["schema_version"]
             == opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
@@ -86,6 +89,26 @@ pub(super) fn requires_dynamic(kind: ExecutionKind, definition: Option<&Value>) 
     spec["steps"]
         .as_array()
         .is_some_and(|steps| steps.iter().any(|step| step["kind"]["type"] == "dynamic"))
+}
+
+fn requires_step_control(kind: ExecutionKind, definition: Option<&Value>) -> bool {
+    let Some(definition) = definition else {
+        return false;
+    };
+    let spec = match kind {
+        ExecutionKind::Dag => definition.get("spec").unwrap_or(definition).clone(),
+        ExecutionKind::Project if definition["todo"]["executor_kind"] == "dag" => definition
+            ["todo"]["executor_spec"]
+            .as_str()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(Value::Null),
+        _ => return false,
+    };
+    spec["steps"].as_array().is_some_and(|steps| {
+        steps
+            .iter()
+            .any(|step| step["recovery_policy"] == "operator")
+    })
 }
 
 fn supports(reply: &RpcReply, feature: &str) -> bool {
@@ -159,6 +182,18 @@ pub(super) fn operation_requires_dynamic(operation: &NodeOperation) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operator_managed_steps_require_capability_without_changing_legacy_specs() {
+        let def =
+            json!({"spec":{"steps":[{"recovery_policy":"operator","kind":{"type":"binary"}}]}});
+        assert!(requires_step_control(ExecutionKind::Dag, Some(&def)));
+        assert!(!requires_step_control(
+            ExecutionKind::Dag,
+            Some(&json!({"steps":[{"kind":{"type":"binary"}}]}))
+        ));
+        assert!(!requires_step_control(ExecutionKind::Agent, Some(&def)));
+    }
 
     #[test]
     fn probes_keep_parent_affinity_and_legacy_manifests_without_task_content() {

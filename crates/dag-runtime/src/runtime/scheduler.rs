@@ -12,11 +12,7 @@ use anyhow::Result;
 use opencoder_core::message::now_ms;
 use opencoder_dag::{DagClaimedRun, StepKind, StepOutcome, StepOutputs, StepStates};
 use serde_json::{json, Value};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tokio::{sync::watch, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -48,16 +44,21 @@ pub(super) async fn schedule(
     let cancel = CancellationToken::new();
     let finalizers = CancellationToken::new();
     let mut groups: BTreeMap<String, Group> = BTreeMap::new();
-    let mut active: BTreeSet<Key> = BTreeSet::new();
+    let mut active: BTreeMap<Key, CancellationToken> = BTreeMap::new();
+    let mut managed = super::managed::Managed::open(root, run, resume)?;
     let mut tasks: JoinSet<StepDone> = JoinSet::new();
     let mut cursor = 0usize;
     let result: Result<()> = async { loop {
         if *cancel_rx.borrow_and_update() {
             cancel.cancel();
         }
+        for completion in managed.poll(&active, cancel.is_cancelled())? {
+            tasks.spawn(async move { completion });
+        }
         if cancel.is_cancelled() {
+            managed.cancel_pending(&active, run)?;
             for (name, group) in &mut groups {
-                if run.spec.steps.iter().any(|s| s.name == *name && s.trigger_rule == opencoder_dag::TriggerRule::AllDone) {
+                if !managed.is_cancelled(name) && run.spec.steps.iter().any(|s| s.name == *name && s.trigger_rule == opencoder_dag::TriggerRule::AllDone) {
                     continue;
                 }
                 group.token.cancel();
@@ -65,9 +66,9 @@ pub(super) async fn schedule(
                 group.progress(root, &run.run_id, name, sink)?;
             }
             for step in &run.spec.steps {
-                if step.trigger_rule == opencoder_dag::TriggerRule::AllDone
+                if (step.trigger_rule == opencoder_dag::TriggerRule::AllDone && !managed.is_cancelled(&step.name))
                     || states.contains_key(&step.name) || groups.contains_key(&step.name)
-                    || active.iter().any(|(name, _)| name == &step.name) {
+                    || active.keys().any(|(name, _)| name == &step.name) {
                     continue;
                 }
                 let mut result = failed("run cancelled".into());
@@ -85,6 +86,8 @@ pub(super) async fn schedule(
                 cursor = (cursor + 1) % run.spec.steps.len();
                 misses += 1;
                 if states.contains_key(&step.name)
+                    || (matches!(step.kind, StepKind::Dynamic { .. }) && !managed.group_ready(&step.name))
+                    || (!matches!(step.kind, StepKind::Dynamic { .. }) && !managed.ready(&step.name, None))
                     || (cancel.is_cancelled() && step.trigger_rule != opencoder_dag::TriggerRule::AllDone)
                     || !opencoder_dag::ready_steps(&run.spec, &states).contains(&step.name)
                 {
@@ -106,12 +109,16 @@ pub(super) async fn schedule(
                                 resume,
                             ) {
                                 Ok(group) => {
+                                    if step.recovery_policy == opencoder_dag::RecoveryPolicy::Operator {
+                                        managed.instances(&step.name, group.items.len())?;
+                                    }
                                     dynamic::start(
                                         root,
                                         &run.run_id,
                                         &step.name,
                                         None,
                                         group.started,
+                                        step.recovery_policy == opencoder_dag::RecoveryPolicy::Operator,
                                     )?;
                                     sink.emit(step_started_event(&step.name));
                                     group.progress(root, &run.run_id, &step.name, sink)?;
@@ -140,6 +147,7 @@ pub(super) async fn schedule(
                         }
                         let group = groups.get_mut(&step.name).unwrap();
                         if let Some(result) = group.result() {
+                            managed.group_finished(&step.name,result.outcome)?;
                             record_step(
                                 StepDone {
                                     name: step.name.clone(),
@@ -158,7 +166,7 @@ pub(super) async fn schedule(
                             misses = 0;
                             continue;
                         }
-                        let Some(i) = group.next() else {
+                        let Some(i) = group.next(|i| managed.ready(&step.name, Some(i))) else {
                             continue;
                         };
                         group.running.insert(i);
@@ -170,7 +178,7 @@ pub(super) async fn schedule(
                         )
                     }
                     kind => {
-                        if active.contains(&(step.name.clone(), None)) {
+                        if active.contains_key(&(step.name.clone(), None)) {
                             continue;
                         }
                         (None, None, kind.clone(), step_token)
@@ -178,7 +186,9 @@ pub(super) async fn schedule(
                 };
                 misses = 0;
                 let at = now_ms();
-                dynamic::start(root, &run.run_id, &step.name, instance, at)?;
+                managed.begin(&step.name, instance)?;
+                dynamic::start(root, &run.run_id, &step.name, instance, at,
+                    step.recovery_policy == opencoder_dag::RecoveryPolicy::Operator)?;
                 let mut event = step_started_event(&step.name);
                 if let Some(i) = instance {
                     event.kind = "instance_started".into();
@@ -203,7 +213,7 @@ pub(super) async fn schedule(
                     log: Some(sink.step_log(&step.name).with_instance(instance)),
                     knowledge_root: exec.config.dag.knowledge_root.clone(),
                 };
-                active.insert((step.name.clone(), instance));
+                active.insert((step.name.clone(), instance), token.clone());
                 let exec = exec.clone();
                 tasks.spawn(async move {
                     let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
@@ -226,6 +236,7 @@ pub(super) async fn schedule(
                 continue;
             }
             if let Some(result) = group.result() {
+                managed.group_finished(name,result.outcome)?;
                 record_step(
                     StepDone {
                         name: name.clone(),
@@ -249,7 +260,7 @@ pub(super) async fn schedule(
             for name in opencoder_dag::topo_order(&run.spec).map_err(anyhow::Error::msg)? {
                 let step = run.spec.steps.iter().find(|s| s.name == name).unwrap();
                 if states.contains_key(&step.name)
-                    || active.iter().any(|(name, _)| name == &step.name)
+                    || active.keys().any(|(name, _)| name == &step.name)
                     || step.trigger_rule != opencoder_dag::TriggerRule::AllSuccess
                     || !step.depends_on.iter().all(|d| states.contains_key(d))
                     || !step.depends_on.iter().any(|d| states.get(d) != Some(&StepOutcome::Done))
@@ -263,6 +274,13 @@ pub(super) async fn schedule(
             }
         }
         if tasks.is_empty() {
+            if managed.waiting() {
+                tokio::select! {
+                    _ = super::await_flag(&mut cancel_rx), if !cancel.is_cancelled() => { cancel.cancel(); }
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
+                }
+                continue;
+            }
             if !opencoder_dag::ready_steps(&run.spec, &states).is_empty()
             {
                 continue;
@@ -291,10 +309,18 @@ pub(super) async fn schedule(
         tokio::select! {
             biased;
             _ = super::await_flag(&mut cancel_rx), if !cancel.is_cancelled() => { cancel.cancel(); }
+            _ = tokio::time::sleep(std::time::Duration::from_millis(250)), if managed.enabled() => {}
             done = tasks.join_next() => {
                 let Some(done) = done else { continue; };
                 let mut done = done?;
                 active.remove(&(done.name.clone(), done.instance));
+                let stopped = cancel.is_cancelled() || done.instance.is_some_and(|_| groups.get(&done.name).is_some_and(|g| g.token.is_cancelled()));
+                if managed.completed(&mut done, stopped).await? {
+                    if let Some(i) = done.instance { groups.get_mut(&done.name).unwrap().running.remove(&i); }
+                    sink.emit(opencoder_dag::DagEventIn {kind:"step_waiting".into(),step:Some(done.name.clone()),
+                        payload:json!({"instance":done.instance,"reason":done.result.error}),at_ms:now_ms()});
+                    continue;
+                }
                 if let Some(i) = done.instance {
                     if let Err(e) = crate::step_io::write_execution_artifacts(root, &run.run_id, &done.name, Some(i), done.started_at_ms, &done.result).await {
                         done.result = failed(format!("instance artifact persistence: {e:#}"));
@@ -352,6 +378,7 @@ pub(super) async fn schedule(
         }
         return Err(error);
     }
+    managed.finish(&states)?;
     Ok((states, errors, cancel.is_cancelled()))
 }
 

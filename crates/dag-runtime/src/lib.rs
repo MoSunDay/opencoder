@@ -1,3 +1,4 @@
+pub mod control;
 pub mod dag_events;
 pub mod exec;
 pub mod runtime;

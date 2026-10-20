@@ -24,6 +24,23 @@ pub struct StepSpec {
     pub kind: StepKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    /// Operator-managed failures remain nonterminal until explicitly resolved.
+    #[serde(default, skip_serializing_if = "RecoveryPolicy::is_default")]
+    pub recovery_policy: RecoveryPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryPolicy {
+    #[default]
+    Fail,
+    Operator,
+}
+
+impl RecoveryPolicy {
+    fn is_default(&self) -> bool {
+        *self == Self::Fail
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

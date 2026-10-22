@@ -66,3 +66,50 @@ fn comment_commands_parse_pagination_encode_ids_and_read_json_files() {
     assert_eq!(plan.body.unwrap(), body);
     assert!(Args::try_parse_from(["ctl", "todos", "comments", "add", "t"]).is_err());
 }
+
+#[test]
+fn comment_mutation_commands_encode_scope_and_require_delete_revision() {
+    let args = Args::try_parse_from([
+        "ctl",
+        "todos",
+        "comments",
+        "edit",
+        "a/b",
+        "12",
+        "--json",
+        r#"{"body_md":"merged","expected_revision":2}"#,
+    ])
+    .unwrap();
+    let plan = project::plan(&args.command).unwrap();
+    assert_eq!(plan.method, reqwest::Method::PATCH);
+    assert_eq!(plan.path, "/api/project/todos/a%2Fb/comments/12");
+    assert_eq!(plan.body.unwrap()["expected_revision"], 2);
+    let args = Args::try_parse_from([
+        "ctl",
+        "todos",
+        "comments",
+        "delete",
+        "a/b",
+        "12",
+        "--expected-revision",
+        "2",
+    ])
+    .unwrap();
+    let plan = project::plan(&args.command).unwrap();
+    assert_eq!(plan.method, reqwest::Method::DELETE);
+    assert_eq!(plan.path, "/api/project/todos/a%2Fb/comments/12");
+    assert_eq!(plan.query, [("expected_revision".into(), "2".into())]);
+    assert!(Args::try_parse_from(["ctl", "todos", "comments", "delete", "t", "12"]).is_err());
+    let args = Args::try_parse_from([
+        "ctl",
+        "todos",
+        "comments",
+        "delete",
+        "t",
+        "0",
+        "--expected-revision",
+        "1",
+    ])
+    .unwrap();
+    assert!(project::plan(&args.command).is_err());
+}

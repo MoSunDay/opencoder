@@ -89,6 +89,12 @@ pub trait ProjectStore: Send + Sync {
     ) -> Result<comments::Comment> {
         anyhow::bail!("TODO comments are unsupported by this store")
     }
+    async fn mutate_todo_comment(
+        &self,
+        _change: &comments::CommentMutation,
+    ) -> Result<Option<comments::Comment>> {
+        anyhow::bail!("TODO comment mutations are unsupported by this store")
+    }
     async fn summary_versions(
         &self,
         scope: summary::SummaryScope,

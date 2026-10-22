@@ -3,7 +3,12 @@ use crate::project::comments::{Comment, CommentError, CommentPage, CommentQuery,
 use anyhow::{Context, Result};
 use turso::{params, Connection};
 
-const COLS: &str = "seq,todo_id,request_id,body_md,author_kind,author_id,author_name,capability_kind,submitted_by,execution_id,created_at";
+#[path = "comments/mutations.rs"]
+pub(super) mod mutations;
+
+const COLS: &str = "c.seq,c.todo_id,c.request_id,c.body_md,c.author_kind,c.author_id,c.author_name,c.capability_kind,c.submitted_by,c.execution_id,c.created_at,COALESCE(s.revision,1),COALESCE(s.updated_at,c.created_at),s.original_body_md";
+const SOURCE: &str =
+    "project_todo_comments c LEFT JOIN project_todo_comment_state s ON s.seq=c.seq";
 
 pub(crate) async fn initialize(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -25,12 +30,16 @@ pub(crate) async fn initialize(conn: &Connection) -> Result<()> {
         (),
     )
     .await?;
+    mutations::initialize(conn).await?;
     Ok(())
 }
 
 fn record(row: &turso::Row) -> Result<Comment> {
     Ok(Comment {
         seq: row.get(0)?,
+        revision: row.get(11)?,
+        updated_at: row.get(12)?,
+        original_body_md: row.get(13)?,
         entry: NewComment {
             todo_id: row.get(1)?,
             request_id: row.get(2)?,
@@ -52,8 +61,15 @@ pub async fn request(
     user: &str,
     id: &str,
 ) -> Result<Option<Comment>> {
-    let mut rows = conn.query(&format!("SELECT {COLS} FROM project_todo_comments WHERE todo_id=? AND submitted_by=? AND request_id=?"), params![todo,user,id]).await?;
-    rows.next().await?.as_ref().map(record).transpose()
+    let mut rows = conn.query(&format!("SELECT {COLS} FROM {SOURCE} WHERE c.todo_id=? AND c.submitted_by=? AND c.request_id=?"), params![todo,user,id]).await?;
+    let comment = rows.next().await?.as_ref().map(record).transpose()?;
+    drop(rows);
+    if let Some(comment) = comment {
+        Ok(Some(comment))
+    } else {
+        mutations::check_deleted_request(conn, todo, user, id).await?;
+        Ok(None)
+    }
 }
 
 pub async fn page(
@@ -73,11 +89,11 @@ pub async fn page(
     }
     let limit = query.limit.unwrap_or(50);
     let (comparison, cursor, order) = match (query.before_seq, query.after_seq) {
-        (Some(seq), _) => ("AND seq<?", seq, "DESC"),
-        (_, Some(seq)) => ("AND seq>?", seq, "ASC"),
-        _ => ("AND seq>?", 0, "DESC"),
+        (Some(seq), _) => ("AND c.seq<?", seq, "DESC"),
+        (_, Some(seq)) => ("AND c.seq>?", seq, "ASC"),
+        _ => ("AND c.seq>?", 0, "DESC"),
     };
-    let mut rows = conn.query(&format!("SELECT {COLS} FROM project_todo_comments WHERE todo_id=? {comparison} ORDER BY seq {order} LIMIT ?"), params![todo,cursor,(limit+1) as i64]).await?;
+    let mut rows = conn.query(&format!("SELECT {COLS} FROM {SOURCE} WHERE c.todo_id=? {comparison} ORDER BY c.seq {order} LIMIT ?"), params![todo,cursor,(limit+1) as i64]).await?;
     let mut comments = vec![];
     while let Some(row) = rows.next().await? {
         comments.push(record(&row)?);

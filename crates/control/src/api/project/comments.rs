@@ -2,7 +2,7 @@
 use super::*;
 use axum::Extension;
 use opencoder_core::identity::Identity;
-use opencoder_store::project::comments::{CommentError, CommentQuery, NewComment};
+use opencoder_store::project::comments::{CommentError, CommentMutation, CommentQuery, NewComment};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -16,11 +16,86 @@ pub struct CommentBody {
 
 fn failure(error: anyhow::Error) -> Response {
     let status = match error.downcast_ref::<CommentError>() {
-        Some(CommentError::MissingTodo) => 404,
-        Some(CommentError::Conflict | CommentError::InvalidSource) => 409,
+        Some(CommentError::MissingTodo | CommentError::MissingComment) => 404,
+        Some(CommentError::Forbidden) => 403,
+        Some(CommentError::InvalidInput) => 400,
+        Some(
+            CommentError::Conflict
+            | CommentError::InvalidSource
+            | CommentError::Deleted
+            | CommentError::RevisionConflict,
+        ) => 409,
         None => 500,
     };
     response(RpcReply::error(status, error.to_string()))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditBody {
+    pub body_md: String,
+    pub expected_revision: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteQuery {
+    pub expected_revision: i64,
+}
+
+pub async fn edit(
+    State(state): State<Arc<AppState>>,
+    Path((id, seq)): Path<(String, i64)>,
+    identity: Option<Extension<Identity>>,
+    Json(body): Json<EditBody>,
+) -> Response {
+    mutate(
+        state,
+        id,
+        seq,
+        identity,
+        body.expected_revision,
+        Some(body.body_md),
+    )
+    .await
+}
+
+pub async fn delete(
+    State(state): State<Arc<AppState>>,
+    Path((id, seq)): Path<(String, i64)>,
+    identity: Option<Extension<Identity>>,
+    Query(query): Query<DeleteQuery>,
+) -> Response {
+    mutate(state, id, seq, identity, query.expected_revision, None).await
+}
+
+async fn mutate(
+    state: Arc<AppState>,
+    id: String,
+    seq: i64,
+    identity: Option<Extension<Identity>>,
+    expected_revision: i64,
+    body_md: Option<String>,
+) -> Response {
+    let actor = identity
+        .map(|Extension(value)| value)
+        .unwrap_or_else(|| Identity::admin("admin"));
+    if !actor.can_edit() {
+        return response(RpcReply::error(403, "当前角色无权修改评论"));
+    }
+    let change = CommentMutation {
+        todo_id: id,
+        seq,
+        expected_revision,
+        body_md,
+        actor,
+        now: opencoder_core::message::now_ms(),
+    };
+    match state.projects.mutate_todo_comment(&change).await {
+        Ok(Some(comment)) => response(RpcReply::ok(json!(comment))),
+        Ok(None) => response(RpcReply::ok(json!({"ok":true}))),
+        Err(error) => failure(error),
+    }
 }
 
 pub async fn list(

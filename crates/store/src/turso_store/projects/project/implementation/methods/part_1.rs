@@ -45,6 +45,15 @@ macro_rules! project_implementation_0 {
 
         }).await
     }
+    async fn mutate_todo_comment(
+        &self,
+        change: &crate::project::comments::CommentMutation,
+    ) -> Result<Option<crate::project::comments::Comment>> {
+        let change = change.clone();
+        self.db.write(move |conn| async move {
+            comments::mutations::apply(&conn, &change).await
+        }).await
+    }
     async fn summary_versions(
         &self,
         scope: SummaryScope,

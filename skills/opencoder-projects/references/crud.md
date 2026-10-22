@@ -64,13 +64,18 @@ Tag 可属于 global/project/initiative；只有当前 TODO 归属范围内的�
 ```sh
 opencoder-cli --no-auth project todos comments list TODO_ID --limit 50
 opencoder-cli --no-auth project todos comments add TODO_ID --json '{"request_id":"stable-note-id","body_md":"已记录分析证据"}'
+# 先读取目标评论的 seq 和 revision，再提交修改。
+opencoder-cli --no-auth project todos comments edit TODO_ID COMMENT_SEQ --json @/tmp/comment-edit.json
+opencoder-cli --no-auth project todos comments delete TODO_ID COMMENT_SEQ --expected-revision CURRENT_REVISION
 opencoder-cli --no-auth project initiatives summary-context INITIATIVE_ID
 opencoder-cli --no-auth project initiatives patch INITIATIVE_ID --json @/tmp/initiative-summary.json
 opencoder-cli --no-auth project goals summary-versions PROJECT_ID
 opencoder-cli --no-auth project goals summary-restore PROJECT_ID VERSION
 ```
 
-评论只追加；同一条评论重试复用 request_id 和完整正文。默认署名为实际提交身份，鉴权关闭时为 admin；能力署名使用真实注册 `capability_id`，可选 `execution_id` 须已关联当前 TODO。概述版本最多保留十条，恢复会新增版本，不改写旧版本。
+评论支持追加、编辑和删除。编辑 JSON 为 `{"body_md":"完整正文","expected_revision":1}`，版本取最新读取结果，不固定填 1；删除同样使用读取时的版本，过期返回 409。editor 只能修改或删除自己提交的评论，admin 可管理全部评论，viewer 只读。编辑保留编号、创建时间、署名和来源。追加重试复用 request_id 和原始完整正文，编辑后返回当前评论；删除后原追加请求返回冲突，不能重新创建。默认署名为实际提交身份，鉴权关闭时为 admin；能力署名使用真实注册 `capability_id`，可选 `execution_id` 须已关联当前 TODO。概述版本最多保留十条，恢复会新增版本，不改写旧版本。
+
+同一轮 Context 先汇总再一次发布；补充已有内容时优先编辑原评论。用户要求合并时，先保存合并正文并回读，再删除被合并的评论；删除前核对 TODO、编号、正文和版本，保留原始快照。不得通过直接写数据库绕过接口。
 
 ## TODO 执行上下文
 

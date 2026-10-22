@@ -1,4 +1,4 @@
-//! Append/read notes through the same authenticated Server API as the UI.
+//! Maintain notes through the same authenticated Server API as the UI.
 use crate::http::{urlencode, RequestPlan};
 use anyhow::{Context, Result};
 use clap::Subcommand;
@@ -20,6 +20,20 @@ pub enum CommentsCmd {
         id: String,
         #[arg(long)]
         json: String,
+    },
+    /// Replace Markdown only. Body: {body_md,expected_revision} from the latest read.
+    Edit {
+        id: String,
+        seq: i64,
+        #[arg(long)]
+        json: String,
+    },
+    /// Delete a comment using its latest revision; retries do not recreate it.
+    Delete {
+        id: String,
+        seq: i64,
+        #[arg(long)]
+        expected_revision: i64,
     },
 }
 
@@ -46,6 +60,29 @@ pub fn plan(command: &CommentsCmd) -> Result<RequestPlan> {
         CommentsCmd::Add { id, json } => {
             RequestPlan::post(format!("/api/project/todos/{}/comments", urlencode(id)))
                 .with_body(super::required_body(json)?)
+        }
+        CommentsCmd::Edit { id, seq, json } => {
+            anyhow::ensure!(*seq > 0, "invalid comment sequence");
+            RequestPlan::patch(format!(
+                "/api/project/todos/{}/comments/{seq}",
+                urlencode(id)
+            ))
+            .with_body(super::required_body(json)?)
+        }
+        CommentsCmd::Delete {
+            id,
+            seq,
+            expected_revision,
+        } => {
+            anyhow::ensure!(
+                *seq > 0 && *expected_revision > 0,
+                "invalid comment sequence or revision"
+            );
+            RequestPlan::delete(format!(
+                "/api/project/todos/{}/comments/{seq}",
+                urlencode(id)
+            ))
+            .with("expected_revision", expected_revision.to_string())
         }
     })
 }

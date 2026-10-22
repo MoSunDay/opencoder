@@ -158,6 +158,7 @@ pub fn build_app_with_auth(
             .layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/api/project/todos/:id/dispatch", post(project_links::dispatch))
         .route("/api/project/todos/:id/comments", get(project::comments::list).post(project::comments::append))
+        .route("/api/project/todos/:id/comments/:seq", patch(project::comments::edit).delete(project::comments::delete))
         .route("/api/project/todos/:id/executions", get(project_links::list).post(project_links::link))
         .route("/api/project/todos/:id/executions/:execution_id", axum::routing::delete(project_links::unlink))
         .route("/api/project/todos/:id/plan", post(project::plan))

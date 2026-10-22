@@ -1,4 +1,4 @@
-Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
+Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
 # ctl 模块
 
@@ -13,7 +13,7 @@ Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 - `src/cmd/brain.rs` — brain 子命令，与 Web 共用 API
 - `src/cmd/project.rs` — 项目、专项及 TODO API 映射；专项使用 `initiatives` 路由，TODO 查询和编辑使用 `initiative_id`，不提供项目里程碑命令别名；`project todos links/attach/detach/dispatch` 管理原生执行引用和能力派发
 - [project.rs](../../crates/ctl/src/cmd/project.rs) 的 `project people` 映射只返回用户名的 `/api/project/people`；三层创建与修改 JSON 透传独立的 `owner_user_name`、`follower_user_names`。
-- [project/comments.rs](../../crates/ctl/src/cmd/project/comments.rs) — `project todos comments list/add` 映射分页与追加接口，接受 `--json @file`，请求 ID 由调用方固定以支持重试；概述收集沿分页读完评论，游标不前进明确报错。
+- [project/comments.rs](../../crates/ctl/src/cmd/project/comments.rs) — `project todos comments list/add/edit/delete` 映射分页、追加、版本校验编辑与删除接口，接受 `--json @file`；编辑正文和删除查询携带 `expected_revision`，追加请求 ID 由调用方固定以支持重试；概述收集沿分页读完评论，游标不前进明确报错。
 - [project/context.rs](../../crates/ctl/src/cmd/project/context.rs) — `project todos context` 读取任务、全部评论与关联执行，默认包括全部历史；`--execution` 仅选择已关联的一次执行。复用原生证据分页读取详情、Session 消息、事件和省略字段，保留原 Runtime 归属；部分读取失败输出 `complete:false` 与 `issues`，退出码 4，不写回任务。`project todos messages --seq/--offset` 对应原生消息游标，旧参数名保留别名。
 - [project/summary/](../../crates/ctl/src/cmd/project/summary/) — `project initiatives summary-context` 读取全部 TODO、全部分页评论、去重后的全部执行引用和原生证据；消息、事件、Team 轮次、TODO 项及省略正文按原生游标读取，失败保留来源和原因。`project goals summary-context` 返回全部专项及概述，提示缺失或过时内容；调用方总结后通过已有 PATCH 写入，见 [概述用法](../../docs/project-summaries.md)。`summary-versions` 查看最近 10 个版本，`summary-restore` 调用服务端将历史正文恢复为新版本。
 - `src/cmd/brain/ontology.rs` — 仅受理 schema_version 7；CLI 读分层视图、层明细及事件，隔离激活通过 OpenCoder session agent loop 输出一次分层模型决策。

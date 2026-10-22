@@ -38,15 +38,25 @@ export async function checkDetails(page) {
 
 export async function checkGraph(page) {
   await page.locator('.graph-node-title').filter({ hasText: '入口服务' }).waitFor();
-  await page.getByRole('button', { name: '恢复 100%', exact: true }).click();
+  await page.locator('.graph-3d[aria-busy="false"]').waitFor();
+  const distance = () => page.evaluate(() => {
+    const labels = [...document.querySelectorAll('.graph-3d-node')];
+    const [a, b] = labels.map((node) => ({ x: Number(node.dataset.anchorX), y: Number(node.dataset.anchorY) }));
+    return Math.hypot(a.x - b.x, a.y - b.y) / document.querySelector('.graph-viewport').clientHeight;
+  });
+  await page.getByRole('button', { name: '重置视角', exact: true }).click();
+  await page.waitForTimeout(100);
+  const initialDistance = await distance();
   await page.getByRole('button', { name: '放大', exact: true }).click();
-  await page.getByRole('button', { name: '恢复 100%', exact: true }).filter({ hasText: '120%' }).waitFor();
+  await page.waitForTimeout(150);
+  assert(await distance() > initialDistance * 1.1);
+  const zoomedDistance = await distance();
   await page.getByRole('button', { name: '放大画布', exact: true }).click();
   await page.getByRole('button', { name: '恢复画布', exact: true }).click();
   await page.locator('.graph-viewport').click({ position: { x: 4, y: 4 } });
   await page.waitForFunction(() => [...document.querySelectorAll('[role="tooltip"]')]
     .every((tooltip) => !tooltip.getClientRects().length || getComputedStyle(tooltip).visibility !== 'visible'));
-  assert.equal(await page.getByRole('button', { name: '恢复 100%', exact: true }).innerText(), '120%');
+  assert(Math.abs(await distance() / zoomedDistance - 1) < 0.03);
   for (const width of [768, 390, 1200]) {
     await page.setViewportSize({ width, height: 850 });
     await page.waitForFunction(() => {
@@ -57,7 +67,7 @@ export async function checkGraph(page) {
       return x >= viewport.x && x <= viewport.right && y >= viewport.y && y <= viewport.bottom;
     });
   }
-  assert.equal(await page.getByRole('button', { name: '恢复 100%', exact: true }).innerText(), '120%');
+  assert(Math.abs(await distance() / zoomedDistance - 1) < 0.03);
   await page.getByText('列表', { exact: true }).click();
   const results = page.locator('.graph-result-list');
   await results.getByLabel('搜索完整观测结果', { exact: true }).fill('下游');

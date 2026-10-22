@@ -191,8 +191,12 @@ def advance(settings, bundle, journal, operations, seconds):
         # the project schema before starting the old Server.
         state['schema_started'] = True
         journal.save()
+        from ..native import ontology_schema
+        if ontology_schema.version(record['manifest']):
+            ontology_schema.authorize(settings, journal, record)
         operations.run('systemctl', 'start', record['server_unit'])
         operations.wait(lambda: operations.http(endpoint(record), '/api/health'), seconds)
+        ontology_schema.completed(settings, journal, record)
         gates.close(settings, record, operations, seconds)
         operations.http(host_url, '/commit-host', 'POST', {})
         checkpoint(journal, 'verifying')

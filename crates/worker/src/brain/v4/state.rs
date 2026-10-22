@@ -58,11 +58,7 @@ pub fn request(record: &Record) -> Result<LayeredRequest> {
 
 pub async fn annotate(worker: &Worker, id: &str, key: &str, value: Value) -> Result<()> {
     let mut journal = worker.inner.journal.lock().await;
-    let mut record = journal
-        .records
-        .get(id)
-        .context("root execution missing")?
-        .clone();
+    let mut record = journal.get(id).await?.context("root execution missing")?;
     if !record.annotations.is_object() {
         record.annotations = json!({});
     }
@@ -102,8 +98,8 @@ pub async fn outcome(
     let io_version = {
         let journal = worker.inner.journal.lock().await;
         let record = journal
-            .records
             .get(&snapshot.run.run_id)
+            .await?
             .context("root execution missing")?;
         opencoder_core::brain::execution_io_version(&record.assignment.request.input)?
     };
@@ -118,11 +114,30 @@ pub async fn outcome(
 pub async fn settle(worker: &Worker, snapshot: &LayeredSnapshot) -> Result<()> {
     let id = &snapshot.run.run_id;
     if snapshot.run.phase.terminal() && !worker.inner.active.lock().await.contains_key(id) {
+        if worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .summaries
+            .get(id)
+            .context("root execution missing")?
+            .index
+            .status
+            .terminal()
+        {
+            return Ok(());
+        }
         let (status, result) = outcome(worker, snapshot).await?;
         let mut journal = worker.inner.journal.lock().await;
-        let record = journal.records.get(id).context("root execution missing")?;
-        if !record.assignment.index.status.terminal() {
-            journal.finalize(id, status, result, snapshot.run.error.clone())?;
+        let record = journal
+            .summaries
+            .get(id)
+            .context("root execution missing")?;
+        if !record.index.status.terminal() {
+            journal
+                .finalize(id, status, result, snapshot.run.error.clone())
+                .await?;
             opencoder_session::loop_registry::notify_change();
         }
     }

@@ -21,6 +21,7 @@ def resource_service(settings, candidate, operations):
                             'protocol_version': build.get('protocol_version'),
                             'storage_engine': build.get('storage_engine', 'libsql'),
                             'execution_io': build.get('execution_io', {'reader': 0, 'writer': 0}),
+                            'report_state': build.get('report_state', {'reader': 0, 'writer': 0}),
                             'compatibility': build['release_compatibility']}])
     # A healthy listener alone does not prove the native management API exists.
     operations.http(settings.resource_url, '/api/dag/binaries')
@@ -194,14 +195,39 @@ def ready(settings, record, node_id, operations, seconds):
         host = operations.http(f"http://127.0.0.1:{record['host_port']}", "/status")
         runtime = operations.http(f"http://127.0.0.1:{record['runtime_port']}", "/inventory")
         release = operations.http(endpoint, "/api/admin/release")
-        return (host["snapshot"]["ready"] and runtime["snapshot"]["ready"]
+        return (standby_ready(host, node_id, record, operations) and runtime["snapshot"]["ready"]
                 and runtime["registration"]["id"] == node_id
                 and runtime["runtime_id"] == record["id"]
                 and release["instance_release"] == record["id"])
     operations.wait(complete_index, seconds)
 
 
-def activated_host(record, operations, seconds):
+def standby_ready(host, node_id, record, operations):
+    """A staged Host still reports the old active Runtime until activation.
+
+    Attribute an unhealthy snapshot to that Runtime before allowing prewarm
+    to finish. Host failures and unknown errors remain blocking. Activation
+    still requires the new Host generation to report ready before ingress.
+    """
+    if host["snapshot"]["ready"]:
+        return True
+    if host.get("node", {}).get("id") != node_id:
+        return False
+    active = [entry["runtime"] for entry in host.get("runtimes", [])
+              if entry["runtime"]["mode"] == "active"]
+    if len(active) != 1 or active[0]["id"] == record["id"]:
+        return False
+    old = active[0]
+    inventory = operations.http(old["config"]["endpoint"], "/inventory")
+    snapshot = inventory["snapshot"]
+    error = snapshot.get("resource_error")
+    return (inventory.get("runtime_id") == old["id"]
+            and inventory["registration"]["id"] == node_id
+            and not snapshot["ready"] and bool(error)
+            and host["snapshot"].get("resource_error") == f"{old['id']}: {error}")
+
+
+def activated_host(record, operations, seconds, *, prewarm=False):
     """The activated Host must finish its report on this Server before ingress."""
     host = operations.http(f"http://127.0.0.1:{record['host_port']}", "/status")
     node_id = host["node"]["id"]
@@ -214,10 +240,16 @@ def activated_host(record, operations, seconds):
         nodes = operations.http(endpoint, "/api/nodes")["nodes"]
         node = next((value for value in nodes if value["id"] == node_id), None)
         snapshot = (node.get("snapshot") or {}) if node else {}
-        if (not node or not node["online"] or not snapshot.get("ready")
-                or snapshot.get("generation") != generation):
+        if (not node or not node["online"] or snapshot.get("generation") != generation):
             return False
-        return operations.http(endpoint, "/api/ready")["ready_nodes"] >= 1
+        if prewarm:
+            # The full-report ACK proves the new producer has committed to the
+            # old Server. A known old-Runtime fault must still allow repair.
+            fresh = operations.http(f"http://127.0.0.1:{record['host_port']}", "/status")
+            return (fresh["snapshot"]["generation"] == generation
+                    and record["report_server"] in fresh.get("reported_servers", [])
+                    and standby_ready(fresh, node_id, record, operations))
+        return snapshot.get("ready") and operations.http(endpoint, "/api/ready")["ready_nodes"] >= 1
 
     operations.wait(synced, seconds)
 

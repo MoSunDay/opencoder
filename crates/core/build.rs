@@ -18,6 +18,12 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
     let full =
         run_git(&["rev-parse", "HEAD"], &manifest_dir).unwrap_or_else(|| "unknown".to_string());
+    // Cargo may reuse a linked worktree's cached script and its old HEAD watch.
+    // The release builder supplies the intended commit as an explicit cache key.
+    println!("cargo:rerun-if-env-changed=OPENCODER_BUILD_COMMIT");
+    if let Ok(expected) = std::env::var("OPENCODER_BUILD_COMMIT") {
+        assert_eq!(expected, full, "release build commit differs from checkout");
+    }
     let dirty = is_dirty(&manifest_dir);
 
     println!("cargo:rustc-env=OPENCODER_GIT_COMMIT={short}");

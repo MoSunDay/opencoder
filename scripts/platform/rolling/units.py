@@ -2,6 +2,7 @@
 import errno
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -296,9 +297,35 @@ server {{ listen 127.0.0.1:{settings.host_port}; client_max_body_size 2m; {locat
 """
 
 
+def switch_host_ingress(settings, host_port, operations):
+    """Follow the active Host without changing the live Server upstream.
+
+    Journal.current may already name a failed candidate during rollback;
+    preserve the actual Server configuration rather than inferring its port.
+    """
+    if type(host_port) is not int or not 0 < host_port < 65536:
+        raise ValueError("invalid Host ingress port")
+    previous = settings.nginx_include.read_text()
+    marker = f"server {{ listen 127.0.0.1:{settings.host_port};"
+    if previous.count(marker) != 1:
+        raise ValueError("managed Host ingress block is missing or ambiguous")
+    prefix, marker, host = previous.partition(marker)
+    host, changed = re.subn(r"(?m)^        proxy_pass http://127\.0\.0\.1:[0-9]+;$",
+                            f"        proxy_pass http://127.0.0.1:{host_port};", host)
+    if changed != 1:
+        raise ValueError("managed Host upstream is missing or ambiguous")
+    content = prefix + marker + host
+    if content != previous:
+        _replace_ingress(settings, content.encode(), operations)
+
+
 def switch_ingress(settings, record, operations):
-    previous = settings.nginx_include.read_bytes() if settings.nginx_include.exists() else None
     content = nginx(settings, record["server_port"], record["host_port"]).encode()
+    _replace_ingress(settings, content, operations)
+
+
+def _replace_ingress(settings, content, operations):
+    previous = settings.nginx_include.read_bytes() if settings.nginx_include.exists() else None
     atomic_bytes(settings.nginx_include, content, 0o644)
     try:
         operations.run("nginx", "-t")

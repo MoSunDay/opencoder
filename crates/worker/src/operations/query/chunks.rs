@@ -72,12 +72,9 @@ pub(in crate::operations) async fn event_payload(
                 .await?
         } else {
             let event = worker
-                .inner
-                .journal
-                .lock()
-                .await
-                .records
-                .get(id)
+                .read_record(id)
+                .await?
+                .map(std::sync::Arc::unwrap_or_clone)
                 .and_then(|record| {
                     record
                         .events
@@ -193,7 +190,10 @@ pub(in crate::operations) async fn detail_field(
         let chunk = team_artifact_chunk(worker, &request, EVENT_CHUNK_BYTES).await?;
         return detail_chunk_reply(request.field, request.offset, chunk, "json-base64");
     }
-    let record = worker.inner.journal.lock().await.records.get(id).cloned();
+    let record = worker
+        .read_record(id)
+        .await?
+        .map(std::sync::Arc::unwrap_or_clone);
     let value = match request.field.as_str() {
         "request.input" => record
             .as_ref()
@@ -234,13 +234,9 @@ async fn team_artifact_chunk(
         anyhow::bail!("team detail field requires a Team execution");
     }
     let record = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(&request.execution.id)
-        .cloned()
+        .read_record(&request.execution.id)
+        .await?
+        .map(std::sync::Arc::unwrap_or_clone)
         .ok_or_else(|| anyhow::anyhow!("team execution not found"))?;
     let name = if request.execution.kind == ExecutionKind::System {
         "system"

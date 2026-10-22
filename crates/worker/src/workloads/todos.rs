@@ -56,7 +56,8 @@ pub(super) async fn run(
             .journal
             .lock()
             .await
-            .mark_todo_initialized(id)?;
+            .mark_todo_initialized(id)
+            .await?;
         if workflow.is_some_and(|wf| wf.status == "running") {
             opencoder_todos::interrupt(
                 &worker.inner.state.store,
@@ -77,6 +78,7 @@ pub(super) async fn run(
                     .lock()
                     .await
                     .mark_todo_initialized(&initialized_id)
+                    .await
             })
             .await?
     };

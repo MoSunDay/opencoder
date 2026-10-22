@@ -323,7 +323,15 @@ async fn cold_retry_and_disconnected_reply_do_not_strand_host_capacity() {
     drop(launch_blocked);
     let completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let status = worker.inner.journal.lock().await.records[&original.index.id]
+            let status = worker
+                .inner
+                .journal
+                .lock()
+                .await
+                .get(&original.index.id)
+                .await
+                .unwrap()
+                .expect("execution exists")
                 .assignment
                 .index
                 .status;
@@ -336,7 +344,11 @@ async fn cold_retry_and_disconnected_reply_do_not_strand_host_capacity() {
     .await;
     if completed.is_err() {
         let journal = worker.inner.journal.lock().await;
-        let record = &journal.records[&original.index.id];
+        let record = &journal
+            .get(&original.index.id)
+            .await
+            .unwrap()
+            .expect("execution exists");
         panic!(
             "request after disconnect: {:?}, error {:?}, tickets {:?}",
             record.assignment.index.status,
@@ -345,8 +357,12 @@ async fn cold_retry_and_disconnected_reply_do_not_strand_host_capacity() {
         );
     }
     let journal = worker.inner.journal.lock().await;
-    let record = &journal.records[&original.index.id];
-    assert_eq!(journal.records.len(), 1);
+    let record = &journal
+        .get(&original.index.id)
+        .await
+        .unwrap()
+        .expect("execution exists");
+    assert_eq!(journal.summaries.len(), 1);
     assert_eq!(record.assignment.request, original.request);
     assert_eq!(
         record.assignment.index.created_at,

@@ -282,36 +282,38 @@ impl Hub {
         true
     }
     pub async fn mark_index_synced(&self, id: &str, generation: &str) -> bool {
+        mark_synced(&mut *self.state.lock().await, id, generation)
+    }
+
+    pub(super) async fn commit_report(
+        &self,
+        id: &str,
+        generation: &str,
+        complete: &super::report::CompleteReport,
+        recovered: &[ExecutionIndex],
+    ) -> bool {
         let mut state = self.state.lock().await;
-        if state
-            .standby
-            .get(id)
-            .is_some_and(|s| s.connection.generation == generation)
-        {
-            let mut standby = state.standby.remove(id).unwrap();
-            standby.connection.index_synced = true;
-            standby.snapshot.ready = standby.connection.reported_ready;
-            state.connections.insert(id.to_string(), standby.connection);
-            if let Some(node) = state.nodes.get_mut(id) {
-                node.registration = standby.registration;
-                node.snapshot = Some(standby.snapshot);
-                node.online = true;
-                node.last_seen_at = now_ms();
-            }
-            return true;
+        if !mark_synced(&mut state, id, generation) {
+            return false;
         }
-        let ready = match state.connections.get_mut(id) {
-            Some(connection) if connection.generation == generation => {
-                connection.index_synced = true;
-                connection.reported_ready
-            }
-            _ => return false,
+        apply_membership(
+            &mut state,
+            id,
+            &complete.records,
+            complete.base_sequence.is_some(),
+            &complete.removed_ids,
+        );
+        let initial = if complete.initial {
+            complete.records.as_slice()
+        } else {
+            &[]
         };
-        if let Some(node) = state.nodes.get_mut(id) {
-            if let Some(snapshot) = node.snapshot.as_mut() {
-                snapshot.ready = ready;
+        for record in initial.iter().chain(recovered) {
+            if let Some(reservation) = state.reservations.remove(&record.id) {
+                if let Some(node) = state.nodes.get_mut(&reservation.node_id) {
+                    node.reserved_loops = node.reserved_loops.saturating_sub(reservation.claims);
+                }
             }
-            node.last_seen_at = now_ms();
         }
         true
     }
@@ -344,15 +346,20 @@ impl Hub {
         }
     }
     pub async fn acknowledge_report(&self, node_id: &str, records: &[ExecutionIndex]) {
-        let mut state = self.state.lock().await;
-        // Replace acceptance evidence only after a complete report.
-        state.accepted.retain(|_, node| node != node_id);
-        for record in records {
-            state
-                .accepted
-                .insert(record.id.clone(), record.node_id.clone());
-        }
+        self.acknowledge_report_changes(node_id, records, false, &[])
+            .await;
     }
+    pub async fn acknowledge_report_changes(
+        &self,
+        node_id: &str,
+        records: &[ExecutionIndex],
+        delta: bool,
+        removed_ids: &[String],
+    ) {
+        let mut state = self.state.lock().await;
+        apply_membership(&mut state, node_id, records, delta, removed_ids);
+    }
+
     pub async fn detach(&self, id: &str, generation: &str) {
         let mut state = self.state.lock().await;
         if state
@@ -528,3 +535,59 @@ fn reject_undispatched(
 #[cfg(test)]
 #[path = "hub_tests.rs"]
 mod tests;
+
+fn mark_synced(state: &mut State, id: &str, generation: &str) -> bool {
+    if state
+        .standby
+        .get(id)
+        .is_some_and(|s| s.connection.generation == generation)
+    {
+        let mut standby = state.standby.remove(id).unwrap();
+        standby.connection.index_synced = true;
+        standby.snapshot.ready = standby.connection.reported_ready;
+        state.connections.insert(id.to_string(), standby.connection);
+        if let Some(node) = state.nodes.get_mut(id) {
+            node.registration = standby.registration;
+            node.snapshot = Some(standby.snapshot);
+            node.online = true;
+            node.last_seen_at = now_ms();
+        }
+        return true;
+    }
+    let ready = match state.connections.get_mut(id) {
+        Some(connection) if connection.generation == generation => {
+            connection.index_synced = true;
+            connection.reported_ready
+        }
+        _ => return false,
+    };
+    if let Some(node) = state.nodes.get_mut(id) {
+        if let Some(snapshot) = node.snapshot.as_mut() {
+            snapshot.ready = ready;
+        }
+        node.last_seen_at = now_ms();
+    }
+    true
+}
+
+fn apply_membership(
+    state: &mut State,
+    node_id: &str,
+    records: &[ExecutionIndex],
+    delta: bool,
+    removed_ids: &[String],
+) {
+    if !delta {
+        state.accepted.retain(|_, node| node != node_id);
+    }
+    for id in removed_ids {
+        if state.accepted.get(id).is_some_and(|node| node == node_id) {
+            state.accepted.remove(id);
+        }
+    }
+    for record in records {
+        state
+            .accepted
+            .insert(record.id.clone(), record.node_id.clone());
+    }
+}

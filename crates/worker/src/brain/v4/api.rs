@@ -30,15 +30,20 @@ pub async fn handle(
     let id = &reference.id;
     let gate = worker.lifecycle_gate(id).await;
     let _guard = gate.lock().await;
+    if matches!(
+        action,
+        "layered_wake_ack" | "layered_guidance_ack" | "layered_dispatch_ack" | "layered_cancel_ack"
+    ) {
+        return super::super::outbox::root_ack(worker, reference, action, input).await;
+    }
     let record = worker
         .inner
         .journal
         .lock()
         .await
-        .records
         .get(id)
-        .context("root execution missing")?
-        .clone();
+        .await?
+        .context("root execution missing")?;
     let request = state::request(&record)?;
     let snapshot = match worker.inner.state.store.brain_layered(id).await? {
         Some(snapshot) => snapshot,
@@ -71,45 +76,6 @@ pub async fn handle(
             );
             state::annotate(worker, id, "layered_intent", input).await?;
             return Ok(RpcReply::ok(json!({"stored":true})));
-        }
-        "layered_wake_ack" => {
-            let generation = input["generation"]
-                .as_u64()
-                .context("generation required")?;
-            if generation <= snapshot.run.generation
-                && record.annotations["layered_wake_ack"]
-                    .as_u64()
-                    .is_none_or(|ack| generation > ack)
-            {
-                state::annotate(worker, id, "layered_wake_ack", json!(generation)).await?;
-            }
-            return Ok(RpcReply::ok(json!({"acknowledged":generation})));
-        }
-        "layered_guidance_ack" => {
-            let seq = input["seq"].as_u64().context("guidance seq required")?;
-            ensure!(
-                seq <= snapshot.run.last_event_seq,
-                "guidance acknowledgement exceeds event watermark"
-            );
-            if record.annotations["layered_guidance_ack"]
-                .as_u64()
-                .is_none_or(|ack| seq > ack)
-            {
-                state::annotate(worker, id, "layered_guidance_ack", json!(seq)).await?;
-            }
-            return Ok(RpcReply::ok(json!({"acknowledged":seq})));
-        }
-        "layered_dispatch_ack" => {
-            let operation_id = input["operation_id"]
-                .as_str()
-                .context("operation_id required")?;
-            let mut acks = record.annotations["layered_dispatch_acks"].clone();
-            if !acks.is_object() {
-                acks = json!({});
-            }
-            acks[operation_id] = json!(true);
-            state::annotate(worker, id, "layered_dispatch_acks", acks).await?;
-            return Ok(RpcReply::ok(json!({"acknowledged":operation_id})));
         }
         "snapshot" => return Ok(RpcReply::ok(json!(snapshot))),
         "events" => {
@@ -385,24 +351,6 @@ pub async fn handle(
             };
             change
         }
-        "layered_cancel_ack" => {
-            let op: LayeredOperation = serde_json::from_value(input)?;
-            ensure!(
-                snapshot
-                    .operations
-                    .iter()
-                    .any(|current| current.operation_id == op.operation_id
-                        && current.cancel_requested),
-                "unknown cancellation"
-            );
-            let mut acks = record.annotations["layered_cancel_acks"].clone();
-            if !acks.is_object() {
-                acks = json!({});
-            }
-            acks[&op.operation_id] = json!(true);
-            state::annotate(worker, id, "layered_cancel_acks", acks).await?;
-            return Ok(RpcReply::ok(json!({"acknowledged":op.operation_id})));
-        }
         "pause" | "resume" | "cancel" => {
             if action == "resume" {
                 if let Err(error) = super::budget::human(worker, &record, "").await {
@@ -456,9 +404,8 @@ async fn requeue_decision(worker: &Worker, id: &str) -> Result<()> {
             .journal
             .lock()
             .await
-            .records
             .get(id)
-            .cloned()
+            .await?
             .context("root execution missing while queueing layered decision")?;
         if !matches!(
             record.assignment.index.status,

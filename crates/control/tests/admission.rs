@@ -121,12 +121,14 @@ struct Harness {
     service: Arc<Service>,
     server: tokio::task::JoinHandle<()>,
     node: tokio::task::JoinHandle<anyhow::Result<()>>,
+    _config: opencoder_core::config::ScopedConfigHome,
     _dir: tempfile::TempDir,
 }
 
 impl Harness {
     async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
+        let config = opencoder_core::config::scoped_config_home(dir.path().join("config"));
         let state =
             opencoder_control::new_state(dir.path().join("work"), dir.path().join("server"), None)
                 .await
@@ -167,6 +169,7 @@ impl Harness {
             service,
             server,
             node,
+            _config: config,
             _dir: dir,
         }
     }

@@ -4,6 +4,7 @@ pub mod api;
 mod bootstrap;
 mod catalog_guard;
 mod ontology;
+mod ontology_catalog;
 pub mod release;
 mod resource_scope;
 pub mod role_gate;

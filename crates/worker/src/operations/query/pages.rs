@@ -116,13 +116,9 @@ pub(in crate::operations) async fn team_turns(
         return Ok(RpcReply::error(400, "team turns require a Team execution"));
     }
     let record = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(&execution.id)
-        .cloned()
+        .read_record(&execution.id)
+        .await?
+        .map(std::sync::Arc::unwrap_or_clone)
         .ok_or_else(|| anyhow::anyhow!("team execution not found"))?;
     let name = if execution.kind == ExecutionKind::System {
         "system"

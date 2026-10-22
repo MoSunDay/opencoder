@@ -9,7 +9,8 @@ from fixture import publish_hold, release_native_gate
 
 def command(args, rollback=False):
     cli = Path(__file__).resolve().parents[2] / 'platform/rolling_cli.py'
-    result = [sys.executable, str(cli), '--config', str(args.config), '--wait-seconds', '300']
+    result = [sys.executable, str(cli), '--config', str(args.config), '--wait-seconds',
+              str(getattr(args, 'deploy_wait_seconds', 300))]
     if getattr(args, 'signal', False):
         result.append('--signal')
     return [*result, '--rollback'] if rollback else [*result, '--bundle', str(args.bundle)]

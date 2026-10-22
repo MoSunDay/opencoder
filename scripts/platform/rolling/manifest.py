@@ -19,7 +19,7 @@ def verify(bundle):
     compatibility = manifest.get("compatibility", {})
     for key in ("protocol", "data_format"):
         limits = compatibility.get(key, {})
-        supported = (1,) if key == "protocol" else tuple(range(1, 12))
+        supported = (1,) if key == "protocol" else tuple(range(1, 13))
         if limits.get("min") not in supported or limits.get("max") != limits.get("min"):
             raise ValueError(f"unsupported handoff {key}")
     info = _installer.build_info(bundle / "bin/opencoder-agent")
@@ -29,6 +29,11 @@ def verify(bundle):
         raise ValueError("brain schema does not match compiled binary")
     if execution_io(manifest) != execution_io(info):
         raise ValueError("execution IO compatibility does not match compiled binary")
+    if report_state(manifest) != report_state(info):
+        raise ValueError("report state compatibility does not match compiled binary")
+    from .native.ontology_schema import version
+    if version(manifest) != version(info):
+        raise ValueError("Ontology catalog schema does not match compiled binary")
     if manifest.get('todo_files_contract', 0) != info.get('todo_files_contract', 0):
         raise ValueError('TODO files contract does not match compiled binary')
     if storage_engine(manifest) != storage_engine(info):
@@ -50,23 +55,40 @@ def execution_io(manifest):
 def writer_preflight(candidate, current):
     if execution_io(candidate)['writer'] > execution_io(current)['reader']:
         raise ValueError('publish the execution IO reader bridge before enabling the writer; current rollback Server cannot read the new wire')
+    if report_state(candidate)['writer'] > report_state(current)['reader']:
+        raise ValueError('publish the report state reader bridge before enabling the writer')
+
+
+def report_state(manifest):
+    value = manifest.get('report_state', {'reader': 0, 'writer': 0})
+    if (not isinstance(value, dict) or set(value) != {'reader', 'writer'}
+            or any(type(v) is not int or v not in (0, 1) for v in value.values())
+            or value['writer'] > value['reader']):
+        raise ValueError('unsupported report state compatibility')
+    return value
 
 
 def storage_engine(value):
     engine = value.get('storage_engine', 'libsql')
     compatibility = value.get('compatibility', value.get('release_compatibility', {}))
     data = compatibility.get('data_format', {})
-    expected = 'turso' if data == {'min': 11, 'max': 11} else 'libsql'
+    expected = 'turso' if data in ({'min': 11, 'max': 11}, {'min': 12, 'max': 12}) else 'libsql'
     if engine != expected:
         raise ValueError('storage engine and handoff data format disagree')
     return engine
 
 
-def io_format(manifest):
+def io_format(manifest, *, retained=False):
     io = execution_io(manifest)
     data = manifest['compatibility']['data_format']
     storage_engine(manifest)
-    if data == {'min': 11, 'max': 11}:
+    report = report_state(manifest)
+    if data == {'min': 12, 'max': 12}:
+        if report != {'reader': 1, 'writer': 1}:
+            raise ValueError('handoff format 12 requires report state reader/writer 1')
+    elif report['writer'] != 0 and not (retained and data == {'min': 11, 'max': 11}):
+        raise ValueError('report state writer requires handoff format 12 so legacy controllers reject unsafe rollback')
+    if data in ({'min': 11, 'max': 11}, {'min': 12, 'max': 12}):
         pass
     elif data == {'min': 10, 'max': 10}:
         if io != {'reader': 1, 'writer': 1}:
@@ -80,7 +102,12 @@ def compatible(candidate, retained):
     reader = execution_io(candidate)['reader']
     new_format = io_format(candidate)
     for previous in retained:
-        old_format = io_format(previous)
+        if report_state(candidate)['reader'] < report_state(previous)['writer']:
+            raise ValueError('retained Runtime requires the report state reader bridge; incompatible rollback or program replacement')
+        # Historical format-11 writers remain readable by the bridge. They
+        # cannot be published or selected as rollback targets by this controller;
+        # candidate validation above always requires the format-12 guard.
+        old_format = io_format(previous, retained=True)
         if storage_engine(candidate) != storage_engine(previous):
             raise ValueError('retained Runtime uses a different storage engine; use --maintenance')
         if reader < execution_io(previous)['writer']:
@@ -94,7 +121,10 @@ def compatible(candidate, retained):
                 io_bridge = key == 'data_format' and reader == 1 and all(
                     value in ({'min': 9, 'max': 9}, {'min': 10, 'max': 10})
                     for value in (new_format, old_format))
-                if not io_bridge:
+                report_bridge = key == 'data_format' and report_state(candidate)['reader'] == 1 and all(
+                    value in ({'min': 11, 'max': 11}, {'min': 12, 'max': 12})
+                    for value in (new_format, old_format))
+                if not (io_bridge or report_bridge):
                     raise ValueError(f"release {previous['release_id']} has a different {key}; use --maintenance")
         if candidate["protocol_version"] != previous["protocol_version"]:
             raise ValueError("fleet protocol differs from a retained runtime")

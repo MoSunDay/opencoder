@@ -5,6 +5,8 @@ mod api;
 mod client;
 pub mod config;
 mod deployment;
+#[path = "inventory/mod.rs"]
+mod inventory;
 mod lifecycle;
 mod routing;
 pub mod runtime;
@@ -39,6 +41,7 @@ pub struct Host {
     pub instance: String,
     pub retiring: AtomicBool,
     pub report_gate: tokio::sync::Mutex<()>,
+    inventory: tokio::sync::Mutex<inventory::HostInventory>,
     pub port: AtomicU64,
 }
 
@@ -103,6 +106,7 @@ impl Host {
             instance: ulid::Ulid::new().to_string(),
             retiring: AtomicBool::new(false),
             report_gate: tokio::sync::Mutex::new(()),
+            inventory: tokio::sync::Mutex::new(Default::default()),
             port: AtomicU64::new(0),
         });
         host.sync_inventory().await?;

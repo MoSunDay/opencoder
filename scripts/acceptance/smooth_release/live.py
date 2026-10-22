@@ -305,12 +305,16 @@ def main():
     parser.add_argument('--bundle', type=Path, required=True)
     parser.add_argument('--evidence-parent', type=Path, default=Path('/var/tmp'))
     parser.add_argument('--observe-seconds', type=int, default=900)
+    parser.add_argument('--deploy-wait-seconds', type=int, default=300,
+                        help='release job wait budget; traffic and SSE acceptance limits are unchanged')
     parser.add_argument('--signal', action='store_true', help='publish through the running Server signal protocol')
     parser.add_argument('--signal-roundtrip', action='store_true', help='also roll back and republish while old and new work remain running')
     parser.add_argument('--current-roundtrip', action='store_true', help='verify rollback and republish after a separately verified initial activation')
     args = parser.parse_args()
     if args.observe_seconds < 900:
         parser.error('final acceptance requires at least 900 seconds of observation')
+    if args.deploy_wait_seconds <= 0:
+        parser.error('--deploy-wait-seconds must be positive')
     if args.signal_roundtrip and not args.signal:
         parser.error('--signal-roundtrip requires --signal and two signal-capable releases')
     if args.current_roundtrip and not (args.signal and args.signal_roundtrip):

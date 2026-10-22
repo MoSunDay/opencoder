@@ -1,7 +1,8 @@
 import { Alert, Button, Collapse, Descriptions, Drawer, Empty, Grid, Skeleton, Space, Tabs, Tag, Tooltip, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../api";
-import type { AttributeDefinition, Entity, EntityType } from "../../types";
+import type { AttributeDefinition, CatalogManagement, Entity, EntityType } from "../../types";
+import CapabilitySource from "./details/managed/CapabilitySource";
 import EntityActions from "../EntityActions";
 import StructuredAttributeList from "./StructuredAttributeList";
 import TextAttributeSection from "./TextAttributeSection";
@@ -25,6 +26,7 @@ export default function EntityDetailDrawer({ env, entity, entityType, canManage,
   const [detailEntity, setDetailEntity] = useState<Entity>();
   const [textAttributes, setTextAttributes] = useState<TextAttribute[]>([]);
   const [actions, setActions] = useState<{ id: string; operation_type: string; operation: string }[]>([]);
+  const [management, setManagement] = useState<CatalogManagement | null>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("basic");
@@ -45,12 +47,14 @@ export default function EntityDetailDrawer({ env, entity, entityType, canManage,
       setDefinitions(typeResult.items.filter((definition) => definition.kind !== "vector"));
       setDetailEntity(detail.item); setRows((detail.structured_attributes as StructuredAttributeRow[]) ?? []);
       setTextAttributes(detail.text_attributes ?? []); setActions(detail.actions ?? []);
+      setManagement(detail.management);
     } catch (reason) { if (current()) setError(reason instanceof Error ? reason.message : "详情加载失败"); }
     finally { if (current()) setLoading(false); }
   }, [env, entityType?.id]);
   useEffect(() => {
     setActiveTab((view?.tab as DetailTab) || "basic"); restoredScroll.current = view?.scroll ?? 0;
     setDefinitions([]); setRows([]); setDetailEntity(undefined); setTextAttributes([]); setActions([]); setError("");
+    setManagement(undefined);
   }, [env, entity?.id]);
   useEffect(() => {
     if (entity && entityType) void reload(entity);
@@ -82,7 +86,7 @@ export default function EntityDetailDrawer({ env, entity, entityType, canManage,
   return <Drawer title={<Tooltip title={entity?.name}><Typography.Text strong ellipsis style={{ maxWidth: "100%" }}>{entity?.name}</Typography.Text></Tooltip>}
     size={screens.md ? 640 : "100%"} open={Boolean(entity)} onClose={close} destroyOnHidden
     styles={{ body: { display: "flex", flexDirection: "column", minHeight: 0, paddingTop: 12, overflow: "hidden" } }}
-    extra={canManage && currentEntity && !currentEntity.is_deleted ? <EntityActions key={`${currentEntity.id}/${currentEntity.revision}`} env={env} entity={currentEntity}
+    extra={canManage && !management && currentEntity && !currentEntity.is_deleted ? <EntityActions key={`${currentEntity.id}/${currentEntity.revision}`} env={env} entity={currentEntity}
       onDone={async (item) => { await reload(item); await onEntityChanged(item); }} /> : null}>
     {error ? <Alert type="error" showIcon message={error} action={<Button onClick={() => { if (entity) void reload(entity); }}>重试</Button>} /> : null}
     {onBack || onObserve ? <Space style={{ marginBottom: 8 }}>
@@ -93,6 +97,7 @@ export default function EntityDetailDrawer({ env, entity, entityType, canManage,
     <div ref={body} className="entity-detail-body" onScroll={() => onView?.({ tab: activeTab, scroll: body.current?.scrollTop ?? 0 })}>
       {!currentEntity || !entityType ? loading ? <Skeleton active /> : error ? null : <Empty /> : <>
         {activeTab === "basic" ? <>
+          <CapabilitySource management={management} />
           <Descriptions column={1} size="small" items={[
             { key: "type", label: "类型", children: <Tag>{entityType.name}</Tag> },
             { key: "description", label: "描述", children: currentEntity.description || "尚未填写描述" },
@@ -107,14 +112,14 @@ export default function EntityDetailDrawer({ env, entity, entityType, canManage,
             ]} /> }]} />
         </> : null}
         {activeTab === "attributes" ? <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-          {ordinary.length ? <StructuredAttributeList definitions={ordinary} canManage={canManage} state={structured} /> : null}
+          {ordinary.length ? <StructuredAttributeList definitions={ordinary} canManage={canManage} readonlyAttributes={management?.readonly_attributes} state={structured} /> : null}
           {!ordinary.length && !ordinaryText.length ? <Empty description="暂无普通属性" /> : null}
           <TextAttributeSection items={ordinaryText} canManage={canManage} drafts={drafts} />
         </Space> : null}
         {activeTab === "extension" ? extension.length ? <TextAttributeSection items={extension} canManage={canManage} drafts={drafts} /> : <Empty description="暂无拓展信息" /> : null}
         {activeTab === "source" ? <>
           <Typography.Paragraph type="secondary">{source.some((item) => (item.current?.bytes ?? 0) > 0) ? "已维护" : "待完善"}</Typography.Paragraph>
-          {source.length ? <TextAttributeSection items={source} canManage={canManage} drafts={drafts} /> : <Empty description="暂无来源定义" />}
+          {source.length ? <TextAttributeSection items={source} canManage={canManage && !management} drafts={drafts} /> : <Empty description="暂无来源定义" />}
         </> : null}
       </>}
     </div>

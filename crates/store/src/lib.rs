@@ -1,10 +1,12 @@
 pub mod brain_types;
 pub mod bundle;
 pub mod import;
+pub mod inventory;
 pub mod jsonl;
 pub mod project;
 pub mod project_executor_spec;
 pub mod project_types;
+pub mod reporting;
 pub mod schedule_types;
 pub mod session_store;
 pub mod store;

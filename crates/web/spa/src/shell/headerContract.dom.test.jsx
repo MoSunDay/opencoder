@@ -34,7 +34,7 @@ vi.mock('../api.js', () => ({
 // timer outlives the assertions.
 vi.mock('../sse.js', () => ({ openStream: vi.fn(() => ({ abort: vi.fn() })) }));
 // jsdom has no graphics renderer; keep the real graph panel and its controls.
-vi.mock('@ant-design/graphs', () => ({ FlowDirectionGraph: () => null }));
+vi.mock('../ontology/pages/graph/canvas3d/GraphScene', () => ({ default: () => null }));
 
 import '../test/setup-dom.js';
 import {

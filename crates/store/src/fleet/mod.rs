@@ -9,8 +9,11 @@ mod brain;
 mod catalog;
 mod counts;
 pub mod handoff;
+mod inventory_meta;
+mod ownership;
 mod records;
 mod report;
+pub use report::IndexReportBaselineChanged;
 mod schema;
 #[derive(Clone)]
 pub struct FleetStore {

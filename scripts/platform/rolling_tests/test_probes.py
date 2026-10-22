@@ -8,10 +8,34 @@ from unittest.mock import patch
 from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rolling.io import HttpFailure
-from rolling.probes import activated_host, candidate_locked, probe_id, public, ready, spec, submit_probe
+from rolling.probes import activated_host, candidate_locked, probe_id, public, ready, spec, standby_ready, submit_probe
 
 
 class ReadyProbeTests(unittest.TestCase):
+    def test_standby_attributes_only_the_replaced_runtime_error(self):
+        old = {"runtime_id": "rel-old", "registration": {"id": "node-test"},
+               "snapshot": {"ready": False, "resource_error": "storage unavailable"}}
+        host = {"node": {"id": "node-test"},
+                "snapshot": {"ready": False, "resource_error": "rel-old: storage unavailable"},
+                "runtimes": [{"runtime": {"id": "rel-old", "mode": "active",
+                                          "config": {"endpoint": "http://127.0.0.1:3103"}}}]}
+        record = {"id": "rel-new"}
+        operations = SimpleNamespace(http=lambda base, path: old)
+        self.assertTrue(standby_ready(host, "node-test", record, operations))
+        for field, value in (("resource_error", "inventory read failed"),
+                             ("resource_error", "rel-old: storage unavailable; host failed"),
+                             ("resource_error", None)):
+            altered = copy.deepcopy(host)
+            altered["snapshot"][field] = value
+            self.assertFalse(standby_ready(altered, "node-test", record, operations))
+        self.assertFalse(standby_ready(host, "other-node", record, operations))
+        self.assertFalse(standby_ready(host, "node-test", {"id": "rel-old"}, operations))
+        old["snapshot"]["ready"] = True
+        self.assertFalse(standby_ready(host, "node-test", record, operations))
+        old["snapshot"]["ready"] = False
+        old["runtime_id"] = "another-runtime"
+        self.assertFalse(standby_ready(host, "node-test", record, operations))
+
     def test_activated_host_waits_for_its_generation_and_durable_ready_index(self):
         class Operations:
             def __init__(self):
@@ -43,6 +67,39 @@ class ReadyProbeTests(unittest.TestCase):
         activated_host({"host_port": 3101, "server_port": 3100}, operations, 1)
         self.assertEqual(operations.attempts, 4)
         self.assertEqual(operations.ready_calls, 1)
+
+    def test_producer_prewarm_requires_its_report_ack_but_allows_known_runtime_fault(self):
+        record = {'id': 'r2', 'server_port': 3100, 'host_port': 3101, 'report_server': 'r1'}
+        old = {'runtime_id': 'r1', 'registration': {'id': 'node'},
+               'snapshot': {'ready': False, 'resource_error': 'storage unavailable'}}
+        host = {'node': {'id': 'node'}, 'reported_servers': [],
+                'snapshot': {'generation': 'host-2', 'ready': False,
+                             'resource_error': 'r1: storage unavailable'},
+                'runtimes': [{'runtime': {'id': 'r1', 'mode': 'active',
+                             'config': {'endpoint': 'http://127.0.0.1:3103'}}}]}
+        node = {'id': 'node', 'online': True, 'snapshot': dict(host['snapshot'])}
+        def http(base, path):
+            if path == '/status': return host
+            if path == '/api/nodes': return {'nodes': [node]}
+            if path == '/inventory': return old
+            if path == '/api/ready': return {'ready_nodes': 0}
+            raise AssertionError(path)
+        def wait(check, seconds):
+            if not check(): raise TimeoutError('report not ready')
+        operations = SimpleNamespace(http=http, wait=wait)
+        with self.assertRaises(TimeoutError):
+            activated_host(record, operations, 1, prewarm=True)
+        host['reported_servers'] = ['r1']
+        activated_host(record, operations, 1, prewarm=True)
+        with self.assertRaises(TimeoutError):
+            activated_host(record, operations, 1)
+        node['snapshot']['generation'] = 'host-1'
+        with self.assertRaises(TimeoutError):
+            activated_host(record, operations, 1, prewarm=True)
+        node['snapshot']['generation'] = 'host-2'
+        host['snapshot']['resource_error'] = 'host inventory failed'
+        with self.assertRaises(TimeoutError):
+            activated_host(record, operations, 1, prewarm=True)
 
     def test_retired_runtime_error_on_old_host_allows_ready_candidate_host(self):
         record = {"id": "rel-new", "server_port": 3100, "host_port": 3101,

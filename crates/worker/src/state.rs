@@ -39,7 +39,7 @@ pub(crate) struct Inner {
     pub registration: NodeRegistration,
     pub generation: String,
     pub sequence: AtomicU64,
-    pub brain_frame_cursor: AtomicU64,
+    pub report_cursor: Mutex<crate::brain::outbox::ReportCursor>,
     pub persistence_error: std::sync::Mutex<Option<String>>,
     pub admission_state: AdmissionState,
     pub runtime: WorkerRuntime,
@@ -50,6 +50,7 @@ pub(crate) struct Inner {
     pub pending_runs: AtomicU64,
     pub stopping: CancellationToken,
     pub journal: Mutex<Journal>,
+    pub inventory: Mutex<crate::inventory::InventoryCache>,
     pub active: Mutex<HashMap<String, CancellationToken>>,
     pub tasks: Arc<ExecutionTasks>,
     pub background_tasks: Arc<ExecutionTasks>,
@@ -178,13 +179,19 @@ impl Worker {
                 tracing::warn!(workdir = %dir, error = %error, "scheduling workdir unavailable");
             }
         }
-        let journal = Journal::load(layout.clone())?;
+        let journal_layout = layout.clone();
+        let journal = tokio::task::spawn_blocking(move || Journal::load(journal_layout)).await??;
         #[cfg(not(windows))]
-        for record in journal.records.values().filter(|record| {
-            record.assignment.index.kind == ExecutionKind::Dag
-                && record.annotations.get("dag_parent").is_some()
-        }) {
-            let parent = crate::layout::dag::accepted_parent(record)?;
+        for summary in journal
+            .summaries
+            .values()
+            .filter(|s| s.index.kind == ExecutionKind::Dag && s.dag_parent)
+        {
+            let record = journal
+                .get(&summary.index.id)
+                .await?
+                .expect("loaded execution");
+            let parent = crate::layout::dag::accepted_parent(&record)?;
             let run_id = &record.assignment.index.id;
             if parent.join(run_id).exists() {
                 opencoder_dag_runtime::sandbox::run::cleanup_run(&parent.join(run_id), run_id)
@@ -192,13 +199,18 @@ impl Worker {
             }
         }
         state.project.cleanup_dag_containers().await?;
-        let journal = journal.recover()?;
+        let mut journal = tokio::task::spawn_blocking(move || journal.recover()).await??;
+        crate::brain::outbox::initialize(&state.store, &mut journal).await?;
         let host_capacity = crate::runtime::capacity::HostCapacity::load(&data_dir).await?;
-        for record in journal.records.values().filter(|r| {
-            r.assignment.index.kind == ExecutionKind::Project
-                && r.assignment.index.status == ExecutionStatus::Pending
+        for summary in journal.summaries.values().filter(|r| {
+            r.index.kind == ExecutionKind::Project
+                && r.index.status == ExecutionStatus::Pending
                 && r.queue.is_some()
         }) {
+            let record = journal
+                .get(&summary.index.id)
+                .await?
+                .expect("loaded project");
             if let Some(id) = record.result["next_run_id"].as_str() {
                 state
                     .project
@@ -210,9 +222,9 @@ impl Worker {
             }
         }
         let pending = journal
-            .records
+            .summaries
             .values()
-            .filter(|r| r.assignment.index.status == ExecutionStatus::Pending && r.queue.is_some())
+            .filter(|r| r.index.status == ExecutionStatus::Pending && r.queue.is_some())
             .count();
         let worker = Self {
             inner: Arc::new(Inner {
@@ -230,7 +242,7 @@ impl Worker {
                 },
                 generation: ulid::Ulid::new().to_string(),
                 sequence: AtomicU64::new(0),
-                brain_frame_cursor: AtomicU64::new(0),
+                report_cursor: Mutex::new(Default::default()),
                 persistence_error: std::sync::Mutex::new(None),
                 admission_state,
                 runtime,
@@ -241,6 +253,7 @@ impl Worker {
                 pending_runs: AtomicU64::new(pending as u64),
                 stopping: CancellationToken::new(),
                 journal: Mutex::new(journal),
+                inventory: Mutex::new(Default::default()),
                 active: Mutex::new(HashMap::new()),
                 tasks: Arc::new(ExecutionTasks::new()),
                 background_tasks: Arc::new(ExecutionTasks::new()),
@@ -291,14 +304,13 @@ impl Worker {
             .journal
             .lock()
             .await
-            .records
+            .summaries
             .values()
             .filter(|record| {
-                crate::lifecycle::shutdown_interrupt_required(record.assignment.index.status)
-                    && !(record.assignment.index.status == ExecutionStatus::Pending
-                        && record.queue.is_some())
+                crate::lifecycle::shutdown_interrupt_required(record.index.status)
+                    && !(record.index.status == ExecutionStatus::Pending && record.queue.is_some())
             })
-            .map(|record| record.assignment.index.id.clone())
+            .map(|record| record.index.id.clone())
             .collect();
         let mut stop_errors = Vec::new();
         for id in unfinished {

@@ -3,7 +3,7 @@
 /// Statement order is load-bearing: the pre-migration DDL batch, then the
 /// version check / migrate / set_version branch, then the post-migration
 /// index batch (some indexes target columns that only exist after `migrate`).
-async fn bootstrap_tx(conn: &Connection) -> Result<()> {
+async fn bootstrap_tx(conn: &Connection, runtime_reporting: bool) -> Result<()> {
     // Probe BEFORE the DDL batch: afterwards every table exists (pre-existing
     // ones via the `IF NOT EXISTS` no-ops, missing ones freshly created), so
     // this is the only point where a legacy database - tables written before
@@ -91,6 +91,10 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     project_people::initialize(conn).await?;
     super::project::summaries::initialize(conn).await?;
     super::project::comments::initialize(conn).await?;
+    if runtime_reporting {
+        super::inventory::initialize(conn).await?;
+        super::reporting::initialize(conn).await?;
+    }
     // The task_type index depends on a column that only physically exists in
     // fresh databases (via CREATE TABLE) or after the v5 migration adds it for
     // older databases, so it must run AFTER `migrate` rather than in the

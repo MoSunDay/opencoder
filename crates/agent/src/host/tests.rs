@@ -15,6 +15,8 @@ mod maintenance;
 mod parent_affinity;
 #[path = "tests/read_reports.rs"]
 mod read_reports;
+#[path = "tests/inventory_changes.rs"]
+mod inventory_changes;
 #[path = "tests/result_upgrade.rs"]
 mod result_upgrade;
 #[path = "tests/runtime_lifecycle.rs"]

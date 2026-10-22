@@ -15,5 +15,4 @@ pub(crate) mod run;
 pub(crate) mod state;
 
 pub use api::handle;
-pub use outbox::frames;
 pub use run::{recover, run};

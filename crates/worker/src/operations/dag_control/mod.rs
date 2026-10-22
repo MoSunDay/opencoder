@@ -11,7 +11,7 @@ pub(super) async fn handle(
 ) -> Result<RpcReply> {
     let gate = worker.lifecycle_gate(id).await;
     let _guard = gate.lock().await;
-    let record = worker.inner.journal.lock().await.records.get(id).cloned();
+    let record = worker.inner.journal.lock().await.get(id).await?;
     let Some(record) = record else {
         return Ok(RpcReply::error(404, "execution not found"));
     };

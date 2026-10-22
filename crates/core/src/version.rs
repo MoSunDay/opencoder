@@ -61,7 +61,9 @@ pub fn long_version() -> &'static str {
 pub struct BuildInfo {
     pub storage_engine: &'static str,
     pub todo_files_contract: u32,
+    pub ontology_catalog_schema: u32,
     pub execution_io: crate::brain::ExecutionIoCompatibility,
+    pub report_state: crate::fleet::release::ReportStateCompatibility,
     pub release_compatibility: crate::fleet::release::ReleaseCompatibility,
     pub version: &'static str,
     pub version_long: &'static str,
@@ -76,7 +78,9 @@ pub fn build_info() -> BuildInfo {
     BuildInfo {
         storage_engine: "turso",
         todo_files_contract: 1,
+        ontology_catalog_schema: 1,
         execution_io: crate::brain::ExecutionIoCompatibility::current(),
+        report_state: crate::fleet::release::ReportStateCompatibility::current(),
         release_compatibility: crate::fleet::release::ReleaseCompatibility::current(),
         version: VERSION,
         version_long: VERSION_LONG,

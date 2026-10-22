@@ -47,7 +47,10 @@ pub(in crate::operations) async fn before_ready(
     {
         return Ok(None);
     }
-    let record = worker.inner.journal.lock().await.records.get(id).cloned();
+    let record = worker
+        .read_record(id)
+        .await?
+        .map(std::sync::Arc::unwrap_or_clone);
     let Some(record) = record.filter(|record| {
         matches!(
             record.assignment.index.kind,

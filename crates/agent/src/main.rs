@@ -16,6 +16,7 @@ use std::{ffi::OsString, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+mod executor;
 mod host;
 mod storage;
 
@@ -237,10 +238,7 @@ fn main() -> Result<()> {
     {
         opencoder_session::process::configure_supervisor_binary(std::env::current_exe()?)?;
     }
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(run(args))
+    executor::build(args.command.as_ref())?.block_on(run(args))
 }
 
 async fn run(args: Args) -> Result<()> {

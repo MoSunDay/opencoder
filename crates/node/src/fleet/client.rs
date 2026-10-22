@@ -1,14 +1,15 @@
 use super::NodeService;
+mod delta;
 mod report;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use futures::{FutureExt, SinkExt, StreamExt};
 use opencoder_core::fleet::*;
-use report::{begin_report, ReportFrames};
+use report::{ReportFrames, begin_report};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{client::IntoClientRequest, protocol::frame::coding::CloseCode, Message},
+    tungstenite::{Message, client::IntoClientRequest, protocol::frame::coding::CloseCode},
 };
 
 pub async fn run(remote: &str, token: &str, service: Arc<dyn NodeService>) -> Result<()> {
@@ -68,12 +69,30 @@ async fn connection_with_period(
         reqwest::header::AUTHORIZATION,
         format!("Bearer {token}").parse()?,
     );
+    request
+        .headers_mut()
+        .insert(INDEX_REPORT_ACK_HEADER, "1".parse()?);
+    if service.supports_index_deltas() {
+        request.headers_mut().insert(
+            INDEX_REPORT_DELTA_HEADER,
+            INDEX_REPORT_DELTA_VERSION.parse()?,
+        );
+    }
     let (socket, response) =
         tokio::time::timeout(std::time::Duration::from_secs(15), connect_async(request)).await??;
     let flow_controlled = response
         .headers()
         .get(INDEX_REPORT_ACK_HEADER)
         .is_some_and(|value| value == "1");
+    let incremental = service.supports_index_deltas()
+        && flow_controlled
+        && response
+            .headers()
+            .get(INDEX_REPORT_DELTA_HEADER)
+            .is_some_and(|v| v == INDEX_REPORT_DELTA_VERSION);
+    let mut baseline = delta::DeltaState::default();
+    let mut brain = tokio::task::JoinSet::new();
+    let mut brain_frames = std::collections::VecDeque::new();
     let (mut writer, mut reader) = socket.split();
     send(
         &mut writer,
@@ -108,6 +127,7 @@ async fn connection_with_period(
     loop {
         tokio::select! {
             _ = tick.tick() => {
+                if let Some(report) = &publishing { report.check_timeout()?; }
                 if service.retiring() && capacity.available_permits() == 128
                     && admission_capacity.available_permits() == 128 && rx.is_empty()
                     && publishing.is_none() {
@@ -132,17 +152,39 @@ async fn connection_with_period(
                 request_report(&report_trigger);
             }
             Some(()) = report_requests.recv() => {
+                if incremental && brain.is_empty() && brain_frames.is_empty() {
+                    let service = service.clone();
+                    brain.spawn(async move {
+                        let started = std::time::Instant::now();
+                        let result = service.brain_frames().await;
+                        if started.elapsed().as_millis() >= 250 {
+                            tracing::info!(node_id = %service.registration().id,
+                                elapsed_ms = started.elapsed().as_millis(),
+                                brain_frames = result.as_ref().map_or(0, Vec::len),
+                                succeeded = result.is_ok(), "node brain report collection timing");
+                        }
+                        result
+                    });
+                }
                 if report_inflight {
                     report_pending = true;
                 } else {
                     report_inflight = true;
-                    reports.spawn(prepare_owned_report(service.clone()));
+                    reports.spawn(prepare_owned_report(service.clone(), incremental, baseline.source_cursor()));
                 }
             }
             Some(prepared) = reports.join_next(), if report_inflight => {
                 match prepared.context("node inventory worker failed")? {
-                    Ok(report) => {
-                        publishing = Some(begin_report(&mut writer, report, next_report_id, flow_controlled).await?);
+                    Ok((mut report, source)) => {
+                        let changes = if let Some((revision,full,removed))=source {
+                            baseline.prepare_source(&report,revision,full,removed)?
+                        } else if incremental { baseline.prepare(&mut report)? } else { None };
+                        if incremental && changes.is_none() {
+                            send(&mut writer, &NodeFrame::Snapshot { snapshot: report.snapshot }).await?;
+                            report_inflight = false;
+                        } else {
+                            publishing = Some(begin_report(&mut writer, report, next_report_id, flow_controlled, changes).await?);
+                        }
                     }
                     Err(error) => {
                         report_inflight = false;
@@ -164,13 +206,17 @@ async fn connection_with_period(
             _ = std::future::ready(()), if publishing.as_ref().is_some_and(ReportFrames::ready) => {
                 let report = publishing.as_mut().expect("active report");
                 if let Some(frame) = report.next() {
+                    let index_fragment = matches!(frame, NodeFrame::IndexReport { .. });
                     send(&mut writer, &frame).await?;
-                    report.sent()?;
+                    // Full reports can interleave Brain frames. Only index
+                    // fragments consume the Server's acknowledgement sequence.
+                    if index_fragment { report.sent()?; }
                     // Ready socket writes are not guaranteed to yield. Let RPC
                     // handlers enqueue their replies before the next batch.
                     tokio::task::yield_now().await;
                 } else {
                     report.log_sent();
+                    if incremental { baseline.commit(); }
                     publishing = None;
                     report_inflight = false;
                     next_report_id = next_report_id.checked_add(1).context("index report id overflow")?;
@@ -179,6 +225,16 @@ async fn connection_with_period(
                         request_report(&report_trigger);
                     }
                 }
+            }
+            Some(result) = brain.join_next(), if !brain.is_empty() => {
+                match result.context("brain report worker failed")? {
+                    Ok(frames) => brain_frames.extend(frames),
+                    Err(error) => tracing::warn!(%error, "brain report remains pending for replay"),
+                }
+            }
+            _ = std::future::ready(()), if !brain_frames.is_empty() => {
+                send(&mut writer, &brain_frames.pop_front().expect("pending brain frame")).await?;
+                tokio::task::yield_now().await;
             }
             Some(frame) = rx.recv() => send(&mut writer, &frame).await?,
             frame = reader.next() => {
@@ -295,14 +351,30 @@ async fn prepare_report(service: &dyn NodeService) -> Result<PreparedReport> {
     service.report().await
 }
 
-async fn prepare_owned_report(service: Arc<dyn NodeService>) -> Result<PreparedReport> {
+async fn prepare_owned_report(
+    service: Arc<dyn NodeService>,
+    incremental: bool,
+    after: Option<u64>,
+) -> Result<(PreparedReport, Option<(u64, bool, Vec<String>)>)> {
     let started = std::time::Instant::now();
-    let result = prepare_report(service.as_ref()).await;
+    if incremental {
+        if let Some(source) = service.index_changes(after).await? {
+            return Ok((
+                source.report,
+                Some((source.revision, source.full, source.removed_ids)),
+            ));
+        }
+    }
+    let result = if incremental {
+        service.index_report().await
+    } else {
+        prepare_report(service.as_ref()).await
+    };
     if started.elapsed().as_millis() >= 250 {
         tracing::info!(node_id = %service.registration().id, elapsed_ms = started.elapsed().as_millis(),
             succeeded = result.is_ok(), "node inventory collection timing");
     }
-    result
+    result.map(|report| (report, None))
 }
 
 async fn send<S>(writer: &mut S, frame: &NodeFrame) -> Result<()>

@@ -11,7 +11,7 @@ from rolling.state import Journal, write
 from rolling.manifest import compatible
 from rolling.units import nginx
 from rolling.units import service
-from rolling.units import freeze_rootfs
+from rolling.units import freeze_rootfs, switch_host_ingress
 from rolling.probes import probe_id
 
 
@@ -38,7 +38,7 @@ class Operations:
         if path == '/api/admin/release':
             return {'retirement_protocol': 2}
         if path == '/status':
-            return {'node': {'id': 'node'},
+            return {'index_report_version': '2', 'node': {'id': 'node'},
                     'snapshot': {'generation': 'host-test', 'ready': True}}
         if path == '/api/nodes':
             return {'nodes': [{'id': 'node', 'online': True,
@@ -86,7 +86,7 @@ class DeploymentTests(unittest.TestCase):
         self.activated_host = activated.start()
         self.addCleanup(activated.stop)
         for target, value in (("manifest.verify", manifest("r2")), ("manifest.resources", None),
-                              ("units.prepare", None), ("units.switch_ingress", None),
+                              ("units.prepare", None), ("units.switch_ingress", None), ("units.switch_host_ingress", None),
                               ("probes.candidate", "node-one"), ("probes.ready", True), ("probes.public", True)):
             mocked = patch("rolling.deployment." + target, return_value=value)
             setattr(self, target.replace(".", "_"), mocked.start())
@@ -94,23 +94,88 @@ class DeploymentTests(unittest.TestCase):
 
     def test_forward_switch_waits_for_the_activated_host_generation(self):
         def switch(*args):
-            self.activated_host.assert_called_once()
+            self.assertEqual(self.activated_host.call_count, 2)
             self.assertIn(("POST", "/activate-host", {}), self.operations.calls)
             self.assertNotIn(("POST", "/commit-host", {}), self.operations.calls)
         self.units_switch_ingress.side_effect = switch
         deploy(self.settings, Path("bundle"), self.operations)
 
+    def test_new_host_is_ready_on_current_server_before_candidate_registration(self):
+        def ready(record, operations, seconds, **options):
+            if self.activated_host.call_count == 1:
+                self.assertEqual(record['server_port'], self.old['server_port'])
+                self.assertEqual(self.operations.active, 'r1')
+                self.assertNotIn(('POST', '/servers/r2', unittest.mock.ANY), self.operations.calls)
+                self.assertIn(('POST', '/activate-host', {}), self.operations.calls)
+        self.activated_host.side_effect = ready
+        deploy(self.settings, Path('bundle'), self.operations)
+        self.assertEqual(self.activated_host.call_count, 2)
+
+    def test_failed_candidate_prewarm_keeps_management_on_the_new_host(self):
+        def changed(settings, port, operations):
+            self.assertEqual(self.operations.active, 'r1')
+            self.assertEqual(self.activated_host.call_count, 1)
+            self.assertNotIn(('POST', '/servers/r2', unittest.mock.ANY), self.operations.calls)
+        self.units_switch_host_ingress.side_effect = changed
+        self.probes_ready.side_effect = TimeoutError('candidate not ready')
+        with self.assertRaisesRegex(TimeoutError, 'candidate not ready'):
+            deploy(self.settings, Path('bundle'), self.operations)
+        self.units_switch_host_ingress.assert_called_once()
+        self.units_switch_ingress.assert_not_called()
+        self.assertEqual(Journal(self.settings.state_dir).data['current'], 'r1')
+
+    def test_old_report_producer_is_rejected_before_host_activation(self):
+        original = self.operations.http
+        def legacy(base, path, method="GET", body=None):
+            result = original(base, path, method, body)
+            if path == '/status':
+                result.pop('index_report_version', None)
+            return result
+        self.operations.http = legacy
+        with self.assertRaisesRegex(ValueError, 'report protocol 2'):
+            deploy(self.settings, Path('bundle'), self.operations)
+        self.assertNotIn(('POST', '/activate-host', {}), self.operations.calls)
+        self.assertNotIn(('POST', '/servers/r2', unittest.mock.ANY), self.operations.calls)
+        self.assertEqual(self.operations.active, 'r1')
+
+    def test_failed_host_prewarm_cannot_register_candidate_or_switch_runtime(self):
+        self.activated_host.side_effect = TimeoutError('producer not ready')
+        with self.assertRaisesRegex(TimeoutError, 'producer not ready'):
+            deploy(self.settings, Path('bundle'), self.operations)
+        self.assertEqual(self.operations.active, 'r1')
+        self.assertEqual(Journal(self.settings.state_dir).data['current'], 'r1')
+        self.assertNotIn(('POST', '/servers/r2', unittest.mock.ANY), self.operations.calls)
+        self.units_switch_ingress.assert_not_called()
+        self.activated_host.side_effect = None
+        deploy(self.settings, Path('bundle'), self.operations)
+        self.assertEqual(self.operations.active, 'r2')
+
+    def test_same_candidate_resume_clears_current_failure_after_public_probe(self):
+        self.probes_ready.side_effect = TimeoutError("standby unavailable")
+        with self.assertRaisesRegex(TimeoutError, "standby unavailable"):
+            deploy(self.settings, Path("bundle"), self.operations)
+        failed = Journal(self.settings.state_dir).data
+        self.assertEqual(failed["phase"], "failed")
+        self.assertEqual(failed["candidate"], "r2")
+        self.assertEqual(failed["failure"], "standby unavailable")
+        self.probes_ready.side_effect = None
+        result = deploy(self.settings, Path("bundle"), self.operations)
+        self.assertEqual(result["current"], "r2")
+        self.assertEqual(result["phase"], "complete")
+        self.assertIsNone(result["failure"])
+        self.assertEqual(set(result["releases"]), {"r1", "r2"})
+
     def test_rollback_switch_waits_for_the_activated_host_generation(self):
         deploy(self.settings, Path("bundle"), self.operations)
         self.activated_host.reset_mock()
         def switch(*args):
-            self.activated_host.assert_called_once()
+            self.assertEqual(self.activated_host.call_count, 2)
             self.assertEqual(self.operations.calls[-1], ("POST", "/activate-host", {}))
         self.units_switch_ingress.side_effect = switch
         rollback(self.settings, self.operations)
 
     def test_forward_host_sync_failure_preserves_old_ingress(self):
-        self.activated_host.side_effect = [TimeoutError("Host index not synced"), True]
+        self.activated_host.side_effect = [True, TimeoutError("Host index not synced"), True, True]
         with self.assertRaisesRegex(TimeoutError, "Host index not synced"):
             deploy(self.settings, Path("bundle"), self.operations)
         self.assertEqual([call.args[1]["id"] for call in self.units_switch_ingress.call_args_list], ["r1"])
@@ -155,6 +220,24 @@ class DeploymentTests(unittest.TestCase):
         with _deferred_disable(operations):
             pass
         self.assertEqual(operations.calls, [])
+
+    def test_maintenance_retired_server_no_longer_blocks_host_handoff(self):
+        record = record_for(self.settings, manifest('retired'), 1)
+        record['maintenance_retired'] = True
+        self.journal.data['releases'][record['id']] = record
+        retire_server(self.settings, self.journal, self.operations)
+        self.assertEqual(self.operations.calls, [
+            ('POST', '/servers/retired', {
+                'id': 'retired', 'url': f"http://127.0.0.1:{record['server_port']}",
+                'enabled': False})])
+        self.assertEqual(self.journal.data['current'], 'r1')
+        self.assertEqual(self.journal.data['releases']['retired'], record)
+
+    def test_current_maintenance_retired_record_is_rejected(self):
+        self.old['maintenance_retired'] = True
+        with self.assertRaisesRegex(ValueError, 'current release'):
+            retire_server(self.settings, self.journal, self.operations)
+        self.assertEqual(self.operations.calls, [])
 
     def test_migrated_absent_units_do_not_break_retirement(self):
         operations = Operations()
@@ -501,3 +584,37 @@ class DeploymentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class HostIngressTests(unittest.TestCase):
+    def test_host_switch_preserves_actual_server_and_retry_does_not_reload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = Settings(root, root / 'token', nginx_include=root / 'nginx.conf')
+            before = nginx(settings, 3100, 3101)
+            settings.nginx_include.write_text(before)
+            operations = Operations()
+            switch_host_ingress(settings, 3201, operations)
+            self.assertEqual(settings.nginx_include.read_text(), nginx(settings, 3100, 3201))
+            self.assertEqual(operations.calls, [('nginx', '-t'), ('systemctl', 'reload', 'nginx')])
+            switch_host_ingress(settings, 3201, operations)
+            self.assertEqual(len(operations.calls), 2)
+
+    def test_invalid_layout_and_failed_reload_preserve_original_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = Settings(root, root / 'token', nginx_include=root / 'nginx.conf')
+            valid = nginx(settings, 3100, 3101)
+            for before in ['server {}', valid + valid]:
+                settings.nginx_include.write_text(before)
+                with self.assertRaisesRegex(ValueError, 'Host ingress'):
+                    switch_host_ingress(settings, 3201, Operations())
+                self.assertEqual(settings.nginx_include.read_text(), before)
+            settings.nginx_include.write_text(valid)
+            operations = Operations()
+            def failed(*args):
+                if args == ('systemctl', 'reload', 'nginx'):
+                    raise RuntimeError('reload failed')
+            operations.run = failed
+            with self.assertRaisesRegex(RuntimeError, 'reload failed'):
+                switch_host_ingress(settings, 3201, operations)
+            self.assertEqual(settings.nginx_include.read_text(), valid)

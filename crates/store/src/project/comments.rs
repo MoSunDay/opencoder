@@ -1,4 +1,4 @@
-//! Append-only TODO notes, distinct from task acceptance and execution results.
+//! Editable TODO notes, distinct from task acceptance and execution results.
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -18,6 +18,10 @@ pub struct NewComment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
     pub seq: i64,
+    pub revision: i64,
+    pub updated_at: i64,
+    #[serde(skip)]
+    pub original_body_md: Option<String>,
     #[serde(flatten)]
     pub entry: NewComment,
 }
@@ -30,11 +34,25 @@ impl Comment {
         capability: Option<&str>,
         execution: Option<&str>,
     ) -> bool {
-        self.entry.body_md == body
+        self.original_body_md
+            .as_deref()
+            .unwrap_or(&self.entry.body_md)
+            == body
             && (self.entry.author_kind == "capability").then_some(self.entry.author_id.as_str())
                 == capability
             && self.entry.execution_id.as_deref() == execution
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommentMutation {
+    pub todo_id: String,
+    pub seq: i64,
+    pub expected_revision: i64,
+    /// None deletes the comment; Some replaces only its Markdown body.
+    pub body_md: Option<String>,
+    pub actor: opencoder_core::identity::Identity,
+    pub now: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -64,6 +82,16 @@ pub struct CommentPage {
 pub enum CommentError {
     #[error("TODO 不存在")]
     MissingTodo,
+    #[error("评论不存在")]
+    MissingComment,
+    #[error("评论已删除，不能重放原追加请求")]
+    Deleted,
+    #[error("只能修改自己提交的评论；管理员可管理所有评论")]
+    Forbidden,
+    #[error("评论已变化，请重新读取后再操作")]
+    RevisionConflict,
+    #[error("评论内容或版本无效")]
+    InvalidInput,
     #[error("相同 request_id 已用于其他评论内容")]
     Conflict,
     #[error("评论执行来源已解除关联或能力不一致，请重新选择")]

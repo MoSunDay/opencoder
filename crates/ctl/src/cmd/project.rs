@@ -111,7 +111,7 @@ pub enum TodosCmd {
     /// Upload, list, download or delete handoff files.
     #[command(subcommand)]
     Files(files::FilesCmd),
-    /// Append/read TODO notes with human or registered capability signatures.
+    /// Read, add, edit or delete TODO notes with preserved signatures.
     #[command(subcommand)]
     Comments(comments::CommentsCmd),
     /// Fetch a TODO including its selected tags and capability.

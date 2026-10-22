@@ -1,4 +1,4 @@
-Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
 # project 模块
 
@@ -19,7 +19,7 @@ Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
 - [executions/results/](../../crates/control/src/api/executions/results/) — 按需从所属节点读取当前结论；离线返回错误，DAG 产物由步骤明细读取。
 - [完成前提](../../crates/store/src/project/acceptance.rs)、[事务核验](../../crates/store/src/turso_store/projects/project/acceptance.rs) — 验证读取时的任务、能力、执行和依赖仍有效，再修改看板；前提过期由 API 返回 409。
 
-- [评论数据](../../crates/store/src/project/comments.rs)、[评论存储](../../crates/store/src/turso_store/projects/project/comments.rs) — schema 39 使用递增序号分页，按 TODO、提交用户与请求 ID 保证事务追加幂等；同时核验任务及执行关联，更新任务时间。正文与署名快照不引用用户、能力的可变名称；TODO 删除触发同事务清理，评论不作为执行结果缓存。
+- [评论数据](../../crates/store/src/project/comments.rs)、[评论存储](../../crates/store/src/turso_store/projects/project/comments.rs) — schema 39 使用递增序号分页，按 TODO、提交用户与请求 ID 保证事务追加幂等；同时核验任务及执行关联，更新任务时间。[评论修改](../../crates/store/src/turso_store/projects/project/comments/mutations.rs) 在同一写事务中核验 TODO、提交用户权限和版本，更新正文或删除记录；独立状态表保存版本、原追加正文及删除标记，防止原追加请求恢复已删除评论。新增状态表不改写已有任务与认证数据。正文与署名快照不引用用户、能力的可变名称；TODO 删除触发同事务清理，评论不作为执行结果缓存。
 
 - [project_files](../../crates/control/src/project_files/mod.rs) 管理 Server 上主动上传的任务文件，使用创建日期、TODO ID 和相对路径定位；独立 NFS 只读导出。目录绑定、文件锁、原子发布及备份协调与数据库任务删除配合，原生执行记录仍由执行节点持有。配置和接口见 [任务文件](../../docs/project-files.md)。
 

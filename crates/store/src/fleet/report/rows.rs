@@ -1,8 +1,24 @@
-//! One atomic report uses three SQL statements, independent of inventory size.
-use anyhow::{bail, Result};
+//! Scalar ownership checks never parse frozen request bodies after warmup.
+use anyhow::{Result, bail};
 use turso::Connection;
 
 pub(super) async fn apply(conn: &Connection, encoded: &str) -> Result<()> {
+    validate(conn, encoded).await?;
+    conn.execute(
+        "INSERT INTO execution_index(id,created_at,kind,node_id,status)
+         SELECT json_extract(value,'$.id'),json_extract(value,'$.created_at'),
+                json_extract(value,'$.kind'),json_extract(value,'$.node_id'),
+                json_extract(value,'$.status')
+         FROM json_each(?1) WHERE true
+         ON CONFLICT(id) DO UPDATE SET status=excluded.status
+         WHERE execution_index.status<>excluded.status",
+        [encoded],
+    )
+    .await?;
+    Ok(())
+}
+
+pub(super) async fn validate(conn: &Connection, encoded: &str) -> Result<()> {
     // Check every immutable field before changing any status. The caller owns
     // BEGIN IMMEDIATE, so another Server cannot alter ownership between these
     // statements. json_extract retains SQLite's signed 64-bit integer values.
@@ -21,28 +37,6 @@ pub(super) async fn apply(conn: &Connection, encoded: &str) -> Result<()> {
         bail!("execution ownership conflict: {}", row.get::<String>(0)?);
     }
     drop(conflicts);
-    let mut conflicts = conn.query(
-        "SELECT a.id FROM json_each(?1) AS incoming
-         JOIN execution_assignments AS a ON a.id=CAST(json_extract(incoming.value,'$.id') AS TEXT)
-         WHERE json_extract(a.assignment,'$.index.created_at')<>json_extract(incoming.value,'$.created_at')
-            OR json_extract(a.assignment,'$.index.kind')<>json_extract(incoming.value,'$.kind')
-            OR json_extract(a.assignment,'$.index.node_id')<>json_extract(incoming.value,'$.node_id')
-         LIMIT 1", [encoded],
-    ).await?;
-    if let Some(row) = conflicts.next().await? {
-        bail!("execution ownership conflict: {}", row.get::<String>(0)?);
-    }
-    drop(conflicts);
-    conn.execute(
-        "INSERT INTO execution_index(id,created_at,kind,node_id,status)
-         SELECT json_extract(value,'$.id'),json_extract(value,'$.created_at'),
-                json_extract(value,'$.kind'),json_extract(value,'$.node_id'),
-                json_extract(value,'$.status')
-         FROM json_each(?1) WHERE true
-         ON CONFLICT(id) DO UPDATE SET status=excluded.status
-         WHERE execution_index.status<>excluded.status",
-        [encoded],
-    )
-    .await?;
+    super::super::ownership::validate_unpublished(conn, encoded).await?;
     Ok(())
 }

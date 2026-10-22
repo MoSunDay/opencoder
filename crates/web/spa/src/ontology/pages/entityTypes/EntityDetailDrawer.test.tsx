@@ -9,6 +9,39 @@ import type { Entity, EntityType } from "../../types";
 import EntityDetailDrawer from "./EntityDetailDrawer";
 vi.mock("../../api", () => ({ api: { attributes: vi.fn(), entity: vi.fn(), textContent: vi.fn(), setText: vi.fn(), setNfsPath: vi.fn(), setAttribute: vi.fn() } }));
 beforeEach(() => vi.resetAllMocks());
+it("shows native capability entrypoints, protects generated values, and keeps notes editable", async () => {
+  const type: EntityType = { id: "t", env_num: 1, type_key: "platform_capability", name: "平台能力", description: "", revision: 1, is_deleted: false, is_system: true };
+  const entity: Entity = { id: "cap", env_num: 1, entity_type_id: "t", name: "测试能力", description: "能力说明", revision: 1, is_deleted: false };
+  const definition = (id: string, name: string, role: "custom" | "ext" | "source", kind: "string" | "text") => ({
+    id, env_num: 1, entity_type_id: "t", attribute_key: id, name, description: "", kind,
+    attribute_role: role, storage_mode: kind === "text" ? "markdown" as const : "sql" as const,
+    required: false, revision: 1, is_deleted: false,
+  });
+  const generated = definition("91", "能力定义", "custom", "string");
+  const custom = definition("101", "人工标注", "custom", "string");
+  const source = definition("92", "来源正文", "source", "text");
+  const notes = definition("93", "补充说明", "ext", "text");
+  vi.mocked(api.attributes).mockResolvedValue({ items: [generated, custom, source, notes] });
+  vi.mocked(api.entity).mockResolvedValue({ item: entity,
+    structured_attributes: [{ attribute_definition_id: "91", value: "自动生成", revision: 1 }],
+    text_attributes: [source, notes].map((definition) => ({ definition, current: { revision: 1, bytes: 4 } })),
+    management: { managed_by: "platform-catalog", readonly_attributes: ["91", "92"], cli: ["opencoder-cli agents --help"], api: ["GET /api/agents"] },
+  });
+  vi.mocked(api.textContent).mockResolvedValue({ format: "md", content: "正文内容", revision: 1 });
+  render(<ConfigProvider theme={{ token: { motion: false } }}><App><EntityDetailDrawer env="debug" entity={entity} entityType={type}
+    canManage onClose={vi.fn()} onEntityChanged={vi.fn()} /></App></ConfigProvider>);
+  await screen.findByText("此能力由平台同步维护");
+  expect(screen.getByText("opencoder-cli agents --help")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: /^普通属性/ }));
+  expect(await screen.findByText("自动生成")).toBeInTheDocument();
+  expect(screen.queryByRole("textbox", { name: "编辑 能力定义" })).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "编辑 人工标注" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: /^来源/ }));
+  await screen.findByText("正文内容");
+  expect(screen.queryByRole("button", { name: /编辑内容/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "拓展信息" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: /编辑内容/ })).toBeEnabled());
+});
 it("ignores a previous entity response after the drawer selection changes", async () => {
   const type: EntityType = { id: "t", env_num: 1, type_key: "custom", name: "类型", description: "", revision: 1, is_deleted: false, is_system: false };
   const first: Entity = { id: "first", env_num: 1, entity_type_id: "t", name: "第一个", description: "旧实体详情", revision: 1, is_deleted: false };

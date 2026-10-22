@@ -1,5 +1,5 @@
 import { apiJson } from "../api.js";
-import type { AttributeDefinition, DirectoryItem, Entity, EntityType, EntityTypeAction, GraphAspect, GraphResponse, Relationship, RelationshipType, RelationshipTypeCreate, RelationshipTypeUpdate, Session } from "./types";
+import type { AttributeDefinition, CatalogManagement, DirectoryItem, Entity, EntityType, EntityTypeAction, GraphAspect, GraphResponse, Relationship, RelationshipType, RelationshipTypeCreate, RelationshipTypeUpdate, Session } from "./types";
 
 const ROOT = "/api/ontology";
 export class ApiError extends Error { constructor(message: string, readonly status: number, readonly code: string) { super(message); } }
@@ -58,7 +58,7 @@ export const api = {
       if (page.items.length < 500) return { items: [...items.values()] };
     }
   },
-  entity: (env: string, id: string) => request<{ item: Entity; attribute_definitions?: AttributeDefinition[]; structured_attributes: unknown[]; text_attributes?: { definition: AttributeDefinition; current?: { content_path?: string; format?: string; revision?: number; bytes?: number } }[]; actions?: EntityTypeAction[]; needs_completion?: boolean }>(`${envPath(env)}/entities/${id}`),
+  entity: (env: string, id: string) => request<{ item: Entity; attribute_definitions?: AttributeDefinition[]; structured_attributes: unknown[]; text_attributes?: { definition: AttributeDefinition; current?: { content_path?: string; format?: string; revision?: number; bytes?: number } }[]; actions?: EntityTypeAction[]; needs_completion?: boolean; management?: CatalogManagement | null }>(`${envPath(env)}/entities/${id}`),
   createEntity: (env: string, value: object) => request<{ item: Entity }>(`${envPath(env)}/entities`, { method: "POST", body: JSON.stringify(value) }),
   updateEntity: (env: string, id: string, value: object) => request<{ item: Entity }>(`${envPath(env)}/entities/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   setAttribute: (env: string, entity: string, attribute: string, value: object) => request(`${envPath(env)}/entities/${entity}/attributes/${attribute}`, { method: "PUT", body: JSON.stringify(value) }),

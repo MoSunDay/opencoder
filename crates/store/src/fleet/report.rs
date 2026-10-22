@@ -1,13 +1,20 @@
 use super::FleetStore;
-use super::{records::read_index, FleetConnection};
-use anyhow::{bail, Context, Result};
-use opencoder_core::fleet::{valid_id, ExecutionIndex};
+use super::{FleetConnection, records::read_index};
+use anyhow::{Context, Result, bail};
+use opencoder_core::fleet::{ExecutionIndex, valid_id};
 use std::collections::HashSet;
-use turso::{params, Connection};
+use turso::{Connection, params};
 
+#[cfg(test)]
+mod performance;
 mod rows;
+mod snapshot;
 #[cfg(test)]
 mod tests;
+
+#[derive(Debug, thiserror::Error)]
+#[error("index report baseline changed: {0}; complete snapshot required")]
+pub struct IndexReportBaselineChanged(pub &'static str);
 
 impl FleetConnection {
     /// Snapshot the pending IDs eligible for first-sync recovery.
@@ -45,6 +52,22 @@ impl FleetConnection {
         pending_at_begin: Option<&[String]>,
         watermark: Option<(&str, u64)>,
     ) -> Result<Vec<ExecutionIndex>> {
+        Ok(self
+            .apply_report(node_id, records, pending_at_begin, watermark, None, false)
+            .await?
+            .unwrap_or_default())
+    }
+
+    /// Negotiated reports must either commit at the expected base or fail.
+    async fn apply_report(
+        &self,
+        node_id: &str,
+        records: &[ExecutionIndex],
+        pending_at_begin: Option<&[String]>,
+        watermark: Option<(&str, u64)>,
+        committed_base: Option<Option<u64>>,
+        rebuilt_snapshot: bool,
+    ) -> Result<Option<Vec<ExecutionIndex>>> {
         validate_report(node_id, records)?;
         // Serialize outside the shared writer gate. Whole inventories can
         // contain tens of thousands of rows during a Server handoff.
@@ -56,11 +79,34 @@ impl FleetConnection {
         match async {
             if let Some((generation, sequence)) = watermark {
                 let mut rows = self.conn.query("SELECT generation,sequence FROM node_report_watermarks WHERE node_id=?1", [node_id]).await?;
-                if let Some(row) = rows.next().await? {
+                anyhow::ensure!(sequence <= i64::MAX as u64, "index report sequence exceeds storage range");
+                let previous = rows.next().await?;
+                if let Some(row) = previous {
                     let old: String = row.get(0)?;
                     let old_sequence: i64 = row.get(1)?;
-                    if generation < old.as_str() || (generation == old && sequence <= old_sequence as u64) {
-                        return Ok(Vec::new());
+                    if rebuilt_snapshot && generation == old && sequence <= old_sequence as u64 {
+                        drop(rows);
+                        rows::validate(&self.conn, &encoded).await?;
+                        return Ok(Some(Vec::new()));
+                    }
+                    if let Some(base) = committed_base {
+                        // A retired Host must retain its socket for outstanding RPC replies.
+                        // Skipping it is distinct from accepting a delta or losing its base.
+                        if generation < old.as_str() { return Ok(None); }
+                        if generation == old && sequence <= old_sequence as u64 {
+                            return Err(IndexReportBaselineChanged("sequence superseded").into());
+                        }
+                        if let Some(base) = base {
+                            if generation != old || base != old_sequence as u64 {
+                                return Err(IndexReportBaselineChanged("committed base differs").into());
+                            }
+                        }
+                    } else if generation < old.as_str() || (generation == old && sequence <= old_sequence as u64) {
+                        return Ok(None);
+                    }
+                } else {
+                    if matches!(committed_base, Some(Some(_))) {
+                        return Err(IndexReportBaselineChanged("committed base missing").into());
                     }
                 }
                 drop(rows);
@@ -73,7 +119,7 @@ impl FleetConnection {
             &encoded,
             pending_at_begin.unwrap_or_default(),
         )
-        .await
+        .await.map(Some)
         }.await
         {
             Ok(recovered) => {

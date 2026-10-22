@@ -19,7 +19,7 @@ pub(super) async fn command(
     if execution.kind == ExecutionKind::Brain {
         return crate::brain::api::handle(worker, execution, &command.action, command.input).await;
     }
-    let record = worker.inner.journal.lock().await.records.get(id).cloned();
+    let record = worker.inner.journal.lock().await.get(id).await?;
     if record.as_ref().is_some_and(|record| {
         record.assignment.request.kind == ExecutionKind::System
             && !matches!(command.action.as_str(), "cancel" | "interrupt")
@@ -48,19 +48,24 @@ pub(super) async fn command(
             let (candidates, owners): (usize, Vec<_>) = {
                 let journal = worker.inner.journal.lock().await;
                 let candidates: Vec<_> = journal
-                    .records
+                    .summaries
                     .values()
-                    .filter(|record| {
-                        record.assignment.request.kind == ExecutionKind::Project
-                            && record.assignment.request.target.as_deref()
-                                == Some(run.todo_id.as_str())
+                    .filter(|r| {
+                        r.index.kind == ExecutionKind::Project
+                            && r.target.as_deref() == Some(run.todo_id.as_str())
                     })
+                    .map(|r| r.index.id.clone())
                     .collect();
-                let owners = candidates
-                    .iter()
-                    .filter(|record| record.result["active_run_id"].as_str() == Some(id))
-                    .map(|record| record.assignment.index.id.clone())
-                    .collect();
+                let mut owners = Vec::new();
+                for candidate in &candidates {
+                    if journal
+                        .get(candidate)
+                        .await?
+                        .is_some_and(|r| r.result["active_run_id"].as_str() == Some(id))
+                    {
+                        owners.push(candidate.clone());
+                    }
+                }
                 (candidates.len(), owners)
             };
             return match owners.as_slice() {
@@ -109,7 +114,7 @@ pub(super) async fn command(
                 ));
             }
             let mut journal = worker.inner.journal.lock().await;
-            let Some(mut record) = journal.records.get(id).cloned() else {
+            let Some(mut record) = journal.get(id).await? else {
                 return Ok(RpcReply::error(404, "execution not found"));
             };
             const OWNED: [&str; 4] = [
@@ -174,7 +179,7 @@ pub(super) async fn command(
                 ));
             }
             let mut journal = worker.inner.journal.lock().await;
-            let Some(mut record) = journal.records.get(id).cloned() else {
+            let Some(mut record) = journal.get(id).await? else {
                 return Ok(RpcReply::error(404, "team execution not found"));
             };
             if record.assignment.index.status != ExecutionStatus::Running {
@@ -244,15 +249,14 @@ pub(crate) async fn durable_stop(
     let update = {
         let mut journal = worker.inner.journal.lock().await;
         timing.mark("journal_lock");
-        let update = journal.request_stop(id, intent, cancel.is_some())?;
+        let update = journal.request_stop(id, intent, cancel.is_some()).await?;
         timing.mark("durable_stop");
         // Do not release and requeue behind inventory/dispatch after the
         // durable stop fence: cancellation must signal the owned process
         // before another journal user can delay it.
         if let Some(mut record) = journal
-            .records
             .get(id)
-            .cloned()
+            .await?
             .filter(|_| intent == StopIntent::Cancel)
         {
             let mut changed = false;
@@ -272,13 +276,14 @@ pub(crate) async fn durable_stop(
             }
         }
         timing.mark("rerun_bookkeeping");
+        if update.signal {
+            cancel.as_ref().expect("active cancellation token").cancel();
+            timing.mark("signal");
+        }
         update
     };
-    if update.signal {
-        cancel.expect("active cancellation token").cancel();
-        timing.mark("signal");
-    } else {
-        let record = worker.inner.journal.lock().await.records.get(id).cloned();
+    if !update.signal {
+        let record = worker.inner.journal.lock().await.get(id).await?;
         if let Some(record) = record.filter(|r| r.assignment.index.kind == ExecutionKind::Project) {
             if let Some(run) = record.result["next_run_id"].as_str() {
                 worker.inner.state.project.cancel(run).await?;
@@ -315,7 +320,7 @@ async fn http(
     let mut _gate = worker.inner.admission.clone().lock_owned().await;
     let (mut record, legacy) = {
         let journal = worker.inner.journal.lock().await;
-        (journal.records.get(id).cloned(), journal.uses_legacy(id))
+        (journal.get(id).await?, journal.uses_legacy(id))
     };
     if record.as_ref().is_some_and(|r| {
         !matches!(
@@ -469,8 +474,8 @@ async fn http(
             .journal
             .lock()
             .await
-            .records
             .get(id)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("execution not found"))?
             .assignment
             .index

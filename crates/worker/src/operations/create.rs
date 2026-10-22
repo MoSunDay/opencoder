@@ -8,7 +8,9 @@ pub(super) use super::launch::{launch_locked, LaunchOutcome};
 
 mod io;
 mod preflight_agents;
+mod prepare;
 use preflight_agents::project_preflight_agents;
+use prepare::prepare_create;
 
 pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Result<RpcReply> {
     if let Err(error) = assignment.request.validate() {
@@ -79,7 +81,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // A durable acceptance is a read-only replay. It must not queue behind
     // unrelated resource snapshots; otherwise a lost reply can never recover
     // under sustained admission load.
-    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await? {
         return Ok(reply);
     }
     // Preparation precedes admission; execution lifecycle locks are taken
@@ -88,13 +90,13 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     let preparation = worker.preparation_gate(&assignment.index.id).await;
     let preparing = preparation.lock_owned().await;
     timing.mark("replay_and_preparation_lock");
-    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await? {
         return Ok(reply);
     }
     let gate = worker.inner.admission.lock().await;
     timing.mark("admission_lock");
     // Another Create may have accepted this ID while we waited for the gate.
-    if let Some(reply) = accepted_reply(worker, &mut assignment).await {
+    if let Some(reply) = accepted_reply(worker, &mut assignment).await? {
         return Ok(reply);
     }
     if let Some(error) = worker.admission_error() {
@@ -275,7 +277,14 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     let _gate = super::queue::dispatch_owned(worker, _gate).await?;
     timing.mark("dispatch");
     let mut body = json!(
-        worker.inner.journal.lock().await.records[&record.assignment.index.id]
+        worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .get(&record.assignment.index.id)
+            .await?
+            .expect("execution exists")
             .assignment
             .index
     );
@@ -293,25 +302,6 @@ pub(super) fn prepare(worker: &Worker, assignment: &Assignment, legacy: bool) ->
         worker.configuration_for(assignment.request.kind)?,
         opencoder_core::agent::agents_dir(),
     )
-}
-
-async fn prepare_create(
-    worker: &Worker,
-    assignment: &Assignment,
-    lease: preparation::Lease,
-) -> Result<(Result<Config>, preparation::Lease)> {
-    // Capture caller-scoped configuration before slow resource I/O crosses threads.
-    let mut timing = super::admission::timing::Timing::new(&assignment.index.id, "preflight");
-    let config = worker.configuration_for(assignment.request.kind)?;
-    timing.mark("configuration");
-    let source = opencoder_core::agent::agents_dir();
-    let worker = worker.clone();
-    let assignment = assignment.clone();
-    preparation::run(lease, move || {
-        timing.mark("blocking_worker_wait");
-        prepare_with_config(&worker, &assignment, false, config, source)
-    })
-    .await
 }
 
 pub(super) fn prepare_record(
@@ -657,7 +647,7 @@ pub(crate) async fn start(
     }
     let (mut record, legacy) = {
         let journal = worker.inner.journal.lock().await;
-        let Some(record) = journal.records.get(id).cloned() else {
+        let Some(record) = journal.get(id).await? else {
             return Ok(RpcReply::error(404, "execution not found"));
         };
         (record, journal.uses_legacy(id))
@@ -779,7 +769,14 @@ pub(crate) async fn start(
     };
     super::queue::enqueue(worker, record, config, true).await?;
     let _gate = super::queue::dispatch_owned(worker, _gate).await?;
-    let status = worker.inner.journal.lock().await.records[id]
+    let status = worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .get(id)
+        .await?
+        .expect("execution exists")
         .assignment
         .index
         .status;

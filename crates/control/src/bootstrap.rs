@@ -48,7 +48,7 @@ pub async fn new_state(
     client: Option<Arc<dyn ChatStream>>,
 ) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let turso = Arc::new(TursoStore::open(data.join("definitions.db")).await?);
+    let turso = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
     new_state_with_projects(workdir, data, client, turso).await
 }
 
@@ -61,13 +61,29 @@ pub async fn new_state_with_projects(
     client: Option<Arc<dyn ChatStream>>,
     projects: Arc<dyn opencoder_store::ProjectStore>,
 ) -> Result<Arc<AppState>> {
-    state_with_projects(workdir, data, client, projects, true).await
+    state_with_projects(
+        workdir,
+        data,
+        client,
+        projects,
+        true,
+        opencoder_ontology::SchemaPolicy::InitializeEmpty,
+    )
+    .await
 }
 
 pub(crate) async fn new_resource_state(workdir: PathBuf, data: PathBuf) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let projects = Arc::new(TursoStore::open(data.join("definitions.db")).await?);
-    state_with_projects(workdir, data, None, projects, false).await
+    let projects = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
+    state_with_projects(
+        workdir,
+        data,
+        None,
+        projects,
+        false,
+        opencoder_ontology::SchemaPolicy::Validate,
+    )
+    .await
 }
 
 async fn state_with_projects(
@@ -76,6 +92,7 @@ async fn state_with_projects(
     client: Option<Arc<dyn ChatStream>>,
     projects: Arc<dyn opencoder_store::ProjectStore>,
     enable_ontology: bool,
+    ontology_policy: opencoder_ontology::SchemaPolicy,
 ) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
     let config = Config::load(&workdir)?;
@@ -84,11 +101,18 @@ async fn state_with_projects(
     }
     let files = crate::ontology::checked_files_root(&config, &workdir, &data)?;
     let ontology = if enable_ontology {
-        Some(opencoder_ontology::AppState::open(&data.join("ontology.db"), &files).await?)
+        Some(
+            opencoder_ontology::AppState::open_with_policy(
+                &data.join("ontology.db"),
+                &files,
+                ontology_policy,
+            )
+            .await?,
+        )
     } else {
         None
     };
-    let turso = Arc::new(TursoStore::open(data.join("definitions.db")).await?);
+    let turso = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
     let store: Arc<dyn Store> = turso;
     let client = client.unwrap_or_else(|| {
         Arc::new(BrainClient {
@@ -217,7 +241,12 @@ pub async fn serve_release(
         "metrics credential must differ from the administrator token"
     );
     let data = resolve_data_dir(&workdir, data)?;
-    let state = new_state(workdir.clone(), data, None).await?;
+    let schema = crate::release::ontology_schema::startup(platform.as_ref(), port, &data).await?;
+    tokio::fs::create_dir_all(&data).await?;
+    let projects = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
+    let state =
+        state_with_projects(workdir.clone(), data, None, projects, true, schema.policy).await?;
+    drop(schema);
     if let Some(platform) = platform {
         state
             .lifecycle

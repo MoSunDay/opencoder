@@ -85,6 +85,8 @@ def check(settings, candidate, operations):
     agent, server = configs(settings)
     paths = configuration(agent, server)
     ontology_binding(settings, server)
+    from ..native.ontology_schema import check as check_ontology
+    ontology_schema = check_ontology(settings, candidate, maintenance=True)
     from ..storage import todos
     todos.validate(server, settings.server_data)
     if shutil.which('runc') is None:
@@ -148,7 +150,8 @@ def check(settings, candidate, operations):
     budget = capacity.check(capacity.plan(settings, candidate, rootfs,
                                           Journal(settings.state_dir).data, {'mounts': mounts}))
     return {'rootfs': str(rootfs), 'mounts': mounts, 'release_id': candidate['release_id'],
-            'database': database, 'backup_bytes': budget['components']['stopped_backup'], 'capacity': budget,
+            'database': database, 'ontology_schema': ontology_schema,
+            'backup_bytes': budget['components']['stopped_backup'], 'capacity': budget,
             'backup_roots': {name: str(path) for name, path in backup_roots(settings, runtime_data=False).items()},
             'retained_execution_roots': [str(settings.state_dir / 'runtimes')]
                 + ([str(settings.legacy_agent_data)] if settings.legacy_agent_data else []),

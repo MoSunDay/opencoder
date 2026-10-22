@@ -69,13 +69,9 @@ pub(super) async fn accepted_request(
         return Ok(RpcReply::error(400, "invalid execution id"));
     }
     let record = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(&execution.id)
-        .cloned();
+        .read_record(&execution.id)
+        .await?
+        .map(std::sync::Arc::unwrap_or_clone);
     let Some(record) = record else {
         return Ok(RpcReply::error(404, "accepted request not found"));
     };
@@ -122,7 +118,10 @@ pub(super) async fn events(
         .as_ref()
         .and_then(|r| r.session_id.as_deref())
         .unwrap_or(id);
-    let record = worker.inner.journal.lock().await.records.get(id).cloned();
+    let record = worker
+        .read_record(id)
+        .await?
+        .map(std::sync::Arc::unwrap_or_clone);
     let is_session = record.as_ref().is_none_or(|r| {
         matches!(
             r.assignment.request.kind,

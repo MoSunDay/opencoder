@@ -7,13 +7,9 @@ use std::collections::BTreeMap;
 
 pub(super) async fn load(worker: &Worker, execution: &ExecutionRef) -> Result<Value> {
     let record = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(&execution.id)
-        .cloned()
+        .read_record(&execution.id)
+        .await?
+        .map(std::sync::Arc::unwrap_or_clone)
         .context("DAG execution record missing")?;
     let definition = record
         .assignment

@@ -1,4 +1,4 @@
-Commit: f90df21319a94ee4e7d2b560c32a25a61dff68ad
+Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
 # worker 模块
 
@@ -58,3 +58,9 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 ## 私有任务文件
 
 DAG 私有文件：准入校验期限、定义及运行中节点执行文件摘要；执行与恢复再次核验摘要。`workloads/dag.rs` 将 owner 私有目录传给 DAG runtime，journal 以 0600 持久化。普通能力探测不计算执行文件摘要，显式私有探测使用异步阻塞任务。`tests/private_files.rs` 覆盖冻结、重放、重启、漂移拒绝与公开读面隔离。
+
+[inventory/](../../crates/worker/src/inventory/mod.rs) 维护五字段索引。会话和项目运行只查询所需列，数据库变更游标、journal 修订和活动运行集合共同更新缓存；常规轮询只处理变化，首次与每 10 分钟校准。`/inventory/changes` 使用 generation 和 revision，按 256 项固定快照分页。
+
+[journal.rs](../../crates/worker/src/journal.rs) 常驻调度摘要与必要的上报字段，完整记录按需读取；读取缓存同时限制总字节和条数。[brain/outbox.rs](../../crates/worker/src/brain/outbox.rs) 先从待确认集合和事务队列选择最多 64 项，再生成消息。终态已确认历史不再参与轮询；派发意图最多复用一个待确认根运行的同一版本，切换或待确认队列清空时释放。ACK 写入独立小表并单调推进，写格式 1 不读取或改写完整执行文件；写格式 0 的过渡版本同时保存旧标记。引导按序发送，数据库提交与队列变更同事务，重启恢复只在启动时补齐旧记录。
+
+执行记录的摘要、按需读取、缓存上限与并发一致性见 [journal](journal.md)。

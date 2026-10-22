@@ -40,15 +40,15 @@ pub(crate) async fn enqueue_with_command(
     let mut timing = super::admission::timing::Timing::new(&record.assignment.index.id, "enqueue");
     let mut journal = worker.inner.journal.lock().await;
     timing.mark("journal_lock");
-    if let Some(current) = journal.records.get(&record.assignment.index.id) {
+    if let Some(current) = journal.summaries.get(&record.assignment.index.id) {
         anyhow::ensure!(
-            current.assignment.index.status == record.assignment.index.status
-                && current.lifecycle.stop_intent == record.lifecycle.stop_intent,
+            current.index.status == record.assignment.index.status
+                && current.stop_intent == record.lifecycle.stop_intent,
             "execution changed before queue acceptance"
         );
     }
     let sequence = journal
-        .records
+        .summaries
         .values()
         .filter_map(|r| r.queue.as_ref().map(|q| q.sequence))
         .max()
@@ -140,9 +140,9 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
         .journal
         .lock()
         .await
-        .records
+        .summaries
         .values()
-        .filter(|r| r.assignment.index.status == ExecutionStatus::Pending && r.queue.is_some())
+        .filter(|r| r.index.status == ExecutionStatus::Pending && r.queue.is_some())
         .cloned()
         .collect();
     worker
@@ -162,12 +162,19 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
         )
     });
     timing.mark("queue_snapshot");
-    for record in records {
-        let mut entry =
-            super::admission::timing::Timing::new(&record.assignment.index.id, "queue_entry");
+    for summary in records {
+        let mut entry = super::admission::timing::Timing::new(&summary.index.id, "queue_entry");
         let Some(permit) = worker.try_slot() else {
             break;
         };
+        let record = worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .get(&summary.index.id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("queued execution disappeared"))?;
         let queued = record.queue.as_ref().unwrap().clone();
         if let Some(host) = &worker.inner.host_capacity {
             let ticket = queued
@@ -187,7 +194,14 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             let id = record.assignment.index.id.clone();
             let gate = worker.lifecycle_gate(&id).await;
             let _guard = gate.lock().await;
-            if worker.inner.journal.lock().await.records[&id]
+            if worker
+                .inner
+                .journal
+                .lock()
+                .await
+                .get(&id)
+                .await?
+                .expect("execution exists")
                 .assignment
                 .index
                 .status
@@ -211,12 +225,18 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             )
             .await?;
             if reply.status >= 300 {
-                worker.inner.journal.lock().await.finalize(
-                    &id,
-                    ExecutionStatus::Error,
-                    record.result.clone(),
-                    Some(format!("queued command rejected: {}", reply.body)),
-                )?;
+                worker
+                    .inner
+                    .journal
+                    .lock()
+                    .await
+                    .finalize(
+                        &id,
+                        ExecutionStatus::Error,
+                        record.result.clone(),
+                        Some(format!("queued command rejected: {}", reply.body)),
+                    )
+                    .await?;
                 worker
                     .inner
                     .pending_runs

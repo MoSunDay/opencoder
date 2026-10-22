@@ -184,7 +184,7 @@ impl FleetConnection {
             .await?;
         rows.next()
             .await?
-            .map(|r| Ok(serde_json::from_str(&r.get::<String>(0)?)?))
+            .map(|r| super::inventory_meta::decode(kind, &r.get::<String>(0)?))
             .transpose()
     }
     pub async fn definitions(&self, kind: &str) -> Result<Vec<Value>> {
@@ -197,7 +197,7 @@ impl FleetConnection {
             .await?;
         let mut result = vec![];
         while let Some(row) = rows.next().await? {
-            result.push(serde_json::from_str(&row.get::<String>(0)?)?);
+            result.push(super::inventory_meta::decode(kind, &row.get::<String>(0)?)?);
         }
         Ok(result)
     }
@@ -219,7 +219,7 @@ impl FleetConnection {
         id: &str,
         body: &Value,
     ) -> Result<()> {
-        self.conn.execute("INSERT INTO fleet_definitions VALUES (?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body", params![kind,id,serde_json::to_string(body)?]).await?;
+        self.conn.execute("INSERT INTO fleet_definitions VALUES (?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body", params![kind,id,super::inventory_meta::encode(kind, body)?]).await?;
         Ok(())
     }
 }

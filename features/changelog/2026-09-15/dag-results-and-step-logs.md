@@ -46,7 +46,7 @@ Commit: 5bf6f621e3722e60258592267109ba5807e74d94
 - 发布包：`/data00/github/opencoder/dist/opencoder-platform-5bf6f621`。四个二进制、manifest、协议与 SPA 摘要验证通过。
 - 使用发布包的真实 Server/Agent 浏览器验收通过：`/tmp/opencoder-todo-workbench-CUwbzT/dag-results.json`，覆盖结果快照、实时状态、75% 抽屉、步骤日志切换及执行详情入口。
 - 用户继续要求完成服务发布后，于 2026-09-15 15:33:09 CST 从 `8a50a393` 更新至 `5bf6f621`。发布前确认没有活动任务、节点与 Server 均已排空；成套原子安装后依次重启 Server/Agent，并恢复 admission=open。
-- 原节点 `node-01M1WVDEYE7Q4TFV6J83EZGKYJ` 重新在线，Ready 检查通过，protocol 9，资源错误为空，服务重启计数为 0，发布后日志没有新增警告或错误。
+- 原节点重新在线，Ready 检查通过，protocol 9，资源错误为空，服务重启计数为 0，发布后日志没有新增警告或错误。
 - 线上浏览器验收通过：`/tmp/opencoder-dag-production-5bf6f621/result.json`。四个二进制与 manifest 的提交及 SPA 摘要一致；实际 JS/CSS 与已发布提交一致；历史 DAG 的 5 个步骤直接显示结果，画布回放事件流数量为 0，右侧 75% 日志抽屉读取正常。
 - 本次发布日志：`/tmp/opencoder-dag-deploy-5bf6f621.log`；回滚包：`/usr/local/bin/.opencoder-platform-rollbacks/1789457586850557800-8a50a393cbe6`。
 

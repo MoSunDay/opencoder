@@ -50,6 +50,26 @@ def register_server(settings, record, operations, enabled=True, host_url=None):
         "id": record["id"], "url": f"http://127.0.0.1:{record['server_port']}", "enabled": enabled})
 
 
+def warm_host_first(settings, record, current, operations, seconds):
+    """Upgrade the report producer before adding a shared-store consumer.
+
+    The active Runtime and Server ingress stay on current. Replaying activation is
+    idempotent, including a retry after the new Host already took ownership.
+    """
+    host_url = f"http://127.0.0.1:{record['host_port']}"
+    status = operations.http(host_url, "/status")
+    if status.get("index_report_version") != "2":
+        raise ValueError("candidate Host lacks connection-baseline report protocol 2")
+    operations.http(host_url, "/activate-host", "POST", {})
+    probes.activated_host({**record, "server_port": current["server_port"],
+                           "report_server": current["id"]}, operations, seconds, prewarm=True)
+    # The old Server sends deployment signals through this fixed Host entry.
+    # Keep it on the newly active Host even if later candidate prewarm fails.
+    expected = operations.http(host_url, "/status")["snapshot"]["generation"]
+    units.switch_host_ingress(settings, record["host_port"], operations)
+    operations.wait(lambda: operations.http(settings.host_url, "/status")["snapshot"]["generation"] == expected, seconds)
+
+
 def deploy(settings, bundle, operations, seconds=90):
     journal = Journal(settings.state_dir)
     state = journal.data.get('maintenance')
@@ -65,6 +85,8 @@ def deploy(settings, bundle, operations, seconds=90):
         manifest.writer_preflight(candidate, journal.record(journal.data["current"])["manifest"])
     manifest.brain_preflight(settings, candidate, journal.data["releases"].values())
     manifest.compatible(candidate, manifest.overlapping(journal.data))
+    from .native.ontology_schema import check as check_ontology
+    check_ontology(settings, candidate)
     probes.resource_service(settings, candidate, operations)
     manifest.resources(settings, candidate)
     if journal.data["phase"] == "rolling_back":
@@ -118,6 +140,7 @@ def deploy(settings, bundle, operations, seconds=90):
             operations.run("systemctl", "start", record["host_unit"])
             host_url = f"http://127.0.0.1:{record['host_port']}"
             operations.wait(lambda: operations.http(host_url, "/status"), seconds)
+            warm_host_first(settings, record, journal.record(journal.data["current"]), operations, seconds)
             register_server(settings, record, operations)
             operations.run("systemctl", "start", record["server_unit"])
             probes.ready(settings, record, node_id, operations, seconds)
@@ -138,7 +161,7 @@ def deploy(settings, bundle, operations, seconds=90):
         if journal.data["phase"] == "verifying":
             probes.public(settings, record, operations, seconds)
             units.activate_launchers(settings, record, operations)
-            journal.data["candidate"] = None
+            journal.data.update(candidate=None, failure=None)
             journal.phase("complete")
         retire_server(settings, journal, operations)
         return journal.data
@@ -198,6 +221,11 @@ def _retire_server(settings, journal, operations, disable):
         return "retiring" if retiring else "waiting_for_ingress"
     for identifier, record in journal.data["releases"].items():
         if record.get('maintenance_retired'):
+            if identifier == journal.data['current']:
+                raise ValueError('current release cannot be maintenance-retired')
+            # Maintenance already stopped these frontends. A stale enabled
+            # registration would make every old Host await an impossible ACK.
+            register_server(settings, record, operations, enabled=False)
             continue
         for previous in record.get("previous_servers", []):
             try:
@@ -226,6 +254,26 @@ def _retire_server(settings, journal, operations, disable):
         journal.save()
 
 
+def rollback_preflight(settings):
+    """Signal requests must reject before replacing the installed controller."""
+    journal = Journal(settings.state_dir)
+    state = journal.data.get('maintenance')
+    if state and state['stage'] != 'repairing' and (state['stage'] not in ('complete', 'rolled_back') or
+            (journal.data['current'] == state['target'] and journal.data['previous'] in (None, state['origin']))):
+        if state['writes_open']:
+            raise ValueError('writes may have reopened; old backup restoration is forbidden')
+        return
+    if journal.data['phase'] == 'rolled_back':
+        return
+    previous = journal.data['previous']
+    if not previous:
+        raise ValueError('no compatible previous release is recorded')
+    candidate = journal.record(previous)['manifest']
+    manifest.compatible(candidate, manifest.overlapping(journal.data))
+    from .native.ontology_schema import check
+    check(settings, candidate)
+
+
 def rollback(settings, operations, seconds=90):
     journal = Journal(settings.state_dir)
     from .todo_resources import require_candidate, set_uploads
@@ -245,10 +293,12 @@ def rollback(settings, operations, seconds=90):
     if not previous:
         raise ValueError("no compatible previous release is recorded")
     old = journal.record(previous)
+    manifest.compatible(old["manifest"], manifest.overlapping(journal.data))
+    from .native.ontology_schema import check as check_ontology
+    check_ontology(settings, old['manifest'])
+    probes.resource_service(settings, old['manifest'], operations)
     if (settings.state_dir / 'todo-files-policy.json').exists():
         set_uploads(settings, False, operations)
-    manifest.compatible(old["manifest"], manifest.overlapping(journal.data))
-    probes.resource_service(settings, old['manifest'], operations)
     resuming = journal.data["phase"] == "rolling_back" or (
         journal.data["phase"] == "failed" and journal.data.get("rollback_switch_started") is False
         and journal.data.get("rollback_from") == journal.data["current"]
@@ -275,6 +325,7 @@ def rollback(settings, operations, seconds=90):
         operations.run("systemctl", "start", old["server_unit"], old["runtime_unit"])
         operations.wait(lambda: operations.http(host_url, "/status"), seconds)
         node_id = probes.candidate(settings, old, operations, seconds)
+        warm_host_first(settings, old, journal.record(journal.data["current"]), operations, seconds)
         register_server(settings, old, operations, host_url=host_url)
         probes.ready(settings, old, node_id, operations, seconds)
     except Exception as error:

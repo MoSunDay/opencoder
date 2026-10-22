@@ -58,6 +58,9 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(command(args, rollback=True)[-2:], ['--signal', '--rollback'])
         args.signal = False
         self.assertNotIn('--signal', command(args))
+        args.deploy_wait_seconds = 900
+        invocation = command(args)
+        self.assertEqual(invocation[invocation.index('--wait-seconds') + 1], '900')
 
     def test_model_scripts_wait_for_release_and_enforce_the_dependency(self):
         with tempfile.TemporaryDirectory() as directory:

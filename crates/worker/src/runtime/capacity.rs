@@ -133,10 +133,9 @@ impl crate::Worker {
         let journal = self.inner.journal.lock().await;
         for (ticket, id, phase) in host.store.runtime_tickets(&host.runtime_id).await? {
             if phase == "queued"
-                && !journal.records.get(&id).is_some_and(|r| {
+                && !journal.summaries.get(&id).is_some_and(|r| {
                     r.queue.as_ref().and_then(|q| q.ticket.as_deref()) == Some(&ticket)
-                        && r.assignment.index.status
-                            == opencoder_core::fleet::ExecutionStatus::Pending
+                        && r.index.status == opencoder_core::fleet::ExecutionStatus::Pending
                 })
             {
                 host.store
@@ -172,9 +171,9 @@ impl crate::Worker {
                 .project
                 .require()
                 .is_ok_and(|p| p.persistence_error.lock().unwrap().is_none())
-            && crate::brain::outbox::frames(self)
+            && crate::brain::outbox::empty(self)
                 .await
-                .is_ok_and(|frames| frames.is_empty())
+                .is_ok_and(|empty| empty)
     }
 }
 

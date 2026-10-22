@@ -1,8 +1,6 @@
 use crate::Worker;
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
-use opencoder_store::SessionFilter;
-use std::collections::HashSet;
 
 #[async_trait::async_trait]
 impl NodeService for Worker {
@@ -54,156 +52,7 @@ impl NodeService for Worker {
         opencoder_session::loop_registry::subscribe()
     }
     async fn indexes(&self) -> anyhow::Result<Vec<ExecutionIndex>> {
-        let mut records: Vec<_> = self
-            .inner
-            .journal
-            .lock()
-            .await
-            .records
-            .values()
-            .map(|r| r.assignment.index.clone())
-            .collect();
-        let projects = self.inner.state.project.require()?;
-        let journal = self.inner.journal.lock().await;
-        for record in journal
-            .records
-            .values()
-            .filter(|r| r.assignment.request.kind == ExecutionKind::Project)
-        {
-            if let Some(todo) = &record.assignment.request.target {
-                for run in projects.projects.list_todo_runs(todo).await? {
-                    records.push(ExecutionIndex {
-                        id: run.id,
-                        created_at: run.created_at,
-                        kind: ExecutionKind::Project,
-                        node_id: self.inner.registration.id.clone(),
-                        status: match run.status {
-                            opencoder_store::ProjectTodoRunStatus::Running => {
-                                if record.assignment.index.status == ExecutionStatus::Pending {
-                                    ExecutionStatus::Pending
-                                } else if self
-                                    .inner
-                                    .active
-                                    .lock()
-                                    .await
-                                    .contains_key(&record.assignment.index.id)
-                                {
-                                    ExecutionStatus::Running
-                                } else {
-                                    ExecutionStatus::Interrupted
-                                }
-                            }
-                            opencoder_store::ProjectTodoRunStatus::Done => ExecutionStatus::Done,
-                            opencoder_store::ProjectTodoRunStatus::Cancelled => {
-                                ExecutionStatus::Cancelled
-                            }
-                            _ => ExecutionStatus::Error,
-                        },
-                    });
-                }
-            }
-        }
-        drop(journal);
-        let roots: HashSet<_> = records.iter().map(|r| r.id.clone()).collect();
-        let active: HashSet<_> = opencoder_session::loop_registry::active_ids()
-            .into_iter()
-            .collect();
-        let mut cursor = None;
-        loop {
-            let rows = self
-                .inner
-                .state
-                .store
-                .list_execution_sessions(&SessionFilter {
-                    limit: 500,
-                    cursor,
-                    workdir_hash: None,
-                    search: None,
-                    // The execution inventory includes DAG Agent-step rows;
-                    // the public chat API applies its own visibility fence.
-                    // Operator sessions are lane-fenced at the store layer
-                    // (their executions live in the node journal).
-                    include_subagents: false,
-                    kind: None,
-                })
-                .await?;
-            if rows.is_empty() {
-                break;
-            }
-            cursor = rows
-                .last()
-                .map(|row| format!("{}|{}", row.updated_at.max(row.created_at), row.id));
-            for row in &rows {
-                if roots.contains(&row.id) {
-                    continue;
-                }
-                // A session that reaches this fallback path has no durable
-                // execution journal. Public Agent sessions use `agent-`;
-                // Team's node-local member sessions use `member-` and carry
-                // the coordinator/member title. Keep both as Agent indexes
-                // so their execution can be inspected through the parent
-                // Team without exposing them in the public chat lane.
-                // Tagged rows resolve at the store layer (the store lane
-                // fence already dropped `operator`); untagged legacy rows
-                // keep the id-prefix/title resolution below.
-                let tagged = row.kind.as_deref();
-                if let Some(kind) = tagged {
-                    match kind {
-                        "agent" | "team" => {
-                            records.push(ExecutionIndex {
-                                id: row.id.clone(),
-                                kind: ExecutionKind::Agent,
-                                node_id: self.inner.registration.id.clone(),
-                                created_at: row.created_at,
-                                status: internal_session_status(active.contains(&row.id)),
-                            });
-                        }
-                        // DAG roots are owned by the durable execution journal.
-                        // A stale root session must not be reintroduced as an
-                        // Agent index when its journal record is absent.
-                        "dag"
-                            if row
-                                .title
-                                .as_deref()
-                                .is_some_and(|title| title.starts_with("dag/")) =>
-                        {
-                            records.push(ExecutionIndex {
-                                id: row.id.clone(),
-                                kind: ExecutionKind::Agent,
-                                node_id: self.inner.registration.id.clone(),
-                                created_at: row.created_at,
-                                status: internal_session_status(active.contains(&row.id)),
-                            });
-                        }
-                        _ => {}
-                    }
-                    continue;
-                }
-                let member_session = row.id.starts_with("member-")
-                    && row
-                        .title
-                        .as_deref()
-                        .is_some_and(|title| title.contains(" / "));
-                let dag_step_session = row
-                    .title
-                    .as_deref()
-                    .is_some_and(|title| title.starts_with("dag/"));
-                if !row.id.starts_with("agent-") && !member_session && !dag_step_session {
-                    continue;
-                }
-                records.push(ExecutionIndex {
-                    id: row.id.clone(),
-                    kind: ExecutionKind::Agent,
-                    node_id: self.inner.registration.id.clone(),
-                    created_at: row.created_at,
-                    status: internal_session_status(active.contains(&row.id)),
-                });
-            }
-            if rows.len() < 500 {
-                break;
-            }
-        }
-        Ok(records)
+        self.cached_indexes().await
     }
     async fn handle(&self, operation: NodeOperation) -> RpcReply {
         match crate::operations::handle(self, operation).await {
@@ -216,22 +65,13 @@ impl NodeService for Worker {
     }
 }
 
-fn internal_session_status(active: bool) -> ExecutionStatus {
-    if active {
-        ExecutionStatus::Running
-    } else {
-        // Sessions without a top-level journal are owned by another
-        // execution and cannot accept work directly once their loop exits.
-        ExecutionStatus::Done
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::WorkerOptions;
     use opencoder_llm::MockChatClient;
     use opencoder_store::SessionMeta;
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -284,6 +124,51 @@ mod tests {
         );
         assert!(ids.contains("agent-inventory-0000"));
         assert!(ids.contains("agent-inventory-0502"));
+        use opencoder_core::fleet::inventory::InventoryQuery;
+        let first = worker
+            .inventory_changes(InventoryQuery::default())
+            .await
+            .unwrap();
+        assert!(first.full);
+        assert_eq!(first.records.len(), 256);
+        worker
+            .inner
+            .state
+            .store
+            .delete_session("agent-inventory-0000")
+            .await
+            .unwrap();
+        let tail = worker
+            .inventory_changes(InventoryQuery {
+                generation: Some(first.generation.clone()),
+                after: None,
+                page: first.next,
+            })
+            .await
+            .unwrap();
+        assert_eq!(tail.records.len(), 247);
+        assert_eq!(tail.revision, first.revision);
+        let delta = worker
+            .inventory_changes(InventoryQuery {
+                generation: Some(first.generation.clone()),
+                after: Some(first.revision),
+                page: None,
+            })
+            .await
+            .unwrap();
+        assert!(!delta.full);
+        assert!(delta.records.is_empty());
+        assert_eq!(delta.removed_ids, vec!["agent-inventory-0000"]);
+        let idle = worker
+            .inventory_changes(InventoryQuery {
+                generation: Some(delta.generation),
+                after: Some(delta.revision),
+                page: None,
+            })
+            .await
+            .unwrap();
+        assert!(idle.records.is_empty() && idle.removed_ids.is_empty());
+        assert_eq!(idle.revision, delta.revision);
         worker.shutdown().await.unwrap();
     }
 

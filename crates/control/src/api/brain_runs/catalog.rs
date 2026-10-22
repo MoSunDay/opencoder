@@ -15,6 +15,7 @@ mod availability;
 #[path = "catalog/dedup.rs"]
 mod dedup;
 mod selection;
+mod sources;
 use selection::{Entry, Origin};
 
 pub struct Library {
@@ -27,6 +28,18 @@ pub async fn capabilities(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
 }
 
 async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
+    read_definitions(state, true).await
+}
+
+/// Definition-only catalog for Ontology; no node probes or presentation merging.
+pub(crate) async fn definition_snapshot(state: &Arc<AppState>) -> anyhow::Result<Vec<Value>> {
+    Ok(read_definitions(state, false).await?.capabilities)
+}
+
+async fn read_definitions(
+    state: &Arc<AppState>,
+    probe_availability: bool,
+) -> anyhow::Result<Library> {
     let builtins = vec![
         json!({
             "id":"builtin-agent-act",
@@ -63,6 +76,12 @@ async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
             .definition("capability_target", &capability.capability.id)
             .await?
         else {
+            if !probe_availability {
+                let mut value = json!(capability.capability);
+                value["kind"] = json!("unbound");
+                value["unavailable_reason"] = json!("capability has no target binding");
+                capabilities.push(Entry::new(Origin::Stored, value));
+            }
             continue;
         };
         let mut value = json!(capability.capability);
@@ -70,7 +89,7 @@ async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
         value["target"] = target["target"].clone();
         value["required_inputs"] = target.get("required_inputs").cloned().unwrap_or(json!([]));
         value["required_outputs"] = target.get("required_outputs").cloned().unwrap_or(json!([]));
-        match registered_definition(state, &target).await {
+        match registered_definition(state, &target, probe_availability).await {
             Ok(definition) => value["definition"] = definition,
             Err(error) => {
                 value["definition"] = Value::Null;
@@ -84,18 +103,33 @@ async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
     let config = opencoder_core::Config::load(&state.workdir)?;
     let agents =
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
-            opencoder_core::agent::list_agents()
+            if !probe_availability {
+                return sources::agents();
+            }
+            Ok(opencoder_core::agent::list_agents()
                 .into_iter()
                 .filter_map(|name| opencoder_core::resolve_agent(&name))
-                .collect::<Vec<_>>()
-        });
+                .collect::<Vec<_>>())
+        })?;
     for agent in agents {
         capabilities.push(Entry::new(Origin::Generated, json!({"id":format!("agent-{}",agent.name),"kind":"agent","target":agent.name,"summary":agent.description,"input_desc":"Named engineering inputs for this agent","output_desc":"The agent response and execution evidence","required_inputs":[],"definition":{"name":agent.name,"kind":agent.kind,"mode":agent.mode,"prompt":agent.prompt,"tools":agent.tools},"version":"current","maturity":"draft"})));
     }
-    let (_, share) = crate::api_todo_util::share_root(&state.workdir).await?;
-    for name in opencoder_core::list_child_dirs(&share.join("todo")) {
+    let share = if probe_availability {
+        crate::api_todo_util::share_root(&state.workdir).await?.1
+    } else {
+        opencoder_core::share_fs::effective_share_dir(Some(&config))
+            .ok_or_else(|| anyhow::anyhow!("share root unresolved"))?
+    };
+    let list_dirs = |path: &std::path::Path| {
+        if probe_availability {
+            Ok(opencoder_core::list_child_dirs(path))
+        } else {
+            sources::directories(path)
+        }
+    };
+    for name in list_dirs(&share.join("todo"))? {
         let root = opencoder_core::todo_dir(&share, &name)?;
-        for version in opencoder_core::list_child_dirs(&root) {
+        for version in list_dirs(&root)? {
             if !opencoder_core::todo_context_path(&share, &name, &version)?.is_file()
                 && !opencoder_core::todo_version_dir(&share, &name, &version)?
                     .join("workflow.json")
@@ -115,17 +149,21 @@ async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
             if kind == "team" && target == "system" {
                 continue;
             }
-            let snapshot = crate::api::catalog::resolve(
-                state,
-                &opencoder_core::fleet::CreateExecution {
-                    id: format!("{kind}-catalog"),
-                    kind: serde_json::from_value(json!(kind))?,
-                    target: Some(target.into()),
-                    input: json!({}),
-                    node_id: None,
-                },
-            )
-            .await;
+            let snapshot = if !probe_availability {
+                Ok(Some(definition.clone()))
+            } else {
+                crate::api::catalog::resolve(
+                    state,
+                    &opencoder_core::fleet::CreateExecution {
+                        id: format!("{kind}-catalog"),
+                        kind: serde_json::from_value(json!(kind))?,
+                        target: Some(target.into()),
+                        input: json!({}),
+                        node_id: None,
+                    },
+                )
+                .await
+            };
             let mut capability = json!({"id":format!("{kind}-{target}"),"kind":kind,"target":target,"summary":definition.get("description").or_else(||definition.get("spec").and_then(|s|s.get("description"))).cloned().unwrap_or(json!("")),"input_desc":format!("Named inputs for this {kind} definition"),"output_desc":format!("The {kind} result and execution evidence"),"required_inputs":[],"definition":null,"version":"current","maturity":"draft"});
             match snapshot {
                 Ok(Some(snapshot)) => capability["definition"] = snapshot,
@@ -163,7 +201,9 @@ async fn raw_load(state: &Arc<AppState>) -> anyhow::Result<Library> {
             capability["evidence"] = meta["evidence"].clone();
         }
     }
-    availability::annotate(state, &config, &mut capabilities).await?;
+    if probe_availability {
+        availability::annotate(state, &config, &mut capabilities).await?;
+    }
     Ok(Library {
         selection_ids: selection::ids(&capabilities),
         capabilities: capabilities.into_iter().map(|entry| entry.value).collect(),
@@ -201,8 +241,22 @@ pub async fn load(state: &Arc<AppState>) -> anyhow::Result<Library> {
     })
 }
 
-async fn registered_definition(state: &Arc<AppState>, target: &Value) -> anyhow::Result<Value> {
+async fn registered_definition(
+    state: &Arc<AppState>,
+    target: &Value,
+    probe_availability: bool,
+) -> anyhow::Result<Value> {
     let target: opencoder_core::fleet::CapabilityTarget = serde_json::from_value(target.clone())?;
+    if !probe_availability && target.kind == opencoder_core::fleet::ExecutionKind::Todos {
+        let (name, version) = target
+            .target
+            .split_once('/')
+            .ok_or_else(|| anyhow::anyhow!("template/version target required"))?;
+        let config = opencoder_core::Config::load(&state.workdir)?;
+        let share = opencoder_core::share_fs::effective_share_dir(Some(&config))
+            .ok_or_else(|| anyhow::anyhow!("share root unresolved"))?;
+        return crate::api::template::snapshot(&share, name, version);
+    }
     let request = opencoder_core::fleet::CreateExecution {
         id: format!("{}-catalog", target.kind.prefix()),
         kind: target.kind,

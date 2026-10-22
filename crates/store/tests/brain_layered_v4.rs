@@ -2,6 +2,9 @@ use opencoder_core::brain::layered::*;
 use opencoder_core::fleet::ExecutionKind;
 use opencoder_store::Store;
 
+#[path = "brain_layered_v4/reporting.rs"]
+mod reporting;
+
 fn run(phase: LayeredPhase, layer: u32, generation: u64) -> LayeredRun {
     LayeredRun {
         pending_guidance: false,

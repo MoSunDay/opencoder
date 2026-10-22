@@ -57,11 +57,10 @@ pub async fn receipt(worker: &Worker, owner: &str, run: &ProjectTodoRunRecord) -
         .journal
         .lock()
         .await
-        .records
+        .summaries
         .get(owner)
         .is_some_and(|r| {
-            r.assignment.index.status == ExecutionStatus::Pending
-                && r.result["next_run_id"].as_str() == Some(&run.id)
+            r.index.status == ExecutionStatus::Pending && r.next_run_id.as_deref() == Some(&run.id)
         });
     RpcReply::ok(
         json!({"id":owner,"kind":"project","run_id":run.id,"node_id":worker.inner.registration.id,"status":if queued {"pending"} else {match run.status {ProjectTodoRunStatus::Running=>"running",ProjectTodoRunStatus::Done=>"idle",ProjectTodoRunStatus::Failed=>"error",ProjectTodoRunStatus::Cancelled=>"cancelled"}},"run_status":run.status}),

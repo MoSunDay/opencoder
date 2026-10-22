@@ -89,8 +89,8 @@ pub async fn query(
 ) -> Result<RpcReply> {
     let journal = worker.inner.journal.lock().await;
     let record = journal
-        .records
         .get(&reference.id)
+        .await?
         .context("execution missing")?;
     ensure!(
         record.assignment.index.kind == reference.kind,

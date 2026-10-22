@@ -60,9 +60,8 @@ pub async fn run(
         .journal
         .lock()
         .await
-        .records
         .get(id)
-        .cloned()
+        .await?
         .context("root execution missing")?;
     if latest.annotations["layered_context"].is_null() {
         return state::outcome(worker, &snapshot).await;

@@ -69,9 +69,9 @@ pub async fn handle(
         .journal
         .lock()
         .await
-        .records
+        .summaries
         .get(&reference.id)
-        .and_then(|record| record.assignment.request.input["schema_version"].as_u64());
+        .and_then(|record| record.schema_version);
     if matches!(schema, Some(4..=6)) {
         return super::v4::history::read(worker, reference, action, input, schema.unwrap() as u32)
             .await;

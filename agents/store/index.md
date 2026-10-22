@@ -1,4 +1,4 @@
-Commit: 309c02570d3cbef348279d7db7839b45e3538294
+Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
 # store 模块
 
@@ -53,3 +53,15 @@ Commit: 309c02570d3cbef348279d7db7839b45e3538294
 - 会话清单沿活跃时间索引定位当前页，再查询当前页预览，短 JSON 直接读取，长内容和含 NUL 的历史内容保留原截取规则；批量消息和事件复用 SQL，事务开始与提交语句同样缓存；单条事件使用 INSERT 自身的原子提交，批量事件继续共享显式事务。新增序号直接读取本连接最后插入的主键。
 - `.db.engine.json` 标识文件所属引擎。在线查询、事务和备份通过 `opencoder-cli storage` 使用 Turso；Python SQLite 仅处理未切换的文件、已停止的库或离线快照，不能与在线 Turso 混开。
 - [并发与取消](../../crates/database/tests/concurrency.rs)、[多进程与备份](../../crates/database/tests/processes.rs)、[混合负载基准](../../crates/store/examples/storage_mixed.rs) 覆盖隔离、写入收尾和性能门槛。
+
+[fleet/ownership/](../../crates/store/src/fleet/ownership/mod.rs) 复用 `execution_index` 的不可变归属。首次报告没有索引时校验冻结请求；后续报告只查已有标量列。原生受理在同一事务内校验已有请求和索引的归属，删除也同时处理两者。无需增加共享表，避免旧进程的已准备 SQL 因结构变化失败。
+
+[fleet/report.rs](../../crates/store/src/fleet/report.rs) 的协商报告在同一事务内核对共享数据库的 generation、sequence 和增量基准；基准失配回滚并返回专用错误，要求调用方重建完整快照。重建入口 [snapshot.rs](../../crates/store/src/fleet/report/snapshot.rs) 仍检查代次和不可变归属，同代次序号落后时不覆盖已保存的新状态。其他冲突不进入重建路径。增量不能携带首次缺失恢复名单，不删除历史索引。
+
+[turso_store/execution/inventory/](../../crates/store/src/turso_store/execution/inventory/mod.rs) 以触发器在源事务内记录会话、子会话归属和项目运行摘要的变更。读取只投影索引字段，不读取消息预览、输入、计划或输出正文；历史游标过期时全量读取这些小字段。
+
+[turso_store/execution/reporting/](../../crates/store/src/turso_store/execution/reporting/mod.rs) 将 Brain 待发送队列与状态变更放在同一事务。确认游标独立存储，确认与出队原子完成，重复确认不写入。待发送查询先按索引限量，再解析所选消息；休眠检查只查询队列是否为空。`execution_report_format` 保存最低读取格式，拒绝不兼容读取。
+
+[fleet/inventory_meta/](../../crates/store/src/fleet/inventory_meta/mod.rs) 在原有休眠 JSON 开头保存版本标记，常规检查只取前 96 个字符。旧写入覆盖标记时，下次读取在事务内补回；旧读取忽略该可选字段。查询结果去除内部标记，冻结清单内容保持一致。
+
+共享 Server 配置库使用 `TursoStore::open_catalog`，不初始化 Runtime 的源增量与报告队列表。Runtime 仍使用完整 `open`，扩展表随其私有库启动创建。两条打开路径均保留原有目录和身份数据，不删除历史附加表。

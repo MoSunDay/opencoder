@@ -50,9 +50,8 @@ pub(in crate::operations) async fn events(
     let (definition, root, run_status) = {
         let journal = worker.inner.journal.lock().await;
         let record = journal
-            .records
             .get(&execution.id)
-            .cloned()
+            .await?
             .ok_or_else(|| anyhow::anyhow!("dag execution not found"))?;
         (
             record.assignment.definition.clone(),

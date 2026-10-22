@@ -5,25 +5,17 @@ use serde_json::{json, Value};
 pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
     let (legacy, parent_kind, codex, runtime, environment_version) = {
         let journal = worker.inner.journal.lock().await;
-        let kind = journal
-            .records
-            .get(parent)
-            .map(|record| record.assignment.index.kind)
-            .unwrap_or(ExecutionKind::Agent);
+        let record = journal.get(parent).await?;
         (
             journal.uses_legacy(parent),
-            kind,
-            journal
-                .records
-                .get(parent)
-                .and_then(|r| r.assignment.codex.clone()),
-            journal
-                .records
-                .get(parent)
-                .and_then(|r| r.assignment.runtime.clone()),
-            journal
-                .records
-                .get(parent)
+            record
+                .as_ref()
+                .map(|r| r.assignment.index.kind)
+                .unwrap_or(ExecutionKind::Agent),
+            record.as_ref().and_then(|r| r.assignment.codex.clone()),
+            record.as_ref().and_then(|r| r.assignment.runtime.clone()),
+            record
+                .as_ref()
                 .and_then(|r| r.annotations.get("operator_environment_version").cloned()),
         )
     };

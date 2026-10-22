@@ -26,7 +26,7 @@ def prefix(settings):
 
 def install(settings, config_path, operations):
     source = Path(__file__).resolve().parents[1]
-    files = sorted([*source.glob("rolling/**/*.py"), *source.glob("signal_release/**/*.py"),
+    files = sorted([*source.glob("rolling/**/*.py"), *source.glob("rolling/**/*.sql"), *source.glob("signal_release/**/*.py"),
                     source / "install_bundle.py", source / "rolling_cli.py"])
     contents = {str(path.relative_to(source)): path.read_bytes() for path in files}
     digest = hashlib.sha256()
@@ -114,6 +114,8 @@ def stage(settings, bundle, maintenance=False, wait_seconds=90):
     if not maintenance:
         manifest.writer_preflight(candidate, journal['releases'][journal['current']]['manifest'])
         manifest.compatible(candidate, manifest.overlapping(journal))
+        from rolling.native.ontology_schema import check
+        check(settings, candidate)
     elif not repair:
         from rolling.maintenance.preflight import check
         from rolling.io import Operations

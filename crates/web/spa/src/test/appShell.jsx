@@ -17,7 +17,7 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 // up in the list below.
 const { strayRoots } = vi.hoisted(() => ({ strayRoots: [] }));
 // Keep real Ontology panels and controls; jsdom has no canvas renderer.
-vi.mock('@ant-design/graphs', () => ({ FlowDirectionGraph: () => null }));
+vi.mock('../ontology/pages/graph/canvas3d/GraphScene', () => ({ default: () => null }));
 vi.mock('react-dom/client', async (importOriginal) => {
   const actual = await importOriginal();
   return {

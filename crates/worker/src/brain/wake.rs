@@ -10,18 +10,18 @@ pub async fn recover_locked(worker: &Worker) -> Result<()> {
         .journal
         .lock()
         .await
-        .records
+        .summaries
         .values()
         .filter(|r| {
-            r.assignment.index.kind == ExecutionKind::Brain
+            r.index.kind == ExecutionKind::Brain
                 && matches!(
-                    r.assignment.index.status,
+                    r.index.status,
                     ExecutionStatus::Idle
                         | ExecutionStatus::Interrupted
                         | ExecutionStatus::Cancelling
                 )
         })
-        .map(|record| record.assignment.index.id.clone())
+        .map(|record| record.index.id.clone())
         .collect();
     for id in candidates {
         let gate = worker.lifecycle_gate(&id).await;
@@ -32,7 +32,7 @@ pub async fn recover_locked(worker: &Worker) -> Result<()> {
         // Context delivery can enqueue the root while recovery waits for its
         // lifecycle gate. Re-read both status and annotations under the gate:
         // a stale Idle record must never overwrite the accepted Pending work.
-        let record = worker.inner.journal.lock().await.records.get(&id).cloned();
+        let record = worker.inner.journal.lock().await.get(&id).await?;
         let Some(record) = record.filter(|record| {
             matches!(
                 record.assignment.index.status,

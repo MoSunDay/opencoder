@@ -89,6 +89,8 @@ pub enum Command {
     /// Brain capabilities, search, plans and dispatch.
     #[command(subcommand)]
     Brain(cmd::brain::BrainCmd),
+    /// Ontology data, platform capabilities and synchronization.
+    Ontology(cmd::ontology::OntologyCmd),
     /// Team definitions.
     #[command(subcommand)]
     Teams(cmd::teams::TeamsCmd),
@@ -154,6 +156,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<i32> {
         Command::Todo(sub) => cmd::todo::run(&ctx, sub).await,
         Command::Project(sub) => cmd::project::run(&ctx, sub).await,
         Command::Brain(sub) => cmd::brain::run(&ctx, sub).await,
+        Command::Ontology(sub) => cmd::ontology::run(&ctx, sub).await,
         Command::Teams(sub) => cmd::teams::run(&ctx, sub).await,
         Command::Agents(sub) => cmd::agents::run(&ctx, sub).await,
         Command::Schedule(sub) => cmd::schedule::run(&ctx, sub).await,

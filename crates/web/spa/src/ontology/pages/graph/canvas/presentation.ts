@@ -1,7 +1,5 @@
 import type { GraphData } from "../../../types";
 
-export const NODE_WIDTH = 220;
-
 export function nodeTitle(name: string): { title: string; detail?: string } {
   const http = name.match(/^HTTP (\w+) (\S+)(.*)$/);
   if (!http) return { title: name };
@@ -22,7 +20,4 @@ export function focusNodeId(data: GraphData, centerIds: string[]): string | unde
     degrees.set(edge.target_entity_id, (degrees.get(edge.target_entity_id) ?? 0) + 1);
   }
   return [...data.nodes].sort((a, b) => (degrees.get(b.id) ?? 0) - (degrees.get(a.id) ?? 0) || a.id.localeCompare(b.id))[0]?.id;
-}
-export function nodeHeight(name: string): number {
-  return name ? 112 : 92;
 }

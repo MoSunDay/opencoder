@@ -89,9 +89,9 @@ async fn validate_reference(worker: &Worker, execution: &ExecutionRef) -> Result
         .journal
         .lock()
         .await
-        .records
+        .summaries
         .get(&execution.id)
-        .map(|record| (record.assignment.index.kind, record.assignment.request.kind))
+        .map(|record| (record.index.kind, record.index.kind))
     {
         if index_kind != execution.kind || request_kind != execution.kind {
             return Ok(Some(RpcReply::error(409, "execution kind mismatch")));

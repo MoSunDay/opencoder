@@ -40,10 +40,9 @@ pub(super) async fn launch_locked(
         .journal
         .lock()
         .await
-        .records
+        .summaries
         .get(&id)
         .ok_or_else(|| anyhow::anyhow!("execution not found"))?
-        .assignment
         .index
         .status;
     if !(crate::lifecycle::can_launch(status, resume)
@@ -57,7 +56,8 @@ pub(super) async fn launch_locked(
         .journal
         .lock()
         .await
-        .begin_run(&id, record.result.clone())?;
+        .begin_run(&id, record.result.clone())
+        .await?;
     worker
         .inner
         .active
@@ -131,7 +131,8 @@ pub(super) async fn launch_locked(
             .journal
             .lock()
             .await
-            .finalize(&id, status, result, error);
+            .finalize(&id, status, result, error)
+            .await;
         if let Err(error) = persisted {
             tracing::error!(%id,%error,"could not persist terminal execution status");
             *worker.inner.persistence_error.lock().unwrap() =

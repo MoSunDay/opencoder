@@ -140,9 +140,13 @@ def migrate(settings, bundle, operations, seconds=90):
         operations.http(host_url, f"/runtimes/{record['id']}/activate", "POST", {})
         register_server(settings, record, operations, host_url=host_url)
         operations.http(host_url, "/activate-host", "POST", {})
+        from .native import ontology_schema
+        if ontology_schema.version(candidate):
+            ontology_schema.authorize_initial(settings, journal, record)
         operations.run("systemctl", "start", record["server_unit"])
         server_url = f"http://127.0.0.1:{record['server_port']}"
         operations.wait(lambda: operations.http(server_url, "/api/health"), seconds)
+        ontology_schema.check(settings, candidate)
         operations.wait(lambda: operations.http(server_url, "/api/admin/drain", "DELETE"), seconds)
         probes.ready(settings, record, review["node_id"], operations, seconds)
         journal.data.update(current=record["id"], candidate=None)

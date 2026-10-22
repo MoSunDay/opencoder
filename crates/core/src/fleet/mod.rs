@@ -1,4 +1,5 @@
 //! Fleet v2 contracts. Execution payloads travel through the server but live on nodes.
+pub mod inventory;
 mod paging;
 pub mod private_files;
 mod protocol;

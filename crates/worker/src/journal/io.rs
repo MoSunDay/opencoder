@@ -4,15 +4,30 @@ use opencoder_core::fleet::{valid_id, ExecutionKind};
 use serde_json::Value;
 use std::{io::Write, path::Path};
 
+pub(super) fn read_stamped(path: &Path, legacy: bool) -> Result<(Record, super::cache::Stamp)> {
+    let before = super::cache::Stamp::of(&std::fs::metadata(path)?);
+    let record = read_record(path, legacy)?;
+    let after = super::cache::Stamp::of(&std::fs::metadata(path)?);
+    anyhow::ensure!(before == after, "execution record changed during load");
+    Ok((record, after))
+}
+
 pub(crate) fn read_record(path: &Path, allow_legacy_kind: bool) -> Result<Record> {
-    let mut value: Value = serde_json::from_slice(
+    parse_record(
         &std::fs::read(path).with_context(|| format!("read {}", path.display()))?,
+        allow_legacy_kind,
     )
-    .with_context(|| format!("parse {}", path.display()))?;
-    if allow_legacy_kind {
+    .map_err(|error| anyhow::anyhow!("parse {}: {error:#}", path.display()))
+}
+
+pub(super) fn parse_record(bytes: &[u8], allow_legacy_kind: bool) -> Result<Record> {
+    let record: Record = if allow_legacy_kind {
+        let mut value: Value = serde_json::from_slice(bytes)?;
         normalize_legacy_index(&mut value)?;
-    }
-    let record: Record = serde_json::from_value(value)?;
+        serde_json::from_value(value)?
+    } else {
+        serde_json::from_slice(bytes)?
+    };
     validate_record(&record, None)?;
     Ok(record)
 }
@@ -58,14 +73,22 @@ pub(super) fn normalize_legacy_index(value: &mut Value) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn durable_json(path: &Path, value: &Record) -> Result<()> {
+pub(super) fn durable_json(path: &Path, value: &Record) -> Result<Option<super::cache::Stamp>> {
     let parent = path.parent().context("journal path has no parent")?;
     opencoder_core::share_fs::durable_create_dir_all(parent)?;
     let temp = parent.join(format!(".execution.tmp-{}", ulid::Ulid::new()));
-    let mut file = opencoder_core::platform::fs::create_private_file(&temp)?;
-    file.write_all(&serde_json::to_vec(value)?)?;
-    file.sync_all()?;
+    let file = opencoder_core::platform::fs::create_private_file(&temp)?;
+    let mut writer = std::io::BufWriter::new(file);
+    serde_json::to_writer(&mut writer, value)?;
+    writer.flush()?;
+    writer.get_ref().sync_all()?;
+    let written = writer.get_ref().metadata().ok();
     opencoder_core::platform::fs::replace(&temp, path)?;
     opencoder_core::platform::fs::sync_directory(parent)?;
-    Ok(())
+    // Read metadata from our still-open file, not the path: a concurrent
+    // replacement must never associate our view with another file's identity.
+    // Cache metadata failure must not turn a durable save into a failed save.
+    Ok(written
+        .zip(writer.get_ref().metadata().ok())
+        .and_then(|(before, after)| super::cache::Stamp::published(&before, &after)))
 }

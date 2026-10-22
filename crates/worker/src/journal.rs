@@ -7,9 +7,19 @@ use anyhow::{bail, Result};
 use opencoder_core::{fleet::*, SseEvt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+mod cache;
+mod compatibility;
+mod inspection;
 mod io;
+pub(crate) use inspection::Inspection;
+mod loading;
+mod projection;
+mod reading;
+mod reporting;
+pub(crate) use reporting::DispatchCache;
+mod summary;
 #[cfg(test)]
 use io::normalize_legacy_index;
 use io::{durable_json, validate_record};
@@ -44,7 +54,16 @@ enum RecordLocation {
 pub(crate) struct Journal {
     layout: DirectoryLayout,
     locations: BTreeMap<String, RecordLocation>,
-    pub records: BTreeMap<String, Record>,
+    // Report projections only; full records are read through get/read_record.
+    records: BTreeMap<String, Record>,
+    pub summaries: BTreeMap<String, summary::Summary>,
+    revision: u64,
+    cache: std::sync::Arc<std::sync::Mutex<cache::Cache>>,
+    inspection_cache: std::sync::Arc<std::sync::Mutex<cache::Cache>>,
+    read_slots: std::sync::Arc<tokio::sync::Semaphore>,
+    report_candidates: BTreeSet<String>,
+    terminal_candidates: BTreeSet<String>,
+    pub inventory: opencoder_core::fleet::inventory::InventoryLog,
 }
 
 impl Journal {
@@ -58,56 +77,40 @@ impl Journal {
             layout,
             locations: BTreeMap::new(),
             records: BTreeMap::new(),
+            summaries: BTreeMap::new(),
+            revision: 0,
+            cache: Default::default(),
+            inspection_cache: std::sync::Arc::new(std::sync::Mutex::new(Inspection::cache())),
+            read_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+            report_candidates: BTreeSet::new(),
+            terminal_candidates: BTreeSet::new(),
+            inventory: Default::default(),
         };
         journal.load_legacy()?;
         journal.load_current()?;
-        // Check before recovery writes. An older binary must finish legacy
-        // nonterminal brain work; upgrading must not reinterpret its state.
-        for record in journal.records.values() {
-            if record.assignment.index.kind == ExecutionKind::Dag
-                && !matches!(
-                    record.assignment.index.status,
-                    ExecutionStatus::Done | ExecutionStatus::Error | ExecutionStatus::Cancelled
-                )
-                && record.annotations.get("dag_parent").is_none()
-            {
-                bail!("DAG migration blocked by nonterminal execution {}; terminate it with the previous runtime before upgrading", record.assignment.index.id);
-            }
-            let input = &record.assignment.request.input;
-            let legacy = (record.assignment.index.kind == ExecutionKind::Brain
-                && input["schema_version"]
-                    != opencoder_core::brain::layered::LAYERED_SCHEMA_VERSION)
-                || input.get("_brain").is_some()
-                || input.get("brain_scheduler").is_some()
-                || input.get("brain_receipt").is_some()
-                || input.get("playbook_receipt").is_some();
-            if legacy
-                && !matches!(
-                    record.assignment.index.status,
-                    ExecutionStatus::Done | ExecutionStatus::Error | ExecutionStatus::Cancelled
-                )
-            {
-                bail!("brain migration blocked by nonterminal legacy execution {}; let its owning old runtime converge before upgrading", record.assignment.index.id);
+        for summary in journal.summaries.values() {
+            if let Some(error) = &summary.compatibility_error {
+                bail!("{error}");
             }
         }
+        *journal.cache.lock().unwrap() = cache::Cache::default();
         Ok(journal)
     }
 
     pub fn recover(mut self) -> Result<Self> {
-        let ids: Vec<_> = self.records.keys().cloned().collect();
+        let ids: Vec<_> = self.summaries.keys().cloned().collect();
         for id in ids {
-            let mut record = self.records[&id].clone();
-            if record.assignment.index.status == ExecutionStatus::Pending
-                && record.queue.is_some()
-                && record.lifecycle.stop_intent.is_none()
+            let summary = &self.summaries[&id];
+            if summary.index.status == ExecutionStatus::Pending
+                && summary.queue.is_some()
+                && summary.stop_intent.is_none()
             {
                 continue;
             }
-            let transition =
-                lifecycle::recover(record.assignment.index.status, record.lifecycle.stop_intent);
-            if transition.status != record.assignment.index.status
-                || transition.intent != record.lifecycle.stop_intent
+            let transition = lifecycle::recover(summary.index.status, summary.stop_intent);
+            if transition.status != summary.index.status || transition.intent != summary.stop_intent
             {
+                let mut record = self.get_sync(&id)?.expect("recovery summary exists");
                 record.assignment.index.status = transition.status;
                 record.lifecycle.stop_intent = transition.intent;
                 record.error = match transition.status {
@@ -140,9 +143,20 @@ impl Journal {
             }
             RecordLocation::Legacy => self.layout.legacy_record_path(&id)?,
         };
-        durable_json(&path, &record)?;
+        let inspection = durable_json(&path, &record)?
+            .and_then(|stamp| Inspection::encode(&record).map(|bytes| (stamp, bytes)));
         self.locations.insert(id.clone(), location);
-        self.records.insert(id, record);
+        self.update_report_candidate(&record);
+        self.inventory.set(record.assignment.index.clone());
+        self.install(record, location);
+        if let Some((stamp, bytes)) = inspection {
+            self.inspection_cache.lock().unwrap().insert(
+                id,
+                self.revision,
+                stamp,
+                std::sync::Arc::new(bytes),
+            );
+        }
         Ok(())
     }
 
@@ -150,7 +164,7 @@ impl Journal {
     /// reports stop resurrecting it after control-side deletion. Unknown ids
     /// return false; a missing record file is tolerated.
     pub fn forget(&mut self, id: &str) -> Result<bool> {
-        let Some(record) = self.records.get(id).cloned() else {
+        let Some(record) = self.summaries.get(id) else {
             return Ok(false);
         };
         let location = self
@@ -159,7 +173,7 @@ impl Journal {
             .copied()
             .unwrap_or(RecordLocation::Current);
         let path = match location {
-            RecordLocation::Current => self.layout.record_path(record.assignment.index.kind, id)?,
+            RecordLocation::Current => self.layout.record_path(record.index.kind, id)?,
             RecordLocation::Legacy => self.layout.legacy_record_path(id)?,
         };
         if let Err(error) = std::fs::remove_file(&path) {
@@ -169,6 +183,12 @@ impl Journal {
         }
         self.locations.remove(id);
         self.records.remove(id);
+        self.summaries.remove(id);
+        self.cache.lock().unwrap().remove(id);
+        self.inspection_cache.lock().unwrap().remove(id);
+        self.inventory.remove(id);
+        self.terminal_candidates.remove(id);
+        self.report_candidates.remove(id);
         Ok(true)
     }
 
@@ -176,11 +196,10 @@ impl Journal {
         self.locations.get(id) == Some(&RecordLocation::Legacy)
     }
 
-    pub fn begin_run(&mut self, id: &str, result: Value) -> Result<()> {
+    pub async fn begin_run(&mut self, id: &str, result: Value) -> Result<()> {
         let mut record = self
-            .records
             .get(id)
-            .cloned()
+            .await?
             .ok_or_else(|| anyhow::anyhow!("execution not found"))?;
         if !lifecycle::can_start(record.assignment.index.status) {
             bail!(
@@ -196,11 +215,10 @@ impl Journal {
         self.save(record)
     }
 
-    pub fn mark_todo_initialized(&mut self, id: &str) -> Result<()> {
+    pub async fn mark_todo_initialized(&mut self, id: &str) -> Result<()> {
         let mut record = self
-            .records
             .get(id)
-            .cloned()
+            .await?
             .ok_or_else(|| anyhow::anyhow!("execution not found"))?;
         if record.assignment.index.kind != ExecutionKind::Todos {
             bail!("only todo executions have workflow initialization state");
@@ -215,16 +233,15 @@ impl Journal {
         self.save(record)
     }
 
-    pub fn request_stop(
+    pub async fn request_stop(
         &mut self,
         id: &str,
         intent: StopIntent,
         active: bool,
     ) -> Result<StopUpdate> {
         let mut record = self
-            .records
             .get(id)
-            .cloned()
+            .await?
             .ok_or_else(|| anyhow::anyhow!("execution not found"))?;
         let current = record.assignment.index.status;
         let current_intent = record.lifecycle.stop_intent;
@@ -242,7 +259,7 @@ impl Journal {
         })
     }
 
-    pub fn finalize(
+    pub async fn finalize(
         &mut self,
         id: &str,
         proposed: ExecutionStatus,
@@ -250,9 +267,8 @@ impl Journal {
         error: Option<String>,
     ) -> Result<ExecutionStatus> {
         let mut record = self
-            .records
             .get(id)
-            .cloned()
+            .await?
             .ok_or_else(|| anyhow::anyhow!("execution not found"))?;
         let current = record.assignment.index.status;
         let transition = lifecycle::finalize(current, record.lifecycle.stop_intent, proposed);
@@ -266,102 +282,6 @@ impl Journal {
         append_status_event(&mut record);
         self.save(record)?;
         Ok(transition.status)
-    }
-
-    fn load_legacy(&mut self) -> Result<()> {
-        let root = self.layout.legacy_records_root();
-        if !root.exists() {
-            return Ok(());
-        }
-        if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&root)?) {
-            bail!("legacy journal root cannot be a symlink");
-        }
-        for entry in std::fs::read_dir(root)? {
-            let entry = entry?;
-            if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?) {
-                bail!(
-                    "journal records cannot be symlinks: {}",
-                    entry.path().display()
-                );
-            }
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
-            let record = read_record(&path, true)?;
-            if path.file_stem().and_then(|value| value.to_str())
-                != Some(record.assignment.index.id.as_str())
-            {
-                bail!("legacy journal file name does not match execution id");
-            }
-            self.insert_loaded(record, RecordLocation::Legacy)?;
-        }
-        Ok(())
-    }
-
-    fn load_current(&mut self) -> Result<()> {
-        for kind in ALL_KINDS {
-            let root = self.layout.kind_root(kind);
-            if !root.exists() {
-                continue;
-            }
-            if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&root)?) {
-                bail!("execution kind root cannot be a symlink");
-            }
-            for entry in std::fs::read_dir(root)? {
-                let entry = entry?;
-                if entry.file_name().to_string_lossy().starts_with('.') {
-                    continue;
-                }
-                if opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(entry.path())?)
-                {
-                    bail!(
-                        "execution directories cannot be symlinks: {}",
-                        entry.path().display()
-                    );
-                }
-                if !entry.file_type()?.is_dir() {
-                    continue;
-                }
-                let id = entry
-                    .file_name()
-                    .into_string()
-                    .map_err(|_| anyhow::anyhow!("non-UTF8 execution directory"))?;
-                let path = self.layout.record_path(kind, &id)?;
-                if !path.exists() {
-                    continue;
-                }
-                let record = read_record(&path, false)?;
-                validate_record(&record, Some(kind))?;
-                if id != record.assignment.index.id {
-                    bail!("execution directory name does not match execution id");
-                }
-                self.insert_loaded(record, RecordLocation::Current)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn insert_loaded(&mut self, record: Record, location: RecordLocation) -> Result<()> {
-        let id = record.assignment.index.id.clone();
-        if let Some(existing) = self.records.get(&id) {
-            let existing_location = self.locations[&id];
-            if !coexisting_records_are_valid(
-                &self.layout,
-                existing,
-                existing_location,
-                &record,
-                location,
-            )? {
-                bail!("conflicting legacy and current execution records for {id}");
-            }
-            if existing_location == RecordLocation::Current {
-                return Ok(());
-            }
-        }
-        self.locations.insert(id.clone(), location);
-        self.records.insert(id, record);
-        Ok(())
     }
 }
 
@@ -392,29 +312,10 @@ fn append_status_event(record: &mut Record) {
     });
 }
 
-fn coexisting_records_are_valid(
-    layout: &DirectoryLayout,
-    left: &Record,
-    left_location: RecordLocation,
-    right: &Record,
-    right_location: RecordLocation,
-) -> Result<bool> {
-    if serde_json::to_value(left)? == serde_json::to_value(right)? {
-        return Ok(true);
-    }
-    let (legacy, current) = match (left_location, right_location) {
-        (RecordLocation::Legacy, RecordLocation::Current) => (left, right),
-        (RecordLocation::Current, RecordLocation::Legacy) => (right, left),
-        _ => return Ok(false),
-    };
-    Ok(same_execution(legacy, current)
-        && crate::migration::receipt_matches_legacy(
-            layout,
-            &legacy.assignment.index.id,
-            legacy.assignment.index.kind,
-        )?)
-}
-
 #[cfg(test)]
 #[path = "journal/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/journal_memory/cases.rs"]
+mod memory_tests;

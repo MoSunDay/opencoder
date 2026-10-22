@@ -1,10 +1,10 @@
-use super::report::{BeginDecision, ReportCollector};
 use super::SocketCommand;
+use super::report::{BeginDecision, ReportCollector};
 use crate::AppState;
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::Response,
 };
@@ -21,14 +21,21 @@ pub struct NodeChannelQuery {
 pub async fn upgrade(
     State(state): State<Arc<AppState>>,
     Query(query): Query<NodeChannelQuery>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let incremental = headers
+        .get(INDEX_REPORT_DELTA_HEADER)
+        .is_some_and(|v| v == INDEX_REPORT_DELTA_VERSION)
+        && headers
+            .get(INDEX_REPORT_ACK_HEADER)
+            .is_some_and(|v| v == "1");
     let mut response = ws
         .max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
         .on_upgrade(move |socket| async move {
             let node_id = query.node_id;
-            if let Err(error) = serve(state, socket, node_id.clone()).await {
+            if let Err(error) = serve(state, socket, node_id.clone(), incremental).await {
                 tracing::error!(%node_id, %error, "node channel failed");
             }
         });
@@ -36,6 +43,12 @@ pub async fn upgrade(
         INDEX_REPORT_ACK_HEADER,
         axum::http::HeaderValue::from_static("1"),
     );
+    if incremental {
+        response.headers_mut().insert(
+            INDEX_REPORT_DELTA_HEADER,
+            axum::http::HeaderValue::from_static(INDEX_REPORT_DELTA_VERSION),
+        );
+    }
     response
 }
 
@@ -43,6 +56,7 @@ async fn serve(
     state: Arc<AppState>,
     socket: WebSocket,
     authenticated_node_id: String,
+    incremental: bool,
 ) -> anyhow::Result<()> {
     let (mut writer, mut reader) = socket.split();
     let first = tokio::select! {
@@ -67,6 +81,10 @@ async fn serve(
     }
     let id = registration.id.clone();
     let generation = snapshot.generation.clone();
+    anyhow::ensure!(
+        !incremental || generation.starts_with("host-"),
+        "incremental reports require a managed Host generation"
+    );
     let mut snapshot_sequence = snapshot.sequence;
     let mut report_sequence = snapshot_sequence;
     let mut report_flow: Option<(u64, u64)> = None;
@@ -117,13 +135,15 @@ async fn serve(
         let fleet = state.fleet.clone();
         let node = registration.clone();
         super::socket_io::storage(async move { fleet.register(&node).await }).await?;
-        let mut applying = tokio::task::JoinSet::<anyhow::Result<()>>::new();
+        let mut applying = tokio::task::JoinSet::<anyhow::Result<Option<u64>>>::new();
         loop {
             // Transport owns termination and its precise I/O error. Once the
             // input queue closes, let the outer select collect that result.
             let frame = tokio::select! {
                 finished = applying.join_next(), if !applying.is_empty() => {
-                    finished.expect("one report application")??;
+                    if let Some(sequence) = finished.expect("one report application")?? {
+                        reports.committed(sequence);
+                    }
                     continue;
                 }
                 incoming = incoming.recv() => match incoming {
@@ -154,7 +174,9 @@ async fn serve(
                             }
                         });
                     }
-                    if let Some((report_id, sequence)) = report_flow.as_mut() {
+                    if let Some((report_id, sequence)) =
+                        report_flow.as_mut().filter(|_| !incremental)
+                    {
                         *sequence = sequence
                             .checked_add(1)
                             .ok_or_else(|| anyhow::anyhow!("report acknowledgement overflow"))?;
@@ -168,19 +190,43 @@ async fn serve(
                     state.hub.snapshot(&id, &generation, snapshot).await;
                 }
                 NodeFrame::IndexReport { report } => {
-                    if !state.hub.touch(&id, &generation).await {
-                        continue;
-                    }
+                    // A replaced Host still drains its original RPCs. Complete
+                    // report flow control on that socket; storage and Hub fences
+                    // reject its obsolete data without causing an ACK timeout.
+                    state.hub.touch(&id, &generation).await;
                     if !applying.is_empty() {
-                        applying
+                        if let Some(sequence) = applying
                             .join_next()
                             .await
-                            .expect("one report application")??;
+                            .expect("one report application")??
+                        {
+                            reports.committed(sequence);
+                        }
                     }
                     let report_id = report.report_id;
                     let acknowledged = report.acknowledge;
+                    anyhow::ensure!(
+                        !incremental || acknowledged,
+                        "negotiated reports require commit acknowledgements"
+                    );
+                    anyhow::ensure!(
+                        matches!(report.part, IndexReportPart::Begin)
+                            || (report.mode == IndexReportMode::Full
+                                && report.base_sequence.is_none()),
+                        "report metadata is only legal at begin"
+                    );
+                    anyhow::ensure!(
+                        matches!(report.part, IndexReportPart::Batch { .. })
+                            || report.removed_ids.is_empty(),
+                        "removals are only legal in batches"
+                    );
                     match report.part {
-                        IndexReportPart::Begin => match reports.begin(report_id)? {
+                        IndexReportPart::Begin => match reports.begin_sync(
+                            report_id,
+                            incremental,
+                            report.mode,
+                            report.base_sequence,
+                        )? {
                             BeginDecision::CapturePending => {
                                 report_sequence = snapshot_sequence;
                                 let fleet = state.fleet.clone();
@@ -221,7 +267,12 @@ async fn serve(
                             BeginDecision::Ignore => {}
                         },
                         IndexReportPart::Batch { records } => {
+                            anyhow::ensure!(
+                                records.len() + report.removed_ids.len() <= INDEX_REPORT_BATCH_SIZE,
+                                "report batch too large"
+                            );
                             reports.batch(report_id, records)?;
+                            reports.removals(report_id, report.removed_ids)?;
                             if let Some((active, sequence)) = report_flow.as_mut() {
                                 anyhow::ensure!(
                                     *active == report_id && acknowledged,
@@ -255,7 +306,7 @@ async fn serve(
                                     // One connection-owned application preserves ordering while
                                     // the same socket still resolves replies and reads load updates.
                                     applying.spawn(async move {
-                                        if super::socket_report::finish(
+                                        super::socket_report::finish(
                                             &state,
                                             &id,
                                             &generation,
@@ -263,17 +314,18 @@ async fn serve(
                                             &complete,
                                             &sender,
                                         )
-                                        .await?
-                                        {
-                                            super::socket_report::acknowledge(
-                                                &sender, report_id, sequence,
-                                            )
-                                            .await?;
-                                        }
-                                        Ok(())
+                                        .await?;
+                                        // A superseded generation still owns its outstanding
+                                        // RPC replies. Acknowledge the discarded report so its
+                                        // flow-control timeout cannot sever that reply path.
+                                        super::socket_report::acknowledge(
+                                            &sender, report_id, sequence,
+                                        )
+                                        .await?;
+                                        Ok(Some(report_sequence))
                                     });
                                 } else {
-                                    super::socket_report::finish(
+                                    let applied = super::socket_report::finish(
                                         &state,
                                         &id,
                                         &generation,
@@ -282,6 +334,9 @@ async fn serve(
                                         &acknowledgements,
                                     )
                                     .await?;
+                                    if applied {
+                                        reports.committed(report_sequence);
+                                    }
                                 }
                             }
                         }

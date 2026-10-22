@@ -2,7 +2,7 @@ use super::Host;
 use anyhow::{Context, Result};
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The wire operation already carries an execution reference on every query.
 /// Never infer ownership from an ID prefix or from the currently active release.
@@ -49,12 +49,7 @@ impl Host {
                 if runtime.mode == "staged" {
                     continue;
                 }
-                if self
-                    .store
-                    .definition("runtime_sleep", &runtime.id)
-                    .await?
-                    .is_some_and(|v| !v.is_null())
-                {
+                if self.store.runtime_sleep_stamp(&runtime.id).await?.1 {
                     continue;
                 }
                 let reply = self.call_runtime(&runtime.id, &operation).await?;
@@ -142,13 +137,13 @@ impl Host {
                                 return Ok(RpcReply::error(
                                     400,
                                     "dialogs_clear only supports operator or agent",
-                                ))
+                                ));
                             }
                             Err(error) => {
                                 return Ok(RpcReply::error(
                                     400,
                                     format!("invalid dialogs_clear kind: {error}"),
-                                ))
+                                ));
                             }
                         },
                     };
@@ -289,7 +284,7 @@ impl Host {
                     return Ok(RpcReply::error(
                         404,
                         "execution runtime ownership not found",
-                    ))
+                    ));
                 }
             }
         } else {
@@ -298,6 +293,25 @@ impl Host {
         self.call_runtime(&runtime, &operation).await
     }
 
+    async fn collect_report_indexes(
+        &self,
+        started: std::time::Instant,
+        gate_ms: u128,
+    ) -> Result<opencoder_node::fleet::NodeReport> {
+        let records = self.indexes().await?;
+        let inventory_ms = started.elapsed().as_millis() - gate_ms;
+        let snapshot = self.snapshot();
+        if started.elapsed().as_millis() >= 250 {
+            tracing::info!(node_id = %self.registration.id, gate_ms, inventory_ms,
+                records = records.len(),
+                "host inventory report timing");
+        }
+        Ok(opencoder_node::fleet::NodeReport {
+            snapshot,
+            records,
+            brain: Vec::new(),
+        })
+    }
     pub async fn active_runtime(&self) -> Result<String> {
         self.store
             .runtimes()
@@ -309,6 +323,21 @@ impl Host {
     }
 
     pub async fn status(&self) -> Result<Value> {
+        let mut reported_servers = Vec::new();
+        for server in self.store.definitions("release_server").await? {
+            if server["enabled"] != true {
+                continue;
+            }
+            let id = server["id"].as_str().context("server identity missing")?;
+            let ack = self
+                .store
+                .definition("host_ack", id)
+                .await?
+                .unwrap_or_default();
+            if ack["instance"] == self.instance {
+                reported_servers.push(id.to_owned());
+            }
+        }
         let mut runtimes = Vec::new();
         for runtime in self.store.runtimes().await? {
             runtimes.push(
@@ -318,13 +347,17 @@ impl Host {
             );
         }
         Ok(
-            json!({"node":self.registration,"snapshot":self.snapshot(),"capacity":self.store.capacity().await?,"runtimes":runtimes}),
+            json!({"node":self.registration,"snapshot":self.snapshot(),"capacity":self.store.capacity().await?,"runtimes":runtimes,
+                "index_report_version":INDEX_REPORT_DELTA_VERSION,"reported_servers":reported_servers}),
         )
     }
 }
 
 #[async_trait::async_trait]
 impl NodeService for Host {
+    fn supports_index_deltas(&self) -> bool {
+        true
+    }
     async fn reconnect_allowed(&self, remote: &str) -> Result<bool> {
         if self.retiring() {
             return Ok(false);
@@ -353,24 +386,37 @@ impl NodeService for Host {
         self.changes.subscribe()
     }
     async fn report(&self) -> Result<opencoder_node::fleet::NodeReport> {
+        // Legacy peers retain one serialized full collection, including Brain.
         let started = std::time::Instant::now();
         let _gate = self.report_gate.lock().await;
-        let gate_ms = started.elapsed().as_millis();
-        let records = self.indexes().await?;
-        let inventory_ms = started.elapsed().as_millis() - gate_ms;
-        let snapshot = self.snapshot();
-        let brain = self.brain_frames().await?;
-        if started.elapsed().as_millis() >= 250 {
-            tracing::info!(node_id = %self.registration.id, gate_ms, inventory_ms,
-                brain_ms = started.elapsed().as_millis() - gate_ms - inventory_ms,
-                records = records.len(), brain_frames = brain.len(),
-                "host inventory report timing");
-        }
-        Ok(opencoder_node::fleet::NodeReport {
-            snapshot,
-            records,
-            brain,
-        })
+        let mut report = self
+            .collect_report_indexes(started, started.elapsed().as_millis())
+            .await?;
+        report.brain = self.brain_frames().await?;
+        Ok(report)
+    }
+    async fn index_report(&self) -> Result<opencoder_node::fleet::NodeReport> {
+        let started = std::time::Instant::now();
+        let _gate = self.report_gate.lock().await;
+        self.collect_report_indexes(started, started.elapsed().as_millis())
+            .await
+    }
+    async fn index_changes(
+        &self,
+        after: Option<u64>,
+    ) -> Result<Option<opencoder_node::fleet::SourceReport>> {
+        let _gate = self.report_gate.lock().await;
+        let changes = self.collect_inventory_changes(after).await?;
+        Ok(Some(opencoder_node::fleet::SourceReport {
+            report: opencoder_node::fleet::NodeReport {
+                snapshot: self.snapshot(),
+                records: changes.records,
+                brain: Vec::new(),
+            },
+            revision: changes.revision,
+            full: changes.full,
+            removed_ids: changes.removed_ids,
+        }))
     }
     async fn indexes(&self) -> Result<Vec<ExecutionIndex>> {
         match self.sync_inventory().await {
@@ -390,13 +436,7 @@ impl NodeService for Host {
                 .store
                 .shared_request_lock("runtime-use", &runtime.id)
                 .await?;
-            if runtime.mode == "staged"
-                || self
-                    .store
-                    .definition("runtime_sleep", &runtime.id)
-                    .await?
-                    .is_some_and(|v| !v.is_null())
-            {
+            if runtime.mode == "staged" || self.store.runtime_sleep_stamp(&runtime.id).await?.1 {
                 continue;
             }
             let config: super::config::RuntimeConfig = serde_json::from_value(runtime.config)?;

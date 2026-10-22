@@ -2,13 +2,13 @@
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import '../../test/setup-dom.js';
-vi.mock('../../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
-import { apiGet, apiPost } from '../../api.js';
+vi.mock('../../api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPatch: vi.fn(), apiDel: vi.fn() }));
+import { apiGet, apiPost, apiPatch, apiDel } from '../../api.js';
 import { setIdentity } from '../../store.js';
 import { TodoComments } from './panel.jsx';
 import { useComments } from './useComments.js';
 
-const comment = (seq, body = `note-${seq}`) => ({ seq, body_md: body, author_kind: 'user', author_name: 'alice', author_id: 'alice', submitted_by: 'alice', created_at: 1 });
+const comment = (seq, body = `note-${seq}`) => ({ seq, revision: 1, body_md: body, author_kind: 'user', author_name: 'alice', author_id: 'alice', submitted_by: 'alice', created_at: 1 });
 const props = () => ({ todoId: 't', active: true, onDraftChange: vi.fn(), onBusyChange: vi.fn(), openExecution: vi.fn(), refresh: vi.fn() });
 beforeEach(() => {
   vi.resetAllMocks(); setIdentity({ name: 'alice', role: 'editor' });
@@ -55,18 +55,77 @@ it('aborts hidden reads and never replaces comments with a late response', async
   expect(screen.queryByText('旧响应')).toBeNull();
 });
 
-it('loads every incremental page and pauses polling while hidden', async () => {
+it('refreshes loaded history after remote edits and deletion and pauses while hidden', async () => {
   vi.useFakeTimers();
-  apiGet.mockImplementation(async (path) => path.includes('after_seq=3') ? { comments: [], has_more: false }
-    : path.includes('after_seq=2') ? { comments: [comment(3)], has_more: false }
-    : path.includes('after_seq=1') ? { comments: [comment(2)], has_more: true }
-    : { comments: [comment(1)], has_more: false });
+  let current = [comment(1), comment(2)];
+  apiGet.mockImplementation(async () => ({ comments: current, has_more: false }));
   const view = renderHook(({ active }) => useComments('t', active), { initialProps: { active: true } });
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  current = [{ ...comment(1, 'updated remotely'), revision: 2 }, comment(3)];
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-  expect(view.result.current.rows.map((row) => row.seq)).toEqual([1, 2, 3]);
+  expect(view.result.current.rows.map((row) => row.seq)).toEqual([1, 3]);
+  expect(view.result.current.rows[0].body_md).toBe('updated remotely');
   view.rerender({ active: false });
   const count = apiGet.mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
   expect(apiGet).toHaveBeenCalledTimes(count);
+});
+
+it('retains an edit on failure and saves with the original revision', async () => {
+  apiGet.mockResolvedValue({ comments: [comment(1)], has_more: false });
+  apiPatch.mockRejectedValueOnce(new Error('评论已变化')).mockResolvedValueOnce({ ...comment(1, '**merged**'), revision: 2 });
+  const p = props(); render(<TodoComments {...p} />);
+  fireEvent.click(await screen.findByRole('button', { name: '编辑评论' }));
+  fireEvent.change(screen.getByLabelText('编辑评论正文'), { target: { value: '**merged**' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: /保存评论$/ }).classList.contains('ant-btn-loading')).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: /保存评论$/ }));
+  expect(await screen.findByText('评论已变化')).toBeTruthy();
+  expect(screen.getByLabelText('编辑评论正文').value).toBe('**merged**');
+  expect(p.onDraftChange).toHaveBeenLastCalledWith(true);
+  await waitFor(() => expect(screen.getByRole('button', { name: /保存评论$/ }).classList.contains('ant-btn-loading')).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: /保存评论$/ }));
+  expect(await screen.findByText('merged')).toBeTruthy();
+  expect(apiPatch).toHaveBeenLastCalledWith('/api/project/todos/t/comments/1', { body_md: '**merged**', expected_revision: 1 });
+  expect(screen.getByText('已编辑')).toBeTruthy();
+  expect(apiPost).not.toHaveBeenCalled();
+});
+
+it('requires deletion confirmation and preserves the comment on failure', async () => {
+  apiGet.mockResolvedValue({ comments: [comment(1)], has_more: false });
+  apiDel.mockRejectedValueOnce(new Error('删除失败')).mockResolvedValueOnce({ ok: true });
+  render(<TodoComments {...props()} />);
+  fireEvent.click(await screen.findByRole('button', { name: '删除评论' }));
+  expect(apiDel).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole('button', { name: /删\s*除$/ }));
+  expect(await screen.findByText('删除失败')).toBeTruthy();
+  expect(screen.getByText('note-1')).toBeTruthy();
+  await waitFor(() => expect(screen.getByRole('button', { name: '删除评论' }).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '删除评论' }));
+  fireEvent.click(await screen.findByRole('button', { name: /删\s*除$/ }));
+  await waitFor(() => expect(screen.queryByText('note-1')).toBeNull());
+  expect(apiDel).toHaveBeenLastCalledWith('/api/project/todos/t/comments/1?expected_revision=1');
+});
+
+it('restricts mutation controls to the submitting editor or an administrator', async () => {
+  apiGet.mockResolvedValue({ comments: [comment(1)], has_more: false });
+  setIdentity({ name: 'bob', role: 'editor' });
+  render(<TodoComments {...props()} />);
+  await screen.findByText('note-1');
+  expect(screen.queryByRole('button', { name: '编辑评论' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '删除评论' })).toBeNull();
+  act(() => setIdentity({ name: 'admin', role: 'admin' }));
+  expect(await screen.findByRole('button', { name: '编辑评论' })).toBeTruthy();
+});
+
+it('discards a polling response that predates a local mutation', async () => {
+  vi.useFakeTimers();
+  let resolve;
+  apiGet.mockResolvedValueOnce({ comments: [comment(1)], has_more: false })
+    .mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  const view = renderHook(() => useComments('t', true));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  act(() => view.result.current.remove(1));
+  await act(async () => resolve({ comments: [comment(1)], has_more: false }));
+  expect(view.result.current.rows).toEqual([]);
 });

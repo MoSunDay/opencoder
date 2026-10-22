@@ -1,4 +1,4 @@
-Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
+Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
 # 项目工作台
 
@@ -37,9 +37,9 @@ TODO 详情分成任务、文件、设置、执行四个页签。任务标题输
 全宽右侧 TODO 抽屉在执行页签展示执行列表，执行页隐藏时停止读取执行记录，任务页隐藏时停止读取评论，迟到请求不会跳页；宽度随视口变化。多个 operator 可分别执行同一 TODO；多人也可打开同一执行 ID，共享上下文并通过原生明细提交引导。人工输入在回复未确认时保持原输入 ID。项目不设置独占领取锁，也不为 TODO 新建额外会话或调度循环。
 
 
-TODO 评论只追加 Markdown 信息。网页按当前用户署名；API/CLI 可指定能力库中的 Agent、Operator、Team、DAG、TODO 工作流或 Brain 能力 ID，记录能力名称与类型快照及实际提交用户。可选执行来源须已关联当前 TODO，能力署名须与真实准入能力一致；评论不替代任务验收。viewer 阅读，editor/admin 追加；默认显示最近 50 条，可加载更早评论并在可见时读取增量。正文最大 64 KiB；同一提交用户、TODO 和 request_id 的重试返回原评论，内容改变返回冲突。追加更新 TODO 更新时间，子项现状的证据收集包含全部评论；删除 TODO 清理评论，删除能力或用户不改写历史署名。
+TODO 评论支持追加、编辑和删除 Markdown 信息。网页按当前用户署名；API/CLI 可指定能力库中的 Agent、Operator、Team、DAG、TODO 工作流或 Brain 能力 ID，记录能力名称与类型快照及实际提交用户。可选执行来源须已关联当前 TODO，能力署名须与真实准入能力一致；评论不替代任务验收。viewer 阅读，editor/admin 追加；editor 只能编辑、删除自己提交的评论，admin 可管理所有评论。删除前确认，失败保留正文和编辑草稿。默认显示最近 50 条，可加载更早评论，并在可见时刷新已加载范围，同步其他人的编辑与删除。正文最大 64 KiB；编辑只改正文，保留序号、署名、来源和创建时间；读取返回 `revision` 和 `updated_at`，修改必须携带当前 `expected_revision`，过期返回 409。同一提交用户、TODO 和 request_id 的原追加请求重试返回当前正文，原输入改变或评论已删除返回冲突。新增、编辑和删除更新 TODO 更新时间，子项现状的证据收集包含全部评论；删除 TODO 清理评论，删除能力或用户不改写历史署名。
 
-API 为 `GET/POST /api/project/todos/:id/comments`；CLI 为 `project todos comments list <id>` 和 `project todos comments add <id> --json @file`。追加正文使用 `request_id`、`body_md`，能力署名和来源分别使用可选 `capability_id`、`execution_id`；重试保留原 request_id。分页使用互斥的 `before_seq`、`after_seq`，默认 50 条、最多 100 条。
+API 为 `GET/POST /api/project/todos/:id/comments`；CLI 为 `project todos comments list <id>` 和 `project todos comments add <id> --json @file`。追加正文使用 `request_id`、`body_md`，能力署名和来源分别使用可选 `capability_id`、`execution_id`；重试保留原 request_id。分页使用互斥的 `before_seq`、`after_seq`，默认 50 条、最多 100 条。`after_seq` 只读取新序号，编辑和删除须重新读取相应页面。编辑为 `PATCH /api/project/todos/:id/comments/:seq`，正文 `{body_md,expected_revision}`；删除为 `DELETE` 同路径并传 `?expected_revision=N`。CLI 对应 `comments edit <id> <seq> --json @file` 和 `comments delete <id> <seq> --expected-revision N`。
 
 CLI 提供 `project people`、`project todos links/attach/detach/dispatch` 和 `exec result`，与 Web 共用 Server API；独立 Web 的旧项目 API 不提供控制台执行索引。创建和修改的人员字段为 `owner_user_name`、`follower_user_names`；PATCH 不传则保留，分别传 `null`、`[]` 清空。非法用户使整次对象和 Tag 修改回滚。
 

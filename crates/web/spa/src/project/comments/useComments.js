@@ -10,16 +10,23 @@ export function useComments(todoId, active) {
   const [revision, setRevision] = useState(0);
   const [added, setAdded] = useState(0);
   const records = useRef([]);
-  const initialized = useRef(false);
+  const mutation = useRef(0);
   const polling = useRef(false);
   const requests = useRef(new Set());
   const generation = useRef(0);
   const merge = useCallback((items) => {
+    mutation.current += 1;
     const combined = new Map(records.current.map((row) => [row.seq, row]));
     items.forEach((row) => combined.set(row.seq, row));
     records.current = [...combined.values()].sort((a, b) => a.seq - b.seq);
     setRows(records.current);
   }, []);
+  const remove = useCallback((seq) => {
+    mutation.current += 1;
+    records.current = records.current.filter((row) => row.seq !== seq);
+    setRows(records.current);
+  }, []);
+  useEffect(() => { records.current = []; setRows([]); setOlder(false); setAdded(0); }, [path]);
   const read = useCallback(async (query = '') => {
     const request = new AbortController(); requests.current.add(request);
     try {
@@ -48,22 +55,25 @@ export function useComments(todoId, active) {
     const poll = async () => {
       if (polling.current) { timer = setTimeout(poll, 5000); return; }
       polling.current = true;
-      if (!initialized.current) setLoading(true);
+      if (!records.current.length) setLoading(true);
+      const version = mutation.current;
+      const first = records.current[0]?.seq;
+      const last = records.current.at(-1)?.seq;
       try {
-        if (!initialized.current || records.current.length === 0) {
-          const page = await read();
-          if (page && !disposed) { merge(page.comments); setOlder(page.has_more); initialized.current = true; }
-        } else {
-          let count = 0;
-          let more = true;
-          while (more && !disposed) {
-            const last = records.current.at(-1).seq;
-            const page = await read(`?after_seq=${last}`);
-            if (!page || disposed) break;
-            if (page.has_more && (!page.comments.length || page.comments.at(-1).seq <= last)) throw new Error('评论分页未前进');
-            count += page.comments.length; merge(page.comments); more = page.has_more;
-          }
-          if (!disposed && count) setAdded((old) => old + count);
+        let page = await read();
+        if (!page || disposed) return;
+        let snapshot = page.comments;
+        while (page.has_more && first && snapshot[0]?.seq > first && !disposed) {
+          const before = snapshot[0].seq;
+          page = await read(`?before_seq=${before}`);
+          if (!page || disposed) return;
+          if (!page.comments.length || page.comments[0].seq >= before) throw new Error('评论分页未前进');
+          snapshot = [...page.comments, ...snapshot];
+        }
+        if (!disposed && version === mutation.current) {
+          const count = last ? snapshot.filter((row) => row.seq > last).length : 0;
+          records.current = snapshot; setRows(snapshot); setOlder(page.has_more);
+          if (count) setAdded((old) => old + count);
         }
       } catch (failure) { if (!disposed) setError(failure.message); }
       finally {
@@ -74,5 +84,5 @@ export function useComments(todoId, active) {
     poll();
     return () => { disposed = true; generation.current += 1; polling.current = false; clearTimeout(timer); requests.current.forEach((request) => request.abort()); };
   }, [active, revision, read, merge]);
-  return { rows, loading, older, error, added, loadOlder, merge, reload: () => setRevision((v) => v + 1) };
+  return { rows, loading, older, error, added, loadOlder, merge, remove, reload: () => setRevision((v) => v + 1) };
 }

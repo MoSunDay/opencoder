@@ -70,7 +70,13 @@ class Journal:
     def save(self):
         # The platform Server uses its existing service account to read status.
         # This journal contains release metadata, never credentials or inputs.
-        atomic_bytes(self.path, (json.dumps(self.data, indent=2, sort_keys=True) + "\n").encode(), 0o644)
+        # Servers hold a shared lock through catalog writes. Never replace or
+        # unlink this lock: activation/rollback must wait for the old writer.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with (self.path.parent / "catalog-writer.lock").open("a+") as lock:
+            os.fchmod(lock.fileno(), 0o644)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            atomic_bytes(self.path, (json.dumps(self.data, indent=2, sort_keys=True) + "\n").encode(), 0o644)
 
     def phase(self, phase):
         if phase not in PHASES and phase not in ("failed", "rolling_back", "rolled_back", "migrating"):

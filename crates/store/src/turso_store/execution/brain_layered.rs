@@ -92,6 +92,7 @@ pub async fn commit(conn: &Connection, change: &LayeredChange) -> Result<Layered
             );
             conn.execute("INSERT INTO brain_layered_operations(execution_id,operation_id,run_id,layer,body) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(execution_id) DO UPDATE SET body=excluded.body WHERE run_id=excluded.run_id AND operation_id=excluded.operation_id",params![op.execution_id.clone(),op.operation_id.clone(),op.run_id.clone(),op.layer as i64,serde_json::to_string(op)?]).await?;
         }
+        let mut committed_events=Vec::new();
         for e in &change.events {
             ensure!(e.run_id == run.run_id, "foreign layered event");
             ensure!(
@@ -105,12 +106,14 @@ pub async fn commit(conn: &Connection, change: &LayeredChange) -> Result<Layered
             run.last_event_seq += 1;
             e.seq = run.last_event_seq;
             conn.execute("INSERT INTO brain_layered_events(run_id,seq,execution_id,source_sequence,body) VALUES(?1,?2,?3,?4,?5)",params![run.run_id.clone(),e.seq as i64,e.execution_id.clone(),e.source_sequence.map(|v|v as i64),serde_json::to_string(&e)?]).await?;
+            committed_events.push(e);
         }
         conn.execute(
             "UPDATE brain_layered_runs SET body=?1 WHERE run_id=?2",
             params![serde_json::to_string(&run)?, run.run_id.clone()],
         )
         .await?;
+        super::reporting::update(conn,&run,&change.operations,&committed_events).await?;
         load(conn, &run.run_id)
             .await?
             .context("layered projection disappeared")

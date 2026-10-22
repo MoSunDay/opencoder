@@ -2,6 +2,38 @@ macro_rules! store_implementation_0 {
     ($($methods:tt)*) => {
         store_implementation_1! {
             $($methods)*
+    async fn reporting_recover(&self)->Result<()> {
+        self.db.write(|conn|async move {super::reporting::recover(&conn).await}).await
+    }
+    async fn reporting_format(&self,reader:u32,writer:u32)->Result<()> {
+        self.db.write(move|conn|async move {super::reporting::format(&conn,reader,writer).await}).await
+    }
+    async fn pending_reports(&self,after:Option<&str>,limit:u32)->Result<Vec<crate::reporting::PendingReport>> {
+        let after=after.map(str::to_owned);
+        self.db.read(move|conn|async move {super::reporting::pending(&conn,after.as_deref(),limit).await}).await
+    }
+    async fn has_pending_reports(&self)->Result<bool> {
+        self.db.read(|conn|async move {super::reporting::has_pending(&conn).await}).await
+    }
+    async fn report_ack(&self,ack:&crate::reporting::ReportAck)->Result<()> {
+        let ack=ack.clone();
+        self.db.write(move|conn|async move {super::reporting::acknowledge(&conn,&ack).await}).await
+    }
+    async fn report_acks(&self)->Result<Vec<crate::reporting::ReportAck>> {
+        self.db.read(|conn|async move {super::reporting::acks(&conn).await}).await
+    }
+    async fn report_run_state(&self,id:&str)->Result<Option<crate::reporting::ReportRunState>> {
+        let id=id.to_owned();self.db.read(move|conn|async move {super::reporting::state(&conn,&id).await}).await
+    }
+    async fn report_operation(&self,id:&str,operation:&str)->Result<Option<opencoder_core::brain::layered::LayeredOperation>> {
+        let id=id.to_owned();let operation=operation.to_owned();
+        self.db.read(move|conn|async move {super::reporting::operation(&conn,&id,&operation).await}).await
+    }
+    async fn inventory_sources(&self, after: Option<u64>) -> Result<crate::inventory::InventorySources> {
+        self.db.read(move |conn| async move {
+            super::inventory::read(&conn, after).await
+        }).await
+    }
     async fn brain_layered(
         &self,
         id: &str,

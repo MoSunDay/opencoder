@@ -36,6 +36,7 @@ pub fn build_app_with_auth(
 ) -> Router {
     crate::release::outbox::start(&state);
     crate::scheduler::start(&state);
+    crate::ontology_catalog::start(&state);
     // Captured before the builder chains consume `state`: the bearer
     // middleware resolves platform users through the same store.
     let auth_store = state.store.clone();
@@ -45,6 +46,7 @@ pub fn build_app_with_auth(
     let mut app = Router::<Arc<AppState>>::new()
         .merge(api::compat::routes())
         .merge(api::brain_runs::routes())
+        .merge(crate::ontology_catalog::routes())
         .merge(api::schedules::routes())
         .route("/api/metrics/scheduler", get(api::scheduler_metrics::json))
         .route("/metrics", get(api::scheduler_metrics::prometheus))
@@ -189,6 +191,10 @@ pub fn build_app_with_auth(
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::catalog_guard::protect,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::ontology_catalog::notify_changes,
         ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

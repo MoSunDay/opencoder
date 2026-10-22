@@ -59,7 +59,7 @@ Commit: 1ac64fe8b81a2c7c144c72b717a8031ab18f2589
 
 ## 生产迁移与验收
 
-- 首次迁移到 `d1779dd8`，随后真实模型验收通过正式发布命令切到 `320dbbf3`；Node ID `node-01M1WVDEYE7Q4TFV6J83EZGKYJ`、原凭证和并发上限 20 保留。
+- 首次迁移到 `d1779dd8`，随后真实模型验收通过正式发布命令切到 `320dbbf3`；原 Node ID、凭证和并发上限 20 保留。
 - 维护窗口一致性备份保存 127,219 个文件：`/var/lib/opencoder-platform/backups/first-migration`。不停调度的在线备份保存 16 个数据库并检查完整性，明确标记非跨库同一时刻快照：`/var/lib/opencoder-platform/backups/online-20260915-post-migration`。
 - 旧 Server/Host 已自行退出，旧 Runtime 安全休眠；生产浏览器验证发布状态、历史唤醒、依赖上下文及只读 Review，页面无脚本错误。证据 `/var/tmp/release-live-68cd9f401086e095/browser.json`。
 - 原观察进程在 34 个成功样本后收到 SIGTERM，退出码 143，原因未知；保留部分样本。跨版本检查已在进入观察前全部通过；独立 systemd 监控重新执行完整 900 秒窗口，证据 `/var/tmp/release-live-68cd9f401086e095/observation-restart-01`。重新执行的完整窗口已通过：900 秒内 173 个探针全部完成，最终结果为 PASS，见 `/var/tmp/release-live-68cd9f401086e095/result.json`。

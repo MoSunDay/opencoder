@@ -1,6 +1,7 @@
 //! Node-owned execution adapters. The old Web handlers are an in-process
 //! session API here; no listener or server-side session store is involved.
 mod brain;
+mod inventory;
 mod journal;
 mod layout;
 mod lifecycle;

@@ -9,28 +9,74 @@ pub(super) async fn apply(
     sequence: u64,
     complete: &CompleteReport,
 ) -> anyhow::Result<bool> {
+    let mut inventory = complete.inventory.lock().await;
     let fleet = state.fleet.clone();
     let node = id.to_owned();
     let epoch = generation.to_owned();
     let records = complete.records.clone();
     let pending = complete.pending_at_begin.clone();
+    let negotiated = complete.negotiated;
+    let base_sequence = complete.base_sequence;
     let storage_started = std::time::Instant::now();
-    let recovered = super::socket_io::storage(async move {
-        fleet
-            .apply_index_report_fenced(
-                &node,
-                &records,
-                pending.as_deref(),
-                epoch
-                    .starts_with("host-")
-                    .then_some((epoch.as_str(), sequence)),
-            )
-            .await
+    let applied = super::socket_io::storage(async move {
+        if negotiated {
+            fleet
+                .apply_index_report_committed(
+                    &node,
+                    &records,
+                    pending.as_deref(),
+                    (&epoch, sequence),
+                    base_sequence,
+                )
+                .await
+        } else {
+            fleet
+                .apply_index_report_fenced(
+                    &node,
+                    &records,
+                    pending.as_deref(),
+                    epoch
+                        .starts_with("host-")
+                        .then_some((epoch.as_str(), sequence)),
+                )
+                .await
+                .map(Some)
+        }
     })
-    .await?;
+    .await;
+    let recovered = match applied {
+        Ok(recovered) => recovered,
+        Err(error)
+            if error
+                .downcast_ref::<opencoder_store::fleet::IndexReportBaselineChanged>()
+                .is_some() =>
+        {
+            // Another Server committed a different baseline. Reconstruct this
+            // peer's complete five-column snapshot before using the shared
+            // generation fence; never accept its delta against that baseline.
+            let snapshot = inventory.snapshot(complete)?;
+            state
+                .fleet
+                .apply_index_snapshot_fenced(
+                    id,
+                    &snapshot,
+                    complete.pending_at_begin.as_deref(),
+                    (generation, sequence),
+                )
+                .await?
+        }
+        Err(error) => return Err(error),
+    };
+    let Some(recovered) = recovered else {
+        return Ok(false);
+    };
+    if negotiated {
+        inventory.commit(complete, sequence);
+    }
     if storage_started.elapsed().as_millis() >= 250 {
         tracing::info!(node_id = %id, report_id = complete.report_id,
-            records = complete.records.len(), elapsed_ms = storage_started.elapsed().as_millis(),
+            records = complete.records.len(), removed = complete.removed_ids.len(),
+            base_sequence = complete.base_sequence, elapsed_ms = storage_started.elapsed().as_millis(),
             "control index report storage timing");
     }
     // Storage may finish after the socket closes. Only its still-running
@@ -38,15 +84,10 @@ pub(super) async fn apply(
     // A newer Host can complete its report while this older report awaits
     // storage. Keep the old socket alive for replies to its in-flight calls;
     // its report must not change the new connection's acceptance accounting.
-    if !state.hub.mark_index_synced(id, generation).await {
-        return Ok(false);
-    }
-    state.hub.acknowledge_report(id, &complete.records).await;
-    if complete.initial {
-        state.hub.clear_reservations(&complete.records).await;
-    }
-    state.hub.clear_reservations(&recovered).await;
-    Ok(true)
+    Ok(state
+        .hub
+        .commit_report(id, generation, complete, &recovered)
+        .await)
 }
 
 #[cfg(test)]
@@ -130,49 +171,66 @@ mod tests {
 
     #[tokio::test]
     async fn superseded_report_keeps_the_old_reply_deliverable() {
-        let root = tempfile::tempdir().unwrap();
-        let _scope = opencoder_core::config::scoped_config_home(root.path().join("config"));
-        let state = state(root.path()).await;
-        let mut old = attach(&state, "host-00000000000000000001-old").await;
-        let (call, request) = pending(state.clone(), &mut old).await;
-        let _new = attach(&state, "host-00000000000000000002-new").await;
-        // The old End frame passed its connection check before the new Host
-        // completed its report. Finishing that older report is not a failure.
-        let applied = apply(
-            &state,
-            "handoff-node",
-            "host-00000000000000000001-old",
-            2,
-            &CompleteReport {
-                report_id: 2,
-                records: vec![],
-                pending_at_begin: None,
-                initial: false,
-            },
-        )
-        .await;
-        assert!(!applied.unwrap());
-        state
-            .hub
-            .resolve(
+        for negotiated in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let _scope = opencoder_core::config::scoped_config_home(root.path().join("config"));
+            let state = state(root.path()).await;
+            let mut old = attach(&state, "host-00000000000000000001-old").await;
+            let (call, request) = pending(state.clone(), &mut old).await;
+            let _new = attach(&state, "host-00000000000000000002-new").await;
+            state
+                .fleet
+                .apply_index_report_committed(
+                    "handoff-node",
+                    &[],
+                    None,
+                    ("host-00000000000000000002-new", 1),
+                    None,
+                )
+                .await
+                .unwrap();
+            // The old End frame passed its connection check before the new Host
+            // completed its report. Finishing that older report is not a failure.
+            let applied = apply(
+                &state,
                 "handoff-node",
                 "host-00000000000000000001-old",
-                &request,
-                RpcReply::ok(json!({"accepted":true})),
+                2,
+                &CompleteReport {
+                    inventory: Default::default(),
+                    report_id: 2,
+                    records: vec![],
+                    pending_at_begin: None,
+                    initial: false,
+                    negotiated,
+                    base_sequence: None,
+                    removed_ids: vec![],
+                },
             )
             .await;
-        let reply = tokio::time::timeout(Duration::from_secs(1), call)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(reply.status, 200);
-        assert_eq!(reply.body, json!({"accepted":true}));
-        let view = state.hub.views().await.remove(0);
-        assert!(view.online && view.snapshot.as_ref().unwrap().ready);
-        assert_eq!(
-            view.snapshot.unwrap().generation,
-            "host-00000000000000000002-new"
-        );
+            assert!(!applied.unwrap());
+            state
+                .hub
+                .resolve(
+                    "handoff-node",
+                    "host-00000000000000000001-old",
+                    &request,
+                    RpcReply::ok(json!({"accepted":true})),
+                )
+                .await;
+            let reply = tokio::time::timeout(Duration::from_secs(1), call)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(reply.status, 200);
+            assert_eq!(reply.body, json!({"accepted":true}));
+            let view = state.hub.views().await.remove(0);
+            assert!(view.online && view.snapshot.as_ref().unwrap().ready);
+            assert_eq!(
+                view.snapshot.unwrap().generation,
+                "host-00000000000000000002-new"
+            );
+        }
     }
 
     #[tokio::test]
@@ -207,5 +265,56 @@ mod tests {
         assert_eq!(reply.status, 200);
         assert_eq!(reply.body, json!({"current":true}));
         assert!(state.hub.views().await[0].online);
+    }
+    #[tokio::test]
+    async fn newer_generation_in_shared_storage_does_not_cancel_local_old_calls() {
+        let root = tempfile::tempdir().unwrap();
+        let _scope = opencoder_core::config::scoped_config_home(root.path().join("config"));
+        let state = state(root.path()).await;
+        let old_generation = "host-00000000000000000001-old";
+        let mut old = attach(&state, old_generation).await;
+        let (call, request) = pending(state.clone(), &mut old).await;
+        // Another Server has committed the successor, before it attaches here.
+        state
+            .fleet
+            .apply_index_report_committed(
+                "handoff-node",
+                &[],
+                None,
+                ("host-00000000000000000002-new", 1),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            !apply(
+                &state,
+                "handoff-node",
+                old_generation,
+                2,
+                &CompleteReport {
+                    inventory: Default::default(),
+                    report_id: 2,
+                    records: vec![],
+                    pending_at_begin: None,
+                    initial: false,
+                    negotiated: true,
+                    base_sequence: Some(1),
+                    removed_ids: vec![],
+                }
+            )
+            .await
+            .unwrap()
+        );
+        state
+            .hub
+            .resolve(
+                "handoff-node",
+                old_generation,
+                &request,
+                RpcReply::ok(json!({"finished":true})),
+            )
+            .await;
+        assert_eq!(call.await.unwrap().status, 200);
     }
 }

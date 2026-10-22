@@ -97,7 +97,7 @@ async fn agent_saved_alias_and_active_execution_block_delete_without_touching_hi
     )
     .await
     .unwrap();
-    let assignment = json!({"request":{"kind":"agent","target":"sample"}}).to_string();
+    let assignment = json!({"index":{"id":"run","created_at":1,"kind":"agent","node_id":"node","status":"running"},"request":{"kind":"agent","target":"sample"}}).to_string();
     conn.execute(
         "INSERT INTO execution_assignments VALUES('run',?1)",
         [assignment.clone()],

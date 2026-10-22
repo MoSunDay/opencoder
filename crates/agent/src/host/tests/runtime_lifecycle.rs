@@ -177,7 +177,9 @@ async fn host_dialogs_clear_deletes_live_runtime_and_trims_hibernated_inventory(
             .into_iter()
             .find(|i| i.id == "operator-done-2")
             .map(|i| i.status);
-        inspect == Some(ExecutionStatus::Idle)
+        // The status is durable before the capacity slot and active task are
+        // released. Clearing must wait for that final cleanup as well.
+        inspect == Some(ExecutionStatus::Idle) && live.snapshot().active_runs == 0
     })
     .await;
 
@@ -191,7 +193,7 @@ async fn host_dialogs_clear_deletes_live_runtime_and_trims_hibernated_inventory(
         .handle(maintenance(json!({"sessions": ["operator-done-1", "operator-done-2", "operator-live-1", "operator-ghost"]})))
         .await;
     assert_eq!(reply.status, 200, "{:?}", reply);
-    assert_eq!(reply.body["removed"], json!(2));
+    assert_eq!(reply.body["removed"], json!(2), "{reply:?}");
     assert_eq!(reply.body["forgotten"], json!(1));
     assert_eq!(reply.body["skipped"], json!(["operator-live-1"]));
 

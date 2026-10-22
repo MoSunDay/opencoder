@@ -4,6 +4,19 @@ macro_rules! store_contract_0 {
         store_contract_1! {
             $($methods)*
 
+    /// Inventory-only columns, with a transactionally maintained change cursor.
+    async fn inventory_sources(&self, _after: Option<u64>) -> Result<crate::inventory::InventorySources> {
+        anyhow::bail!("incremental inventory sources unsupported")
+    }
+    async fn reporting_recover(&self)->Result<()> {anyhow::bail!("report recovery unsupported")}
+    async fn reporting_format(&self,_reader:u32,_writer:u32)->Result<()> {anyhow::bail!("report format unsupported")}
+    async fn pending_reports(&self,_after:Option<&str>,_limit:u32)->Result<Vec<crate::reporting::PendingReport>> {anyhow::bail!("pending reports unsupported")}
+    async fn has_pending_reports(&self)->Result<bool> {anyhow::bail!("pending reports unsupported")}
+    async fn report_ack(&self,_ack:&crate::reporting::ReportAck)->Result<()> {anyhow::bail!("report acknowledgements unsupported")}
+    async fn report_acks(&self)->Result<Vec<crate::reporting::ReportAck>> {anyhow::bail!("report acknowledgements unsupported")}
+    async fn report_run_state(&self,_id:&str)->Result<Option<crate::reporting::ReportRunState>> {anyhow::bail!("report state unsupported")}
+    async fn report_operation(&self,_id:&str,_operation:&str)->Result<Option<opencoder_core::brain::layered::LayeredOperation>> {anyhow::bail!("report operation unsupported")}
+
     /// Atomic v4 layered projection read. Layers are recomputed, never stored.
     async fn brain_layered(
         &self,

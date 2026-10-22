@@ -1,4 +1,6 @@
-Commit: 309c02570d3cbef348279d7db7839b45e3538294
+Commit: 842e58ef5525e8f189895ad0cc7ac59031f312fc
+
+共享 Ontology 结构的启动权限由 [release/ontology_schema](../../crates/control/src/release/ontology_schema/mod.rs) 在打开数据库前核验。普通实例仅验证结构；维护目标须匹配版本、端口和数据路径，并持有已验证备份回执。共享文件锁持有到初始化结束，控制器的阶段提交不能越过正在执行的迁移；Server 无需读取包含配置的 root 私有备份。
 
 # control 模块
 
@@ -84,3 +86,16 @@ Agent 卡片删除由 [catalog_guard/agents.rs](../../crates/control/src/catalog
 所有目录引用检查与资源 API 使用同一有效 Agent 根目录。没有 `agents_dir` 配置时，继续解析运行作用域、进程覆盖、`OPENCODER_AGENTS_DIR` 或默认目录。在进入阻塞线程前固定解析结果；默认目录缺失、不是目录或文件无法确认时也拒绝删除，不能跳过检查。
 
 Agent 卡片的已知元数据字段只描述自身、共享资源池和执行配置，不作为其他 Agent 的依赖；未识别字段继续检查，资源文件正文仍按完整引用判断。
+## Ontology 能力同步
+
+[ontology_catalog](../../crates/control/src/ontology_catalog/mod.rs) 组合共享平台入口和 Brain 目录的纯定义快照，提取明确引用并同步到当前 Server 的默认数据空间。相关写请求成功后通知后台，通知层覆盖目录保护与资源代理的直接回执；每 30 秒补查一次。手动同步和检查使用相同来源及跨进程锁。
+
+同步读取不探测执行节点，不改变 Brain 目录的执行能力选择。来源读取失败记录错误并保留上次快照，数据库批次失败整体回滚；重启重新核对。任务参与 Server 退休计数，停止接纳新批次后等待已接纳工作收尾。公开能力描述不包含凭据或私有配置。
+
+[ownership.rs](../../crates/control/src/ontology_catalog/ownership.rs) 在托管发布中核验 `release-state.json` 的当前版本、Server 端口及阶段。从开始状态到最终提交或错误记录始终持有 `catalog-writer.lock` 共享锁；[Journal.save](../../scripts/platform/rolling/state.py) 持独占锁更新发布记录。切换和回滚准备期间暂停同步写入，预热候选与同版本旧实例只能检查差异。记录或锁缺失时拒绝写入；独立 Server 沿用原同步行为。
+
+[transport/report.rs](../../crates/control/src/transport/report.rs) 分开记录报告收齐和提交成功。首次完整报告提交后才能接收增量；数据库提交、Hub 就绪及归属记账完成后发送最终确认。`Hub::commit_report` 在同一把锁内核验代次、更新接收证据与首次恢复预留；全量替换清单，增量仅合并变化和移除。移除清单成员不删除历史，也不释放活动预留。每条协商连接缓存五字段索引，普通提交仅更新变化项。多个 Server 共库导致基准变化时，[inventory.rs](../../crates/control/src/transport/socket_report/inventory.rs) 从本连接已确认的清单重建完整快照，再经数据库代次和归属校验提交，连接中的 RPC 继续等待原回复。
+
+共享数据库已接受更高 Host 代次时，旧报告不改写存储或接收证据；同代次已有更新快照时，重建报告仍核验不可变归属但不覆盖新状态。两者均确认报告已处理，以保留原连接和未完成的 RPC 回复。协议、归属或存储错误仍拒绝，不当作基准变化处理。
+
+索引增量头只接受协议 2，并继续要求逐批确认能力；协议 1 对端使用全量报告。发布控制器先接管 Host、等待当前 Server 对该实例的完整报告确认，再登记候选 Server；新旧 Server 共存时，各连接仍独立校验增量基准。预热确认不替代切换入口前的新 Host 代次与就绪检查。

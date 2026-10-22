@@ -1,0 +1,18 @@
+.graph-3d { position: absolute; inset: 0; overflow: hidden; }
+.graph-3d canvas { display: block; touch-action: none; }
+.graph-3d-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.graph-3d-leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; stroke: var(--graph-secondary); stroke-width: 1; opacity: 0.5; }
+.graph-3d-node, .graph-3d-relation { position: absolute; visibility: hidden; transform: translate(-50%, 0); pointer-events: auto; color: var(--graph-text); background: var(--graph-background); border: 1px solid var(--graph-border); border-radius: 6px; }
+.graph-3d-node { width: 156px; padding: 6px 8px; box-shadow: 0 2px 6px #0001; }
+.graph-3d-labels.compact .graph-3d-node { width: max-content; max-width: 144px; padding: 3px 6px; }
+.graph-3d-labels.compact .graph-node-title { font-size: 12px; line-height: 16px; }
+.graph-3d-labels.compact .graph-3d-type { font-size: 10px; }
+.graph-3d-node.center { border-width: 2px; }
+.graph-3d-node.selected, .graph-3d-relation.selected { outline: 2px solid var(--graph-primary); background: var(--graph-selected); z-index: 2000 !important; }
+.graph-3d-name { display: block; width: 100%; padding: 0; text-align: left; border: 0; background: none; color: inherit; cursor: pointer; }
+.graph-3d-path { font-size: 11px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.graph-3d-type { display: flex; align-items: center; justify-content: space-between; gap: 4px; color: var(--graph-secondary); font-size: 11px; }
+.graph-3d-type button { padding: 0 4px; border: 0; border-radius: 3px; color: var(--graph-primary); background: var(--graph-selected); cursor: pointer; }
+.graph-3d-relation { max-width: 180px; padding: 3px 6px; transform: translate(-50%, -50%); font: 12px/18px system-ui, sans-serif; overflow-wrap: anywhere; white-space: pre-wrap; cursor: pointer; }
+.graph-3d-labels button:focus-visible { outline: 2px solid var(--graph-primary); outline-offset: 2px; }
+.graph-3d-hint { position: absolute; bottom: 8px; left: 8px; color: var(--graph-secondary); background: var(--graph-background); padding: 3px 6px; border-radius: 4px; pointer-events: none; font-size: 11px; z-index: 2100; }

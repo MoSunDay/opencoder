@@ -48,3 +48,44 @@ fn pragma_order_synchronous_precedes_journal_wal() {
     assert!(idx("busy_timeout") < idx("synchronous"));
     assert!(idx("synchronous") < idx("journal_mode"));
 }
+
+#[tokio::test]
+async fn shared_catalog_does_not_install_runtime_reporting_schema() {
+    const CHILD: &str = "OPENCODER_CATALOG_UPGRADE_TEST";
+    if let Some(path) = std::env::var_os(CHILD) {
+        crate::TursoStore::open_catalog(std::path::Path::new(&path))
+            .await
+            .unwrap();
+        std::fs::write(std::path::Path::new(&path).with_extension("opened"), b"opened")
+            .unwrap();
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("definitions.db");
+    let store = crate::TursoStore::open_catalog(&path).await.unwrap();
+    let conn = store.conn().await.unwrap();
+    let mut rows = conn.query("PRAGMA schema_version", ()).await.unwrap();
+    let before: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    drop(rows);
+    let status = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["turso_store::schema::tests::shared_catalog_does_not_install_runtime_reporting_schema", "--exact", "--nocapture"])
+            .env(CHILD,path).status().unwrap()
+    }).await.unwrap();
+    assert!(status.success());
+    assert!(root.path().join("definitions.opened").is_file());
+    let mut rows = conn.query("PRAGMA schema_version", ()).await.unwrap();
+    assert_eq!(
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+        before
+    );
+    drop(rows);
+    let mut rows = conn.query("SELECT name FROM sqlite_master WHERE name IN ('inventory_source_changes','execution_report_queue','execution_report_acks')",()).await.unwrap();
+    assert!(rows.next().await.unwrap().is_none());
+    let runtime = crate::TursoStore::open_memory().await.unwrap();
+    let mut rows = runtime.conn().await.unwrap().query("SELECT count(*) FROM sqlite_master WHERE name IN ('inventory_source_changes','execution_report_queue','execution_report_acks')",()).await.unwrap();
+    assert_eq!(
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+        3
+    );
+}

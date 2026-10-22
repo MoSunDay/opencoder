@@ -122,7 +122,12 @@ async fn fixture() -> (
 
 async fn seed_intent(worker: &Worker, state: &WorkflowState, request: &RerunRequest) {
     let mut journal = worker.inner.journal.lock().await;
-    let mut record = journal.records[&state.workflow_id].clone();
+    let mut record = journal
+        .get(&state.workflow_id)
+        .await
+        .unwrap()
+        .expect("execution exists")
+        .clone();
     record.lifecycle.todo_reruns.insert(
         request.request_id.clone(),
         Control {
@@ -167,7 +172,16 @@ async fn recovery_finishes_each_durable_rerun_checkpoint_exactly_once() {
         // The scheduler may resume after any one of the durable writes.
         recover_locked(&worker).await.unwrap();
         recover_locked(&worker).await.unwrap();
-        let saved = worker.inner.journal.lock().await.records[&state.workflow_id].clone();
+        let saved = worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .get(&state.workflow_id)
+            .await
+            .unwrap()
+            .expect("execution exists")
+            .clone();
         assert_eq!(saved.assignment.index.status, ExecutionStatus::Pending);
         assert!(saved.queue.as_ref().unwrap().resume);
         let receipt = &saved.lifecycle.todo_reruns[&request.request_id];
@@ -197,7 +211,15 @@ async fn recovery_finishes_each_durable_rerun_checkpoint_exactly_once() {
         // Re-entering recovery must not enqueue another copy.
         recover_locked(&worker).await.unwrap();
         assert_eq!(
-            worker.inner.journal.lock().await.records[&state.workflow_id]
+            worker
+                .inner
+                .journal
+                .lock()
+                .await
+                .get(&state.workflow_id)
+                .await
+                .unwrap()
+                .expect("execution exists")
                 .queue
                 .as_ref()
                 .unwrap()
@@ -221,7 +243,16 @@ async fn cancellation_wins_over_a_pending_rerun_intent() {
         .await
         .unwrap();
     recover_locked(&worker).await.unwrap();
-    let saved = worker.inner.journal.lock().await.records[&state.workflow_id].clone();
+    let saved = worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .get(&state.workflow_id)
+        .await
+        .unwrap()
+        .expect("execution exists")
+        .clone();
     assert_eq!(
         saved.lifecycle.todo_reruns[&request.request_id].phase,
         "failed"
@@ -256,7 +287,16 @@ async fn cancel_before_store_checkpoint_does_not_restart_a_completed_execution()
         .await
         .unwrap();
     recover_locked(&worker).await.unwrap();
-    let saved = worker.inner.journal.lock().await.records[&state.workflow_id].clone();
+    let saved = worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .get(&state.workflow_id)
+        .await
+        .unwrap()
+        .expect("execution exists")
+        .clone();
     assert_eq!(saved.assignment.index.status, ExecutionStatus::Done);
     assert_eq!(
         saved.lifecycle.todo_reruns[&request.request_id].phase,
@@ -284,7 +324,12 @@ async fn review_pages_all_nodes_and_rejects_a_stale_page_generation() {
     let (_root, worker, spec, state, request) = fixture_with_count(111).await;
     {
         let mut journal = worker.inner.journal.lock().await;
-        let mut record = journal.records[&state.workflow_id].clone();
+        let mut record = journal
+            .get(&state.workflow_id)
+            .await
+            .unwrap()
+            .expect("execution exists")
+            .clone();
         for (id, accepted_at) in [("z-older", 1), ("a-newer", 2)] {
             let mut request = request.clone();
             request.request_id = id.into();

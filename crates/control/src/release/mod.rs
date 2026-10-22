@@ -1,4 +1,5 @@
 pub mod ingress;
+pub(crate) mod ontology_schema;
 pub(crate) mod outbox;
 mod proxy;
 mod relay;
@@ -26,6 +27,8 @@ use std::{
 pub struct Lifecycle {
     pub outbox_started: AtomicBool,
     pub schedule_started: AtomicBool,
+    pub catalog_started: AtomicBool,
+    pub catalog_changed: tokio::sync::Notify,
     pub scheduler: crate::scheduler::telemetry::SchedulerTelemetry,
     pub retiring: AtomicBool,
     pub retirement: OnceLock<ingress::Retirement>,

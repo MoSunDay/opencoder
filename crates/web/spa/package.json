@@ -11,10 +11,8 @@
     "typecheck:ontology": "tsc -p tsconfig.ontology.json"
   },
   "dependencies": {
-    "@ant-design/graphs": "^2.1.1",
     "@ant-design/icons": "^6.3.2",
     "@ant-design/x": "^2.9.0",
-    "@antv/g6": "^5.1.1",
     "@codemirror/commands": "^6.11.0",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.5.2",
@@ -34,7 +32,9 @@
     "marked": "^15.0.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-force-graph-3d": "^1.29.2",
     "react-markdown": "^10.1.0",
+    "three": "^0.186.1",
     "usehooks-ts": "^3.1.1"
   },
   "devDependencies": {
@@ -43,6 +43,7 @@
     "@testing-library/react": "^16.3.3",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^30.0.1",
     "playwright-core": "^1.62.1",

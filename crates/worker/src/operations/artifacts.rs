@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 mod tests;
 pub(super) async fn read(worker: &Worker, id: &str, input: Value) -> Result<RpcReply> {
     let journal = worker.inner.journal.lock().await;
-    if !journal.records.get(id).is_some_and(|record| {
+    if !journal.get(id).await?.is_some_and(|record| {
         record.assignment.request.kind == ExecutionKind::Dag
             && record.assignment.index.kind == ExecutionKind::Dag
     }) {
@@ -55,8 +55,8 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
             .journal
             .lock()
             .await
-            .records
             .get(&request.execution.id)
+            .await?
             .is_some_and(|record| {
                 crate::brain::v4::parent::leaf(&record.assignment.request.input)
                     || crate::brain::v4::parent::root(&record.assignment.request.input)
@@ -91,8 +91,8 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
             .journal
             .lock()
             .await
-            .records
             .get(&request.execution.id)
+            .await?
             .is_some_and(|r| r.assignment.request.input.get("_brain").is_some());
         if !managed {
             return Ok(RpcReply::error(404, "managed result not found"));
@@ -125,15 +125,15 @@ pub(super) async fn read_request(worker: &Worker, request: ArtifactRequest) -> R
         let dir = {
             let journal = worker.inner.journal.lock().await;
             let record = journal
-                .records
                 .get(&request.execution.id)
+                .await?
                 .ok_or_else(|| anyhow::anyhow!("execution missing"))?;
             if crate::brain::v4::parent::leaf(&record.assignment.request.input)
                 || crate::brain::v4::parent::root(&record.assignment.request.input)
             {
-                Some(crate::brain::workdir::for_record(worker, record)?)
+                Some(crate::brain::workdir::for_record(worker, &record)?)
             } else {
-                crate::brain::workspace::workdir(record)?
+                crate::brain::workspace::workdir(&record)?
             }
         };
         let Some(dir) = dir else {
@@ -154,9 +154,9 @@ async fn read_fields(worker: &Worker, request: &ArtifactRequest) -> Result<RpcRe
     let workflow_root = {
         let journal = worker.inner.journal.lock().await;
         crate::layout::dag::accepted_parent(
-            journal
-                .records
+            &journal
                 .get(id)
+                .await?
                 .ok_or_else(|| anyhow::anyhow!("DAG execution missing"))?,
         )?
     };

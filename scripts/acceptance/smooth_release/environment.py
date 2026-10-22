@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -14,7 +15,7 @@ import urllib.error
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'platform'))
 from rolling.config import Settings
 from rolling import ingress, probes, units, storage
-from rolling.state import atomic_bytes, write
+from rolling.state import Journal, atomic_bytes, write
 from fixture import Model, publish_hold
 from resources import Resources
 from containers import Containers
@@ -180,8 +181,13 @@ class Environment:
         mark('candidate_ready')
         platform = {'release_id':label,'state_dir':str(s.state_dir),'host_service':s.host_url,'resource_service':s.resource_url}
         write(data / 'release.json',platform)
+        self.prepare_schema(record)
         self.start(label+'-server','opencoder-server',['--host','127.0.0.1','--port',record['server_port'],
             '--workdir',s.server_workdir,'--data-dir',s.server_data,'--release-config',data / 'release.json','--token-file',s.token_file])
+        if len(self.records) > 1:
+            from rolling.deployment import warm_host_first
+            journal = Journal(s.state_dir)
+            warm_host_first(s, record, journal.record(journal.data['current']), self, 90)
         self.http(host,f'/servers/{label}','POST',{'url':f"http://127.0.0.1:{record['server_port']}",'enabled':True})
         if len(self.records) == 1:
             self.http(host,f'/runtimes/{label}/activate','POST',{})
@@ -191,16 +197,52 @@ class Environment:
         (self.root / (label + '-warm-timings.json')).write_text(json.dumps(timings,indent=2))
         return record
 
+    def prepare_schema(self, record):
+        # The first private Server follows the stopped-backup bootstrap gate.
+        # Subsequent candidates only validate the existing shared schema.
+        from rolling.backup_files.tree import inventory
+        from rolling.native import ontology_schema
+        from rolling.storage.database import using
+        s = self.settings
+        journal = Journal(s.state_dir)
+        journal.data.update(candidate=record['id'], phase='warming',
+                            releases={r['id']: r for r in self.records})
+        if journal.data['current'] is None:
+            backup = s.state_dir / 'backups/first-migration'
+            shutil.copytree(s.server_data, backup / 'server')
+            shutil.copytree(self.resources.roots['ontology'], backup / 'ontology-files')
+            write(backup / 'backup-manifest.json',
+                  {'kind': 'stopped-consistent-copy', 'files': inventory(backup)})
+            journal.data.update(phase='migrating', migration_stage='services')
+            with using(self.bin / 'opencoder-cli'):
+                ontology_schema.authorize_initial(s, journal, record)
+        else:
+            journal.save()
+
+    def run(self, *args):
+        # The release helper only reloads this fixture's private Nginx.
+        suffix = {("nginx", "-t"): ["-t"],
+                  ("systemctl", "reload", "nginx"): ["-s", "reload"]}.get(args)
+        if suffix is None:
+            raise ValueError(f"unsupported isolated ingress command: {args}")
+        subprocess.run([self.nginx, "-e", str(self.root / "nginx.log"), "-p", str(self.root),
+                        "-c", str(self.root / "nginx.conf"), *suffix], check=True)
+
     def wait(self,check,seconds=90):
         return until(check,'deployment probe',seconds)
 
     def switch(self, record):
         s = self.settings
-        write(s.state_dir / 'release-state.json',{'schema_version':1,'current':record['id'],
-            'candidate':None,'phase':'switching','releases':{r['id']:r for r in self.records}})
+        journal = Journal(s.state_dir)
+        journal.data.update(current=record['id'], candidate=None, phase='switching',
+                            releases={r['id']: r for r in self.records})
+        journal.save()
         host = f"http://127.0.0.1:{record['host_port']}"
         self.http(host,f"/runtimes/{record['id']}/activate",'POST',{})
         self.http(host,'/activate-host','POST',{})
+        # Match the controller: finish the new Host report before routing
+        # public traffic to its Server. Submission probes keep running here.
+        probes.activated_host(record, self, 90)
         self.last_ingress_workers = self.ingress_workers()
         self.last_successor_port = record["server_port"]
         atomic_bytes(s.nginx_include,units.nginx(s,record['server_port'],record['host_port']).encode(),0o644)
@@ -213,6 +255,7 @@ class Environment:
             subprocess.run([self.nginx,'-e',str(self.root / 'nginx.log'),'-p',str(self.root),'-c',str(config),'-s','reload'],check=True)
         self.http(host,'/commit-host','POST',{})
         until(lambda:self.api('/api/admin/release')['instance_release'] == record['id'],'public version')
+        journal.phase('complete')
         self.resources.check()
         assert self.children['resources'].poll() is None, 'resource service exited during handoff'
 
@@ -240,8 +283,12 @@ class Environment:
             '--token-file',s.token_file,'host','--port',record['host_port'],'--standby'])
         until(lambda:self.http(host,'/status'),'rollback Host')
         record['server_label'] = label + '-server'
+        self.prepare_schema(record)
         self.start(record['server_label'],'opencoder-server',['--host','127.0.0.1','--port',record['server_port'],
             '--workdir',s.server_workdir,'--data-dir',s.server_data,'--release-config',Path(record['runtime_data']) / 'release.json','--token-file',s.token_file])
+        from rolling.deployment import warm_host_first
+        journal = Journal(s.state_dir)
+        warm_host_first(s, record, journal.record(journal.data['current']), self, 90)
         self.http(host,f"/servers/{record['id']}",'POST',{'url':f"http://127.0.0.1:{record['server_port']}",'enabled':True})
         node = self.http(host,'/status')['node']['id']
         probes.ready(s,record,node,self,90)

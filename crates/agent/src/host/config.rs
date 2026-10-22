@@ -58,3 +58,9 @@ pub struct Inventory {
     pub indexes: Vec<opencoder_core::fleet::ExecutionIndex>,
     pub can_hibernate: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InventoryUpdate {
+    pub inventory: Inventory,
+    pub changes: opencoder_core::fleet::inventory::InventoryPage,
+}

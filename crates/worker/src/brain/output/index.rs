@@ -61,8 +61,8 @@ pub(crate) async fn root(
 ) -> Result<Vec<ArtifactRef>> {
     let journal = worker.inner.journal.lock().await;
     let record = journal
-        .records
         .get(&snapshot.run.run_id)
+        .await?
         .context("root execution missing")?;
     let mut files = Vec::new();
     for operation in opencoder_brain::layered::relevant_operations(snapshot) {

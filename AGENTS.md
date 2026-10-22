@@ -8,6 +8,9 @@ Before changing projects, initiatives, TODO boards, tags, execution links, resul
 
 Repository logic indexes live in [repo-memory.md](repo-memory.md); code remains the source of implementation detail.
 
+Before changing public capabilities, CLI/API entrypoints, input/output requirements, or dependencies, read [rules/09-ontology-capabilities.md](rules/09-ontology-capabilities.md). Keep the Ontology catalog and affected synchronization tests consistent with the native implementation.
+查找、理解和组织现有能力时，从 Ontology 开始；使用或修改 Ontology CLI 前阅读 [rules/10-ontology-cli.md](rules/10-ontology-cli.md)，遵循实体目录挂载、版本校验、软删除和同步检查约定。
+
 ## 测试范围
 
 - 改到哪里测哪里：只运行本次改动及其直接影响链路的定向测试，发布时也遵循此规则。

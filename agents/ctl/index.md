@@ -7,6 +7,7 @@ Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 `--no-auth` 明确省略 Authorization，连接文件可用 `auth_enabled:false`；默认仍要求既有 Token。免鉴权不读取 Token 文件，显式 Token 参数覆盖文件设置，`--no-auth` 与显式凭据互斥。项目三层增删改查与归属操作见 [用法](../../docs/project-cli.md) 和 [opencoder-projects skill](../../skills/opencoder-projects/SKILL.md)。
 
 ## 索引
+- `src/cmd/ontology/` — Ontology 全部已有数据操作及平台能力查询、同步状态、检查和补同步；复用连接、JSON 和退出码约定，检查发现差异返回 4。见 [Ontology CLI](../../rules/10-ontology-cli.md)。
 - `src/lib.rs` — clap 命令分发
 - `src/http.rs` — `RequestPlan` + Bearer + 退出码
 - `src/cmd/` — 按域子命令（纯 plan() 映射）

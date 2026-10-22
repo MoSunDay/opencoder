@@ -1,13 +1,33 @@
 //! Real Server/Node channel stays live without completing an inventory report.
+mod incremental;
 mod report_flow;
 mod report_storage;
+mod retiring;
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{Semaphore, watch};
+
+// Multi-thread tests need explicit roots: thread-local config guards do not
+// follow socket and catalog tasks onto Tokio worker threads.
+fn isolated_work(root: &std::path::Path) -> std::path::PathBuf {
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(root.join("agents")).unwrap();
+    std::fs::create_dir_all(root.join("share/todo")).unwrap();
+    std::fs::write(
+        work.join("opencoder.json"),
+        serde_json::json!({"agent":{
+            "agents_dir":root.join("agents"), "share_dir":root.join("share")
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    work
+}
 
 struct SlowInventory {
     changes: watch::Sender<u64>,
@@ -59,7 +79,7 @@ impl NodeService for SlowInventory {
 async fn transport_ping_keeps_node_live_without_fabricating_load_or_inventory() {
     let directory = tempfile::tempdir().unwrap();
     let state = opencoder_control::new_state(
-        directory.path().join("work"),
+        isolated_work(directory.path()),
         directory.path().join("data"),
         None,
     )

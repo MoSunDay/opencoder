@@ -2,7 +2,6 @@ use super::{assignment, native_fixture, open};
 use crate::{journal::Record, lifecycle::StopIntent};
 use futures::poll;
 use opencoder_core::fleet::{ExecutionKind, ExecutionStatus};
-use std::task::Poll;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
@@ -42,21 +41,38 @@ async fn durable_cancel_signals_before_a_queued_journal_reader_can_block_it() {
     assert!(poll!(&mut other_reader).is_pending());
     drop(first);
 
-    // The reader is deliberately queued immediately after the stop fence.
-    // Reacquiring journal before signalling would leave the stop future pending.
-    let reply = match poll!(&mut stopping) {
-        Poll::Ready(reply) => reply.unwrap(),
-        Poll::Pending => panic!("durable cancellation requeued behind another journal user"),
-    };
+    // The record may now require asynchronous disk IO while holding journal.
+    // That is allowed; letting the queued reader acquire journal before the
+    // durable stop signals cancellation is not.
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::select! {
+            biased;
+            reply = &mut stopping => reply.unwrap(),
+            _ = &mut other_reader => panic!("durable cancellation requeued behind another journal user"),
+        }
+    }).await.unwrap();
     assert_eq!(reply.status, 200);
     assert!(token.is_cancelled());
     let journal = other_reader.await;
     assert_eq!(
-        journal.records[id].lifecycle.stop_intent,
+        journal
+            .get(id)
+            .await
+            .unwrap()
+            .expect("execution exists")
+            .lifecycle
+            .stop_intent,
         Some(StopIntent::Cancel)
     );
     assert_eq!(
-        journal.records[id].assignment.index.status,
+        journal
+            .get(id)
+            .await
+            .unwrap()
+            .expect("execution exists")
+            .assignment
+            .index
+            .status,
         ExecutionStatus::Cancelling
     );
     drop(journal);
@@ -104,7 +120,16 @@ async fn native_cancel_reaps_runc_and_descendants_without_model_calls() {
         .await
         .unwrap();
     assert_eq!(accepted.status, 200);
-    let record = worker.inner.journal.lock().await.records[id].clone();
+    let record = worker
+        .inner
+        .journal
+        .lock()
+        .await
+        .get(id)
+        .await
+        .unwrap()
+        .expect("execution exists")
+        .clone();
     let run = crate::layout::dag::accepted_parent(&record)
         .unwrap()
         .join(id);
@@ -121,7 +146,15 @@ async fn native_cancel_reaps_runc_and_descendants_without_model_calls() {
     assert_eq!(reply.status, 200);
     assert_eq!(reply.body["status"], "cancelling");
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while worker.inner.journal.lock().await.records[id]
+        while worker
+            .inner
+            .journal
+            .lock()
+            .await
+            .get(id)
+            .await
+            .unwrap()
+            .expect("execution exists")
             .assignment
             .index
             .status

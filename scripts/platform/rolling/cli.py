@@ -107,6 +107,7 @@ def main():
                 result = {"backup": str(args.backup), "cross_database_snapshot": False}
             elif args.rollback:
                 if args.signal:
+                    deployment.rollback_preflight(settings)
                     controller.install(settings, args.config, operations)
                 result = None if args.signal else deployment.rollback(settings, operations, args.wait_seconds)
             else:
@@ -117,12 +118,9 @@ def main():
                                               wait_seconds=args.wait_seconds)
                     controller.install(settings, args.config, operations)
                 else:
-                    if not args.maintenance:
-                        controller.install(settings, args.config, operations)
                     action = maintenance.deploy if args.maintenance else migration.migrate if args.migrate else deployment.deploy
                     result = action(settings, args.bundle, operations, args.wait_seconds)
-                    if args.maintenance:
-                        controller.install(settings, args.config, operations)
+                    controller.install(settings, args.config, operations)
         if args.signal:
             target = result["release_id"] if result else None
             result = trigger(settings, "rollback" if args.rollback else "deploy", operations, args.wait_seconds)

@@ -13,6 +13,9 @@ mod report_failure;
 #[path = "tests/publication.rs"]
 mod publication;
 
+#[path = "tests/incremental.rs"]
+mod incremental;
+
 struct Service {
     records: Vec<ExecutionIndex>,
     indexes_sampled: AtomicBool,
@@ -80,7 +83,9 @@ async fn frames(records: Vec<ExecutionIndex>) -> Vec<NodeFrame> {
     };
     let (mut writer, reader) = futures_mpsc::unbounded();
     let report = prepare_report(&service).await.unwrap();
-    let cursor = begin_report(&mut writer, report, 7, false).await.unwrap();
+    let cursor = begin_report(&mut writer, report, 7, false, None)
+        .await
+        .unwrap();
     for frame in cursor {
         send(&mut writer, &frame).await.unwrap();
     }

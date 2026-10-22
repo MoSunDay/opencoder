@@ -3,6 +3,7 @@ use super::report::CompleteReport;
 use crate::AppState;
 use axum::extract::ws::Message;
 use opencoder_core::fleet::{ExecutionCommand, NodeOperation, ServerFrame};
+pub(super) mod inventory;
 
 pub(super) async fn acknowledge(
     sender: &tokio::sync::mpsc::Sender<super::socket_io::Acknowledgement>,

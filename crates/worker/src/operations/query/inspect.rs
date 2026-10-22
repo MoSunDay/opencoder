@@ -12,41 +12,32 @@ pub(in crate::operations) async fn inspect(
         return Ok(reply);
     }
     let id = execution.id.as_str();
-    let snapshot = worker
-        .inner
-        .journal
-        .lock()
-        .await
-        .records
-        .get(id)
-        .map(|record| {
-            let request = bounded_request_ref(&record.assignment.request);
-            let definition = record
-                .assignment
-                .definition
-                .as_ref()
-                .map(|value| bounded_value_ref(value, "definition"));
-            let outcome = bounded_value_ref(&record.result, "result");
-            let error = record.error.as_deref().map(truncate_error_ref);
-            let team_name = record
-                .assignment
-                .definition
-                .as_ref()
-                .and_then(|definition| definition["name"].as_str())
-                .map(str::to_owned);
-            (
-                record.annotations.clone(),
-                record.assignment.index.clone(),
-                record.assignment.request.kind,
-                record.assignment.request.target.clone(),
-                team_name,
-                request,
-                definition,
-                outcome,
-                error,
-                record.lifecycle.todo_initialization,
-            )
-        });
+    let snapshot = worker.read_inspection(id).await?.map(|record| {
+        let request = bounded_request_ref(&record.request);
+        let definition = record
+            .definition
+            .as_ref()
+            .map(|value| bounded_value_ref(value, "definition"));
+        let outcome = bounded_value_ref(&record.result, "result");
+        let error = record.error.as_deref().map(truncate_error_ref);
+        let team_name = record
+            .definition
+            .as_ref()
+            .and_then(|definition| definition["name"].as_str())
+            .map(str::to_owned);
+        (
+            record.annotations,
+            record.index,
+            record.request.kind,
+            record.request.target,
+            team_name,
+            request,
+            definition,
+            outcome,
+            error,
+            record.todo_initialization,
+        )
+    });
     let Some((
         annotations,
         index,

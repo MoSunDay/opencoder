@@ -20,15 +20,19 @@ import { useDraftGuard } from "../../navigation/DraftGuard";
 import { useDetailNavigation } from "./details/useDetailNavigation";
 import EntityRelations from "./details/EntityRelations";
 import { aspectSelection, readObservation, recommendedAspect, validSelection, writeObservation } from "./session/observationMemory";
+import { useLinkedLocation } from "../../../fleet/navigation/location.js";
+import type { ObservationLink } from "../../navigation/observationLink";
+import { linkedObservation } from "./session/linkedObservation";
 
 const TEST = "aspect-test";
 const OBSERVE = "aspect-observe";
 export default function GraphPage() {
   const { env, canManage } = useEnv();
-  return <GraphWorkspace key={env} env={env} canManage={canManage} />;
+  const { ontology } = useLinkedLocation();
+  return <GraphWorkspace key={env + JSON.stringify(ontology)} env={env} canManage={canManage} link={ontology} />;
 }
 
-function GraphWorkspace({ env, canManage }: { env: string; canManage: boolean }) {
+function GraphWorkspace({ env, canManage, link }: { env: string; canManage: boolean; link: ObservationLink | null }) {
   const expandNeighbors = true;
   const guard = useDraftGuard();
   const detail = useDetailNavigation();
@@ -66,7 +70,9 @@ function GraphWorkspace({ env, canManage }: { env: string; canManage: boolean })
   useEffect(() => {
     if (restored.current || !metadataReady || aspectStore.loading || aspectStore.error) return;
     restored.current = true;
-    const memory = readObservation(env);
+    const fromLink = linkedObservation(link, entities, aspectStore.aspects);
+    const memory = fromLink ?? readObservation(env);
+    if (link && !fromLink) setRestoreNotice("链接中的观测点或切面已不可用，已恢复可用观测范围。");
     const savedAspect = aspectStore.aspects.find((item) => item.aspect_key === memory?.aspectKey);
     if (memory && validSelection(memory.selection, { entities, entityTypes, relationshipTypes })
       && (memory.mode === TEST || (savedAspect && savedAspect.entity_type_ids.length === memory.selection.entityTypeIds.length
@@ -80,7 +86,7 @@ function GraphWorkspace({ env, canManage }: { env: string; canManage: boolean })
     } else if (aspectStore.aspects.length) {
       setActiveTab(OBSERVE);
       applyAspect(recommendedAspect(aspectStore.aspects));
-      if (memory) setRestoreNotice("上次观测条件已失效，已恢复推荐切面。");
+      if (memory && !link) setRestoreNotice("上次观测条件已失效，已恢复推荐切面。");
     }
   }, [metadataReady, aspectStore.loading, aspectStore.aspects, aspectStore.error]);
   useEffect(() => {

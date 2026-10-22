@@ -51,8 +51,24 @@ class CliTests(unittest.TestCase):
                     patch.object(cli.config,'load',return_value=settings), \
                     patch.object(cli,'Operations',return_value=Mock()), \
                     patch.object(cli.controller,'install'), \
+                    patch.object(cli.deployment,'rollback_preflight'), \
                     patch.object(cli,'trigger',return_value={'phase':'complete'}) as trigger, \
                     patch.object(cli.deployment,'rollback') as rollback, contextlib.redirect_stdout(io.StringIO()):
                 cli.main()
             self.assertEqual(trigger.call_args.args[1], 'rollback')
             rollback.assert_not_called()
+
+    def test_incompatible_signal_rollback_does_not_install_controller(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = Settings(root, root / 'token')
+            with patch.object(sys, 'argv', ['deploy', '--signal', '--rollback']), \
+                    patch.object(cli.config, 'load', return_value=settings), \
+                    patch.object(cli, 'Operations', return_value=Mock()), \
+                    patch.object(cli.deployment, 'rollback_preflight', side_effect=ValueError('incompatible rollback')), \
+                    patch.object(cli.controller, 'install') as install, \
+                    patch.object(cli, 'trigger') as trigger, \
+                    self.assertRaisesRegex(ValueError, 'incompatible rollback'):
+                cli.main()
+            install.assert_not_called()
+            trigger.assert_not_called()

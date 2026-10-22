@@ -41,10 +41,14 @@ async fn attach(
 
 fn report(initial: bool) -> CompleteReport {
     CompleteReport {
+        inventory: Default::default(),
         report_id: 1,
         records: vec![],
         pending_at_begin: Some(vec![]),
         initial,
+        negotiated: false,
+        base_sequence: None,
+        removed_ids: vec![],
     }
 }
 
@@ -94,20 +98,22 @@ async fn full_rpc_queue_does_not_block_initial_host_handoff() {
         ack.done.send(Ok(())).unwrap();
         ack.message
     });
-    assert!(tokio::time::timeout(
-        Duration::from_secs(2),
-        finish(
-            &state,
-            "node-report-progress",
-            generation,
-            2,
-            &report(true),
-            &writer,
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            finish(
+                &state,
+                "node-report-progress",
+                generation,
+                2,
+                &report(true),
+                &writer,
+            )
         )
-    )
-    .await
-    .expect("handoff must not wait for its own full RPC queue")
-    .unwrap());
+        .await
+        .expect("handoff must not wait for its own full RPC queue")
+        .unwrap()
+    );
     let Message::Text(text) = delivery.await.unwrap() else {
         panic!("expected handoff frame")
     };
@@ -148,16 +154,18 @@ async fn subsequent_report_does_not_repeat_handoff() {
     let generation = "host-00000000000000000001-progress";
     let (_tx, _rx) = attach(&state, generation).await;
     let (writer, mut written) = mpsc::channel(1);
-    assert!(finish(
-        &state,
-        "node-report-progress",
-        generation,
-        2,
-        &report(false),
-        &writer
-    )
-    .await
-    .unwrap());
+    assert!(
+        finish(
+            &state,
+            "node-report-progress",
+            generation,
+            2,
+            &report(false),
+            &writer
+        )
+        .await
+        .unwrap()
+    );
     drop(writer);
     assert!(written.recv().await.is_none());
 }

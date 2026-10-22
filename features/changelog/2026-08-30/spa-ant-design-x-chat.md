@@ -30,7 +30,7 @@ Commit: (working-tree, SPA chat 交互整体迁移 @ant-design/x 2.9.0 + antd 6.
 |------|-----------|------|
 | 登录 | browser-acceptance step01 | PASS（签名 /api/nodes 探测→badge 已连接） |
 | nodes 页 | step02 | PASS（表格渲染） |
-| 建会话+发 prompt+流式 | step03（Sender fill+Enter） | PASS（POST /sessions 200→/prompt 200→streaming 标签+transcript 增长，sessionId=01M179P0NH0H7CEAJV733QBNDD） |
+| 建会话+发 prompt+流式 | step03（Sender fill+Enter） | PASS（POST /sessions 200→/prompt 200→streaming 标签+transcript 增长） |
 | 断链→徽章 | step04（`ss -K` RST+CDP 封 URL 后点停止键） | PASS（连接断开 badge） |
 | SSE 自动重连 | step05 | PASS（backoff 后新 GET /events?after=344） |
 | 中断 | step06（停止键→POST /interrupt 200） | PASS（done 终帧+store 归一化） |

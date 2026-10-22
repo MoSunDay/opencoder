@@ -1,7 +1,7 @@
 use super::config::Inventory;
 use anyhow::Result;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -37,6 +37,7 @@ pub async fn serve(worker: Worker, port: u16, token: String) -> Result<()> {
 pub fn router(worker: Arc<Worker>, token: String) -> Router {
     Router::new()
         .route("/inventory", get(inventory))
+        .route("/inventory/changes", get(inventory_changes))
         .route("/rpc", post(rpc))
         .route("/frames", get(frames))
         .with_state(worker)
@@ -75,6 +76,10 @@ async fn inventory(State(worker): State<Arc<Worker>>) -> Response {
 
 pub async fn inventory_of(worker: &Worker) -> Result<Inventory> {
     let indexes = worker.indexes().await?;
+    inventory_metadata(worker, indexes).await
+}
+
+async fn inventory_metadata(worker: &Worker, indexes: Vec<ExecutionIndex>) -> Result<Inventory> {
     let snapshot = worker.snapshot();
     Ok(Inventory {
         runtime_id: worker.runtime_id().map(str::to_owned),
@@ -85,6 +90,31 @@ pub async fn inventory_of(worker: &Worker) -> Result<Inventory> {
         indexes,
         can_hibernate: worker.can_hibernate().await,
     })
+}
+
+async fn inventory_changes(
+    State(worker): State<Arc<Worker>>,
+    Query(query): Query<opencoder_core::fleet::inventory::InventoryQuery>,
+) -> Response {
+    let paging = query.page.is_some();
+    let result = async {
+        let changes = worker.inventory_changes(query).await?;
+        let inventory = inventory_metadata(&worker, Vec::new()).await?;
+        Ok::<_, anyhow::Error>(super::config::InventoryUpdate { inventory, changes })
+    }
+    .await;
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => (
+            if paging {
+                axum::http::StatusCode::CONFLICT
+            } else {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            },
+            error.to_string(),
+        )
+            .into_response(),
+    }
 }
 
 async fn rpc(

@@ -53,7 +53,7 @@ async fn bindings_saved_versions_and_pending_dispatch_prevent_removal() {
         .unwrap();
     conn.execute(
         "INSERT INTO dispatch_receipts VALUES('execution','pending','hash','prepared',?1)",
-        [json!({"request":{"kind":"dag","target":"first"}}).to_string()],
+        [json!({"index":{"id":"dag-run","created_at":1,"kind":"dag","node_id":"node","status":"running"},"request":{"kind":"dag","target":"first"}}).to_string()],
     )
     .await
     .unwrap();
@@ -85,7 +85,7 @@ async fn active_assignments_protect_resources_but_finished_history_is_unchanged(
     .await
     .unwrap();
     let assignment =
-        json!({"request":{"kind":"dag","target":"first"},"definition":{"spec":spec("first")}})
+        json!({"index":{"id":"dag-run","created_at":1,"kind":"dag","node_id":"node","status":"running"},"request":{"kind":"dag","target":"first"},"definition":{"spec":spec("first")}})
             .to_string();
     conn.execute(
         "INSERT INTO execution_assignments VALUES('dag-run',?1)",

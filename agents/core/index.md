@@ -1,4 +1,4 @@
-Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
+Commit: 6b8410c1bb5a175cfd8d0d6c2259fa357e136024
 
 # core 模块
 
@@ -6,6 +6,7 @@ Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
 接缝：`Arc<dyn Store>`、`Arc<dyn ChatStream>` 定义于相邻 crate，Config 供全仓加载。
 
 ## 索引
+- [build.rs](../../crates/core/build.rs) 捕获构建提交和干净状态。正式发布通过 `OPENCODER_BUILD_COMMIT` 提供预期提交，作为跨工作树共享 Cargo 缓存的显式刷新条件；预期与实际检出提交不符时构建失败，不能产出混合版本包。
 - [identity/permissions.rs](../../crates/core/src/identity/permissions.rs) — `admin`、`editor`、`viewer` 共用 HTTP 权限纯函数，Control、独立 Web 与 Ontology 使用同一读写判定。
 - [harness/settings.rs](../../crates/core/src/harness/settings.rs) — Codex `startup_script` 保存逐项命令参数，配置与 profile 随执行固定；字段校验拒绝空入口和 NUL，Debug 不输出命令内容。
 - `src/message.rs` — Message/Role/ContentBlock
@@ -32,3 +33,12 @@ Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
 ## 私有任务文件
 
 `src/fleet/private_files/` 定义 `PrivateExecutionContext`、期限/路径/容量纯校验及不可变存储。Unix 执行目录 0700、文件 0600；Windows 使用受保护的 ACL，仅允许当前用户、SYSTEM 和 Administrators。拒绝链接，写入同步并校验回读；Debug 脱敏。`image_digest` 指运行中节点可执行文件 SHA256。`Config.dag.execution_private_root` 仅运行态传递，不参与配置序列化。
+## 平台能力描述
+
+[ontology](../../crates/core/src/ontology/mod.rs) 定义公开能力描述与平台入口清单，供控制面同步及 CLI 完整性检查共用。描述保存稳定来源标识、公开约定、入口和明确依赖；原始执行定义及凭据继续归属原模块。新增入口遵循 [能力同步规则](../../rules/09-ontology-capabilities.md)。
+
+[fleet/report.rs](../../crates/core/src/fleet/report.rs) 定义可选增量报告：双方协商 ACK 与 delta 头后，Begin 携带 `mode/base_sequence`，Batch 可携带 `removed_ids`。旧全量 JSON 不变，协议版本仍为 10；基准使用已提交的 Snapshot sequence，不使用分片确认序号。
+
+兼容边界：本次仅受管 Host 请求增量协商。旧 Server 对直连 Worker 不保存报告提交序号，无法防止迟到旧报告覆盖状态，因此直连 Worker 继续周期性全量；候选提取优化仍生效。Server 拒绝非 Host 代次启用增量。
+
+[fleet/inventory/](../../crates/core/src/fleet/inventory/mod.rs) 保存有界的索引变更历史与固定分页快照。源游标过期后返回完整摘要，分页期间的变化留到下一次增量。读取和写入兼容由 [fleet/release/report_state.rs](../../crates/core/src/fleet/release/report_state.rs) 声明，并进入构建信息及发布清单。独立 ACK writer 使用数据格式 12，让旧控制器拒绝不兼容的发布和回滚；格式 11 的 reader 过渡包由新控制器验证后可以共存。`ontology_catalog_schema` 声明候选所需目录结构，缺省为 0。

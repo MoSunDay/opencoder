@@ -327,5 +327,9 @@ pub async fn checkpoint_wal(conn: &Connection) -> Result<()> {
 /// batch and stamp sharing one transaction - roll the whole bootstrap back so
 /// the database could never be opened.
 pub async fn bootstrap(conn: &Connection) -> Result<()> {
-    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || bootstrap_tx(conn)).await
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || bootstrap_tx(conn, true)).await
+}
+
+pub(super) async fn bootstrap_catalog(conn: &Connection) -> Result<()> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || bootstrap_tx(conn, false)).await
 }

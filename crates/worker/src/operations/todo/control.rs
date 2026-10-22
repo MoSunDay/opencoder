@@ -41,11 +41,7 @@ pub(super) async fn accept(worker: &Worker, id: &str, input: Value) -> Result<Rp
     let (mut record, legacy) = {
         let journal = worker.inner.journal.lock().await;
         (
-            journal
-                .records
-                .get(id)
-                .cloned()
-                .context("execution not found")?,
+            journal.get(id).await?.context("execution not found")?,
             journal.uses_legacy(id),
         )
     };
@@ -163,11 +159,7 @@ async fn park(
 async fn signal_stop(worker: &Worker, id: &str) -> Result<()> {
     let active = worker.inner.active.lock().await.get(id).cloned();
     let mut journal = worker.inner.journal.lock().await;
-    let mut record = journal
-        .records
-        .get(id)
-        .cloned()
-        .context("execution not found")?;
+    let mut record = journal.get(id).await?.context("execution not found")?;
     record.lifecycle.stop_intent = Some(StopIntent::Interrupt);
     record.assignment.index.status = if active.is_some() {
         ExecutionStatus::Cancelling
@@ -184,11 +176,7 @@ async fn signal_stop(worker: &Worker, id: &str) -> Result<()> {
 
 async fn fail(worker: &Worker, id: &str, request_id: &str, error: String) -> Result<()> {
     let mut journal = worker.inner.journal.lock().await;
-    let mut record = journal
-        .records
-        .get(id)
-        .cloned()
-        .context("execution not found")?;
+    let mut record = journal.get(id).await?.context("execution not found")?;
     let control = record
         .lifecycle
         .todo_reruns
@@ -202,23 +190,17 @@ async fn fail(worker: &Worker, id: &str, request_id: &str, error: String) -> Res
 
 /// Scheduler holds node admission; lifecycle gates exclude driver finalization.
 pub(crate) async fn recover_locked(worker: &Worker) -> Result<()> {
-    let records: Vec<_> = worker
+    let ids: Vec<_> = worker
         .inner
         .journal
         .lock()
         .await
-        .records
+        .summaries
         .values()
-        .filter(|r| {
-            r.lifecycle
-                .todo_reruns
-                .values()
-                .any(|c| c.phase == "stopping")
-        })
-        .cloned()
+        .filter(|summary| summary.stopping_rerun)
+        .map(|summary| summary.index.id.clone())
         .collect();
-    for record in records {
-        let id = &record.assignment.index.id;
+    for id in &ids {
         let gate = worker.lifecycle_gate(id).await;
         let _guard = gate.lock().await;
         let current = worker
@@ -226,9 +208,8 @@ pub(crate) async fn recover_locked(worker: &Worker) -> Result<()> {
             .journal
             .lock()
             .await
-            .records
             .get(id)
-            .cloned()
+            .await?
             .context("execution missing")?;
         let Some(control) = current
             .lifecycle
@@ -303,9 +284,8 @@ async fn advance(worker: &Worker, record: &Record, control: &Control) -> Result<
         .journal
         .lock()
         .await
-        .records
         .get(id)
-        .cloned()
+        .await?
         .context("execution missing")?;
     let receipt = record
         .lifecycle

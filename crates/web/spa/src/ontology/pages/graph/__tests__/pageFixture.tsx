@@ -7,22 +7,8 @@ import GraphPage from "../GraphPage";
 vi.setConfig({ testTimeout: 15000 });
 
 vi.mock("antd", async (original) => { const actual = await original<typeof import("antd")>(); return { ...actual, Grid: { ...actual.Grid, useBreakpoint: () => ({ md: true, lg: true }) } }; });
-const { apiMock, graphHandlers, graphMock } = vi.hoisted(() => {
-  const handlers: Record<string, (event: { target: { id: string } }) => void> = {};
+const { apiMock } = vi.hoisted(() => {
   return {
-    graphHandlers: handlers,
-    graphMock: {
-      on: vi.fn((event: string, handler: (event: { target: { id: string } }) => void) => {
-        handlers[event] = handler;
-      }),
-      setElementState: vi.fn().mockResolvedValue(undefined),
-      getZoom: vi.fn(() => 1), getNodeData: vi.fn(() => [] as { id: string; data: { name: string } }[]), getEdgeData: vi.fn(() => [] as { id: string }[]),
-      updateEdgeData: vi.fn(), draw: vi.fn().mockResolvedValue(undefined),
-      zoomTo: vi.fn().mockResolvedValue(undefined), zoomBy: vi.fn().mockResolvedValue(undefined),
-      fitView: vi.fn().mockResolvedValue(undefined), focusElement: vi.fn().mockResolvedValue(undefined),
-      getElementPosition: vi.fn(() => [100, 100]), getViewportByCanvas: vi.fn(() => [100, 100]),
-      getCanvasCenter: vi.fn(() => [400, 250]), translateBy: vi.fn().mockResolvedValue(undefined),
-    },
     apiMock: {
       graph: vi.fn(),
       entities: vi.fn(),
@@ -40,31 +26,15 @@ const { apiMock, graphHandlers, graphMock } = vi.hoisted(() => {
 });
 
 vi.mock("../../../api", () => ({ api: apiMock }));
-vi.mock("@ant-design/graphs", () => ({
-  FlowDirectionGraph: (props: {
-    data: { nodes: Array<{ id: string; data: { name: string } }>; edges: Array<{ id: string }> };
-    onReady: (graph: typeof graphMock) => void;
-  }) => {
-    graphMock.getNodeData.mockReturnValue(props.data.nodes);
-    graphMock.getEdgeData.mockReturnValue(props.data.edges);
-    props.onReady(graphMock);
-    return (
-      <div data-testid="mock-graph">
-        {props.data.nodes.map((node) => (
-          <button data-testid={`node-${node.id}`} key={node.id} onClick={() => graphHandlers["node:click"]?.({ target: { id: node.id } })}>
-            {node.data.name}
-          </button>
-        ))}
-        {props.data.edges.map((item) => (
-          <button key={item.id} onClick={() => graphHandlers["edge:click"]?.({ target: { id: item.id } })}>
-            edge-{item.id}
-          </button>
-        ))}
-      </div>
-    );
-  },
-
-}));
+vi.mock("../canvas3d/GraphScene", async () => {
+  const { forwardRef } = await import("react");
+  return { default: forwardRef((props: import("../canvas3d/GraphScene").SceneProps, _ref) => <div data-testid="mock-graph">
+    {props.data.nodes.map((node) => <button data-testid={`node-${node.id}`} key={node.id}
+      data-center={props.centerIds.includes(node.id)} data-selected={node.id === props.selectedNodeId}
+      onClick={() => props.onNodeClick(node.id)}>{node.name}</button>)}
+    {props.data.edges.map((edge) => <button key={edge.id} onClick={() => props.onEdgeClick(edge.id)}>edge-{edge.id}</button>)}
+  </div>) };
+});
 vi.mock("../EntityDrawer", () => ({
   default: ({ entity }: { entity?: { id: string } }) => <div>entity-drawer-{entity?.id || "closed"}</div>,
 }));
@@ -173,7 +143,6 @@ export { entityTypes, entities, relationshipTypes, graphNodes, aspect, edge, pag
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    Object.keys(graphHandlers).forEach((key) => delete graphHandlers[key]);
     apiMock.graph.mockResolvedValue({ nodes: graphNodes, edges: [edge], available_relationship_type_ids: ["depends", "unused"] });
     apiMock.entities.mockResolvedValue({ items: entities });
     apiMock.entityTypes.mockResolvedValue({ items: entityTypes });
@@ -181,4 +150,4 @@ export { entityTypes, entities, relationshipTypes, graphNodes, aspect, edge, pag
     apiMock.relationshipTypes.mockResolvedValue({ items: relationshipTypes });
     apiMock.graphAspects.mockResolvedValue({ items: [] });
   });
-export { chooseScope, apiMock, graphHandlers, graphMock };
+export { chooseScope, apiMock };

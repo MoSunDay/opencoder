@@ -53,4 +53,37 @@ impl FleetStore {
             })
             .await
     }
+    /// Full or delta report with a durable commit fence, shared by all Servers.
+    /// None means a newer Host generation committed; the old socket must drain RPCs.
+    pub async fn apply_index_report_committed(
+        &self,
+        node_id: &str,
+        records: &[ExecutionIndex],
+        pending_at_begin: Option<&[String]>,
+        watermark: (&str, u64),
+        base_sequence: Option<u64>,
+    ) -> Result<Option<Vec<ExecutionIndex>>> {
+        anyhow::ensure!(
+            base_sequence.is_none() || pending_at_begin.is_none(),
+            "delta reports cannot recover missing pending executions"
+        );
+        let node_id = node_id.to_owned();
+        let records = records.to_vec();
+        let pending = pending_at_begin.map(ToOwned::to_owned);
+        let (generation, sequence) = (watermark.0.to_owned(), watermark.1);
+        self.db
+            .write(move |conn| async move {
+                FleetConnection { conn }
+                    .apply_report(
+                        &node_id,
+                        &records,
+                        pending.as_deref(),
+                        Some((&generation, sequence)),
+                        Some(base_sequence),
+                        false,
+                    )
+                    .await
+            })
+            .await
+    }
 }

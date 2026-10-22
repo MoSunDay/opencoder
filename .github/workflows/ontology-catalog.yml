@@ -1,0 +1,41 @@
+name: ontology-catalog
+on:
+  pull_request:
+    paths:
+      - "crates/core/src/ontology/**"
+      - "crates/ctl/**"
+      - "crates/control/src/**"
+      - "crates/control/tests/ontology_catalog.rs"
+      - "crates/control/tests/ontology_catalog/**"
+      - "crates/ontology/**"
+      - "scripts/platform/rolling/state.py"
+      - "scripts/platform/rolling_tests/test_catalog_writer.py"
+      - "rules/09-ontology-capabilities.md"
+      - ".github/workflows/ontology-catalog.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ontology-catalog-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev cmake pkg-config
+      - name: Public CLI capabilities, mappings and Ontology operations
+        run: cargo test --locked -p opencoder-cli --test parse_ontology --test ontology_server
+      - name: Public control routes have catalog ownership
+        run: cargo test --locked -p opencoder-control --test ontology_catalog
+      - name: Catalog writes serialize with release transitions
+        run: cargo test --locked -p opencoder-control --lib ontology_catalog::ownership::tests
+      - name: Release journal lock recovery
+        run: python3 -m unittest discover -s scripts/platform/rolling_tests -p 'test_catalog_writer.py'

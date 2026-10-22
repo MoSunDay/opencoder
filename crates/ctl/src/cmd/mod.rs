@@ -9,6 +9,7 @@ pub mod dag;
 pub mod dag_steps;
 pub mod executions;
 pub mod nodes;
+pub mod ontology;
 pub mod project;
 pub mod raw;
 pub mod schedule;

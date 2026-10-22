@@ -16,12 +16,23 @@ fn dag_recovery_reads_without_closing_before_container_cleanup_and_rejects_unpin
     let original = std::fs::read(&path).unwrap();
     let loaded = Journal::load(layout.clone()).unwrap();
     assert_eq!(
-        loaded.records["dag-recovery"].assignment.index.status,
+        loaded
+            .get_sync("dag-recovery")
+            .unwrap()
+            .unwrap()
+            .assignment
+            .index
+            .status,
         ExecutionStatus::Running
     );
     assert_eq!(std::fs::read(&path).unwrap(), original);
     assert_eq!(
-        loaded.recover().unwrap().records["dag-recovery"]
+        loaded
+            .recover()
+            .unwrap()
+            .get_sync("dag-recovery")
+            .unwrap()
+            .unwrap()
             .assignment
             .index
             .status,
@@ -38,7 +49,7 @@ fn dag_recovery_reads_without_closing_before_container_cleanup_and_rejects_unpin
     assert_eq!(std::fs::read(&path).unwrap(), original);
     record["assignment"]["index"]["status"] = serde_json::json!("done");
     std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
-    assert_eq!(Journal::load(layout).unwrap().records.len(), 1);
+    assert_eq!(Journal::load(layout).unwrap().summaries.len(), 1);
 }
 
 #[test]
@@ -101,7 +112,7 @@ fn legacy_brain_upgrade_guard_preserves_pending_data_and_allows_history() {
         value["assignment"]["index"]["status"] = json!("done");
         let original = serde_json::to_vec(&value).unwrap();
         std::fs::write(&path, &original).unwrap();
-        assert_eq!(Journal::open(layout).unwrap().records.len(), 1);
+        assert_eq!(Journal::open(layout).unwrap().summaries.len(), 1);
         assert_eq!(std::fs::read(&path).unwrap(), original);
     }
 }

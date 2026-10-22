@@ -153,7 +153,13 @@ async fn durable_replay_does_not_wait_for_an_unrelated_cold_admission() {
     std::fs::write(&pending, &reservation).unwrap();
     let recovered = crate::journal::Journal::open(worker.inner.layout.clone()).unwrap();
     assert_eq!(
-        recovered.records[&assignment.index.id].assignment.index,
+        recovered
+            .get(&assignment.index.id)
+            .await
+            .unwrap()
+            .expect("execution exists")
+            .assignment
+            .index,
         assignment.index
     );
     let _busy = worker.inner.admission.lock().await;

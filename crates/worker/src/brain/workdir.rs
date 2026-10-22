@@ -126,11 +126,11 @@ pub async fn native_state(
         .and_then(|tail| tail.split('/').next())
     {
         let journal = worker.inner.journal.lock().await;
-        if let Some(record) = journal.records.get(id) {
-            if let Some((home, workspace)) = operator_env(worker, record)? {
+        if let Some(record) = journal.get(id).await? {
+            if let Some((home, workspace)) = operator_env(worker, &record)? {
                 return Ok((with_workdir(state, workspace, Some(home)), None));
             }
-            if managed(record) {
+            if managed(&record) {
                 // Keep admitted model/provider/AP settings in process. They do
                 // not belong in the managed child workspace.
                 let config = record
@@ -140,7 +140,7 @@ pub async fn native_state(
                     .map(Ok)
                     .unwrap_or_else(|| worker.configuration())?;
                 return Ok((
-                    with_workdir(state, for_record(worker, record)?, None),
+                    with_workdir(state, for_record(worker, &record)?, None),
                     Some(config),
                 ));
             }

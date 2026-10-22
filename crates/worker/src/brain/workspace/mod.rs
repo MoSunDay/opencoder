@@ -49,8 +49,8 @@ pub(crate) async fn prepare(worker: &Worker, assignment: &Assignment) -> Result<
     let root = {
         let journal = worker.inner.journal.lock().await;
         let record = journal
-            .records
             .get(run_id)
+            .await?
             .context("shared workspace owner must be local")?;
         ensure!(
             record.assignment.index.kind == ExecutionKind::Brain,
@@ -60,7 +60,7 @@ pub(crate) async fn prepare(worker: &Worker, assignment: &Assignment) -> Result<
             record.assignment.index.node_id == assignment.index.node_id,
             "workspace node mismatch"
         );
-        resolve(record)?.context("root did not admit a shared workspace")?
+        resolve(&record)?.context("root did not admit a shared workspace")?
     };
     let snapshot = super::v4::state::load(worker, run_id).await?;
     let operation = snapshot

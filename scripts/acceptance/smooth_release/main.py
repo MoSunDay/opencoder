@@ -107,8 +107,10 @@ def exercise(env, observe_seconds=0):
         assert env.retire(first), 'Server cannot retire while ingress still owns accepted requests'
         env.http(env.settings.host_url,'/servers/r1','POST',{
             'url':f"http://127.0.0.1:{first['server_port']}",'enabled':False})
-        until(lambda:len(stream.reconnects) == 1,'SSE release notification')
-        until(lambda:len(stream.resume_delays) == 1,'SSE resumed response')
+        until(lambda:stream.reconnects or stream.errors,'SSE release notification')
+        until(lambda:stream.resume_delays or stream.errors,'SSE resumed response')
+        assert not stream.errors, stream.errors
+        assert len(stream.reconnects) == len(stream.resume_delays) == 1
         assert stream.resume_delays[0] < 5, 'SSE reconnect exceeded 5 seconds'
         until(lambda:node_channel.closed.is_set() or node_channel.errors,'Node retirement notification',5)
         assert not node_channel.errors, node_channel.errors
@@ -163,6 +165,9 @@ def exercise(env, observe_seconds=0):
         unchanged_shell()
         unchanged_container()
     finally:
+        (env.root / 'stream.json').write_text(json.dumps({
+            'ids': stream.ids, 'reconnects': stream.reconnects,
+            'resume_delays': stream.resume_delays, 'errors': stream.errors}, indent=2))
         if late:
             late.close()
         if node_channel:

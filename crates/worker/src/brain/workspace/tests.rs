@@ -145,7 +145,12 @@ async fn workspace_admission_shares_files_and_preserves_activation_identity() {
         assert_eq!(reply.status, status);
         let journal = worker.inner.journal.lock().await;
         assert_eq!(
-            journal.records[&first.index.id].annotations["brain_workspace"],
+            journal
+                .get(&first.index.id)
+                .await
+                .unwrap()
+                .expect("execution exists")
+                .annotations["brain_workspace"],
             first_meta
         );
     }

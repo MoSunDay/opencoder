@@ -26,9 +26,8 @@ pub(in crate::operations) async fn dag_steps(
     let (status, definition, root, execution_error) = {
         let journal = worker.inner.journal.lock().await;
         let record = journal
-            .records
             .get(&execution.id)
-            .cloned()
+            .await?
             .ok_or_else(|| anyhow::anyhow!("dag execution not found"))?;
         (
             record.assignment.index.status,

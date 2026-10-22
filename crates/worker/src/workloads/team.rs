@@ -80,8 +80,8 @@ impl Dispatcher {
             .journal
             .lock()
             .await
-            .records
             .get(&self.coordinator)
+            .await?
             .and_then(|record| record.annotations["team_guidance"].as_array().cloned())
             .unwrap_or_default();
         let prompt = if guidance.is_empty() {

@@ -176,8 +176,8 @@ async fn overview(
     let (execution_status, mut controls) = {
         let journal = worker.inner.journal.lock().await;
         let execution = journal
-            .records
             .get(&record.id)
+            .await?
             .context("execution not found")?;
         (
             execution.assignment.index.status,

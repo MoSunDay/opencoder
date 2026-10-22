@@ -10,7 +10,13 @@ use axum::{
 };
 use std::sync::atomic::Ordering;
 
-struct Active(Database);
+pub(crate) struct Active(Database);
+impl Active {
+    pub(crate) fn new(database: Database) -> Self {
+        database.active.fetch_add(1, Ordering::SeqCst);
+        Self(database)
+    }
+}
 impl Drop for Active {
     fn drop(&mut self) {
         self.0.active.fetch_sub(1, Ordering::SeqCst);
@@ -25,18 +31,31 @@ pub(crate) async fn transaction(
 ) -> Response {
     let write = !matches!(request.method().as_str(), "GET" | "HEAD")
         && !request.uri().path().ends_with("/vector-search");
-    state.database.active.fetch_add(1, Ordering::SeqCst);
-    let active = Active(state.database.clone());
+    let active = Active::new(state.database.clone());
     // Detaching from the client preserves accepted mutations; Server retirement
     // waits for Active guards, including requests whose client already left.
     let task = tokio::spawn(async move {
         let _active = active;
+        let database = state.database.clone();
         let work = move |connection: turso::Connection| async move {
             if write {
                 connection.execute("BEGIN IMMEDIATE", ()).await?;
             }
             let response = REQUEST_CONNECTION
-                .scope(connection.clone(), next.run(request))
+                .scope(connection.clone(), async {
+                    if write {
+                        if let Err(error) = state
+                            .database
+                            .store()
+                            .await
+                            .catalog_guard(request.uri().path())
+                            .await
+                        {
+                            return error.into_response();
+                        }
+                    }
+                    next.run(request).await
+                })
                 .await;
             if write {
                 let finish = if response.status().is_success() {
@@ -49,9 +68,9 @@ pub(crate) async fn transaction(
             Ok::<_, anyhow::Error>(response)
         };
         let result = if write {
-            state.database.db.write(work).await
+            database.db.write(work).await
         } else {
-            state.database.db.read(work).await
+            database.db.read(work).await
         };
         match result {
             Ok(response) => response,

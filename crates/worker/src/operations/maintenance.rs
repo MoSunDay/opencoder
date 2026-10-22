@@ -145,7 +145,7 @@ async fn run_unscoped(worker: &Worker, command: ExecutionCommand) -> Result<RpcR
                 // A session without a top-level journal is an internal child
                 // or an already-cleared id. It is intentionally ignored so a
                 // public bulk clear cannot erase a parent-owned transcript.
-                let Some(record) = journal.records.get(id) else {
+                let Some(record) = journal.get(id).await? else {
                     continue;
                 };
                 if record.assignment.index.kind != kind {

@@ -92,11 +92,7 @@ impl Host {
             if runtime.mode != "retired"
                 || self.activity.recent(&runtime.id)
                 || !self.store.runtime_tickets(&runtime.id).await?.is_empty()
-                || self
-                    .store
-                    .definition("runtime_sleep", &runtime.id)
-                    .await?
-                    .is_some_and(|v| !v.is_null())
+                || self.store.runtime_sleep_stamp(&runtime.id).await?.1
             {
                 continue;
             }

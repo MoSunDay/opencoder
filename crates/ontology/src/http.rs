@@ -10,8 +10,16 @@ pub struct AppState {
 
 impl AppState {
     pub async fn open(database: &Path, files: &Path) -> Result<Self, AppError> {
+        Self::open_with_policy(database, files, crate::SchemaPolicy::InitializeEmpty).await
+    }
+
+    pub async fn open_with_policy(
+        database: &Path,
+        files: &Path,
+        policy: crate::SchemaPolicy,
+    ) -> Result<Self, AppError> {
         let text_store = TextStore::initialize(files.to_path_buf()).await?;
-        let database = Database::open(database, &files.canonicalize()?).await?;
+        let database = Database::open(database, &files.canonicalize()?, policy).await?;
         Ok(Self {
             database,
             text_store,

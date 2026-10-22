@@ -10,7 +10,13 @@ export type RelationshipTypeCreate = { key: string; name: string; description?: 
 export type RelationshipTypeUpdate = { name: string; description?: string; source_entity_type_id: string | null; target_entity_type_ids: string[]; is_deleted: boolean; expected_revision: number };
 export type EntityTypeAction = { id: string; env_num: number; entity_type_id: string; operation_type: "read" | "write"; operation: string; description: string; revision: number; is_deleted: boolean };
 export type Relationship = { id: string; env_num: number; relationship_type_id: string; source_entity_id: string; target_entity_id: string; description: string; revision: number; is_deleted: boolean; is_pinned: boolean };
-export type DirectoryItem = { id: string; name: string; description: string; parent_id?: string; revision: number; is_deleted: boolean };
+export type DirectoryItem = { id: string; name: string; description: string; parent_id?: string | null; revision: number; is_deleted: boolean };
 export type GraphData = { nodes: Entity[]; edges: Relationship[] };
 export type GraphResponse = GraphData & { available_relationship_type_ids: string[] };
 export type GraphAspect = { id: string; env_num: number; aspect_key: string; name: string; description: string; entity_type_ids: string[]; relationship_type_ids: string[]; default_center_ids: string[]; default_upstream_depth: number | null; default_downstream_depth: number | null; revision: number; is_deleted: boolean };
+export type CatalogManagement = {
+  managed_by: string;
+  readonly_attributes: string[];
+  cli?: string[] | null;
+  api?: string[] | null;
+};

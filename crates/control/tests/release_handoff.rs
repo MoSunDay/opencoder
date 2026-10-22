@@ -32,6 +32,9 @@ impl Node {
 }
 #[async_trait::async_trait]
 impl NodeService for Node {
+    fn supports_index_deltas(&self) -> bool {
+        true
+    }
     fn registration(&self) -> NodeRegistration {
         NodeRegistration {
             id: "node-release".into(),
@@ -469,6 +472,7 @@ async fn retiring_server_accepts_late_ingress_connections_until_workers_exit() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+    response.bytes().await.unwrap();
     let submitted = client()
         .post(format!("{url}/api/executions"))
         .bearer_auth("release-test")
@@ -477,6 +481,9 @@ async fn retiring_server_accepts_late_ingress_connections_until_workers_exit() {
         .await
         .unwrap();
     assert_eq!(submitted.status(), 202);
+    // Graceful retirement preserves response bodies. Finish these finite
+    // replies before asserting that the listener has completely drained.
+    submitted.bytes().await.unwrap();
     assert_eq!(node.starts.load(Ordering::SeqCst), 1);
     for _ in 0..5 {
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -488,6 +495,7 @@ async fn retiring_server_accepts_late_ingress_connections_until_workers_exit() {
             .await
             .unwrap();
         assert_eq!(late.status(), 200);
+        late.bytes().await.unwrap();
     }
     worker.kill().await.unwrap();
     worker.wait().await.unwrap();

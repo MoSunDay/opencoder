@@ -202,6 +202,7 @@ async fn accepted_todo_is_visible_before_and_after_workflow_initialization() {
         .lock()
         .await
         .mark_todo_initialized(id)
+        .await
         .unwrap();
     let initialized = inspect(&worker, &execution(id)).await.unwrap();
     assert_eq!(initialized.status, 200, "{initialized:?}");
@@ -242,9 +243,10 @@ async fn initialization_marker_preserves_a_concurrent_stop_intent() {
         let mut journal = worker.inner.journal.lock().await;
         journal
             .request_stop(id, StopIntent::Interrupt, true)
+            .await
             .unwrap();
-        journal.mark_todo_initialized(id).unwrap();
-        let saved = &journal.records[id];
+        journal.mark_todo_initialized(id).await.unwrap();
+        let saved = &journal.get(id).await.unwrap().expect("execution exists");
         assert_eq!(saved.assignment.index.status, ExecutionStatus::Cancelling);
         assert_eq!(saved.lifecycle.stop_intent, Some(StopIntent::Interrupt));
         assert_eq!(

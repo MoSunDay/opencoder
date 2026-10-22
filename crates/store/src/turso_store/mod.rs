@@ -21,6 +21,8 @@ mod events;
 mod impl_store;
 #[path = "conversation/inputs.rs"]
 mod inputs;
+#[path = "execution/inventory/mod.rs"]
+mod inventory;
 #[path = "conversation/messages.rs"]
 mod messages;
 #[path = "execution/node_state.rs"]
@@ -35,6 +37,8 @@ mod project;
 mod project_links;
 #[path = "projects/project_runs.rs"]
 mod project_runs;
+#[path = "execution/reporting/mod.rs"]
+mod reporting;
 #[path = "execution/schedule.rs"]
 mod schedule;
 #[path = "bootstrap/schema.rs"]
@@ -73,6 +77,14 @@ impl TursoStore {
 
     pub async fn open_memory() -> Result<Self> {
         Self::open(":memory:").await
+    }
+
+    /// Shared Server definitions do not own Runtime inventory or report outboxes.
+    /// Avoid installing those schemas while older Server connections are live.
+    pub async fn open_catalog(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            db: connection::open_catalog(path.as_ref()).await?,
+        })
     }
 
     /// Independent diagnostic connection; normal operations use the bounded pool.

@@ -179,10 +179,13 @@ mod tests {
     #[tokio::test]
     async fn entity_value_queries_use_the_entity_indexes_without_statistics() {
         let temp = tempfile::tempdir().unwrap();
-        let database =
-            crate::database::Database::open(&temp.path().join("db"), &temp.path().join("files"))
-                .await
-                .unwrap();
+        let database = crate::database::Database::open(
+            &temp.path().join("db"),
+            &temp.path().join("files"),
+            crate::SchemaPolicy::InitializeEmpty,
+        )
+        .await
+        .unwrap();
         let store = database.store().await;
         for table in ["structured_values", "text_revisions"] {
             let mut rows = store

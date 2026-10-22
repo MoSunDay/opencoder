@@ -4,7 +4,7 @@ Commit: (working-tree, skill run-end 清除三处修复 + [active skill] tail �
 
 ## 背景
 
-用户报告：激活 task-plan skill 后按 shift+tab，之后每个 turn 都复述「The task-plan skill is active.」。活库探针（会话 01M16YEEMC0CE9CSX15KP7ATXG）完全闭合根因链：
+用户报告：激活 task-plan skill 后按 shift+tab，之后每个 turn 都复述「The task-plan skill is active.」。会话探针确认了以下原因：
 
 1. `clear_on_run_end` 的 store 写入用 `let _ =` 吞错：`sessions.skill` 行自 23:04 起持续 SET（task-plan 全文），期间 185 个 Done 事件零次 clear 落库；
 2. 每个 turn resume 从未清的行复活 `skill_prompt`（resume.rs）；

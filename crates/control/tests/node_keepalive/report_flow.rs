@@ -3,8 +3,8 @@ use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -14,10 +14,14 @@ struct Inventory {
     changes: watch::Sender<u64>,
     reports: AtomicUsize,
     calls: AtomicUsize,
+    sequence: AtomicUsize,
 }
 
 #[async_trait::async_trait]
 impl NodeService for Inventory {
+    fn supports_index_deltas(&self) -> bool {
+        true
+    }
     fn registration(&self) -> NodeRegistration {
         NodeRegistration {
             protocol_version: PROTOCOL_VERSION,
@@ -30,8 +34,8 @@ impl NodeService for Inventory {
     }
     fn snapshot(&self) -> NodeSnapshot {
         NodeSnapshot {
-            generation: "flow-generation".into(),
-            sequence: 1,
+            generation: "host-00000000000000000001-flow".into(),
+            sequence: self.sequence.fetch_add(1, Ordering::SeqCst) as u64 + 1,
             cpu_capacity: 2.0,
             active_agent_loops: 0,
             active_runs: 1,
@@ -74,10 +78,13 @@ impl NodeService for Inventory {
 async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
     let root = tempfile::tempdir().unwrap();
     let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
-    let state =
-        opencoder_control::new_state(root.path().join("work"), root.path().join("data"), None)
-            .await
-            .unwrap();
+    let state = opencoder_control::new_state(
+        super::isolated_work(root.path()),
+        root.path().join("data"),
+        None,
+    )
+    .await
+    .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let remote = format!("http://{}", listener.local_addr().unwrap());
     let app = opencoder_control::build_app(state.clone(), Some("flow-test".into()), false);
@@ -87,6 +94,7 @@ async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
         changes,
         reports: AtomicUsize::new(0),
         calls: AtomicUsize::new(0),
+        sequence: AtomicUsize::new(0),
     });
     let service: Arc<dyn NodeService> = inventory.clone();
     let node =
@@ -118,14 +126,16 @@ async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
         while inventory.reports.load(Ordering::SeqCst) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(tokio::time::timeout(
-            Duration::from_millis(20),
-            state
-                .fleet
-                .put_definition("test", "writer-barrier", &serde_json::json!({})),
-        )
-        .await
-        .is_err());
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(20),
+                state
+                    .fleet
+                    .put_definition("test", "writer-barrier", &serde_json::json!({})),
+            )
+            .await
+            .is_err()
+        );
         assert!(
             !tokio::time::timeout(Duration::from_secs(1), state.fleet.nodes())
                 .await
@@ -220,7 +230,7 @@ async fn report_ack(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn acknowledged_report_detach_cannot_promote_or_ack_replacement_connection() {
-    use super::report_storage::{send, until, Fixture};
+    use super::report_storage::{Fixture, send, until};
     use futures::StreamExt;
     let fixture = Fixture::start().await;
     let mut old = fixture.connect(1).await;

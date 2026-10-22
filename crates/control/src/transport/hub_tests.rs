@@ -295,3 +295,35 @@ async fn post_operation_snapshot_precedes_capacity_claim_release() {
     assert_eq!(after_reply.snapshot.unwrap().active_runs, 1);
     assert_eq!(after_reply.reserved_loops, 0);
 }
+
+#[tokio::test]
+async fn delta_membership_preserves_unmentioned_acceptances_and_reservations() {
+    let hub = Hub::new(vec![]);
+    let a = ExecutionIndex {
+        id: "agent-a".into(),
+        created_at: 1,
+        kind: ExecutionKind::Agent,
+        node_id: "node-a".into(),
+        status: ExecutionStatus::Pending,
+    };
+    let b = ExecutionIndex {
+        id: "agent-b".into(),
+        ..a.clone()
+    };
+    hub.acknowledge_report("node-a", &[a.clone(), b.clone()])
+        .await;
+    hub.reserve(&a).await;
+    hub.reserve(&b).await;
+    hub.acknowledge_report_changes("node-a", &[], true, std::slice::from_ref(&b.id))
+        .await;
+    let state = hub.state.lock().await;
+    assert_eq!(
+        state.accepted.get(&a.id).map(String::as_str),
+        Some("node-a")
+    );
+    assert!(!state.accepted.contains_key(&b.id));
+    assert!(
+        state.reservations.contains_key(&a.id) && state.reservations.contains_key(&b.id),
+        "inventory removal cannot release active capacity"
+    );
+}

@@ -1,11 +1,13 @@
 //! Runtime deployment configuration and compatibility contract.
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+mod report_state;
+pub use report_state::ReportStateCompatibility;
 
 pub const HANDOFF_PROTOCOL: u32 = 1;
-// Schema stays at v39. Format 11 forbids overlapping libsql and Turso processes
-// on shared files; switching engines requires a stopped-writer maintenance.
-pub const HANDOFF_DATA_FORMAT: u32 = 11;
+// Schema stays at v39. Format 12 marks independent report ACKs so controllers
+// predating the reader bridge reject unsafe publication and rollback.
+pub const HANDOFF_DATA_FORMAT: u32 = 12;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

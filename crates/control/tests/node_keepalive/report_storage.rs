@@ -3,9 +3,8 @@ use futures::{SinkExt, StreamExt};
 use opencoder_core::fleet::*;
 use std::{sync::Arc, time::Duration};
 use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{client::IntoClientRequest, Message},
-    MaybeTlsStream, WebSocketStream,
+    MaybeTlsStream, WebSocketStream, connect_async,
+    tungstenite::{Message, client::IntoClientRequest},
 };
 
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -26,10 +25,13 @@ impl Fixture {
     pub(super) async fn start() -> Self {
         let root = tempfile::tempdir().unwrap();
         let _scope = opencoder_core::config::scoped_config_home(root.path().join("config"));
-        let state =
-            opencoder_control::new_state(root.path().join("work"), root.path().join("data"), None)
-                .await
-                .unwrap();
+        let state = opencoder_control::new_state(
+            super::isolated_work(root.path()),
+            root.path().join("data"),
+            None,
+        )
+        .await
+        .unwrap();
         let app = opencoder_control::build_app(state.clone(), Some("storage-test".into()), false);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let remote = format!(
@@ -45,11 +47,35 @@ impl Fixture {
         }
     }
     pub(super) async fn open(&self, sequence: u64) -> Socket {
+        self.open_mode(sequence, false).await
+    }
+    pub(super) async fn open_mode(&self, sequence: u64, delta: bool) -> Socket {
+        self.open_generation(sequence, delta, GENERATION).await
+    }
+    pub(super) async fn open_generation(
+        &self,
+        sequence: u64,
+        delta: bool,
+        generation: &str,
+    ) -> Socket {
         let mut request = self.remote.clone().into_client_request().unwrap();
         request
             .headers_mut()
             .insert("authorization", "Bearer storage-test".parse().unwrap());
-        let (mut socket, _) = connect_async(request).await.unwrap();
+        if delta {
+            request
+                .headers_mut()
+                .insert(INDEX_REPORT_ACK_HEADER, "1".parse().unwrap());
+            request.headers_mut().insert(
+                INDEX_REPORT_DELTA_HEADER,
+                INDEX_REPORT_DELTA_VERSION.parse().unwrap(),
+            );
+        }
+        let (mut socket, response) = connect_async(request).await.unwrap();
+        assert_eq!(
+            response.headers().contains_key(INDEX_REPORT_DELTA_HEADER),
+            delta
+        );
         send(
             &mut socket,
             NodeFrame::Hello {
@@ -61,7 +87,10 @@ impl Fixture {
                     maintenance_agent_id: "maintenance-storage".into(),
                     kinds: vec![ExecutionKind::Dag],
                 },
-                snapshot: snapshot(sequence),
+                snapshot: NodeSnapshot {
+                    generation: generation.into(),
+                    ..snapshot(sequence)
+                },
             },
         )
         .await;
@@ -116,7 +145,7 @@ impl Fixture {
         );
     }
 }
-fn snapshot(sequence: u64) -> NodeSnapshot {
+pub(super) fn snapshot(sequence: u64) -> NodeSnapshot {
     NodeSnapshot {
         generation: GENERATION.into(),
         sequence,
@@ -130,7 +159,7 @@ fn snapshot(sequence: u64) -> NodeSnapshot {
         resource_error: None,
     }
 }
-fn index(status: ExecutionStatus) -> ExecutionIndex {
+pub(super) fn index(status: ExecutionStatus) -> ExecutionIndex {
     ExecutionIndex {
         id: "dag-storage".into(),
         node_id: "node-storage".into(),
@@ -158,6 +187,9 @@ async fn report(socket: &mut Socket, report_id: u64, records: Vec<ExecutionIndex
                     report_id,
                     part,
                     acknowledge: false,
+                    mode: IndexReportMode::Full,
+                    base_sequence: None,
+                    removed_ids: vec![],
                 },
             },
         )
@@ -318,13 +350,15 @@ async fn invalid_report_closes_without_handoff_or_ready_promotion() {
             .unwrap()
             .ready
     );
-    assert!(fixture
-        .state
-        .fleet
-        .index("dag-storage")
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        fixture
+            .state
+            .fleet
+            .index("dag-storage")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -2,7 +2,7 @@
 import "../../../testSetup";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { apiMock, graphMock, entities, graphNodes, aspect, edge, pageElement, finishSelection, expandFilters, renderPage, chooseScope } from "./pageFixture";
+import { apiMock, entities, graphNodes, aspect, edge, pageElement, finishSelection, expandFilters, renderPage, chooseScope } from "./pageFixture";
 describe("GraphPage saved observation", () => {
   it("observes a saved aspect at three hops without requiring centers", async () => {
     apiMock.graphAspects.mockResolvedValue({ items: [aspect] });
@@ -88,7 +88,8 @@ describe("GraphPage saved observation", () => {
       entityTypeIds: ["service"], centerIds: ["a", "b"], upstreamDepth: 3, downstreamDepth: 3, relationshipTypeIds: ["depends"],
     }));
     await screen.findByTestId("node-b");
-    expect(graphMock.setElementState).toHaveBeenLastCalledWith({ a: [], b: [], edge: [] }, false);
+    expect(screen.getByTestId("node-a")).toHaveAttribute("data-center", "true");
+    expect(screen.getByTestId("node-b")).toHaveAttribute("data-center", "true");
   });
 
   it("shows failures with a working retry", async () => {

@@ -86,8 +86,11 @@ async fn detail(
         text_rows.push(future.await?);
     }
     let needs_completion = !store.intrinsic_complete(env.env_num, id).await?;
+    let management = store
+        .catalog_management(env.env_num, "entities", &id.to_string())
+        .await?;
     Ok(Json(
-        serde_json::json!({"item":item,"attribute_definitions":definitions,"structured_attributes":values,"text_attributes":text_rows,"actions":actions,"needs_completion":needs_completion}),
+        serde_json::json!({"item":item,"attribute_definitions":definitions,"structured_attributes":values,"text_attributes":text_rows,"actions":actions,"needs_completion":needs_completion,"management":management}),
     ))
 }
 #[derive(Deserialize)]

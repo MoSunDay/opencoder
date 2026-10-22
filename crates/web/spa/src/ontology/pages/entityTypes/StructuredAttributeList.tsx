@@ -5,6 +5,7 @@ import type { useStructuredDrafts } from "./details/useStructuredDrafts";
 type Props = {
   definitions: AttributeDefinition[];
   canManage: boolean;
+  readonlyAttributes?: string[];
   state: ReturnType<typeof useStructuredDrafts>;
 };
 
@@ -17,6 +18,7 @@ export function formatValue(value: unknown): string {
 export default function StructuredAttributeList({
   definitions,
   canManage,
+  readonlyAttributes = [],
   state,
 }: Props) {
   const { drafts, saving, valueOf, change, submit } = state;
@@ -24,8 +26,8 @@ export default function StructuredAttributeList({
   const renderEditor = (definition: AttributeDefinition) => {
     const id = definition.id;
     const value = valueOf(id);
-    if (!canManage) {
-      return <Typography.Text>{formatValue(value)}</Typography.Text>;
+    if (!canManage || readonlyAttributes.includes(id)) {
+      return <Typography.Text style={{ overflowWrap: "anywhere" }}>{formatValue(value)}</Typography.Text>;
     }
     switch (definition.kind) {
       case "boolean":

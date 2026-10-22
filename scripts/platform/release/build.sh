@@ -82,9 +82,9 @@ packages=()
 for binary in "${binaries[@]}"; do
   packages+=(-p "$binary")
 done
-OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked "${packages[@]}"
+OPENCODER_BUILD_COMMIT="$commit" OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked "${packages[@]}"
 if [[ "$(uname -s)" = Linux ]]; then
-  OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked -p opencoder-dag-runtime \
+  OPENCODER_BUILD_COMMIT="$commit" OPENCODER_SPA_SHA256="$spa_digest" cargo build --release --locked -p opencoder-dag-runtime \
     --example dag-runner --example agent-step-runner --example agent-session-runner
   binaries+=(dag-runner agent-step-runner agent-session-runner)
 fi
@@ -149,8 +149,10 @@ manifest = {
     "release_id": "rel-" + commit,
     "compatibility": info["release_compatibility"],
     "execution_io": info["execution_io"],
+    "report_state": info["report_state"],
     "storage_engine": info["storage_engine"],
     "todo_files_contract": info["todo_files_contract"],
+    "ontology_catalog_schema": info["ontology_catalog_schema"],
     "schema_version": 1,
     "commit": commit,
     "version": info["version"],

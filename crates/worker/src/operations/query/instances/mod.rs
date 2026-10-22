@@ -30,10 +30,10 @@ pub(in crate::operations) async fn context(
     }
     let (definition, root, status) = {
         let journal = worker.inner.journal.lock().await;
-        let record = journal.records.get(&execution.id).unwrap();
+        let record = journal.get(&execution.id).await?.unwrap();
         (
             record.assignment.definition.clone(),
-            crate::layout::dag::accepted_parent(record)?,
+            crate::layout::dag::accepted_parent(&record)?,
             record.assignment.index.status.as_str().to_owned(),
         )
     };

@@ -1,6 +1,8 @@
+mod catalog;
 mod entities;
 pub(crate) mod model;
 mod schema;
+pub use schema::{SchemaPolicy, CONTRACT as SCHEMA_CONTRACT};
 mod seeding;
 mod store;
 pub(crate) mod text_revision;
@@ -33,24 +35,18 @@ pub(crate) struct Database {
 }
 
 impl Database {
-    pub async fn open(path: &Path, files: &Path) -> Result<Self, AppError> {
+    pub async fn open(path: &Path, files: &Path, policy: SchemaPolicy) -> Result<Self, AppError> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
         let db = opencoder_database::Database::open(path).await?;
         let files = files.to_owned();
+        // Inspect on the initialization connection. A pooled read transaction
+        // before DDL could itself retain Turso's previous schema snapshot.
         db.write(move |connection| async move {
-            schema::bootstrap(&connection, &files).await?;
-            connection.execute("BEGIN IMMEDIATE", ()).await?;
-            let store = Store {
-                connection: connection.clone(),
-                include_pending: false,
-            };
-            let result = store.initialize_debug().await;
-            connection
-                .execute(if result.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
-                .await?;
-            result?;
+            if !schema::ready(&connection, &files, policy).await? {
+                schema::bootstrap(&connection, &files, policy).await?;
+            }
             Ok(())
         })
         .await?;

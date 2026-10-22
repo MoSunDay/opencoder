@@ -270,10 +270,13 @@ mod tests {
     #[tokio::test]
     async fn anchored_relationship_query_uses_both_endpoint_indexes() {
         let temp = tempfile::tempdir().unwrap();
-        let database =
-            crate::database::Database::open(&temp.path().join("db"), &temp.path().join("files"))
-                .await
-                .unwrap();
+        let database = crate::database::Database::open(
+            &temp.path().join("db"),
+            &temp.path().join("files"),
+            crate::SchemaPolicy::InitializeEmpty,
+        )
+        .await
+        .unwrap();
         let store = database.store().await;
         let mut rows = store
             .connection

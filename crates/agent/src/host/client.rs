@@ -249,67 +249,6 @@ impl Host {
     }
 
     pub async fn sync_inventory(&self) -> Result<Vec<opencoder_core::fleet::ExecutionIndex>> {
-        let mut indexes = Vec::new();
-        let mut active_loops = 0;
-        let mut resource_errors = Vec::new();
-        let mut runtime_ready = true;
-        for runtime in self.store.runtimes().await? {
-            if runtime.mode == "staged" {
-                continue;
-            }
-            let _use = self
-                .store
-                .shared_request_lock("runtime-use", &runtime.id)
-                .await?;
-            let inventory = if let Some(saved) = self
-                .store
-                .definition("runtime_sleep", &runtime.id)
-                .await?
-                .filter(|value| !value.is_null())
-            {
-                // A sleeping Runtime has a frozen final inventory. Its old
-                // port can belong to another service; only an explicit wake
-                // may clear this marker and resume live reads.
-                ensure!(
-                    runtime.mode == "retired",
-                    "sleep inventory requires a retired runtime"
-                );
-                serde_json::from_value(saved)?
-            } else {
-                // A missing live Runtime must still fail readiness.
-                self.inventory(&runtime, false).await?
-            };
-            let ids: Vec<_> = inventory
-                .indexes
-                .iter()
-                .map(|index| index.id.as_str())
-                .collect();
-            self.store
-                .assign_runtime_inventory(&runtime.id, &ids)
-                .await?;
-            if runtime.mode == "active" {
-                runtime_ready &= inventory.snapshot.ready;
-                if let Some(error) = &inventory.snapshot.resource_error {
-                    resource_errors.push(format!("{}: {error}", runtime.id));
-                }
-            }
-            active_loops += inventory.snapshot.active_agent_loops;
-            indexes.extend(inventory.indexes);
-        }
-        let capacity = self.store.capacity().await?;
-        let ready = self
-            .store
-            .runtimes()
-            .await?
-            .iter()
-            .any(|r| r.mode == "active");
-        let mut snapshot = self.snapshot.write().unwrap();
-        snapshot.active_agent_loops = active_loops;
-        snapshot.active_runs = capacity.running;
-        snapshot.pending_runs = capacity.queued;
-        snapshot.max_runs = capacity.max_runs;
-        snapshot.ready = ready && runtime_ready;
-        snapshot.resource_error = (!resource_errors.is_empty()).then(|| resource_errors.join("; "));
-        Ok(indexes)
+        Ok(self.collect_inventory_changes(None).await?.records)
     }
 }

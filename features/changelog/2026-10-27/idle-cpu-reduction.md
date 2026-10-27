@@ -1,4 +1,4 @@
-Commit: 基线 e0abec72；brain-ACK 修复与空闲开销削减分两笔提交
+Commit: 基线 e0abec72；brain-ACK 修复 91462810，其余随 3885164f
 
 # 常驻进程空闲 CPU 削减
 

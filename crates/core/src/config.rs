@@ -47,6 +47,8 @@ mod model_guard;
 #[path = "config/runtime/ontology.rs"]
 mod ontology;
 mod persistence;
+#[path = "config/runtime/operator.rs"]
+mod operator;
 mod project;
 mod provider;
 pub mod redact;
@@ -67,6 +69,7 @@ pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
 pub use model_guard::is_suspicious_model;
 pub use ontology::{OntologyConfig, OntologyNfsConfig};
+pub use operator::{LinuxIdentityMode, OperatorConfig};
 pub use project::{ProjectConfig, TodoNfsConfig, TodoStorageConfig};
 pub use provider::{Endpoint, HttpHeader, ProviderConfig};
 pub use schedule::{
@@ -120,6 +123,9 @@ pub struct Config {
     /// DAG binary-module pool + NFS export knobs.
     #[serde(default)]
     pub dag: DagConfig,
+    /// Operator execution plane (per-execution Linux identity provisioning).
+    #[serde(default)]
+    pub operator: OperatorConfig,
     #[serde(default)]
     pub ontology: OntologyConfig,
     #[serde(default)]
@@ -316,6 +322,7 @@ impl Default for Config {
             embedding_provider: None,
             agent: AgentDefaults::default(),
             dag: DagConfig::default(),
+            operator: OperatorConfig::default(),
             ontology: OntologyConfig::default(),
             project: ProjectConfig::default(),
             compaction: CompactionConfig::default(),

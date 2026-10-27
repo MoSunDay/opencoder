@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use opencoder_core::platform::RunAsIdentity;
 use opencoder_core::{AgentKind, ToolArc};
 use serde_json::Value;
 
@@ -20,7 +21,7 @@ pub mod view_image;
 
 pub fn registry() -> HashMap<String, ToolArc> {
     let all: Vec<ToolArc> = vec![
-        Arc::new(bash::BashTool) as ToolArc,
+        Arc::new(bash::BashTool::new(None)) as ToolArc,
         Arc::new(read::ReadTool) as ToolArc,
         Arc::new(view_image::ViewImageTool) as ToolArc,
         Arc::new(edit::EditTool) as ToolArc,
@@ -34,6 +35,17 @@ pub fn registry() -> HashMap<String, ToolArc> {
         Arc::new(ssh_pty::SshPtyTool) as ToolArc,
     ];
     all.into_iter().map(|t| (t.name().to_string(), t)).collect()
+}
+
+/// Rebind the shell tool entry to a session-scoped instance carrying the
+/// harness privilege-drop identity, so every workload that session spawns
+/// below the supervisor runs as that user. Other tools are identity-agnostic.
+pub fn bind_shell_identity(
+    registry: &mut HashMap<String, ToolArc>,
+    run_as: Option<&RunAsIdentity>,
+) {
+    let tool: ToolArc = Arc::new(command::ShellTool::new(run_as.cloned()));
+    registry.insert(tool.name().to_string(), tool);
 }
 
 /// Whether the `build` subagent must be hidden from every prompt surface:

@@ -34,6 +34,7 @@ fn backtab_in_plan_mode_arms_clear_context_confirm() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
+            None,
         );
         (action, input)
     }
@@ -107,6 +108,7 @@ fn backtab_arm_then_esc_restores_the_raw_draft() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
+            None,
         );
         let (rest, draft) = match action {
             KeyAction::ArmClearConfirm { rest, draft } => (rest, draft),
@@ -171,6 +173,7 @@ fn backtab_in_act_mode_switches_to_plan() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
+            None,
         );
         (action, input)
     }
@@ -228,6 +231,7 @@ fn tab_shift_spelling_arms_or_switches_like_backtab() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
+            None,
         );
         (action, input)
     }
@@ -297,6 +301,7 @@ fn ctrl_alt_shift_tab_chords_never_arm_or_switch() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
+            None,
         );
         (action, input)
     }
@@ -374,6 +379,7 @@ fn shift_tab_with_focused_subagent_never_arms() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
+            None,
         );
         assert!(
             matches!(action, KeyAction::None),

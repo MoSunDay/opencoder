@@ -41,6 +41,7 @@ pub fn start(state: &Arc<AppState>) {
                     continue;
                 }
             };
+            let had_assignments = !assignments.is_empty();
             after = assignments
                 .last()
                 .map(|a| a.index.id.clone())
@@ -105,7 +106,17 @@ pub fn start(state: &Arc<AppState>) {
                     _ = state.lifecycle.retired() => return,
                 }
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // Retry backoffs are >=1s (see retry::Retries::completed), so a 1s
+            // idle poll never delays recovery; active draining keeps a 100ms
+            // cadence so new submissions are dispatched promptly.
+            let idle =
+                !had_assignments && after.is_empty() && retries.idle() && resources.is_empty();
+            tokio::time::sleep(if idle {
+                Duration::from_secs(1)
+            } else {
+                Duration::from_millis(100)
+            })
+            .await;
         }
     });
 }

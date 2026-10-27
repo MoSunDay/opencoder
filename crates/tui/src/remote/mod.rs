@@ -5,6 +5,7 @@ mod questions;
 mod selection;
 mod session;
 pub mod stream;
+pub(crate) mod subtasks;
 pub mod transcript;
 mod worker;
 pub use selection::{catalog, select};

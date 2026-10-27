@@ -4,7 +4,9 @@
 //! execution directory:
 //!
 //! - `home/.opencoder/config.json` — a frozen snapshot of the node `Config`
-//!   (written once at creation, 0600). Config resolution for the session
+//!   (written once at creation; node-owned 0600 — on Linux identity nodes
+//!   root-owned 0440 after the execution account takes over the trees).
+//!   Config resolution for the session
 //!   (`Config::load_with_home`) redirects the global candidates here, so the
 //!   session never pierces the node daemon's — i.e. the interactive TUI
 //!   user's — `~/.opencoder`.
@@ -19,30 +21,50 @@
 //! job is node maintenance) and agent-kind host/runc loops are untouched.
 //! Legacy in-flight executions (created before this layout existed) resolve
 //! to `None` and keep their node-level behavior.
+//!
+//! On Linux each operator execution additionally owns a dedicated system
+//! account (`linux_identity`): home/workspace move to it (0700) while the
+//! frozen snapshot stays node-owned (0440); the terminal state releases the
+//! account and hands the produced files back to the node user.
 
 use crate::layout::DirectoryLayout;
 use anyhow::{ensure, Context, Result};
 use opencoder_core::fleet::ExecutionKind;
+use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
+pub mod linux_identity;
+
 mod fork;
-pub(crate) use fork::fork_environment;
+pub use fork::fork_environment;
 
 fn snapshot_path(home: &Path) -> PathBuf {
     home.join(".opencoder").join("config.json")
+}
+
+/// Materialized operator environment: the private home/workspace plus, on
+/// Linux, the provisioned per-execution identity for later privilege drop.
+pub struct OperatorEnvironment {
+    pub home: PathBuf,
+    pub workspace: PathBuf,
+    /// Linux-only identity; `None` on other platforms, when provisioning is
+    /// disabled, and for resumed environments (the harness runtime carries
+    /// it after initialization).
+    pub run_as: Option<opencoder_core::platform::RunAsIdentity>,
 }
 
 /// Materialize the per-execution home + workspace for a FRESH operator
 /// execution. Idempotent: existing directories are reused and the config
 /// snapshot is written once (mirroring `resources::pin` semantics). Returns
 /// `None` for every other kind.
-pub(crate) fn materialize(
+pub fn materialize(
     layout: &DirectoryLayout,
     kind: ExecutionKind,
     id: &str,
     config: &opencoder_core::Config,
-) -> Result<Option<(PathBuf, PathBuf)>> {
+) -> Result<Option<OperatorEnvironment>> {
     if kind != ExecutionKind::Operator {
         return Ok(None);
     }
@@ -53,7 +75,40 @@ pub(crate) fn materialize(
     }
     validate_snapshot(&snapshot)?;
     crate::operations::operator_config::freeze_skills(layout, &home)?;
-    Ok(Some((home, workspace)))
+    // Linux: admission + dedicated account; the private trees move to it
+    // and the frozen snapshot is re-owned root:root 0440. Other platforms
+    // keep the node-owned layout unchanged.
+    #[cfg(target_os = "linux")]
+    let run_as = linux_identity::materialize_ownership(config, &home, &workspace, id)?;
+    #[cfg(not(target_os = "linux"))]
+    let run_as = None;
+    Ok(Some(OperatorEnvironment {
+        home,
+        workspace,
+        run_as,
+    }))
+}
+
+/// Record-annotation payload persisting the provisioned identity
+/// (`operator_identity`), so resumes re-attach it to the harness runtime
+/// without a live account lookup. `Value::Null` when no identity exists.
+pub fn identity_annotation(environment: &Option<OperatorEnvironment>) -> Value {
+    environment
+        .as_ref()
+        .and_then(|env| env.run_as.as_ref())
+        .and_then(|run_as| serde_json::to_value(run_as).ok())
+        .unwrap_or(Value::Null)
+}
+
+/// Terminal-state teardown of the per-execution Linux identity: chown the
+/// produced files back to the node user and delete the account. Idempotent
+/// (absent account/directories are success); other platforms are no-ops
+/// handled by the caller's cfg.
+#[cfg(target_os = "linux")]
+pub fn release_identity(layout: &DirectoryLayout, kind: ExecutionKind, id: &str) -> Result<()> {
+    let home = layout.home_dir(kind, id)?;
+    let workspace = layout.workspace_dir(kind, id)?;
+    linux_identity::release(&home, &workspace, id)
 }
 
 fn create_directories(
@@ -114,9 +169,27 @@ pub(crate) fn write_snapshot(path: &Path, body: &str) -> Result<()> {
 fn validate_snapshot(path: &Path) -> Result<()> {
     let metadata = std::fs::symlink_metadata(path).context("isolated operator config missing")?;
     ensure!(
-        metadata.is_file()
-            && !opencoder_core::platform::fs::is_link(&metadata)
-            && opencoder_core::platform::fs::private_access(path)?,
+        metadata.is_file() && !opencoder_core::platform::fs::is_link(&metadata),
+        "isolated operator config must be a regular file"
+    );
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        ensure!(
+            metadata.uid() == linux_identity::node_uid(),
+            "isolated operator config must stay owned by the node user"
+        );
+        // 0600: node-only fresh layout (also the legacy pre-identity form).
+        // 0440: frozen after the execution account took over the trees.
+        let mode = metadata.permissions().mode() & 0o777;
+        ensure!(
+            mode == 0o600 || mode == 0o440,
+            "isolated operator config mode must be 0600 or 0440"
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    ensure!(
+        opencoder_core::platform::fs::private_access(path)?,
         "isolated operator config must be a private regular file (0600)"
     );
     let _: opencoder_core::Config = serde_json::from_slice(&std::fs::read(path)?)
@@ -131,7 +204,7 @@ pub(crate) fn resolve(
     kind: ExecutionKind,
     id: &str,
     version: Option<&serde_json::Value>,
-) -> Result<Option<(PathBuf, PathBuf)>> {
+) -> Result<Option<OperatorEnvironment>> {
     if kind != ExecutionKind::Operator || version.is_none() {
         return Ok(None);
     }
@@ -146,7 +219,11 @@ pub(crate) fn resolve(
         "isolated operator directories missing"
     );
     validate_snapshot(&snapshot_path(&home))?;
-    Ok(Some((home, workspace)))
+    Ok(Some(OperatorEnvironment {
+        home,
+        workspace,
+        run_as: None,
+    }))
 }
 
 /// HOME env pair for harness injection: persisted with the harness runtime
@@ -174,19 +251,30 @@ mod tests {
     }
 
     fn config() -> opencoder_core::Config {
+        // Unit tests keep the node-owned layout; Linux identity provisioning
+        // is integration-level (tests/operator_linux_identity.rs).
         opencoder_core::Config {
             model: "openai/gpt-isolation".into(),
+            operator: opencoder_core::config::OperatorConfig {
+                linux_identity: opencoder_core::config::LinuxIdentityMode::Off,
+            },
             ..Default::default()
         }
+    }
+
+    fn expect_environment(
+        environment: Result<Option<OperatorEnvironment>>,
+    ) -> (PathBuf, PathBuf) {
+        let environment = environment.unwrap().expect("operator materializes");
+        (environment.home, environment.workspace)
     }
 
     #[test]
     fn materialize_writes_snapshot_once_and_keeps_permissions_private() {
         let root = tempfile::tempdir().unwrap();
         let layout = layout(root.path());
-        let (home, workspace) = materialize(&layout, ExecutionKind::Operator, "op-1", &config())
-            .unwrap()
-            .expect("operator materializes");
+        let (home, workspace) =
+            expect_environment(materialize(&layout, ExecutionKind::Operator, "op-1", &config()));
         assert!(workspace.is_dir());
         let snapshot = snapshot_path(&home);
         let raw = std::fs::read_to_string(&snapshot).unwrap();
@@ -226,9 +314,8 @@ mod tests {
             .unwrap()
             .is_none());
         materialize(&layout, ExecutionKind::Operator, "op-2", &config()).unwrap();
-        let (home, workspace) = resolve(&layout, ExecutionKind::Operator, "op-2", Some(&json!(1)))
-            .unwrap()
-            .expect("materialized operator resolves");
+        let (home, workspace) =
+            expect_environment(resolve(&layout, ExecutionKind::Operator, "op-2", Some(&json!(1))));
         assert_eq!(
             workspace,
             layout
@@ -263,9 +350,7 @@ mod tests {
         let version = json!(1);
         assert!(resolve(&layout, ExecutionKind::Operator, "missing", Some(&version)).is_err());
         let (home, workspace) =
-            materialize(&layout, ExecutionKind::Operator, "op-broken", &config())
-                .unwrap()
-                .unwrap();
+            expect_environment(materialize(&layout, ExecutionKind::Operator, "op-broken", &config()));
         let snapshot = snapshot_path(&home);
         std::fs::write(&snapshot, "{incomplete").unwrap();
         assert!(resolve(
@@ -334,9 +419,8 @@ mod tests {
         let working = root.path().join("workspace");
         std::fs::create_dir_all(&working).unwrap();
         let layout = layout(root.path());
-        let (home, _) = materialize(&layout, ExecutionKind::Operator, "op-5", &config())
-            .unwrap()
-            .unwrap();
+        let (home, _) =
+            expect_environment(materialize(&layout, ExecutionKind::Operator, "op-5", &config()));
         let loaded = opencoder_core::Config::load_with_home(&working, Some(&home)).unwrap();
         assert_eq!(loaded.model, "openai/gpt-isolation");
     }
@@ -347,9 +431,8 @@ mod tests {
         let layout = layout(root.path());
         let mut cfg = config();
         cfg.provider.api_key = Some("{E2E_KEY}".into());
-        let (home, _) = materialize(&layout, ExecutionKind::Operator, "op-6", &cfg)
-            .unwrap()
-            .unwrap();
+        let (home, _) =
+            expect_environment(materialize(&layout, ExecutionKind::Operator, "op-6", &cfg));
         let raw: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(snapshot_path(&home)).unwrap()).unwrap();
         assert_eq!(raw["provider"]["api_key"], json!("{E2E_KEY}"));

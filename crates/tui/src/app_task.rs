@@ -204,6 +204,14 @@ pub(crate) async fn switch_session(
     *sidecar_ask =
         crate::sidecar_ui::spawn_actor(&session_for_worker, ntx.clone(), Some(store.clone()));
     spawn_task(session_for_worker, n_cmd_rx, ntx);
+    // Σ subtask registry tokens of the session being switched AWAY from
+    // (`session_id` is still the old id here): the dormant-growth baseline
+    // stored in its snapshot for the restore floor.
+    let subtask_seen = crate::subtask_registry::sum_tokens(
+        &crate::remote::subtasks::load_registry(store, session_id)
+            .await
+            .unwrap_or_default(),
+    );
     // Save current session's UI state before switching.
     session_states.insert(
         session_id.clone(),
@@ -218,10 +226,17 @@ pub(crate) async fn switch_session(
             queue_items,
             active_skill,
             active_skill_body,
+            subtask_seen,
         ),
     );
     // Restore or create the target session's UI state.
     let restored = session_states.remove(&new_session_id);
+    // Authoritative subtask registry of the session being switched TO: the
+    // restore floor and the [sub x/x] badge recompute from it, never from a
+    // possibly-stale snapshot.
+    let subtask_registry = crate::remote::subtasks::load_registry(store, &new_session_id)
+        .await
+        .unwrap_or_default();
     // Always rebuild the chat transcript from the
     // store on switch-back. A cached snapshot can
     // be stale -- background subagents may have
@@ -236,11 +251,17 @@ pub(crate) async fn switch_session(
                 store,
                 &new_session_id,
                 // Floor with the live view's accumulated cost so [tok cost]
-                // never regresses across the switch-back replay.
-                restored
-                    .as_ref()
-                    .map(|state| state.chat.tokens_total)
-                    .unwrap_or(0),
+                // never regresses across the switch-back replay. Subtask
+                // folds recorded while the session was dormant are added on
+                // top via the snapshot's switch-away baseline.
+                match &restored {
+                    Some(state) => crate::session_ui::subtask_restore_floor(
+                        state.chat.tokens_total,
+                        state.subtask_tokens_seen,
+                        crate::subtask_registry::sum_tokens(&subtask_registry),
+                    ),
+                    None => crate::subtask_registry::sum_tokens(&subtask_registry),
+                },
             )
             .await
         }
@@ -295,6 +316,11 @@ pub(crate) async fn switch_session(
         *active_skill = None;
         *active_skill_body = None;
     }
+    // Authoritative [sub x/x] recompute from the registry loaded above: a
+    // dormant session's snapshot counters can lag behind watcher writebacks
+    // (and a first visit has no snapshot at all).
+    chat.subtask_done = crate::subtask_registry::done_count(&subtask_registry);
+    chat.subtask_total = subtask_registry.len() as u32;
     // Pending subagents exist: surface a hint marker instead of blocking on
     // eager replay.
     if let Some(text) = pending_replay_hint(pending_replay) {

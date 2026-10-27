@@ -8,6 +8,7 @@ Commit: 842e58ef5525e8f189895ad0cc7ac59031f312fc
 - `crates/node/src/fleet/mod.rs` — NodeService trait
 - `crates/node/src/fleet/client.rs` — Bearer WS 注册、心跳及连接内 RPC/报告调度
 - `crates/node/src/fleet/client/report.rs` — 保留一个完整报告游标，按原顺序逐批发送
+- `crates/node/src/fleet/client/skip.rs` — 纯函数快照对比（排除报告序列字段）：非增量连接上库存与索引均无变化时该周期只发负载 Snapshot，Brain 帧独立排队；基线连接内有效，重连首份报告仍全量
 - `crates/core/src/fleet/protocol.rs` — 协议定义（core）
 
 [NodeOperation::refreshes_inventory](../../crates/core/src/fleet/protocol.rs) 区分只读查询与状态变更；[client.rs](../../crates/node/src/fleet/client.rs) 的只读 RPC 仅回复，不生成全量库存。状态变更、周期心跳与实际库存修订继续报告。

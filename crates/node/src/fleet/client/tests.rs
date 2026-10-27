@@ -16,6 +16,9 @@ mod publication;
 #[path = "tests/incremental.rs"]
 mod incremental;
 
+#[path = "tests/skip.rs"]
+mod skip;
+
 struct Service {
     records: Vec<ExecutionIndex>,
     indexes_sampled: AtomicBool,

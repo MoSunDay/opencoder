@@ -9,7 +9,7 @@ Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点，启动前�
 ## 索引
 - `crates/agent/src/` — Host/Runtime 装配与兼容入口
 - `crates/agent/src/host/service.rs` — 节点级维护命令中继
-- `crates/agent/src/host/mod.rs` — fleet channel 装配
+- `crates/agent/src/host/mod.rs` — fleet channel 装配；Host 周期采集 500 毫秒（远低于 30 秒调度时延预算）
 - [host/lifecycle.rs](../../crates/agent/src/host/lifecycle.rs) — 当前 Host 每 5 秒回收 retired Runtime；要求无 reservation 且 inventory 允许休眠，staged Runtime 不在自动回收范围。[最近访问记录](../../crates/agent/src/host/lifecycle/activity.rs) 让实际转发过 RPC 的 Runtime 在请求结束后保留 60 秒，连续读取历史时不反复休眠；自动回收取得使用锁后再次核对当前 Host 身份与最近访问。Host 直接读取持久化结果时不延长 Runtime 存活时间，显式休眠仍使用原有安全条件。
 - [host/mod.rs](../../crates/agent/src/host/mod.rs) — Host 曾在本进程中成为 current，且后继完成 ingress 与 Server ACK 后才进入退出流程；从未激活的 standby 不走这一退出分支。
 - [host/runtime.rs](../../crates/agent/src/host/runtime.rs) — Runtime inventory 提供执行、子进程及可休眠状态；排查同名进程时区分 Host、Runtime、节点及 internal-process-supervisor。

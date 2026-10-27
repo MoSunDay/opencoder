@@ -400,6 +400,9 @@ async fn one_slot_worker(
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    // Fixtures never provision real Linux accounts; see
+    // `support::disable_operator_identity`.
+    support::disable_operator_identity(root);
     opencoder_worker::Worker::open(
         opencoder_worker::WorkerOptions {
             name: "test-node".into(),

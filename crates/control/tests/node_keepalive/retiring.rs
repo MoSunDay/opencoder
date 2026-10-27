@@ -1,6 +1,6 @@
 //! A locally superseded Host must finish its report flow while RPCs drain.
 use super::incremental::{ack, batch, begin, end};
-use super::report_storage::{Fixture, index, send};
+use super::report_storage::{index, send, Fixture};
 use futures::StreamExt;
 use opencoder_core::fleet::*;
 use std::time::Duration;

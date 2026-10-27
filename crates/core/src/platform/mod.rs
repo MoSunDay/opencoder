@@ -1,7 +1,9 @@
 //! Host-specific operations shared by local sessions and execution nodes.
 pub mod fs;
+mod run_as;
 pub mod shell;
 mod user_dirs;
+pub use run_as::RunAsIdentity;
 pub use user_dirs::{config_dir, data_local_dir, home_dir};
 #[cfg(windows)]
 mod windows_acl;

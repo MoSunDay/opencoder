@@ -21,6 +21,23 @@ fn main() {
     if windows_fixture::dispatch() {
         return;
     }
+    // Linux re-entry for supervisor integration tests: this binary is the
+    // configured hidden supervisor and hands its raw argv to supervisor_main.
+    // The leading raw-command separator is consumed here, mirroring the real
+    // binary's CLI parser (`last = true` trailing command).
+    #[cfg(target_os = "linux")]
+    {
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+        if args
+            .first()
+            .is_some_and(|arg| arg == "internal-process-supervisor")
+        {
+            assert_eq!(args[1], "--");
+            let code = opencoder_session::process::supervisor_main(args[2..].to_vec(), None)
+                .unwrap();
+            std::process::exit(code);
+        }
+    }
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();

@@ -20,8 +20,15 @@ pub(super) async fn ensure(
         .map(|v| serde_json::from_value(v.clone()))
         .transpose()?;
     let mut envs = launch_environment(input, how_append, config_home)?;
+    let mut identity = None;
     if let Some(record) = worker.inner.journal.lock().await.get(id).await? {
         envs.extend(crate::brain::workspace::envs(&record)?);
+        // Operator executions provisioned a dedicated Linux account at
+        // creation; re-attach it so later phases can drop privileges.
+        identity = record
+            .annotations
+            .get("operator_identity")
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
     }
     opencoder_core::agent::scope::with_root(
         config.agent.agents_dir.clone(),
@@ -54,6 +61,9 @@ pub(super) async fn ensure(
     }
     if let Some(literal) = input["literal_mentions"].as_bool() {
         runtime.literal_mentions = literal;
+    }
+    if runtime.run_as.is_none() {
+        runtime.run_as = identity;
     }
     worker
         .inner

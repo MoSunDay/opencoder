@@ -1,4 +1,4 @@
-use opencoder_core::fleet::{ExecutionIndex, INDEX_REPORT_BATCH_SIZE, IndexReportMode, valid_id};
+use opencoder_core::fleet::{valid_id, ExecutionIndex, IndexReportMode, INDEX_REPORT_BATCH_SIZE};
 use std::collections::HashSet;
 
 pub(super) enum BeginDecision {

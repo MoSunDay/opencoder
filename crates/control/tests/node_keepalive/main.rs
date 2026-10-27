@@ -6,10 +6,10 @@ mod retiring;
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use std::sync::{
-    Arc,
     atomic::{AtomicUsize, Ordering},
+    Arc,
 };
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{watch, Semaphore};
 
 // Multi-thread tests need explicit roots: thread-local config guards do not
 // follow socket and catalog tasks onto Tokio worker threads.

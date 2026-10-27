@@ -93,7 +93,8 @@ pub(super) fn spawn_with_context(
         )?
     };
     let program = launcher.as_ref().unwrap_or(&binary);
-    let (mut cmd, lease) = match crate::process::command(program)? {
+    let (mut cmd, lease) = match crate::process::command(program, session.harness.run_as.as_ref())?
+    {
         Some((cmd, lease)) => (cmd, Some(lease)),
         None => (Command::new(program), None),
     };

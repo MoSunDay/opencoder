@@ -60,7 +60,12 @@ pub fn configure_supervisor_binary(path: PathBuf) -> Result<()> {
 }
 
 /// Supervision is unavailable, so callers retain the direct-process behavior.
-pub fn command(_program: impl AsRef<OsStr>) -> Result<Option<(Command, SpawnLease)>> {
+/// The identity is accepted and ignored: without a supervisor there is no
+/// privilege-drop mechanism on this platform.
+pub fn command(
+    _program: impl AsRef<OsStr>,
+    _run_as: Option<&opencoder_core::platform::RunAsIdentity>,
+) -> Result<Option<(Command, SpawnLease)>> {
     Ok(None)
 }
 
@@ -91,7 +96,7 @@ mod tests {
 
     #[test]
     fn constructors_report_no_supervised_command() {
-        assert!(command("bash").unwrap().is_none());
+        assert!(command("bash", None).unwrap().is_none());
         assert!(runc_command("runc", Path::new("/tmp"), "id")
             .unwrap()
             .is_none());

@@ -110,7 +110,7 @@ async fn bash_tool_captures_stdout_via_pipe() {
     // tool. Output must come back through ToolOutput, not leak to the terminal.
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
-    let out = BashTool
+    let out = BashTool::default()
         .execute(json!({"command": "echo hello-from-bash"}), &c)
         .await
         .unwrap();
@@ -126,7 +126,7 @@ async fn bash_tool_captures_stdout_via_pipe() {
 async fn bash_tool_captures_stderr_via_pipe() {
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
-    let out = BashTool
+    let out = BashTool::default()
         .execute(json!({"command": "echo oops 1>&2"}), &c)
         .await
         .unwrap();
@@ -147,7 +147,7 @@ async fn bash_tool_detaches_controlling_terminal() {
     // parent (test runner) session and the two would differ.
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
-    let out = BashTool
+    let out = BashTool::default()
         .execute(
             // exec keeps bash's PID/session while getsid avoids ps fields
             // that differ between Linux and macOS.
@@ -178,7 +178,7 @@ async fn bash_tool_runs_long_command_without_handoff() {
     // behind. The `timeout` input is ignored (bash uses a fixed internal value).
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
-    let out = BashTool
+    let out = BashTool::default()
         .execute(
             json!({"command": "echo PARTIAL-MARKER-9f3a; sleep 2; echo done", "timeout": 1}),
             &c,
@@ -223,7 +223,7 @@ async fn bash_tool_registered_and_stoppable() {
     let command = format!("echo $$ > {pf}; sleep 30", pf = pidfile.display());
 
     let handle = tokio::spawn(async move {
-        BashTool
+        BashTool::default()
             .execute(json!({"command": command}), &c)
             .await
             .unwrap()

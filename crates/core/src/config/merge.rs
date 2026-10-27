@@ -388,6 +388,11 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 }
             }
         }
+        if let Some(value) = obj.get("operator") {
+            if let Some(parsed) = merge_fields(&cfg.operator, value) {
+                cfg.operator = parsed;
+            }
+        }
         if let Some(n) = obj.get("network").and_then(|v| v.as_object()) {
             if let Some(p) = n.get("proxy").and_then(|v| v.as_str()) {
                 let t = p.trim();
@@ -522,6 +527,21 @@ mod tests {
     /// still carrying them must be ignored, not error. (The mcp
     /// env-indirection coverage that used to live here moved to
     /// `config::domain`'s `apply_domain` tests.)
+    #[test]
+    fn merge_into_applies_operator_linux_identity_and_skips_invalid() {
+        use super::super::LinuxIdentityMode;
+        let mut cfg = Config::default();
+        assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Enforced);
+        merge_into(&mut cfg, serde_json::json!({"operator": {"linux_identity": "off"}}));
+        assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Off);
+        // Partial blocks keep prior state; unknown/invalid values are
+        // ignored (same silent-keep contract as the other nested blocks).
+        merge_into(&mut cfg, serde_json::json!({"operator": {}}));
+        assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Off);
+        merge_into(&mut cfg, serde_json::json!({"operator": {"linux_identity": "nope"}}));
+        assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Off);
+    }
+
     #[test]
     fn merge_into_hard_cuts_domain_keys_from_config_json() {
         let mut cfg = Config::default();

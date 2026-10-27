@@ -286,26 +286,24 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(
-            !apply(
-                &state,
-                "handoff-node",
-                old_generation,
-                2,
-                &CompleteReport {
-                    inventory: Default::default(),
-                    report_id: 2,
-                    records: vec![],
-                    pending_at_begin: None,
-                    initial: false,
-                    negotiated: true,
-                    base_sequence: Some(1),
-                    removed_ids: vec![],
-                }
-            )
-            .await
-            .unwrap()
-        );
+        assert!(!apply(
+            &state,
+            "handoff-node",
+            old_generation,
+            2,
+            &CompleteReport {
+                inventory: Default::default(),
+                report_id: 2,
+                records: vec![],
+                pending_at_begin: None,
+                initial: false,
+                negotiated: true,
+                base_sequence: Some(1),
+                removed_ids: vec![],
+            }
+        )
+        .await
+        .unwrap());
         state
             .hub
             .resolve(

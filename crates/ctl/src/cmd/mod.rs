@@ -39,10 +39,10 @@ pub async fn exec_plan(ctx: &Ctx, plan: RequestPlan) -> Result<i32> {
     if outcome.is_success() {
         match outcome.json {
             Some(value) => out::json(&value),
-            None if outcome.text.trim().is_empty() => out::json(&serde_json::json!({"ok": true})),
+            None if outcome.text().trim().is_empty() => out::json(&serde_json::json!({"ok": true})),
             None => out::json(&serde_json::json!({
                 "ok": true,
-                "body": outcome.text.trim(),
+                "body": outcome.text().trim(),
             })),
         }
         return Ok(0);

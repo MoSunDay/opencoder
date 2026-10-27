@@ -4,6 +4,11 @@ use anyhow::Result;
 use opencoder_core::{fleet::*, Config};
 use serde::{Deserialize, Serialize};
 
+/// Scheduler wakeup period while queued work exists.
+const DISPATCH_INTERVAL_MS: u64 = 100;
+/// Scheduler wakeup period while idle (2 wakeups/sec).
+const IDLE_DISPATCH_INTERVAL_MS: u64 = 500;
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct QueuedRun {
     #[serde(default)]
@@ -278,9 +283,13 @@ pub(crate) fn start_scheduler(worker: &Worker) {
     // Track scheduler shutdown separately: an idle timer is not execution work
     // and must not prevent an empty Runtime from hibernating.
     worker.inner.background_tasks.spawn(async move {
-        let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+        // Idle runtimes back off to 2 wakeups/sec; any pending work returns
+        // to 100ms. dispatch_locked refreshes pending_runs each cycle. Start
+        // at the active period so journal-recovered pending runs are picked
+        // up promptly; an idle runtime backs off after its first cycle.
+        let mut delay = std::time::Duration::from_millis(DISPATCH_INTERVAL_MS);
         loop {
-            tokio::select! { _ = stop.cancelled() => break, _ = tick.tick() => {} }
+            tokio::select! { _ = stop.cancelled() => break, _ = tokio::time::sleep(delay) => {} }
             let Some(inner) = weak.upgrade() else {
                 break;
             };
@@ -297,6 +306,11 @@ pub(crate) fn start_scheduler(worker: &Worker) {
                 *worker.inner.persistence_error.lock().unwrap() =
                     Some(format!("pending dispatch: {error:#}"));
             }
+            delay = if worker.inner.pending_runs.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                std::time::Duration::from_millis(DISPATCH_INTERVAL_MS)
+            } else {
+                std::time::Duration::from_millis(IDLE_DISPATCH_INTERVAL_MS)
+            };
         }
     });
 }

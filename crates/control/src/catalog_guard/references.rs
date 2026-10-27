@@ -65,14 +65,25 @@ async fn scan(state: &AppState, name: &str, dag: bool, agent: bool) -> Result<Ve
         .or_else(opencoder_core::agent::agents_dir)
     {
         let name = name.to_owned();
-        found.extend(tokio::task::spawn_blocking(move || files(&root, &name, dag, agent)).await??);
+        // The blocking walk drives the async resource-database engine through
+        // the caller's runtime handle; source files stay untouched.
+        let handle = tokio::runtime::Handle::current();
+        found.extend(
+            tokio::task::spawn_blocking(move || files(&handle, &root, &name, dag, agent)).await??,
+        );
     }
     found.sort();
     found.dedup();
     Ok(found)
 }
 
-fn files(root: &Path, name: &str, dag: bool, agent: bool) -> Result<Vec<String>> {
+fn files(
+    handle: &tokio::runtime::Handle,
+    root: &Path,
+    name: &str,
+    dag: bool,
+    agent: bool,
+) -> Result<Vec<String>> {
     anyhow::ensure!(
         std::fs::symlink_metadata(root)?.file_type().is_dir(),
         "agent resource root is not a directory"
@@ -121,7 +132,7 @@ fn files(root: &Path, name: &str, dag: bool, agent: bool) -> Result<Vec<String>>
                 .ok()
                 .filter(|text| !text.contains('\0'));
             if bytes.len() <= 4 * 1024 * 1024 && text.is_none() {
-                if let Some(values) = resources::values(&path, &bytes)? {
+                if let Some(values) = handle.block_on(resources::values(&path, &bytes))? {
                     if values.iter().any(|value| matches(value, name, dag, agent)) {
                         found.push(format!("agent-file:{}", path.strip_prefix(root)?.display()));
                     }

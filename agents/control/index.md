@@ -77,7 +77,7 @@ TODO 文件由 `project_files` 提供列表、流式上传、下载和删除；�
 
 ## 目录写入与清理
 
-[catalog_guard](../../crates/control/src/catalog_guard/mod.rs) 在资源代理之前检查 DAG、二进制和能力目标写入。发布与删除持有跨进程目录独占锁，引用写入及首次执行冻结持有共享锁；共享锁最多等待 30 秒，超时返回可重试的 503。删除检查保存计划、能力、日程、TODO、活动执行、待派发回执、配置与 Agent 文件。Agent 文件不按扩展名跳过；文本按完整内容检查，[二进制容器检查](../../crates/control/src/catalog_guard/references/resources/mod.rs) 通过 rusqlite 在临时副本中只读检查 SQLite 的结构与记录，支持 UTF-16，核验并复制完整 WAL，验证派生索引；CPython 3.11 缓存只解析字符串，不执行代码。源数据库、索引和缓存不写入。无法读取、未知格式、损坏或正在变化的容器、超过 4 MiB 的文件及失效资源根都会阻止删除。健康接口声明 `catalog_guard: 2`；新维护工具拒绝旧版保护。GET 详情提供 ETag，条件删除在锁内复核。删除标记阻止晚到请求引用已删目标，原名重新创建后可再次使用。独立资源服务仍负责文件与 NFS 生命周期。
+[catalog_guard](../../crates/control/src/catalog_guard/mod.rs) 在资源代理之前检查 DAG、二进制和能力目标写入。发布与删除持有跨进程目录独占锁，引用写入及首次执行冻结持有共享锁；共享锁最多等待 30 秒，超时返回可重试的 503。删除检查保存计划、能力、日程、TODO、活动执行、待派发回执、配置与 Agent 文件。Agent 文件不按扩展名跳过；文本按完整内容检查，[二进制容器检查](../../crates/control/src/catalog_guard/references/resources/mod.rs) 通过与应用库相同的 Turso 引擎在临时副本中只读检查 SQLite 格式资源的结构与记录（引擎仅读取 UTF-8 数据库，UTF-16 编码按无法核验处理、继续阻止删除），核验并复制完整 WAL，验证派生索引；CPython 3.11 缓存只解析字符串，不执行代码。源数据库、索引和缓存不写入。无法读取、未知格式、损坏或正在变化的容器、超过 4 MiB 的文件及失效资源根都会阻止删除。健康接口声明 `catalog_guard: 2`；新维护工具拒绝旧版保护。GET 详情提供 ETag，条件删除在锁内复核。删除标记阻止晚到请求引用已删目标，原名重新创建后可再次使用。独立资源服务仍负责文件与 NFS 生命周期。
 
 [能力目录投影](../../crates/control/src/api/brain_runs/catalog/dedup.rs) 折叠同目标、同定义与同字段约定的条目；跨名 Agent 还核验实际资源的全部文件、相对路径与执行配置。资源读取和摘要计算在阻塞线程中执行，并显式保留请求的 Agent 资源根，避免占用处理准入与健康检查的异步线程。其他说明及 ID 保留在 `equivalent_sources`；接口仍返回完整目录，`selection_ids` 仅控制新建选项，旧计划编辑和执行解析保留原 ID。
 

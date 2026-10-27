@@ -1,5 +1,5 @@
 use super::wal;
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 use std::{
     io::{Read, Write},
     path::Path,
@@ -17,9 +17,9 @@ fn bounded_read(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Query only an isolated copy; the SQLite connection never opens the source files.
+/// Query only an isolated copy; the database connection never opens the source files.
 /// WAL frames are validated and copied; the derived WAL index is rebuilt privately.
-pub(super) fn strings(source: &Path, bytes: &[u8]) -> Result<Vec<String>> {
+pub(super) async fn strings(source: &Path, bytes: &[u8]) -> Result<Vec<String>> {
     let source_wal = wal::companion(source, "-wal");
     let wal_bytes = match std::fs::symlink_metadata(&source_wal) {
         Ok(meta) => {
@@ -61,28 +61,33 @@ pub(super) fn strings(source: &Path, bytes: &[u8]) -> Result<Vec<String>> {
     if let Some(data) = &wal_bytes {
         std::fs::File::create(wal::companion(&path, "-wal"))?.write_all(data)?;
     }
-    // SQLite resource files may use UTF-16, which the application database
-    // engine does not support. This reader stays inside the existing blocking
-    // resource scan. SQLite connections only open the copy, never a live database.
-    let connection =
-        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    connection.execute_batch("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF;")?;
-    let mut statement = connection.prepare("PRAGMA quick_check")?;
-    let mut check = statement.query([])?;
+    // The application database engine reads only UTF-8 databases, so files
+    // with any other text encoding fail verification and keep deletions
+    // blocked. This reader stays inside the existing blocking resource scan;
+    // connections only open the copy, never a live database.
+    let database = turso::Builder::new_local(path.to_str().context("resource database copy path")?)
+        .read_only(true)
+        .build()
+        .await
+        .context("unreadable resource database")?;
+    let connection = database.connect()?;
+    let mut check = connection.query("PRAGMA quick_check", ()).await?;
     let row = check
-        .next()?
+        .next()
+        .await?
         .ok_or_else(|| anyhow::anyhow!("empty database validation"))?;
     ensure!(
-        row.get::<_, String>(0)? == "ok" && check.next()?.is_none(),
+        row.get::<String>(0)? == "ok" && check.next().await?.is_none(),
         "invalid resource database"
     );
-    let mut statement = connection.prepare("SELECT name,sql,type FROM sqlite_schema")?;
-    let mut schema = statement.query([])?;
+    let mut schema = connection
+        .query("SELECT name,sql,type FROM sqlite_schema", ())
+        .await?;
     let mut tables = Vec::new();
     let mut found = Vec::new();
-    while let Some(row) = schema.next()? {
-        let name = row.get::<_, String>(0)?;
-        let definition = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+    while let Some(row) = schema.next().await? {
+        let name = row.get::<String>(0)?;
+        let definition = row.get::<Option<String>>(1)?.unwrap_or_default();
         ensure!(
             !definition
                 .to_ascii_uppercase()
@@ -91,7 +96,7 @@ pub(super) fn strings(source: &Path, bytes: &[u8]) -> Result<Vec<String>> {
         );
         found.push(name.clone());
         found.push(definition);
-        if row.get::<_, String>(2)? == "table" {
+        if row.get::<String>(2)? == "table" {
             tables.push(name);
         }
     }
@@ -99,25 +104,20 @@ pub(super) fn strings(source: &Path, bytes: &[u8]) -> Result<Vec<String>> {
     let mut total_rows = 0;
     for name in tables {
         let query = format!("SELECT * FROM \"{}\"", name.replace('"', "\"\""));
-        let mut statement = connection.prepare(&query)?;
-        let mut rows = statement.query([])?;
-        while let Some(row) = rows.next()? {
+        let mut rows = connection.query(&query, ()).await?;
+        while let Some(row) = rows.next().await? {
             total_rows += 1;
             ensure!(
                 total_rows <= 100_000,
                 "resource database row limit exceeded"
             );
-            for index in 0..row.as_ref().column_count() {
-                let text = match row.get::<_, rusqlite::types::Value>(index)? {
-                    rusqlite::types::Value::Text(text) => Some(text),
-                    rusqlite::types::Value::Blob(bytes) => {
-                        Some(String::from_utf8(bytes).map_err(|_| {
-                            anyhow::anyhow!("unverified binary resource database value")
-                        })?)
-                    }
-                    rusqlite::types::Value::Null
-                    | rusqlite::types::Value::Integer(_)
-                    | rusqlite::types::Value::Real(_) => None,
+            for index in 0..row.column_count() {
+                let text = match row.get_value(index)? {
+                    turso::Value::Text(text) => Some(text),
+                    turso::Value::Blob(bytes) => Some(String::from_utf8(bytes).map_err(|_| {
+                        anyhow::anyhow!("unverified binary resource database value")
+                    })?),
+                    turso::Value::Null | turso::Value::Integer(_) | turso::Value::Real(_) => None,
                 };
                 if let Some(text) = text {
                     if text.contains('\0') {

@@ -1,6 +1,6 @@
 # Agent 调度平台
 
-`opencoder` 保留 CLI/TUI；初始部署可以使用两个进程：`opencoder-server` 负责 Web、全局定义、大脑和调度，`opencoder-agent` 负责节点上的 agent loop。Server 不创建本地会话、不执行团队或工作流，也不链接 Python VM/runc。
+`opencoder` 保留 CLI/TUI；初始部署可以使用两个进程：`opencoder-server` 负责 Web、全局定义、大脑和调度，`opencoder-agent` 负责节点上的 agent loop。Server 不创建本地会话、不执行团队或工作流，也不链接 Python VM/runc。`opencode-server` 仅支持在 Linux 上运行，在其他平台启动时直接报错退出；`opencode` CLI/TUI 保持跨平台可用。
 
 ## 部署
 
@@ -55,7 +55,7 @@ Node 在返回接受前同步持久化任务、资源和 Harness 配置快照。
 
 ## 定时调度
 
-定时任务定义自 schema v27 起持久化在控制面 libsql `schedules` 表（事实源）；`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）降级为一次性 seed——仅表空时全量导入（非法条目告警跳过，不阻断启动），此后文件改动不再回灌（删除不会在重启时复活），但 `scan_interval_secs` 永远以文件为准（默认 15s，最小 1s，调度循环热读）。Server 控制面内置 cron 调度器（无定义即空转，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`（按 kind 消费：agent/team/todos 读 `prompt`——agent 触发时作为首轮消息提交并经回落机制补进 how.md，dag 读 `args`，brain 读 `schema_version:4`、固定版本 `plan` 和 `inputs`）、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
+定时任务定义自 schema v27 起持久化在控制面 Turso `schedules` 表（事实源）；`schedules.json`（server workdir 的 `.opencoder/` 域文件，或全局 `~/.opencoder/`）降级为一次性 seed——仅表空时全量导入（非法条目告警跳过，不阻断启动），此后文件改动不再回灌（删除不会在重启时复活），但 `scan_interval_secs` 永远以文件为准（默认 15s，最小 1s，调度循环热读）。Server 控制面内置 cron 调度器（无定义即空转，配置读取失败或条目非法仅告警跳过，不影响其余任务）。字段：`id`（1–40 字符，字母/数字/`-`/`_`，用于确定性执行 ID）、`cron`（5 字段为分 时 日 月 周；6/7 字段保留秒位）、`timezone`（仅固定偏移如 `+08:00`）、`enabled`（默认 true，关闭的条目不做校验）、`kind`（`brain`/`team`/`todos`/`agent`/`dag`）、`target`、`params`（按 kind 消费：agent/team/todos 读 `prompt`——agent 触发时作为首轮消息提交并经回落机制补进 how.md，dag 读 `args`，brain 读 `schema_version:4`、固定版本 `plan` 和 `inputs`）、`overlap`（`skip` 默认 / `allow`）、`node_id`（可选钉住节点）、`scan_interval_secs`（扫描间隔，默认 15s，最小 1s）。
 
 触发复用既有入口：agent/team/todos/dag 走 `POST /api/executions` 同一条提交链路，brain 走 brain run 创建链路；`params` 支持时间模板 `{{now[±N<单位>][:格式]}}`（单位 s/m/h/d/w，缺省 RFC3339，另有 `unix`/`unix_ms`），在触发时刻渲染为执行 input；dag 的 `args`（字符串数组，可选）在触发时追加到每个二进制步骤的参数数组（幂等不重复追加）。每次触发获得确定性执行 ID `<kind>-<schedule_id>-<scheduled_for_ms>`：同一 tick 重复提交幂等收敛，不重复执行。调度从当前定义生效时刻开始（`created_at` 与 `updated_at` 的较晚值）：新建、修改或重新启用后，只计算该时刻之后的 cron tick，不补跑创建前、停用期间或旧定义的触发，也不把它们记为 `missed`；重复保存相同定义或重复设置相同启停状态不更新时间。Server 停机重启后，未修改的定义仍在最近 24 小时内补跑最新到期 tick，窗口内其余到期 tick 合并为一条 `missed` 记录；`missed` 表示这段积压被跳过，不代表 Agent 执行失败。当前定义提交失败的 tick 在 1 小时内原位重试，超窗后等待下一个 tick；定义更新前的失败记录不按新参数重试。`overlap: skip` 时上一轮触发对应的执行未到终态则本轮不触发，`allow` 无条件触发。
 

@@ -13,14 +13,44 @@ fn resource(h: &Harness, file: &str) -> PathBuf {
     std::fs::create_dir_all(&root).unwrap();
     root.join(file)
 }
-fn database(path: &Path, utf16: bool) -> rusqlite::Connection {
-    let conn = rusqlite::Connection::open(path).unwrap();
-    if utf16 {
-        conn.execute_batch("PRAGMA encoding='UTF-16le';").unwrap();
-    }
-    conn.execute_batch("CREATE TABLE records(value TEXT);")
+async fn open(path: &Path) -> (turso::Database, turso::Connection) {
+    let database = turso::Builder::new_local(path.to_str().unwrap())
+        .build()
+        .await
         .unwrap();
-    conn
+    let connection = database.connect().unwrap();
+    (database, connection)
+}
+async fn database(path: &Path) -> (turso::Database, turso::Connection) {
+    let (database, connection) = open(path).await;
+    connection
+        .execute("CREATE TABLE records(value TEXT)", ())
+        .await
+        .unwrap();
+    (database, connection)
+}
+/// Rewrite the header text-encoding field (offset 56) to UTF-16le. The engine
+/// only reads UTF-8 databases, so such files must stay unverifiable.
+fn mark_utf16(path: &Path) {
+    let mut bytes = std::fs::read(path).unwrap();
+    bytes[56] = 2;
+    std::fs::write(path, bytes).unwrap();
+}
+/// Snapshot every file (name and bytes) in a fixture directory so tests can
+/// prove the guard neither adds nor rewrites sidecars next to a source file.
+fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (
+                entry.file_name().into_string().unwrap(),
+                std::fs::read(entry.path()).unwrap(),
+            )
+        })
+        .collect();
+    files.sort();
+    files
 }
 async fn agent(h: &Harness) {
     assert_eq!(
@@ -33,34 +63,57 @@ async fn agent(h: &Harness) {
 
 #[tokio::test]
 async fn sqlite_resource_references_are_read_from_a_copy_and_source_is_preserved() {
-    for utf16 in [false, true] {
-        let h = Harness::new().await;
-        agent(&h).await;
-        let file = resource(&h, "notes.db");
-        let conn = database(&file, utf16);
-        conn.execute("INSERT INTO records VALUES(?1)", ["operator-sample"])
-            .unwrap();
-        drop(conn);
-        let before = std::fs::read(&file).unwrap();
-        let blocked = h.call("DELETE", "/api/agents/sample", Value::Null).await;
-        assert_eq!(blocked.0, 409, "{}", blocked.1);
-        assert_eq!(
-            blocked.1["details"]["references"],
-            json!(["agent-file:memory/fixture/v1/notes.db"])
-        );
-        assert_eq!(std::fs::read(&file).unwrap(), before);
-        let conn = rusqlite::Connection::open(&file).unwrap();
-        conn.execute("DELETE FROM records", ()).unwrap();
-        drop(conn);
-        let before = std::fs::read(&file).unwrap();
-        let deleted = h.call("DELETE", "/api/agents/sample", Value::Null).await;
-        assert_eq!(deleted.0, 200, "{}", deleted.1);
-        assert_eq!(std::fs::read(&file).unwrap(), before);
-        assert_eq!(
-            std::fs::read_dir(file.parent().unwrap()).unwrap().count(),
-            1
-        );
-    }
+    let h = Harness::new().await;
+    agent(&h).await;
+    let file = resource(&h, "notes.db");
+    let (database, connection) = database(&file).await;
+    connection
+        .execute("INSERT INTO records VALUES(?1)", ["operator-sample"])
+        .await
+        .unwrap();
+    drop(connection);
+    let before = std::fs::read(&file).unwrap();
+    let blocked = h.call("DELETE", "/api/agents/sample", Value::Null).await;
+    assert_eq!(blocked.0, 409, "{}", blocked.1);
+    assert_eq!(
+        blocked.1["details"]["references"],
+        json!(["agent-file:memory/fixture/v1/notes.db"])
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    let connection = database.connect().unwrap();
+    connection.execute("DELETE FROM records", ()).await.unwrap();
+    drop(connection);
+    // The engine keeps its committed WAL sidecar; the guard must leave every
+    // file next to the source database byte-for-byte unchanged.
+    let before = snapshot(file.parent().unwrap());
+    let deleted = h.call("DELETE", "/api/agents/sample", Value::Null).await;
+    assert_eq!(deleted.0, 200, "{}", deleted.1);
+    assert_eq!(snapshot(file.parent().unwrap()), before);
+}
+
+#[tokio::test]
+async fn utf16_databases_cannot_be_verified_and_still_refuse_deletion() {
+    let h = Harness::new().await;
+    agent(&h).await;
+    let file = resource(&h, "notes.db");
+    let (database, connection) = database(&file).await;
+    connection
+        .execute("INSERT INTO records VALUES(?1)", ["operator-sample"])
+        .await
+        .unwrap();
+    drop(connection);
+    drop(database);
+    mark_utf16(&file);
+    let before = std::fs::read(&file).unwrap();
+    let refused = h.call("DELETE", "/api/agents/sample", Value::Null).await;
+    assert_eq!(refused.0, 503, "{}", refused.1);
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert_eq!(
+        h.call("GET", "/api/agents/sample/meta", Value::Null)
+            .await
+            .0,
+        200
+    );
 }
 
 #[tokio::test]
@@ -146,13 +199,16 @@ async fn unverified_database_values_and_corruption_still_refuse_deletion() {
     let h = Harness::new().await;
     agent(&h).await;
     let file = resource(&h, "notes.db");
-    let conn = database(&file, false);
-    conn.execute(
-        "INSERT INTO records VALUES(?1)",
-        [rusqlite::types::Value::Blob(vec![0xff, 0])],
-    )
-    .unwrap();
-    drop(conn);
+    let (database, connection) = database(&file).await;
+    connection
+        .execute(
+            "INSERT INTO records VALUES(?1)",
+            turso::params![turso::Value::Blob(vec![0xff, 0])],
+        )
+        .await
+        .unwrap();
+    drop(connection);
+    drop(database);
     for bytes in [
         std::fs::read(&file).unwrap(),
         b"SQLite format 3\0incomplete".to_vec(),
@@ -175,8 +231,17 @@ async fn active_database_wal_is_not_silently_omitted_or_modified() {
     let h = Harness::new().await;
     agent(&h).await;
     let file = resource(&h, "notes.db");
-    let conn = database(&file, false);
-    conn.execute_batch("PRAGMA journal_mode=WAL; INSERT INTO records VALUES('agent-sample');")
+    let (database, connection) = database(&file).await;
+    let mut rows = connection
+        .query("PRAGMA journal_mode=WAL", ())
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert_eq!(row.get::<String>(0).unwrap(), "wal");
+    drop(rows);
+    connection
+        .execute("INSERT INTO records VALUES('agent-sample')", ())
+        .await
         .unwrap();
     let wal = PathBuf::from(format!("{}-wal", file.display()));
     let before_db = std::fs::read(&file).unwrap();
@@ -185,13 +250,15 @@ async fn active_database_wal_is_not_silently_omitted_or_modified() {
     assert_eq!(refused.0, 409, "{}", refused.1);
     assert_eq!(std::fs::read(&file).unwrap(), before_db);
     assert_eq!(std::fs::read(&wal).unwrap(), before_wal);
-    conn.execute("DELETE FROM records", ()).unwrap();
+    connection.execute("DELETE FROM records", ()).await.unwrap();
     let before_db = std::fs::read(&file).unwrap();
     let before_wal = std::fs::read(&wal).unwrap();
     let deleted = h.call("DELETE", "/api/agents/sample", Value::Null).await;
     assert_eq!(deleted.0, 200, "{}", deleted.1);
     assert_eq!(std::fs::read(&file).unwrap(), before_db);
     assert_eq!(std::fs::read(&wal).unwrap(), before_wal);
+    drop(connection);
+    drop(database);
 }
 
 #[tokio::test]
@@ -205,17 +272,21 @@ async fn sqlite_resources_protect_dag_and_binary_dependencies_too() {
         201
     );
     let file = resource(&h, "notes.db");
-    let conn = database(&file, false);
-    conn.execute_batch("INSERT INTO records VALUES('dag-flow'),('helper');")
+    let (database, connection) = database(&file).await;
+    connection
+        .execute_batch("INSERT INTO records VALUES('dag-flow'),('helper');")
+        .await
         .unwrap();
-    drop(conn);
+    drop(connection);
+    drop(database);
     for path in ["/api/dag/defs/flow", "/api/dag/binaries/helper"] {
         let refused = h.call("DELETE", path, Value::Null).await;
         assert_eq!(refused.0, 409, "{}", refused.1);
     }
-    let conn = rusqlite::Connection::open(&file).unwrap();
-    conn.execute("DELETE FROM records", ()).unwrap();
-    drop(conn);
+    let (database, connection) = open(&file).await;
+    connection.execute("DELETE FROM records", ()).await.unwrap();
+    drop(connection);
+    drop(database);
     for path in ["/api/dag/defs/flow", "/api/dag/binaries/helper"] {
         let deleted = h.call("DELETE", path, Value::Null).await;
         assert_eq!(deleted.0, 200, "{}", deleted.1);
@@ -227,10 +298,13 @@ async fn sqlite_view_definitions_are_checked_without_executing_the_view() {
     let h = Harness::new().await;
     agent(&h).await;
     let file = resource(&h, "notes.db");
-    let conn = database(&file, false);
-    conn.execute_batch("CREATE VIEW saved_view AS SELECT 'agent-sample' AS target;")
+    let (database, connection) = database(&file).await;
+    connection
+        .execute_batch("CREATE VIEW saved_view AS SELECT 'agent-sample' AS target;")
+        .await
         .unwrap();
-    drop(conn);
+    drop(connection);
+    drop(database);
     let refused = h.call("DELETE", "/api/agents/sample", Value::Null).await;
     assert_eq!(refused.0, 409, "{}", refused.1);
 }
@@ -239,24 +313,33 @@ async fn sqlite_view_definitions_are_checked_without_executing_the_view() {
 async fn incomplete_or_corrupt_wal_and_unverified_index_cannot_allow_deletion() {
     let source = tempfile::tempdir().unwrap();
     let original = source.path().join("source.db");
-    let conn = database(&original, false);
-    conn.execute_batch("PRAGMA journal_mode=WAL; INSERT INTO records VALUES('unrelated');")
+    let (database, connection) = database(&original).await;
+    let mut rows = connection
+        .query("PRAGMA journal_mode=WAL", ())
+        .await
         .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert_eq!(row.get::<String>(0).unwrap(), "wal");
+    drop(rows);
+    connection
+        .execute("INSERT INTO records VALUES('unrelated')", ())
+        .await
+        .unwrap();
+    drop(connection);
+    drop(database);
     let wal_bytes = std::fs::read(source.path().join("source.db-wal")).unwrap();
-    let shm_bytes = std::fs::read(source.path().join("source.db-shm")).unwrap();
+    // The engine keeps no shared-memory WAL index; a derived index file that
+    // fails its own header checks stays an unverified input.
+    let index_bytes = vec![0u8; 32768];
     for (wal, shm, status) in [
-        (
-            wal_bytes[..wal_bytes.len() - 1].to_vec(),
-            shm_bytes.clone(),
-            503,
-        ),
+        (wal_bytes[..wal_bytes.len() - 1].to_vec(), None, 503),
         (
             {
                 let mut b = wal_bytes.clone();
                 b[24] ^= 1;
                 b
             },
-            shm_bytes.clone(),
+            None,
             503,
         ),
         (
@@ -265,17 +348,19 @@ async fn incomplete_or_corrupt_wal_and_unverified_index_cannot_allow_deletion() 
                 b[50] ^= 1;
                 b
             },
-            shm_bytes.clone(),
+            None,
             503,
         ),
-        (wal_bytes.clone(), vec![0; shm_bytes.len()], 409),
+        (wal_bytes.clone(), Some(index_bytes), 409),
     ] {
         let h = Harness::new().await;
         agent(&h).await;
         let file = resource(&h, "notes.db");
         std::fs::copy(&original, &file).unwrap();
         std::fs::write(file.with_file_name("notes.db-wal"), wal).unwrap();
-        std::fs::write(file.with_file_name("notes.db-shm"), shm).unwrap();
+        if let Some(shm) = shm {
+            std::fs::write(file.with_file_name("notes.db-shm"), shm).unwrap();
+        }
         let refused = h.call("DELETE", "/api/agents/sample", Value::Null).await;
         assert_eq!(refused.0, status, "{}", refused.1);
         assert_eq!(

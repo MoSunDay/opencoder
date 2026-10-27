@@ -13,7 +13,7 @@ Startup is ~6 ms, well under the 50 ms target (8× headroom).
 
 Binary size: **9.3 MB** (stripped, thin-LTO).
 
-## 2. Store latency (libsql, WAL) — `crates/store/tests/store_perf.rs`
+## 2. Store latency (Turso, WAL) — `crates/store/tests/store_perf.rs`
 
 Threshold-asserted contracts (release, single-shot):
 

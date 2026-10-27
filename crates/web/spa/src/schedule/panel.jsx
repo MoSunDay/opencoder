@@ -1,7 +1,7 @@
 import { EditButton } from '../ui/permissions.jsx';
 // schedule/panel.jsx —「调度」页：控制面 cron 定时任务的管理视图。
 //
-// schema v27 起 libsql `schedules` 表是定义事实源，本页是它的全功能
+// schema v27 起 Turso `schedules` 表是定义事实源，本页是它的全功能
 // 前台：GET /api/schedules 给定义 + last_run / next_run；POST / PUT /
 // PATCH / DELETE 走 admin CRUD（重名 409、非法 body 400、未知 id 404）；
 // POST /api/schedules/:id/run 手动立即触发（绕过 enabled/overlap）；

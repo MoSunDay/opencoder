@@ -1,6 +1,7 @@
 use super::NodeService;
 mod delta;
 mod report;
+mod skip;
 use anyhow::{Context, Result, bail};
 use futures::{FutureExt, SinkExt, StreamExt};
 use opencoder_core::fleet::*;
@@ -91,6 +92,7 @@ async fn connection_with_period(
             .get(INDEX_REPORT_DELTA_HEADER)
             .is_some_and(|v| v == INDEX_REPORT_DELTA_VERSION);
     let mut baseline = delta::DeltaState::default();
+    let mut published = skip::PublishedInventory::default();
     let mut brain = tokio::task::JoinSet::new();
     let mut brain_frames = std::collections::VecDeque::new();
     let (mut writer, mut reader) = socket.split();
@@ -175,14 +177,26 @@ async fn connection_with_period(
             }
             Some(prepared) = reports.join_next(), if report_inflight => {
                 match prepared.context("node inventory worker failed")? {
-                    Ok((mut report, source)) => {
-                        let changes = if let Some((revision,full,removed))=source {
-                            baseline.prepare_source(&report,revision,full,removed)?
+                    Ok((mut report, mut source)) => {
+                        let changes = if let Some((revision,full,removed))=source.as_mut() {
+                            baseline.prepare_source(&report,*revision,*full,std::mem::take(removed))?
                         } else if incremental { baseline.prepare(&mut report)? } else { None };
                         if incremental && changes.is_none() {
                             send(&mut writer, &NodeFrame::Snapshot { snapshot: report.snapshot }).await?;
                             report_inflight = false;
+                        } else if !incremental && source.is_none() && published.covers(&report) {
+                            // Legacy reporters re-collect the whole inventory
+                            // every heartbeat; an identical collection means
+                            // the server already holds this state, so a load
+                            // snapshot is the entire update. Brain frames ride
+                            // along outside index reports, as in delta mode.
+                            brain_frames.extend(report.brain);
+                            send(&mut writer, &NodeFrame::Snapshot { snapshot: report.snapshot }).await?;
+                            report_inflight = false;
                         } else {
+                            if !incremental && source.is_none() {
+                                published.capture(&mut report);
+                            }
                             publishing = Some(begin_report(&mut writer, report, next_report_id, flow_controlled, changes).await?);
                         }
                     }

@@ -5,18 +5,20 @@
 use serde_json::Value;
 
 /// Print a JSON document to stdout (pretty, still a single parseable doc).
+/// Streams straight to the terminal: no intermediate full-document string.
 pub fn json(value: &Value) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).unwrap_or_default()
-    );
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let _ = serde_json::to_writer_pretty(&mut out, value);
+    let _ = writeln!(out);
 }
 
 /// Print one compact JSON line to stdout and flush (SSE frames).
 pub fn json_line(value: &Value) {
     use std::io::Write;
     let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "{}", serde_json::to_string(value).unwrap_or_default());
+    let _ = serde_json::to_writer(&mut out, value);
+    let _ = out.write_all(b"\n");
     let _ = out.flush();
 }
 

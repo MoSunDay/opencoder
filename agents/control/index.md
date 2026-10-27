@@ -60,9 +60,9 @@ Commit: 842e58ef5525e8f189895ad0cc7ac59031f312fc
 
 ## 派发与报告
 
-- [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。
+- [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。无分配、无到期、无重试且无资源任务时空闲轮询退避到 1 秒（`retry.rs::idle` 判定），有工作立即恢复 100 毫秒。
 - [outbox/resources.rs](../../crates/control/src/release/outbox/resources.rs)：资源任务受理后先持久化等待，按创建时间及 ID 扫描，获得外部授权后才创建节点执行；不可运行项不阻挡其他项。普通任务保持持久化前预留节点容量的路径，不依赖资源提供方。 重试失败记录执行 ID、HTTP 状态与固定错误分类，不写入请求正文或凭据。
-- [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的应用帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道逐项等待数据库异步操作，数据库执行线程与应用 Tokio 线程分开；心跳只更新在线时间。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属连接的处理 future，迟到的数据库结果不能确认替代连接。
+- [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的应用帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；非增量连接上只有索引分片消费报告 ACK 序列，交错的 Brain 帧不再回 ACK（与节点侧计数一致）；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道逐项等待数据库异步操作，数据库执行线程与应用 Tokio 线程分开；心跳只更新在线时间。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属连接的处理 future，迟到的数据库结果不能确认替代连接。
 - [v4/view.rs](../../crates/control/src/api/brain_runs/v4/view.rs)：层调度理由只取本层 `layer_started` 事件，不被执行终态覆盖。
 
 索引报告在 Begin 固定其负载快照的 sequence；报告中间的 RPC 负载快照可以更新连接视图，但不会抬高较早报告的持久水位。被忽略的旧 Begin 也不能替换当前报告水位。初始 pending 捕获和完整报告落库的慢调用记录节点、报告 ID、条数和耗时，不记录帧 payload 或凭据。
@@ -88,7 +88,7 @@ Agent 卡片删除由 [catalog_guard/agents.rs](../../crates/control/src/catalog
 Agent 卡片的已知元数据字段只描述自身、共享资源池和执行配置，不作为其他 Agent 的依赖；未识别字段继续检查，资源文件正文仍按完整引用判断。
 ## Ontology 能力同步
 
-[ontology_catalog](../../crates/control/src/ontology_catalog/mod.rs) 组合共享平台入口和 Brain 目录的纯定义快照，提取明确引用并同步到当前 Server 的默认数据空间。相关写请求成功后通知后台，通知层覆盖目录保护与资源代理的直接回执；每 30 秒补查一次。手动同步和检查使用相同来源及跨进程锁。
+[ontology_catalog](../../crates/control/src/ontology_catalog/mod.rs) 组合共享平台入口和 Brain 目录的纯定义快照，提取明确引用并同步到当前 Server 的默认数据空间。相关写请求成功后通知后台，通知层覆盖目录保护与资源代理的直接回执；每 30 秒补查一次。条目摘要无变化且距上次全同步不足 10 分钟时跳过写租约与 Start/Apply 事务，仅保留补查。手动同步和检查使用相同来源及跨进程锁。
 
 同步读取不探测执行节点，不改变 Brain 目录的执行能力选择。来源读取失败记录错误并保留上次快照，数据库批次失败整体回滚；重启重新核对。任务参与 Server 退休计数，停止接纳新批次后等待已接纳工作收尾。公开能力描述不包含凭据或私有配置。
 

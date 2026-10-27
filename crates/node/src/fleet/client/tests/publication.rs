@@ -97,7 +97,9 @@ async fn publication(acknowledged: bool) {
                 continue;
             }
             let frame: NodeFrame = serde_json::from_str(message.to_text().unwrap()).unwrap();
-            let requires_ack = matches!(frame, NodeFrame::IndexReport { .. } | NodeFrame::Brain { .. });
+            // Only index report fragments consume the acknowledgement
+            // sequence; interleaved Brain frames are never ACKed.
+            let requires_ack = matches!(frame, NodeFrame::IndexReport { .. });
             let is_begin = matches!(&frame, NodeFrame::IndexReport { report } if matches!(report.part, IndexReportPart::Begin));
             if requires_ack && !is_begin { sequence += 1; }
             if acknowledged && requires_ack {
@@ -158,9 +160,6 @@ async fn publication(acknowledged: bool) {
         }
     })
     .await;
-    if result.is_err() {
-        client.abort();
-    }
     result.expect("bounded publication must keep its control channel live");
     tokio::time::timeout(std::time::Duration::from_secs(1), client)
         .await

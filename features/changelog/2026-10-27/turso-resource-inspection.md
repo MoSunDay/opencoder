@@ -1,3 +1,5 @@
+Commit: 9a89e07b15ecc379e6171ff9f3c61b058d53a799
+
 # 资源引用检查统一使用 Turso
 
 目录清理的二进制资源检查去除最后一个 SQLite C 依赖（rusqlite 及其 bundled libsqlite3-sys），SQLite 格式资源改由与应用存储相同的 Turso 引擎在临时副本中只读检查。检查仍先经手写校验（WAL 头部、页大小、帧身份、校验和与最终提交）再复制，随后执行 `PRAGMA quick_check`、读取 `sqlite_schema` 结构、拒绝虚拟表并保持行数与文本字节上限；连接只打开副本，源数据库、WAL 与派生索引不被写入。检查继续运行在资源扫描的阻塞线程内，异步引擎经调用方 runtime handle 驱动。

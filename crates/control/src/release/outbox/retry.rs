@@ -36,6 +36,11 @@ impl Retries {
         self.seen.clear();
     }
 
+    /// True while no dispatch is waiting out a retry backoff.
+    pub(super) fn idle(&self) -> bool {
+        self.failures.is_empty()
+    }
+
     pub fn ready(&self, id: &str, generation: &str, now: Instant) -> bool {
         self.failures
             .get(id)

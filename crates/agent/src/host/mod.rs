@@ -179,7 +179,9 @@ pub async fn run(host: Arc<Host>, port: u16, remote: String, standby: bool) -> R
     let mut channels =
         std::collections::HashMap::<String, tokio::task::JoinHandle<Result<()>>>::new();
     let mut active_once = false;
-    let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+    // 500ms trades sub-second config reaction latency (host handoff /
+    // release-server channel changes) for lower idle query cost.
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
     let shutdown = crate::shutdown_signal();
     tokio::pin!(shutdown);
     loop {

@@ -4,7 +4,6 @@
 
 use anyhow::Result;
 use futures::StreamExt;
-use serde_json::Value;
 
 /// One parsed SSE frame.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -78,13 +77,16 @@ pub async fn print_stream(response: reqwest::Response) -> Result<()> {
                 match chunk {
                     Some(Ok(bytes)) => {
                         buffer.extend_from_slice(&bytes);
-                        while let Some(pos) = buffer.iter().position(|b| *b == b'\n') {
-                            let line: Vec<u8> = buffer.drain(..=pos).collect();
-                            let line = String::from_utf8_lossy(&line[..line.len() - 1]);
+                        let mut consumed = 0;
+                        while let Some(offset) = buffer[consumed..].iter().position(|b| *b == b'\n') {
+                            let end = consumed + offset;
+                            let line = String::from_utf8_lossy(&buffer[consumed..end]);
                             if let Some(frame) = assembler.feed(&line) {
                                 emit(&frame);
                             }
+                            consumed = end + 1;
                         }
+                        buffer.drain(..consumed);
                     }
                     Some(Err(error)) => return Err(error.into()),
                     None => {
@@ -103,21 +105,36 @@ pub async fn print_stream(response: reqwest::Response) -> Result<()> {
 }
 
 fn emit(frame: &Frame) {
-    let data: Value = match serde_json::from_str(&frame.data) {
-        Ok(value) => value,
-        Err(_) => Value::String(frame.data.clone()),
-    };
-    let seq: Value = frame
-        .id
-        .as_deref()
-        .and_then(|id| id.parse::<i64>().ok())
-        .map(Value::from)
-        .unwrap_or(Value::Null);
-    crate::out::json_line(&serde_json::json!({
-        "event": frame.event,
-        "seq": seq,
-        "data": data,
-    }));
+    use std::io::Write;
+    let line = frame_line(frame);
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(&line);
+    let _ = out.write_all(b"\n");
+    let _ = out.flush();
+}
+
+/// Render one wrapper line. Valid-JSON data is validated (no parse, no
+/// re-serialization) and embedded raw; anything else becomes a JSON string.
+fn frame_line(frame: &Frame) -> Vec<u8> {
+    let mut line: Vec<u8> = Vec::with_capacity(frame.data.len() + 48);
+    line.extend_from_slice(b"{\"event\":");
+    match frame.event.as_deref() {
+        Some(event) => serde_json::to_writer(&mut line, event).expect("serialize event"),
+        None => line.extend_from_slice(b"null"),
+    }
+    line.extend_from_slice(b",\"seq\":");
+    match frame.id.as_deref().and_then(|id| id.parse::<i64>().ok()) {
+        Some(seq) => line.extend_from_slice(seq.to_string().as_bytes()),
+        None => line.extend_from_slice(b"null"),
+    }
+    line.extend_from_slice(b",\"data\":");
+    if serde_json::from_str::<serde::de::IgnoredAny>(&frame.data).is_ok() {
+        line.extend_from_slice(frame.data.as_bytes());
+    } else {
+        serde_json::to_writer(&mut line, frame.data.as_str()).expect("serialize data");
+    }
+    line.extend_from_slice(b"}");
+    line
 }
 
 #[cfg(test)]
@@ -159,5 +176,48 @@ mod tests {
     #[test]
     fn consecutive_blank_lines_do_not_emit_empty_frames() {
         assert!(assemble(&["", "", ""]).is_empty());
+    }
+
+    #[test]
+    fn line_scanner_splits_frames_without_per_line_allocations() {
+        // Mirrors print_stream's cursor scan over a chunk with two newlines.
+        let mut assembler = FrameAssembler::new();
+        let mut buffer = b"event: status\ndata: {\"a\":1}\n\ndata: 2\n".to_vec();
+        let mut consumed = 0;
+        let mut emitted = Vec::new();
+        while let Some(offset) = buffer[consumed..].iter().position(|b| *b == b'\n') {
+            let end = consumed + offset;
+            let line = String::from_utf8_lossy(&buffer[consumed..end]);
+            if let Some(frame) = assembler.feed(&line) {
+                emitted.push(frame);
+            }
+            consumed = end + 1;
+        }
+        buffer.drain(..consumed);
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].data, r#"{"a":1}"#);
+        assert_eq!(buffer, b"data: 2\n");
+    }
+
+    #[test]
+    fn frame_line_passes_json_data_through_raw() {
+        let frame = Frame {
+            event: Some("status".into()),
+            id: Some("7".into()),
+            data: r#"{"a": 1,"b":[1,2]}"#.into(),
+        };
+        let line = String::from_utf8(frame_line(&frame)).unwrap();
+        assert_eq!(line, r#"{"event":"status","seq":7,"data":{"a": 1,"b":[1,2]}}"#);
+        assert!(serde_json::from_str::<serde_json::Value>(&line).is_ok());
+    }
+
+    #[test]
+    fn frame_line_wraps_non_json_data_and_missing_fields() {
+        let frame = Frame::default();
+        let mut frame = Frame { data: "plain \"text\"".into(), ..frame };
+        frame.event = None;
+        frame.id = Some("not-a-number".into());
+        let line = String::from_utf8(frame_line(&frame)).unwrap();
+        assert_eq!(line, r#"{"event":null,"seq":null,"data":"plain "text""}"#);
     }
 }

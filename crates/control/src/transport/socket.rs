@@ -1,10 +1,10 @@
-use super::SocketCommand;
 use super::report::{BeginDecision, ReportCollector};
+use super::SocketCommand;
 use crate::AppState;
 use axum::{
     extract::{
-        Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
+        Query, State,
     },
     response::Response,
 };
@@ -174,15 +174,9 @@ async fn serve(
                             }
                         });
                     }
-                    if let Some((report_id, sequence)) =
-                        report_flow.as_mut().filter(|_| !incremental)
-                    {
-                        *sequence = sequence
-                            .checked_add(1)
-                            .ok_or_else(|| anyhow::anyhow!("report acknowledgement overflow"))?;
-                        super::socket_report::acknowledge(&acknowledgements, *report_id, *sequence)
-                            .await?;
-                    }
+                    // Interleaved Brain frames do not consume the report
+                    // acknowledgement sequence: nodes only count index
+                    // fragments, and ACKing anything else disconnects them.
                 }
                 NodeFrame::Hello { .. } => anyhow::bail!("duplicate hello"),
                 NodeFrame::Snapshot { snapshot } => {

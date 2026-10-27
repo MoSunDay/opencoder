@@ -40,19 +40,19 @@
 
 ---
 
-OpenCoder is a fully independent, Rust-native coding agent implemented from scratch. It ships a single binary `opencoder` that offers **four working modes**: an **interactive TUI**, **headless one-shot execution**, a **centralized HTTP/SSE server**, and a **remote thin client**. All upper-layer logic depends on only two abstraction seams — `Arc<dyn Store>` and `Arc<dyn ChatStream>` — so both the persistence layer (libsql) and the LLM backend (OpenAI-compatible) are swappable.
+OpenCoder is a fully independent, Rust-native coding agent implemented from scratch. It ships a single binary `opencoder` that offers **four working modes**: an **interactive TUI**, **headless one-shot execution**, a **centralized HTTP/SSE server**, and a **remote thin client**. All upper-layer logic depends on only two abstraction seams — `Arc<dyn Store>` and `Arc<dyn ChatStream>` — so both the persistence layer (Turso) and the LLM backend (OpenAI-compatible) are swappable.
 
 ## ✨ Features
 
 - **🧠 Multi-mode runtime** — Local TUI and headless `run` share the session runtime; dedicated `opencoder-server` and `opencoder-agent` binaries provide Fleet control and node execution.
-- **🔄 Session resume & fork** — `--session <id>` / `--continue` / `--fork` rebuild history from libsql across processes; titles are generated asynchronously by the small model.
+- **🔄 Session resume & fork** — `--session <id>` / `--continue` / `--fork` rebuild history from Turso across processes; titles are generated asynchronously by the small model.
 - **📦 Session binary export/import** — `session export/import` carries the full subagent tree in a `.opencoder` binary (`OPENCODR` magic) for migration; idempotent and never exports Config (API key safe).
 - **🛠️ Subagent scheduling** — two subagent kinds, `explore` (read-only investigation) and `build` (implementation execution), with DB-tracked lifecycles and collapsible views.
 - **📋 Plan / Act dual mode** — Plan mode is read-only (bash writes are blocked by `bash_guard`); switching to Act clears the context and keeps only the final plan.
 - **🗜️ Auto-compaction** — token-estimate-driven context compression; `compaction.{auto,context_threshold,reserved,tail_turns,buffer}` is fully configurable.
 - **🎮 Steer / follow-up two-phase delivery** — inject steer instantly at turn boundaries while running; consume exactly one queued follow-up when idle.
 - **🌐 Lossless event replay** — SSE event schema v2 migration; `SessionEvent` is the single source of truth, and replay fully rebuilds tool blocks.
-- **⚡ High performance** — cold start ~6 ms, binary 9.3 MB (thin-LTO + strip); libsql WAL concurrent read/write, appending 1k messages in 30 ms.
+- **⚡ High performance** — cold start ~6 ms, binary 9.3 MB (thin-LTO + strip); Turso WAL concurrent read/write, appending 1k messages in 30 ms.
 
 ## 🚀 Quick Start
 
@@ -74,7 +74,7 @@ cargo build --release
 Platform prerequisites (building from source):
 
 - **Linux**: `cargo build --release` works out of the box with the full feature set (including the `opencoder-agent` node).
-- **macOS**: builds and runs `opencoder` (CLI/TUI) and `opencoder-server`; run `xcode-select --install` and `brew install cmake` first (the libsql `libsql-ffi` dependency needs libclang and cmake). On macOS, session child processes run as direct children (no Linux pidfd supervision), and the `opencoder-agent` node (runc sandbox, process supervision) is Linux-only.
+- **macOS**: builds and runs `opencoder` (CLI/TUI) and `opencoder-server`; the storage engine is pure Rust and needs no libclang or cmake. On macOS, session child processes run as direct children (no Linux pidfd supervision), and the `opencoder-agent` node (runc sandbox, process supervision) is Linux-only.
 
 Or use the install script:
 
@@ -131,7 +131,7 @@ OpenCoder is a Cargo workspace with layered dependencies. Its main crates includ
 | --- | --- |
 | `core` | Shared types and `Config` (model / compaction / context window / small_model, all configurable) |
 | `llm` | OpenAI-compatible streaming client + `ChatStream` trait + `MockChatClient` + token estimator |
-| `store` | `Store` trait + libsql implementation (WAL, embedded), the sole outlet for all persistence |
+| `store` | `Store` trait + Turso implementation (pure-Rust SQLite-compatible, WAL, embedded), the sole outlet for all persistence |
 | `session` | Runtime core: drain main loop, tool registration, subagent scheduling, plan bash guard, compaction, resume |
 | `tui` | ratatui interactive UI (3-pane layout, subagent folding, steer/follow-up, plan/act switch) |
 | `web` | axum HTTP + SSE session management (prompt admit / event stream / runtime switch / interrupt) |
@@ -197,7 +197,7 @@ OpenCoder and [sst/opencode](https://github.com/sst/opencode) (a TypeScript / No
 | Cold-start time | **~0.78 s** | **~6 ms** | opencode is **~125×** slower |
 | Cold-start token overhead | **~13k tok** | **~0.4k tok** | opencode **~32×** higher |
 | Protocol | OpenAI-compatible + ACP + MCP | OpenAI-compatible + subagents (explore/build) | — |
-| Session storage | SQLite (WAL) + Drizzle ORM | libsql (SQLite-compatible, WAL) + hand-written `Store` trait | Both SQLite; see [storage comparison](#-storage) below |
+| Session storage | SQLite (WAL) + Drizzle ORM | Turso (pure-Rust SQLite-compatible, WAL) + hand-written `Store` trait | Both SQLite-family; see [storage comparison](#-storage) below |
 
 > **Cold-start token overhead** methodology: take each agent's first request body sent to the LLM, count tokens in the `system` message + the `tools` array (the fixed first-turn cost, incurred before any user input) with the `cl100k_base` BPE. Measured independently from the other `--help` runtime-baseline rows above. This is a fixed cost re-paid on every conversation turn.
 
@@ -207,15 +207,15 @@ Both are **SQLite under the hood**, persisting as standard `.db` + `.db-wal` + `
 
 | Dimension | opencode `1.17.8` | opencoder `0.1.0` |
 | --- | --- | --- |
-| Database | SQLite (embedded in bun) | libsql `0.9.30` (SQLite-compatible, `core` + `libsql-sys`) |
+| Database | SQLite (embedded in bun) | Turso `0.8.3` (pure-Rust SQLite-compatible engine) |
 | Access layer | Drizzle ORM (JS, runtime migrations via `migration` table) | Hand-written SQL + `Store` trait (`crates/store/src/store.rs`) |
-| Driver language | JS/V8 ↔ SQLite C ABI | Rust ↔ libsql C ABI (zero-copy binding) |
+| Driver language | JS/V8 ↔ SQLite C ABI | Pure Rust, in-process (no C ABI, no FFI) |
 | WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL` (same concurrency model) |
 | Tables (core) | `session` / `message` / `step` / `agent` / `tool_use` / `snapshot` / `checkpoint` / `event` / `subagent` | `sessions` / `messages` / `session_inputs` / `session_events` / `subagent_tasks` / `schema_version` |
 | Migration | Drizzle migration (runtime diff against `migration` table + `meta/_journal.json`) | Single `schema_version` value + idempotent `CREATE TABLE IF NOT EXISTS` |
 | DB file naming | `opencode.db` (varies by channel, e.g. `opencode-dev.db`) | Determined by workdir (one DB per workdir) |
 
-> Both share an equivalent WAL concurrency model (many readers / one writer; reads never block writes). Storage throughput differences mainly come from the driver layer — opencode goes through Drizzle ORM + V8 cross-language hops, while opencoder talks directly to the libsql C binding with no ORM translation layer.
+> Both share an equivalent WAL concurrency model (many readers / one writer; reads never block writes). Storage throughput differences mainly come from the driver layer — opencode goes through Drizzle ORM + V8 cross-language hops, while opencoder runs the pure-Rust database engine in-process with no ORM translation layer.
 
 > Note: end-to-end task performance is LLM-dominated (first-token latency is the provider RTT); under the same model both projects are essentially neck-and-neck in actual task throughput. The comparison above isolates the **runtime baseline** — the cost the runtime itself imposes regardless of the LLM.
 
@@ -243,7 +243,7 @@ opencoder/
 ├── crates/
 │   ├── core/      # Shared types & Config
 │   ├── llm/       # LLM client + ChatStream trait
-│   ├── store/     # Store trait + libsql implementation
+│   ├── store/     # Store trait + Turso implementation
 │   ├── session/   # Session runtime core
 │   ├── tui/       # ratatui interactive UI
 │   ├── web/       # axum HTTP + SSE

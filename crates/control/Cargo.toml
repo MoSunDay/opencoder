@@ -5,8 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# External SQLite resources are inspected only in disposable read-only copies.
-rusqlite = { version = "=0.40.2", features = ["bundled"] }
+# External SQLite-format resources are inspected only in disposable read-only
+# copies, opened with the same pure-Rust engine as the application database.
+turso.workspace = true
 tempfile.workspace = true
 fs2 = "0.4"
 libc = "0.2"
@@ -40,7 +41,6 @@ axum = { version = "0.7", features = ["ws"] }
 reqwest.workspace = true
 
 [dev-dependencies]
-turso.workspace = true
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 tower = { version = "0.5", features = ["util"] }
 opencoder-node.workspace = true

@@ -10,9 +10,9 @@ pub(super) fn sidecar(path: &std::path::Path) -> anyhow::Result<bool> {
 use anyhow::Result;
 use serde_json::Value;
 
-pub(super) fn values(path: &std::path::Path, bytes: &[u8]) -> Result<Option<Vec<Value>>> {
+pub(super) async fn values(path: &std::path::Path, bytes: &[u8]) -> Result<Option<Vec<Value>>> {
     let strings = if bytes.starts_with(b"SQLite format 3\0") {
-        Some(sqlite::strings(path, bytes)?)
+        Some(sqlite::strings(path, bytes).await?)
     } else if bytes.starts_with(&[0xa7, 0x0d, 0x0d, 0x0a]) {
         Some(python::strings(bytes)?)
     } else {

@@ -97,17 +97,23 @@ pub(crate) fn urlencode(value: &str) -> String {
     out
 }
 
-/// Outcome of a completed HTTP call: status, raw body text and parsed JSON
-/// (when the body is valid JSON).
+/// Outcome of a completed HTTP call: status, raw body bytes and parsed JSON
+/// (when the body is valid JSON). Text is materialized only when a caller
+/// actually needs it, so JSON responses never pay for a string copy.
 pub struct Outcome {
     pub status: u16,
-    pub text: String,
+    body: Vec<u8>,
     pub json: Option<serde_json::Value>,
 }
 
 impl Outcome {
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
+    }
+
+    /// Raw body text (lossy UTF-8) for non-JSON payloads.
+    pub fn text(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.body)
     }
 
     /// Error message: prefer the server's JSON `error` field, else raw text.
@@ -117,7 +123,7 @@ impl Outcome {
             .and_then(|v| v.get("error"))
             .and_then(|e| e.as_str())
             .map(str::to_owned)
-            .unwrap_or_else(|| self.text.trim().to_owned())
+            .unwrap_or_else(|| self.text().trim().to_owned())
     }
 }
 
@@ -145,9 +151,13 @@ fn request(ctx: &Ctx, plan: &RequestPlan) -> reqwest::RequestBuilder {
 pub async fn send(ctx: &Ctx, plan: &RequestPlan) -> Result<Outcome> {
     let response = request(ctx, plan).send().await.context("send request")?;
     let status = response.status().as_u16();
-    let text = response.text().await.context("read response body")?;
-    let json = serde_json::from_str(&text).ok();
-    Ok(Outcome { status, text, json })
+    let body = response
+        .bytes()
+        .await
+        .context("read response body")?
+        .to_vec();
+    let json = serde_json::from_slice(&body).ok();
+    Ok(Outcome { status, body, json })
 }
 
 /// Execute a plan without buffering: for SSE streams and artifact downloads.
@@ -229,7 +239,7 @@ mod tests {
     fn outcome_error_prefers_json_error_field() {
         let outcome = Outcome {
             status: 400,
-            text: r#"{"ok":false,"error":"boom"}"#.into(),
+            body: br#"{"ok":false,"error":"boom"}"#.to_vec(),
             json: serde_json::from_str(r#"{"ok":false,"error":"boom"}"#).ok(),
         };
         assert_eq!(outcome.error_message(), "boom");

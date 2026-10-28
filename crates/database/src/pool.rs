@@ -68,7 +68,9 @@ impl Database {
             let name = path.to_str().context("database path must be UTF-8")?;
             crate::marker::record(key.as_deref().unwrap_or(&path))?;
             let db = turso::Builder::new_local(name)
-                .experimental_multiprocess_wal(name != ":memory:")
+                // The shared-WAL path is a Linux deployment optimization; Windows
+                // falls back to regular single-process WAL with file locking.
+                .experimental_multiprocess_wal(name != ":memory:" && !cfg!(windows))
                 .build()
                 .await
                 .with_context(|| format!("open Turso database {}", path.display()))?;

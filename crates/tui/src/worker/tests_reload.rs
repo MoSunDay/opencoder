@@ -197,5 +197,6 @@ fn variant_name(ev: &UiEvent) -> &'static str {
         UiEvent::AssistantFinal(_) => "AssistantFinal",
         UiEvent::TurnDone(_) => "TurnDone",
         UiEvent::RemoteSnapshot { .. } => "RemoteSnapshot",
+        UiEvent::SubtaskUpdate { .. } => "SubtaskUpdate",
     }
 }

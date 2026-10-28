@@ -100,6 +100,7 @@ fn double_esc_while_running_cancels() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(
         matches!(first, KeyAction::None),
@@ -129,6 +130,7 @@ fn double_esc_while_running_cancels() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(
         matches!(second, KeyAction::Cancel),

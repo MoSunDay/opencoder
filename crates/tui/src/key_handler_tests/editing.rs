@@ -35,6 +35,7 @@ fn ctrl_v_returns_clip() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::Clip));
 }
@@ -80,6 +81,7 @@ fn undo_restores_previous_text() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
+            None,
         );
     }
     assert_eq!(input, "hi");
@@ -107,6 +109,7 @@ fn undo_restores_previous_text() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert_eq!(input, "");
 
@@ -133,6 +136,7 @@ fn undo_restores_previous_text() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert_eq!(input, "hi");
 }
@@ -173,6 +177,7 @@ fn undo_after_backspace() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert_eq!(input, "hell");
 
@@ -199,6 +204,7 @@ fn undo_after_backspace() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert_eq!(input, "hello");
 }
@@ -243,6 +249,7 @@ fn up_arrow_browses_history_when_single_row() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert_eq!(input, "older");
     assert_eq!(hist_idx, Some(0));
@@ -287,6 +294,7 @@ fn up_arrow_moves_cursor_when_multi_row() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     // Cursor moved up, input unchanged, history not browsed.
     assert!(cursor < cursor_before, "cursor should move up");
@@ -332,6 +340,7 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
@@ -375,6 +384,7 @@ fn handle_key_alt_f_still_moves_word() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "hello");

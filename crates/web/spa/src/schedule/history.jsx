@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ExecutionDetail } from '../fleet/detail.jsx';
 import { useJsonQuery } from '../ui/requests/query.js';
 import { StatusTag } from '../ui/statusTag.jsx';
+import { tableLoading, tableRows } from '../ui/tableLoading.js';
 import { TimeText } from '../ui/timeText.jsx';
 
 function readRuns(value) {
@@ -15,7 +16,7 @@ export function ScheduleRunsDrawer({ schedule, onClose, onNotice }) {
   const [execution, setExecution] = useState(null);
   return <Drawer title={`调度 ${schedule.id} 的触发历史`} size={760} styles={{ wrapper: { maxWidth: '100vw' } }} open onClose={onClose}>
     {error && <Alert type="error" showIcon title={error} action={<Button onClick={reload}>重试触发历史</Button>} />}
-    <Table size="small" scroll={{ x: 'max-content' }} rowKey="scheduled_for_ms" loading={loading} dataSource={data || []}
+    <Table size="small" scroll={{ x: 'max-content' }} rowKey="scheduled_for_ms" loading={tableLoading(loading)} dataSource={tableRows(loading, data)}
       locale={{ emptyText: error ? '触发历史读取失败，请重试' : '暂无触发记录' }} columns={[
         { title: '计划时间', dataIndex: 'scheduled_for_ms', render: (value) => <TimeText ts={value} /> },
         { title: '实际触发', dataIndex: 'fired_at_ms', render: (value) => <TimeText ts={value} /> },

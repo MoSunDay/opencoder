@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import './test/setup-dom.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { BrainPanel } from './brainPanel.jsx';
 import { apiDel, apiGet, apiPost, apiPut } from './api.js';
 vi.mock('./api.js', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDel: vi.fn() }));
@@ -179,5 +179,22 @@ describe('capability library table and editor', () => {
     expect(await screen.findByText('读取能力失败: node unavailable')).toBeTruthy();
     expect(button('保存修改').disabled).toBe(true);
     expect(apiPut).not.toHaveBeenCalled();
+  });
+
+  it('does not claim 暂无能力 while the first fetch is still in flight', async () => {
+    let resolveFetch;
+    apiGet.mockImplementation((path) => {
+      if (path === '/api/brain/capabilities') return new Promise((resolve) => { resolveFetch = resolve; });
+      if (path === '/api/agents') return Promise.resolve({ agents: [{ name: 'custom-agent' }] });
+      if (path === '/api/dag/defs') return Promise.resolve([{ id: 'dag-build' }]);
+      if (path.endsWith('/target')) return Promise.resolve({ target: null });
+      return Promise.resolve(entry);
+    });
+    render(<BrainPanel executionCatalog={[]} />);
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/brain/capabilities', expect.anything()));
+    expect(screen.queryByText('暂无能力，点击「新建能力」添加')).toBeNull();
+    await act(async () => { resolveFetch({ capabilities: [] }); });
+    // 加载完成后的真空态才可以说「暂无能力」。
+    expect(await screen.findByText('暂无能力，点击「新建能力」添加')).toBeTruthy();
   });
 });

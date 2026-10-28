@@ -8,6 +8,7 @@ use opencoder_session::SessionEvent;
 use serde_json::json;
 use support::{frame, until, Fixture};
 mod protocol;
+mod subtasks;
 mod support;
 
 #[tokio::test]

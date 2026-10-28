@@ -92,14 +92,18 @@ pub(crate) async fn initial_chat_view(
             ..Default::default()
         };
     }
-    let view = if !session.messages.is_empty() {
+    // Cold-start floor = subtask folds recorded in the runtime registry;
+    // message replay alone cannot see them.
+    let registry = crate::remote::subtasks::load_registry(store, &session.id)
+        .await
+        .unwrap_or_default();
+    let mut view = if !session.messages.is_empty() {
         crate::session_ui::replay_into_chat(
             &session.agent.name,
             &session.messages,
             store,
             &session.id,
-            // Cold start: no live view whose accumulated token cost to floor.
-            0,
+            crate::subtask_registry::sum_tokens(&registry),
         )
         .await
     } else {
@@ -108,6 +112,8 @@ pub(crate) async fn initial_chat_view(
             ..Default::default()
         }
     };
+    view.subtask_done = crate::subtask_registry::done_count(&registry);
+    view.subtask_total = crate::subtask_registry::total_count(&registry);
     view
 }
 

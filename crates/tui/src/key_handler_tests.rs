@@ -68,6 +68,7 @@ fn handle_key_disabled_blocks_char() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
@@ -108,6 +109,7 @@ fn handle_key_disabled_blocks_enter() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::None));
 }
@@ -147,6 +149,7 @@ fn handle_key_disabled_allows_scroll() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(scroll, 30);
@@ -188,6 +191,7 @@ fn handle_key_disabled_allows_quit() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::Quit));
 }
@@ -196,3 +200,59 @@ fn handle_key_disabled_allows_quit() {
 mod bash;
 #[path = "key_handler_tests/editing.rs"]
 mod editing;
+
+/// Ctrl+Enter return-from-subtask-child arming: `Some(child_id)` maps
+/// Ctrl+Enter to `AppendSubtask`, plain Enter still submits, and `None`
+/// keeps Ctrl+Enter swallowed (previous behavior preserved).
+#[test]
+fn ctrl_enter_returns_from_subtask_child_only_when_armed() {
+    let bindings = crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default());
+    let run = |code: KeyCode, mods: KeyModifiers, child: Option<&str>| {
+        let mut input = String::from("hello");
+        let mut cursor = 5usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut scroll = 0u32;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+        let mut undo_state = crate::undo::init("hello", 5);
+        let mut queue_scroll: u32 = 0;
+        let action = handle_key(
+            KeyEvent::new(code, mods),
+            &bindings,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            false,
+            "act",
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
+            false,
+            false,
+            &mut undo_state,
+            &mut queue_scroll,
+            &mut None,
+            child,
+        );
+        (action, input)
+    };
+    // (a) Armed: Ctrl+Enter returns the child id.
+    let (action, _) = run(KeyCode::Enter, KeyModifiers::CONTROL, Some("agent-x"));
+    assert!(matches!(action, KeyAction::AppendSubtask(ref id) if id == "agent-x"));
+    // (b) Armed: plain Enter still submits normally.
+    let (action, input) = run(KeyCode::Enter, KeyModifiers::NONE, Some("agent-x"));
+    assert!(matches!(action, KeyAction::Submit(ref text) if text == "hello"));
+    assert!(input.is_empty());
+    // (c) Unarmed: Ctrl+Enter stays swallowed.
+    let (action, input) = run(KeyCode::Enter, KeyModifiers::CONTROL, None);
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "hello");
+}

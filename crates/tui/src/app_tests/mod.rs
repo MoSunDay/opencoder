@@ -49,6 +49,7 @@ pub(super) fn run_handle(
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     )
 }
 
@@ -91,6 +92,7 @@ pub(super) fn run_handle_disabled(
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     )
 }
 
@@ -134,6 +136,7 @@ pub(super) fn run_handle_subagents_busy(
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     )
 }
 
@@ -175,6 +178,7 @@ pub(super) fn run_handle_subagent(
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     )
 }
 
@@ -215,6 +219,7 @@ pub(super) fn run_handle_menu(
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     )
 }
 
@@ -259,6 +264,7 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "steer while running");
@@ -287,6 +293,7 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
+        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "");

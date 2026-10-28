@@ -42,7 +42,10 @@ def failure_excerpt(log):
                 or 'Browser host resources:' in line]
     errors = [line for line in lines if '[err]' in line and ':ERROR:' in line
               and 'dbus/' not in line]
-    priority = '\n'.join(dict.fromkeys(fatal + original + errors[-8:]))[:3400]
+    locator_logs = [line for line in lines
+                    if 'waiting for' in line or 'locator(' in line
+                    or '=====' in line][:20]
+    priority = '\n'.join(dict.fromkeys(fatal + original + errors[-8:] + locator_logs))[:3400]
     return priority + '\nLast output:\n' + '\n'.join(lines[-10:])
 
 

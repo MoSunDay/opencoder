@@ -47,7 +47,7 @@ async fn powershell_timeout_handoff_completes_and_output_overflow_stops_backgrou
     .unwrap();
     let output = std::fs::read_to_string(path).unwrap();
     assert!(output.contains("before") && output.contains("after"));
-    let output = ShellTool.execute(json!({"command":"Start-Sleep 2; [Console]::Out.Write(('x' * 9000000)); Start-Sleep 60"}), &context).await.unwrap();
+    let output = ShellTool::default().execute(json!({"command":"Start-Sleep 2; [Console]::Out.Write(('x' * 9000000)); Start-Sleep 60"}), &context).await.unwrap();
     assert!(
         output.content.contains("[powershell-timeout:"),
         "{}",

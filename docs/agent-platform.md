@@ -43,6 +43,17 @@ Server 与 Node 都要求 `--token`、`--token-file` 或既有 `OPENCODER_SERVER
 
 平台使用独立新库：Server 的 `data-dir` 包含 `control.db`、`definitions.db` 和持久化的 `admission.json`；省略该参数时兼容使用当前工作目录数据域下的 `server-v2/`。Node 的 `data-dir` 包含 `runtime.db`、`admission.json`、`scheduling.json` 和 `<kind>/<id>/execution.json` 及其资源、team、DAG 状态。未指定 Node `data-dir` 时使用当前工作目录数据域的 `node-v2/`。旧 daemon/CLI 数据不迁移、不清空；需要迁移旧 Node 布局时显式运行 `opencoder-agent --data-dir <目录> storage migrate-layout`。平台项目定义固定使用新 Server 库，不读取旧 MySQL 项目库。
 
+## Operator 执行身份
+
+Linux 节点上每条 Operator 执行供给一个专用系统账号（`ocop-` 前缀，nologin shell），形成 OS 级读写边界：
+
+- 执行准入 fail-closed：节点无供给能力（非 root 或缺少 shadow-utils 的 `useradd`）时拒绝 Operator 执行，不静默降级。operator 配置 `"linux_identity":"off"` 保留节点用户子进程，仅用于本地开发。
+- 私有 `home`/`workspace` 归该账号所有；冻结的配置快照归 root 只读，会话无法改写自己的配置。工具子进程经隐藏 supervisor 在 exec 前 `setgroups`→`setgid`→`setuid` 降权并收紧 umask，身份随会话运行时持久化，重启恢复。
+- 访问档位 `operator.access`：`readwrite`（默认）额外获得私有 `TMPDIR`；`readonly` 将 home/workspace 冻结为 root 属主 0555，共享只读资源经附加组 `opencoder-ro` 授予组读。
+- 执行终态回收产物属主（chown 回节点用户）并删除账号；补扫机制清理遗留的终态账号。
+- 前提：节点以 root 运行或具备 `CAP_SETUID`+`CAP_SETGID`+`CAP_CHOWN`；降权仅在节点配置隐藏 supervisor 时生效（生产 agent 二进制始终配置）。
+- Windows 路径不变：继续使用现有 HOME/WORKSPACE 环境隔离，无身份切换。
+
 ## 调度和恢复
 
 调度分数为 `(活跃 agent loops + 待确认分配数) / 可用 CPU`，优先最低值。CPU 包含容器 quota；统计真实运行的父/子 agent、团队成员、工作流 agent 和维护 agent，空闲会话不占 loop。节点还必须在线、心跳新鲜、资源可用且支持执行类型。优先选择有空余容量的节点；全部满载时选择等待数较少的可接受节点，把超额任务交给该 Node 持久化排队。

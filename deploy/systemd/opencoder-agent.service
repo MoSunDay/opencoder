@@ -8,6 +8,12 @@ ConditionPathIsDirectory=/data00
 Type=simple
 # Root is intentional in this runc-capable example. A node that disables runc
 # may use a dedicated account after its local filesystem permissions are set.
+# Operator execution identity also needs the privilege: every operator session
+# provisions a dedicated system user (useradd/userdel/groupadd from
+# shadow-utils) and re-owns its files, so run as root or grant
+# CAP_SETUID+CAP_SETGID+CAP_CHOWN. Without the capability the node rejects
+# operator executions (fail-closed); set operator config "linux_identity":"off"
+# to keep node-user subprocesses for local development.
 User=root
 Group=root
 WorkingDirectory=/etc/opencoder/agent

@@ -57,8 +57,8 @@ function assertRun(view) {
 
 async function openRound(page, round) {
   const drawer = page.getByRole('dialog', { name: '计划运行详情', exact: true });
-  const entry = drawer.locator('.brain-run-details > .ant-collapse > .ant-collapse-item').filter({ hasText: `第 ${round} 轮 ·` }).first();
-  if (await entry.locator('.ant-collapse-header').getAttribute('aria-expanded') !== 'true') await entry.locator('.ant-collapse-header').click();
+  await drawer.getByRole('tab', { name: '执行记录', exact: true }).click();
+  await drawer.locator('.brain-round-selector button').filter({ hasText: `第 ${round} 轮` }).first().click();
   return drawer;
 }
 
@@ -80,7 +80,7 @@ async function main() {
     await page.goto(base, { waitUntil: 'networkidle' });
     await page.getByRole('tablist', { name: '导航分类', exact: true }).getByRole('tab', { name: 'Agent', exact: true }).click();
     await page.getByRole('menuitem', { name: '大脑调度' }).click();
-    await page.getByRole('tab', { name: '工作台' }).waitFor();
+    await page.getByRole('tab', { name: '运行历史' }).waitFor();
     assert.equal(await page.getByRole('button', { name: '创建并执行计划' }).count(), 0);
     await capabilityContracts(page, artifacts);
     await page.getByRole('tab', { name: '计划库' }).click();
@@ -159,19 +159,17 @@ async function main() {
     for (const round of [1, 2]) {
       const drawer = await openRound(page, round);
       const operation = view.operations.find((op) => op.round === round && op.node_id === version.plan.nodes[0].node_id);
-      await drawer.getByRole('button', { name: operation.execution_id, exact: true }).click();
-      const executionDrawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
-      await executionDrawer.locator('.execution-view-full').waitFor();
-      await executionDrawer.getByText('node-owned child result', { exact: false }).last().waitFor();
+      await drawer.locator('tr').filter({ hasText: operation.execution_id }).getByRole('button', { name: '查看执行详情' }).first().click();
+      await drawer.locator('.execution-view-full').waitFor();
+      await drawer.getByText('node-owned child result', { exact: false }).last().waitFor();
       assert(details.some((url) => url.endsWith(`/api/executions/${operation.execution_id}`)), 'execution panel must fetch the selected attempt by ID');
-      await executionDrawer.getByRole('button', { name: '返回轮次列表' }).click();
+      await drawer.getByRole('button', { name: '返回运行详情' }).click();
     }
     const finalDrawer = await openRound(page, 2);
     const operator = view.operations.find((op) => op.round === 2 && op.node_id === version.plan.nodes[2].node_id);
-    await finalDrawer.getByRole('button', { name: operator.execution_id, exact: true }).click();
-    const operatorDrawer = page.getByRole('dialog', { name: '能力执行明细', exact: true });
-    await operatorDrawer.locator('.execution-view-full').waitFor();
-    await operatorDrawer.getByText('node-owned child result', { exact: false }).last().waitFor();
+    await finalDrawer.locator('tr').filter({ hasText: operator.execution_id }).getByRole('button', { name: '查看执行详情' }).first().click();
+    await finalDrawer.locator('.execution-view-full').waitFor();
+    await finalDrawer.getByText('node-owned child result', { exact: false }).last().waitFor();
     assert(details.some((url) => url.endsWith(`/api/executions/${operator.execution_id}`)), 'Operator panel must fetch its own execution ID');
     await page.screenshot({ path: path.join(artifacts, 'completed.png'), animations: 'disabled' });
     assert.deepEqual(errors, []);

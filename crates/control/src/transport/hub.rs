@@ -121,11 +121,18 @@ impl Hub {
         }
         let removed = fleet.unregister(id).await?;
         let cached = state.nodes.remove(id).is_some();
-        Ok(if removed || cached {
-            UnregisterResult::Removed
+        if removed || cached {
+            // A removed node can never report again, so its per-execution
+            // bookkeeping must not outlive the view: accepted markers and
+            // capacity reservations would otherwise leak forever.
+            state.accepted.retain(|_, node| node != id);
+            state
+                .reservations
+                .retain(|_, reservation| reservation.node_id != id);
+            Ok(UnregisterResult::Removed)
         } else {
-            UnregisterResult::NotFound
-        })
+            Ok(UnregisterResult::NotFound)
+        }
     }
     pub async fn close_connections(&self) {
         let senders: Vec<_> = self

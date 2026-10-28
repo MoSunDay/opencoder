@@ -327,3 +327,39 @@ async fn delta_membership_preserves_unmentioned_acceptances_and_reservations() {
         "inventory removal cannot release active capacity"
     );
 }
+
+#[tokio::test]
+async fn unregister_sweeps_per_node_acceptances_and_reservations() {
+    let fleet = opencoder_store::fleet::FleetStore::open_memory().await.unwrap();
+    let hub = Hub::new(vec![registration()]);
+    let own = execution();
+    let other = ExecutionIndex {
+        id: "agent-kept".into(),
+        node_id: "node-b".into(),
+        ..own.clone()
+    };
+    hub.acknowledge_report("node-a", std::slice::from_ref(&own))
+        .await;
+    hub.acknowledge_report("node-b", std::slice::from_ref(&other))
+        .await;
+    hub.reserve(&own).await;
+    hub.reserve(&other).await;
+    let result = hub.unregister("node-a", &fleet).await.unwrap();
+    assert!(matches!(result, UnregisterResult::Removed));
+    let state = hub.state.lock().await;
+    assert!(!state.nodes.contains_key("node-a"), "view removed");
+    assert!(
+        !state.accepted.values().any(|node| node == "node-a"),
+        "removed node must not keep accepted markers"
+    );
+    assert!(
+        !state.reservations.values().any(|r| r.node_id == "node-a"),
+        "removed node must not keep reservations"
+    );
+    // An unrelated node's bookkeeping survives the sweep.
+    assert_eq!(
+        state.accepted.get(&other.id).map(String::as_str),
+        Some("node-b")
+    );
+    assert!(state.reservations.contains_key(&other.id));
+}

@@ -111,9 +111,24 @@ impl Outcome {
         (200..300).contains(&self.status)
     }
 
-    /// Raw body text (lossy UTF-8) for non-JSON payloads.
+    /// Build the outcome for a buffered response: parse JSON when possible
+    /// and drop the raw byte copy once parsed — the one-shot CLI contract
+    /// renders either the parsed value or the raw text, never both.
+    pub(crate) fn from_body(status: u16, body: Vec<u8>) -> Self {
+        let json = serde_json::from_slice(&body).ok();
+        let body = if json.is_some() { Vec::new() } else { body };
+        Outcome { status, body, json }
+    }
+
+    /// Raw body text (lossy UTF-8) for non-JSON payloads. JSON bodies are
+    /// dropped after parsing, so those render from the parsed value instead.
     pub fn text(&self) -> std::borrow::Cow<'_, str> {
-        String::from_utf8_lossy(&self.body)
+        match (&self.json, self.body.is_empty()) {
+            (Some(json), true) => serde_json::to_string(json)
+                .map(std::borrow::Cow::Owned)
+                .unwrap_or_default(),
+            _ => String::from_utf8_lossy(&self.body),
+        }
     }
 
     /// Error message: prefer the server's JSON `error` field, else raw text.
@@ -156,8 +171,7 @@ pub async fn send(ctx: &Ctx, plan: &RequestPlan) -> Result<Outcome> {
         .await
         .context("read response body")?
         .to_vec();
-    let json = serde_json::from_slice(&body).ok();
-    Ok(Outcome { status, body, json })
+    Ok(Outcome::from_body(status, body))
 }
 
 /// Execute a plan without buffering: for SSE streams and artifact downloads.
@@ -243,5 +257,29 @@ mod tests {
             json: serde_json::from_str(r#"{"ok":false,"error":"boom"}"#).ok(),
         };
         assert_eq!(outcome.error_message(), "boom");
+    }
+
+    #[test]
+    fn parsed_json_bodies_drop_their_raw_copy() {
+        let outcome = Outcome::from_body(200, br#"{"ok":true}"#.to_vec());
+        let json = outcome.json.clone().expect("json parsed");
+        assert_eq!(json, serde_json::json!({"ok": true}));
+        // The raw copy is gone; text renders from the parsed value instead.
+        assert_eq!(outcome.text(), r#"{"ok":true}"#);
+        assert_eq!(
+            Outcome::from_body(400, br#"{"reason":"nope"}"#.to_vec()).error_message(),
+            r#"{"reason":"nope"}"#
+        );
+    }
+
+    #[test]
+    fn non_json_bodies_keep_their_raw_bytes() {
+        let outcome = Outcome::from_body(200, b"plain text".to_vec());
+        assert!(outcome.json.is_none());
+        assert_eq!(outcome.text(), "plain text");
+        assert_eq!(outcome.error_message(), "plain text");
+        // An empty payload stays empty on both paths.
+        let empty = Outcome::from_body(204, Vec::new());
+        assert!(empty.json.is_none() && empty.text().is_empty());
     }
 }

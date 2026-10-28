@@ -154,7 +154,9 @@ mod tests {
         .unwrap();
         let _home = opencoder_core::scoped_config_home(dir.path().to_path_buf());
         emit(Event::Question);
-        tokio::time::timeout(Duration::from_secs(5), async {
+        // Hook commands spawn a host shell; cold PowerShell starts under a
+        // fully loaded test runner can take well over five seconds.
+        tokio::time::timeout(Duration::from_secs(30), async {
             while !output.exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }

@@ -1,4 +1,6 @@
 [Unit]
+# opencode-server is Linux-only: it exits with an error on other platforms.
+# The opencode CLI/TUI remain cross-platform.
 Description=Opencoder fleet control plane
 After=network-online.target
 Wants=network-online.target

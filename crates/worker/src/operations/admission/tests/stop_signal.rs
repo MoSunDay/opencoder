@@ -77,6 +77,7 @@ async fn durable_cancel_signals_before_a_queued_journal_reader_can_block_it() {
     );
     drop(journal);
     worker.inner.active.lock().await.remove(id);
+    crate::state::release_execution_state(&worker.inner, id).await;
 }
 
 #[tokio::test]

@@ -128,7 +128,7 @@ jobs:
           $result = $LASTEXITCODE
           if ($result -ne 0) {
             $tail = [string](@(Get-Content $log -Tail 120) -join "`n")
-            $focused = @(Get-Content $log | Where-Object { $_ -match 'FAILED|panicked|called .Result::unwrap|^failures|test result: FAILED|^error|Err\(' } | Select-Object -First 10)
+            $focused = @(Get-Content $log | Where-Object { $_ -cmatch '\.\.\. FAILED$|panicked|called .Result::unwrap|^failures|test result: FAILED|^error' } | Select-Object -First 10)
             $index = 1
             foreach ($line in $focused) {
               $annotation = $line.Replace('%', '%25').Replace("`r", '%0D')

@@ -36,3 +36,5 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 axum = "0.7"
 tempfile = "3"
 libc = "0.2"
+# Paused-clock tests (`#[tokio::test(start_paused)]`) for the subtask watcher.
+tokio = { workspace = true, features = ["test-util"] }

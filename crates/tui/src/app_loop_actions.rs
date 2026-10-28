@@ -635,3 +635,84 @@ pub(crate) async fn confirm_tick(
     }
     false
 }
+
+/// Ctrl+Enter / subtask-detail action: format the finished subtask's
+/// question+result+tokens and admit it to the PARENT session through the
+/// queue mechanism (parent running ⇒ queued at its idle boundary; idle ⇒
+/// consumed immediately). When the parent is the live session the queue
+/// panel shows the row; from a child session a scratch panel is used so the
+/// child view never displays parent queue rows. Returns the parent pick when
+/// the caller should switch back to it (parent not live), else `None`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn append_subtask_result(
+    child_id: &str,
+    store: &Arc<dyn Store>,
+    session_id: &str,
+    _chat: &mut ChatView,
+    main_task_id: Option<&str>,
+    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    admit_st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+) -> Option<crate::task::TaskPick> {
+    // Not descended from a parent task: nothing to append into.
+    let parent = main_task_id?;
+    let registry = crate::remote::subtasks::load_registry(store, parent)
+        .await
+        .unwrap_or_default();
+    let Some(entry) = crate::subtask_registry::find(&registry, child_id) else {
+        *mode_flash = Some(("subtask 未注册".into(), anim_tick));
+        return None;
+    };
+    if !crate::subtask_registry::is_terminal(&entry.status) {
+        *mode_flash = Some(("subtask 尚未完成，完成后再追加".into(), anim_tick));
+        return None;
+    }
+    let text = crate::subtask_registry::append_text(entry);
+    if parent == session_id {
+        // Parent is the live session: the real queue panel carries the row.
+        if !crate::queue_admitter::handle_queue(
+            &text,
+            admit_tx,
+            admit_st,
+            queue_items,
+            pending_images,
+            parent,
+        ) {
+            *mode_flash = Some((
+                crate::queue_admitter::QUEUE_SUBMIT_FAILED_FLASH.to_string(),
+                anim_tick,
+            ));
+            return None;
+        }
+        *mode_flash = Some(("subtask 结果已追加到主任务".into(), anim_tick));
+        None
+    } else {
+        // Admitting from the child view: scratch panels keep the parent row
+        // out of the child's queue panel; the switch rebuilds it anyway.
+        let mut scratch_queue = Vec::new();
+        let mut scratch_images = Vec::new();
+        if !crate::queue_admitter::handle_queue(
+            &text,
+            admit_tx,
+            admit_st,
+            &mut scratch_queue,
+            &mut scratch_images,
+            parent,
+        ) {
+            *mode_flash = Some((
+                crate::queue_admitter::QUEUE_SUBMIT_FAILED_FLASH.to_string(),
+                anim_tick,
+            ));
+            return None;
+        }
+        *mode_flash = Some(("subtask 结果已追加，正在返回主任务".into(), anim_tick));
+        Some(crate::task::TaskPick::Resume(parent.to_string()))
+    }
+}
+
+#[cfg(test)]
+#[path = "app_loop_actions_subtask_tests.rs"]
+mod subtask_append_tests;

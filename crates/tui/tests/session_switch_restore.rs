@@ -318,6 +318,7 @@ async fn switch_rebuilds_chat_view_without_cross_talk() {
             &queue_items,
             &active_skill,
             &active_skill_body,
+            0,
         ),
     );
     let (b, _) = switch_to(&store, SESSION_B, client.clone(), dir.path()).await;
@@ -361,6 +362,7 @@ async fn switch_rebuilds_chat_view_without_cross_talk() {
             &queue_items,
             &active_skill,
             &active_skill_body,
+            0,
         ),
     );
     let (a2, _) = switch_to(&store, SESSION_A, client, dir.path()).await;

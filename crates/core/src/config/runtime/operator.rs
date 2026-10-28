@@ -48,7 +48,9 @@ mod tests {
     #[test]
     fn linux_identity_defaults_to_enforced_and_parses_both_modes() {
         assert_eq!(
-            serde_json::from_str::<OperatorConfig>("{}").unwrap().linux_identity,
+            serde_json::from_str::<OperatorConfig>("{}")
+                .unwrap()
+                .linux_identity,
             LinuxIdentityMode::Enforced
         );
         assert_eq!(

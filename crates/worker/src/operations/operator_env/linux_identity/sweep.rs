@@ -130,11 +130,7 @@ mod tests {
             .record_path(ExecutionKind::Operator, "operator-01A")
             .unwrap();
         std::fs::create_dir_all(terminal.parent().unwrap()).unwrap();
-        std::fs::write(
-            &terminal,
-            r#"{"assignment":{"index":{"status":"done"}}}"#,
-        )
-        .unwrap();
+        std::fs::write(&terminal, r#"{"assignment":{"index":{"status":"done"}}}"#).unwrap();
         assert_eq!(record_is_terminal(&terminal), Some(true));
 
         let running = layout
@@ -144,7 +140,10 @@ mod tests {
         std::fs::write(&running, r#"{"assignment":{"index":{"status":"idle"}}}"#).unwrap();
         assert_eq!(record_is_terminal(&running), Some(false));
 
-        assert_eq!(record_is_terminal(&layout.root().join("missing.json")), None);
+        assert_eq!(
+            record_is_terminal(&layout.root().join("missing.json")),
+            None
+        );
     }
 
     #[test]

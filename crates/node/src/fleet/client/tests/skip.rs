@@ -66,7 +66,14 @@ async fn unchanged_full_inventory_is_not_reuploaded_until_it_changes() {
     let client_service: Arc<dyn NodeService> = service.clone();
     let period = std::time::Duration::from_millis(50);
     let client = tokio::spawn(async move {
-        connection_with_period(&url, "test-token", client_service, Arc::new(Semaphore::new(128)), period).await
+        connection_with_period(
+            &url,
+            "test-token",
+            client_service,
+            Arc::new(Semaphore::new(128)),
+            period,
+        )
+        .await
     });
     let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         let (stream, _) = listener.accept().await.unwrap();
@@ -74,16 +81,36 @@ async fn unchanged_full_inventory_is_not_reuploaded_until_it_changes() {
         // Hello, then the initial full report: begin + batches + end.
         assert!(matches!(frame(&mut socket).await, NodeFrame::Hello { .. }));
         // A full report opens with a load snapshot, then the begin envelope.
-        assert!(matches!(frame(&mut socket).await, NodeFrame::Snapshot { .. }));
         assert!(matches!(
             frame(&mut socket).await,
-            NodeFrame::IndexReport { report: IndexReportEnvelope { part: IndexReportPart::Begin, .. } }
+            NodeFrame::Snapshot { .. }
+        ));
+        assert!(matches!(
+            frame(&mut socket).await,
+            NodeFrame::IndexReport {
+                report: IndexReportEnvelope {
+                    part: IndexReportPart::Begin,
+                    ..
+                }
+            }
         ));
         let mut batches = 0;
         loop {
             match frame(&mut socket).await {
-                NodeFrame::IndexReport { report: IndexReportEnvelope { part: IndexReportPart::Batch { .. }, .. } } => batches += 1,
-                NodeFrame::IndexReport { report: IndexReportEnvelope { part: IndexReportPart::End, .. } } => break,
+                NodeFrame::IndexReport {
+                    report:
+                        IndexReportEnvelope {
+                            part: IndexReportPart::Batch { .. },
+                            ..
+                        },
+                } => batches += 1,
+                NodeFrame::IndexReport {
+                    report:
+                        IndexReportEnvelope {
+                            part: IndexReportPart::End,
+                            ..
+                        },
+                } => break,
                 other => panic!("unexpected {other:?}"),
             }
         }
@@ -98,8 +125,14 @@ async fn unchanged_full_inventory_is_not_reuploaded_until_it_changes() {
         // A record change restores full publication.
         service.records.lock().unwrap().push(record(301));
         for _ in 0..8 {
-            if let NodeFrame::IndexReport { report: IndexReportEnvelope { part: IndexReportPart::Begin, report_id: 2, .. } } =
-                frame(&mut socket).await
+            if let NodeFrame::IndexReport {
+                report:
+                    IndexReportEnvelope {
+                        part: IndexReportPart::Begin,
+                        report_id: 2,
+                        ..
+                    },
+            } = frame(&mut socket).await
             {
                 return;
             }

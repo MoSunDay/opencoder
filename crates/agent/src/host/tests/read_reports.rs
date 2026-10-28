@@ -98,14 +98,13 @@ async fn queries_preserve_revision_but_mutations_and_wakeups_notify() {
         200
     );
     assert!(revision.has_changed().unwrap());
-    assert!(
-        host.store
-            .definition("runtime_sleep", "reads")
-            .await
-            .unwrap()
-            .unwrap()
-            .is_null()
-    );
+    assert!(host
+        .store
+        .definition("runtime_sleep", "reads")
+        .await
+        .unwrap()
+        .unwrap()
+        .is_null());
     server.abort();
 }
 

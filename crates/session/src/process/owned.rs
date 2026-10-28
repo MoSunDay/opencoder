@@ -68,7 +68,10 @@ fn supervisor_argv(
     run_as: Option<&RunAsIdentity>,
 ) -> Result<Vec<OsString>> {
     anyhow::ensure!(!program.is_empty(), "supervised program is empty");
-    let mut argv = vec![binary.as_os_str().to_os_string(), "internal-process-supervisor".into()];
+    let mut argv = vec![
+        binary.as_os_str().to_os_string(),
+        "internal-process-supervisor".into(),
+    ];
     if let Some(cleanup) = cleanup {
         argv.push("--runc-root".into());
         argv.push(cleanup.root.as_os_str().to_os_string());
@@ -243,13 +246,8 @@ mod tests {
             root: Path::new("/state").into(),
             id: "container".into(),
         };
-        let argv = supervisor_argv(
-            Path::new("/agent"),
-            "runc".as_ref(),
-            Some(&cleanup),
-            None,
-        )
-        .unwrap();
+        let argv =
+            supervisor_argv(Path::new("/agent"), "runc".as_ref(), Some(&cleanup), None).unwrap();
         assert_eq!(
             argv,
             [
@@ -268,14 +266,20 @@ mod tests {
 
     #[test]
     fn argv_refuses_root_identities_and_empty_programs() {
-        assert!(
-            supervisor_argv(Path::new("/agent"), "bash".as_ref(), None, Some(&identity(0, 1, Vec::new())))
-                .is_err()
-        );
-        assert!(
-            supervisor_argv(Path::new("/agent"), "bash".as_ref(), None, Some(&identity(1, 0, Vec::new())))
-                .is_err()
-        );
+        assert!(supervisor_argv(
+            Path::new("/agent"),
+            "bash".as_ref(),
+            None,
+            Some(&identity(0, 1, Vec::new()))
+        )
+        .is_err());
+        assert!(supervisor_argv(
+            Path::new("/agent"),
+            "bash".as_ref(),
+            None,
+            Some(&identity(1, 0, Vec::new()))
+        )
+        .is_err());
         assert!(supervisor_argv(Path::new("/agent"), "".as_ref(), None, None).is_err());
     }
 

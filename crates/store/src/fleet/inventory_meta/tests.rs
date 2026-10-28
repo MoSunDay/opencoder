@@ -71,8 +71,11 @@ async fn shared_database_upgrade_preserves_the_running_old_connections() {
     if let Some(path) = std::env::var_os(CHILD) {
         let store = FleetStore::open(std::path::Path::new(&path)).await.unwrap();
         assert!(store.runtime_sleep_stamp("legacy").await.unwrap().1);
-        std::fs::write(std::path::Path::new(&path).with_extension("opened"), b"opened")
-            .unwrap();
+        std::fs::write(
+            std::path::Path::new(&path).with_extension("opened"),
+            b"opened",
+        )
+        .unwrap();
         return;
     }
     let root = tempfile::tempdir().unwrap();

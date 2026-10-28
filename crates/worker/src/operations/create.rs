@@ -181,7 +181,7 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
     // isolated paths. Deliberately NOT inside `prepare`: resume/command
     // paths re-run prepare for in-flight records, and materializing there
     // would flip a legacy execution's workdir mid-flight.
-    if let Err(error) = preparation::blocking(|| {
+    let environment = match preparation::blocking(|| {
         super::operator_env::materialize(
             &worker.inner.layout,
             assignment.request.kind,
@@ -189,11 +189,14 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
             &config,
         )
     }) {
-        return Ok(RpcReply::error(
-            400,
-            format!("execution preflight: {error:#}"),
-        ));
-    }
+        Ok(environment) => environment,
+        Err(error) => {
+            return Ok(RpcReply::error(
+                400,
+                format!("execution preflight: {error:#}"),
+            ));
+        }
+    };
     timing.mark("operator_materialization");
     let shared_workspace = match crate::brain::workspace::prepare(worker, &assignment).await {
         Ok(value) => value,
@@ -245,7 +248,8 @@ pub(super) async fn create(worker: &Worker, mut assignment: Assignment) -> Resul
         annotations: if assignment.request.kind == ExecutionKind::Dag {
             json!({"dag_parent":crate::layout::dag::parent(worker, &config, &assignment)?, "dag_config":config.dag})
         } else if assignment.request.kind == ExecutionKind::Operator {
-            json!({"operator_environment_version": 1, "brain_workspace":shared_workspace})
+            json!({"operator_environment_version": 1, "brain_workspace":shared_workspace,
+                "operator_identity": super::operator_env::identity_annotation(&environment)})
         } else if let Some(budget) = brain_budget {
             json!({"brain_context_budget": budget, "brain_workspace":shared_workspace})
         } else {

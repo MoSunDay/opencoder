@@ -48,9 +48,9 @@ fn operator_env(worker: &Worker, record: &Record) -> Result<Option<(PathBuf, Pat
         record.annotations.get("operator_environment_version"),
     )?;
     Ok(match env {
-        Some((home, workspace)) => Some((
-            home,
-            super::workspace::workdir(record)?.unwrap_or(workspace),
+        Some(env) => Some((
+            env.home,
+            super::workspace::workdir(record)?.unwrap_or(env.workspace),
         )),
         None => None,
     })

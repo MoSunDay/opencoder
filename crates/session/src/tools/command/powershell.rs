@@ -44,7 +44,7 @@ async fn inspect(command: &str, workdir: &Path) -> Result<Inspection> {
     let program = super::host::program().await?;
     #[cfg(not(windows))]
     let program = std::path::PathBuf::from("pwsh");
-    let (mut child, lease) = match crate::process::command(&program)? {
+    let (mut child, lease) = match crate::process::command(&program, None)? {
         Some((child, lease)) => (child, Some(lease)),
         None => (tokio::process::Command::new(&program), None),
     };

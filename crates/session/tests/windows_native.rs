@@ -65,13 +65,13 @@ async fn native_shell_handles_unicode_paths_streams_exit_and_tool_registration()
             assert!(!agent.tools.allows("bash"));
         }
     }
-    let output = ShellTool.execute(json!({"command":"Set-Content -LiteralPath '中文 file.txt' -Value '内容'; [Console]::Out.WriteLine('中文输出'); [Console]::Error.WriteLine('错误输出')"}), &context(&working)).await.unwrap();
+    let output = ShellTool::default().execute(json!({"command":"Set-Content -LiteralPath '中文 file.txt' -Value '内容'; [Console]::Out.WriteLine('中文输出'); [Console]::Error.WriteLine('错误输出')"}), &context(&working)).await.unwrap();
     assert!(!output.is_error, "{}", output.content);
     assert!(output.content.contains("中文输出") && output.content.contains("错误输出"));
     assert!(std::fs::read_to_string(working.join("中文 file.txt"))
         .unwrap()
         .contains("内容"));
-    let failure = ShellTool
+    let failure = ShellTool::default()
         .execute(json!({"command":"exit 7"}), &context(&working))
         .await
         .unwrap();
@@ -129,7 +129,7 @@ async fn cancelling_shell_and_natural_exit_stop_all_descendants() {
         let context = context(root.path());
         let task =
             tokio::spawn(
-                async move { ShellTool.execute(json!({"command":script}), &context).await },
+                async move { ShellTool::default().execute(json!({"command":script}), &context).await },
             );
         let pid = tokio::time::timeout(Duration::from_secs(10), async {
             loop {

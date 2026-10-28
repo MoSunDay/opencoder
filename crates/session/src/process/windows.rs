@@ -63,7 +63,12 @@ pub struct SignalTarget {
     job: Arc<OwnedHandle>,
 }
 
-pub fn command(program: impl AsRef<OsStr>) -> Result<Option<(Command, SpawnLease)>> {
+/// Windows has no privilege-drop mechanism; the identity is accepted and
+/// ignored so call sites compile unchanged across platforms.
+pub fn command(
+    program: impl AsRef<OsStr>,
+    _run_as: Option<&opencoder_core::platform::RunAsIdentity>,
+) -> Result<Option<(Command, SpawnLease)>> {
     let binary = BINARY
         .get()
         .context("Windows process supervisor is not configured")?;

@@ -5,7 +5,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn bash_normal_completion() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     let input = json!({"command": "echo hello; echo world >&2"});
     let out = tool.execute(input, &ctx()).await.unwrap();
     assert!(!out.is_error, "expected success, got: {}", out.content);
@@ -30,7 +30,7 @@ async fn bash_normal_completion() {
 #[tokio::test]
 async fn bash_failure_appends_exit_code() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     let input = json!({"command": "echo oops; exit 7"});
     let out = tool.execute(input, &ctx()).await.unwrap();
     assert!(
@@ -50,7 +50,7 @@ async fn bash_failure_appends_exit_code() {
 #[cfg(unix)]
 async fn bash_output_overflow_is_an_error_and_kills_the_group() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     let input = json!({
         "command": "timeout 30; head -c 8388609 /dev/zero"
     });
@@ -74,7 +74,7 @@ async fn bash_output_overflow_is_an_error_and_kills_the_group() {
 #[cfg(unix)]
 async fn background_output_overflow_stops_process_and_caps_file() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     let bg_ctx = ctx();
     // Hide sleep behind a variable so the 1s test foreground timeout is
     // retained. The output overflow happens after handoff. `head -c` retries
@@ -122,7 +122,7 @@ async fn background_output_overflow_stops_process_and_caps_file() {
 #[tokio::test]
 async fn bash_short_command_completes_normally() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     let input = json!({"command": "echo done"});
     let out = tool.execute(input, &ctx()).await.unwrap();
     assert!(!out.is_error, "expected success, got: {}", out.content);
@@ -146,7 +146,7 @@ async fn bash_short_command_completes_normally() {
 #[cfg(unix)]
 async fn bash_returns_when_grandchild_leaks_pipe() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     // `sleep 30 &` spawns a process that inherits stdout; bash exits at
     // once (wait returns Ok) but the grandchild keeps the pipe open.
     let input = json!({"command": "echo done; sleep 30 &"});

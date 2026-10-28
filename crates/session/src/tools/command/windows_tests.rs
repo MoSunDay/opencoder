@@ -23,7 +23,7 @@ async fn powershell_timeout_handoff_completes_and_output_overflow_stops_backgrou
         proxy: None,
         tools_path: None,
     };
-    let output = ShellTool
+    let output = ShellTool::default()
         .execute(
             json!({"command":"Write-Output before; Start-Sleep 3; Write-Output after"}),
             &context,

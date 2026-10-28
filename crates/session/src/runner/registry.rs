@@ -25,6 +25,10 @@ pub(super) async fn build_full_registry(session: &SessionState) -> HashMap<Strin
         mcp::pool::sync(&session.id, &desired).await;
     }
     let mut reg = crate::tools::registry();
+    // The registry's shell entry carries no session identity (schema/token
+    // estimation only). Rebind it so the session's workloads drop to the
+    // harness identity when one is configured.
+    crate::tools::bind_shell_identity(&mut reg, session.harness.run_as.as_ref());
     // The registry's `question` entry carries a placeholder hub (schema/token
     // estimation only). Rebind it to this session's shared hub so an attached
     // frontend resolves tool results mid-turn.

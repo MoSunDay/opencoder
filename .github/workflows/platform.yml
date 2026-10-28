@@ -128,7 +128,8 @@ jobs:
           $result = $LASTEXITCODE
           if ($result -ne 0) {
             $tail = [string](@(Get-Content $log -Tail 120) -join "`n")
-            $annotation = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            $focused = [string](@(Get-Content $log | Where-Object { $_ -match 'FAILED|panicked|^failures|test result|^error|Running' }) -join "`n")
+            $annotation = $focused.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Output "::error title=Windows platform contract failure::$annotation"
             @('### Windows platform contract failure', '```text', $tail, '```') | Add-Content $env:GITHUB_STEP_SUMMARY
           }

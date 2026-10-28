@@ -50,7 +50,8 @@ pub(crate) async fn prepare(worker: &Worker, assignment: &Assignment) -> Result<
         let journal = worker.inner.journal.lock().await;
         let record = journal
             .get(run_id)
-            .await?
+            .await
+            .context("load shared workspace owner record")?
             .context("shared workspace owner must be local")?;
         ensure!(
             record.assignment.index.kind == ExecutionKind::Brain,
@@ -62,7 +63,9 @@ pub(crate) async fn prepare(worker: &Worker, assignment: &Assignment) -> Result<
         );
         resolve(&record)?.context("root did not admit a shared workspace")?
     };
-    let snapshot = super::v4::state::load(worker, run_id).await?;
+    let snapshot = super::v4::state::load(worker, run_id)
+        .await
+        .with_context(|| format!("load layered state for run {run_id}"))?;
     let operation = snapshot
         .operations
         .iter()
@@ -84,7 +87,8 @@ pub(crate) async fn prepare(worker: &Worker, assignment: &Assignment) -> Result<
         "invalid step identity"
     );
     checked(&root, &step)?;
-    std::fs::create_dir_all(&step)?;
+    std::fs::create_dir_all(&step)
+        .with_context(|| format!("create shared step dir {}", step.display()))?;
     let context = step.join("context.json");
     let metadata = json!({"schema_version":1,"run_id":run_id,"owner_node_id":assignment.index.node_id,
         "root":root,"step":step,"context":context,"activation":operation.activation,
@@ -99,7 +103,8 @@ pub(crate) fn freeze(path: &Path, value: &Value) -> Result<()> {
     ensure!(!path.is_symlink(), "workspace metadata cannot be a symlink");
     if !path.exists() {
         let temporary = path.with_extension(format!("{}.tmp", ulid::Ulid::new()));
-        let mut file = opencoder_core::platform::fs::create_private_file(&temporary)?;
+        let mut file = opencoder_core::platform::fs::create_private_file(&temporary)
+            .with_context(|| format!("create private metadata file {}", temporary.display()))?;
         file.write_all(&serde_json::to_vec_pretty(value)?)?;
         file.sync_all()?;
         let published = opencoder_core::platform::fs::publish_new(&temporary, path);
@@ -111,13 +116,19 @@ pub(crate) fn freeze(path: &Path, value: &Value) -> Result<()> {
         match published {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                return Err(anyhow::Error::new(error)
+                    .context(format!("publish metadata file {}", path.display())));
+            }
         }
         opencoder_core::platform::fs::sync_directory(
             path.parent().context("metadata parent missing")?,
-        )?;
+        )
+        .with_context(|| "sync metadata parent directory".to_string())?;
     }
-    let existing: Value = serde_json::from_slice(&std::fs::read(path)?)?;
+    let existing: Value = serde_json::from_slice(
+        &std::fs::read(path).with_context(|| format!("read frozen metadata {}", path.display()))?,
+    )?;
     ensure!(existing == *value, "frozen workspace metadata changed");
     Ok(())
 }

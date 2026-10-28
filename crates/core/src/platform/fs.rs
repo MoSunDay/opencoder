@@ -45,7 +45,7 @@ pub fn replace(source: &Path, destination: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
         use windows_sys::Win32::Storage::FileSystem::{
-            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            DeleteFileW, MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
         };
         let source = super::windows_acl::wide(source)?;
         let destination = super::windows_acl::wide(destination)?;
@@ -54,6 +54,23 @@ pub fn replace(source: &Path, destination: &Path) -> io::Result<()> {
                 source.as_ptr(),
                 destination.as_ptr(),
                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } != 0
+        {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        // Filter drivers (antivirus, indexers) occasionally refuse an in-place
+        // swap over handles they hold. Cached readers keep pinning the old
+        // inode, so delete-then-move still publishes a single generation.
+        if unsafe { DeleteFileW(destination.as_ptr()) } == 0 {
+            return Err(error);
+        }
+        if unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_WRITE_THROUGH,
             )
         } == 0
         {

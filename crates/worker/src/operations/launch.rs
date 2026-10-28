@@ -133,6 +133,9 @@ pub(super) async fn launch_locked(
             .await
             .finalize(&id, status, result, error)
             .await;
+        let terminal = persisted
+            .as_ref()
+            .is_ok_and(|status: &ExecutionStatus| status.terminal());
         if let Err(error) = persisted {
             tracing::error!(%id,%error,"could not persist terminal execution status");
             *worker.inner.persistence_error.lock().unwrap() =
@@ -140,6 +143,20 @@ pub(super) async fn launch_locked(
         } else if let Err(error) = worker.finish_slot(ticket.as_deref()).await {
             *worker.inner.persistence_error.lock().unwrap() =
                 Some(format!("capacity completion {id}: {error:#}"));
+        }
+        // Terminal operator executions release their dedicated Linux
+        // account (produced files handed back to the node user). Idempotent,
+        // so a failed attempt can simply be retried later.
+        #[cfg(target_os = "linux")]
+        if record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Operator && terminal
+        {
+            if let Err(error) = crate::operations::operator_env::release_identity(
+                &worker.inner.layout,
+                record.assignment.index.kind,
+                &record.assignment.index.id,
+            ) {
+                tracing::warn!(%id, %error, "operator identity release failed");
+            }
         }
         worker.inner.active.lock().await.remove(&id);
         drop(loop_guard);

@@ -1,33 +1,44 @@
 use super::*;
 
 /// A fork takes the parent's frozen configuration and skills, never today's
-/// node pool. The new execution owns its HOME and an empty working directory.
-pub(crate) fn fork_environment(
+/// node pool. The new execution owns its HOME and an empty working
+/// directory — and, on Linux, a FRESH independent account (never the
+/// parent's).
+pub fn fork_environment(
     layout: &DirectoryLayout,
     kind: ExecutionKind,
     parent: &str,
     id: &str,
     version: Option<&serde_json::Value>,
-) -> Result<Option<(PathBuf, PathBuf)>> {
-    let Some((source, _)) = resolve(layout, kind, parent, version)? else {
+    config: &opencoder_core::Config,
+) -> Result<Option<OperatorEnvironment>> {
+    let Some(source) = resolve(layout, kind, parent, version)? else {
         return Ok(None);
     };
     let (home, workspace) = create_directories(layout, kind, id)?;
     write_snapshot(
         &snapshot_path(&home),
-        &std::fs::read_to_string(snapshot_path(&source))?,
+        &std::fs::read_to_string(snapshot_path(&source.home))?,
     )?;
     copy_directory(
-        &source.join(".opencoder/skills"),
+        &source.home.join(".opencoder/skills"),
         &home.join(".opencoder/skills"),
     )?;
     // Codex fork needs the original thread in its private home. Copy its
     // state so resuming the child cannot write to the parent's HOME.
-    let codex = source.join(".codex");
+    let codex = source.home.join(".codex");
     if codex.exists() {
         copy_directory(&codex, &home.join(".codex"))?;
     }
-    Ok(Some((home, workspace)))
+    #[cfg(target_os = "linux")]
+    let run_as = super::linux_identity::materialize_ownership(layout, config, &home, &workspace, id)?;
+    #[cfg(not(target_os = "linux"))]
+    let run_as = None;
+    Ok(Some(OperatorEnvironment {
+        home,
+        workspace,
+        run_as,
+    }))
 }
 
 fn copy_directory(source: &Path, target: &Path) -> Result<()> {
@@ -67,22 +78,44 @@ fn copy_directory(source: &Path, target: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// Unit tests keep the node-owned layout (identity provisioning is an
+    /// integration-level behavior; see tests/operator_linux_identity.rs).
+    fn config() -> opencoder_core::Config {
+        opencoder_core::Config {
+            operator: opencoder_core::config::OperatorConfig {
+                linux_identity: opencoder_core::config::LinuxIdentityMode::Off,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn fork_copies_frozen_state_without_sharing_writes() {
         let temp = tempfile::tempdir().unwrap();
         let layout = DirectoryLayout::new(temp.path().to_path_buf(), None).unwrap();
         let kind = ExecutionKind::Operator;
-        let (parent, _) = materialize(&layout, kind, "parent", &Default::default())
+        let parent = materialize(&layout, kind, "parent", &config())
             .unwrap()
             .unwrap();
+        let parent = parent.home;
         let pack = ".opencoder/skills/frozen.md";
         std::fs::write(parent.join(pack), "original skill").unwrap();
         std::fs::create_dir(parent.join(".codex")).unwrap();
         std::fs::write(parent.join(".codex/thread"), "original thread").unwrap();
         let version = serde_json::json!(1);
-        let (home, workspace) = fork_environment(&layout, kind, "parent", "child", Some(&version))
-            .unwrap()
-            .unwrap();
+        let child = fork_environment(
+            &layout,
+            kind,
+            "parent",
+            "child",
+            Some(&version),
+            &config(),
+        )
+        .unwrap()
+        .unwrap();
+        let (home, workspace) = (child.home, child.workspace);
+        assert!(child.run_as.is_none());
         assert_ne!(home, parent);
         assert_eq!(std::fs::read_dir(workspace).unwrap().count(), 0);
         assert_eq!(std::fs::read(home.join(pack)).unwrap(), b"original skill");
@@ -96,7 +129,7 @@ mod tests {
         assert!(resolve(&layout, kind, "child", Some(&version))
             .unwrap()
             .is_some());
-        assert!(fork_environment(&layout, kind, "parent", "legacy", None)
+        assert!(fork_environment(&layout, kind, "parent", "legacy", None, &config())
             .unwrap()
             .is_none());
     }

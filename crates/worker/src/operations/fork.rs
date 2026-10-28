@@ -24,6 +24,7 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
         "only conversations can be forked"
     );
     let id = format!("{}-{}", parent_kind.prefix(), ulid::Ulid::new());
+    let config = worker.configuration_for(parent_kind)?;
     let source = if legacy {
         worker.inner.layout.legacy_resources_dir(parent)?
     } else {
@@ -41,6 +42,7 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
         parent,
         &id,
         environment_version.as_ref(),
+        &config,
     )?;
     opencoder_session::fork::fork_session_in(
         worker.inner.state.store.as_ref(),
@@ -48,12 +50,15 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
         &id,
         environment
             .as_ref()
-            .map(|(_, workspace)| workspace.as_path()),
+            .map(|env| env.workspace.as_path()),
     )
     .await?;
-    if let Some((home, _)) = &environment {
+    if let Some(env) = &environment {
         if let Some(mut harness) = worker.inner.state.store.harness_runtime(&id).await? {
-            harness.envs.extend(super::operator_env::env_pairs(home));
+            harness.envs.extend(super::operator_env::env_pairs(
+                &env.home,
+                config.operator.access,
+            ));
             worker
                 .inner
                 .state
@@ -79,7 +84,8 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
     };
     worker.inner.journal.lock().await.save(Record {
         annotations: if environment.is_some() {
-            json!({"operator_environment_version": 1})
+            json!({"operator_environment_version": 1,
+                "operator_identity": super::operator_env::identity_annotation(&environment)})
         } else {
             Value::Null
         },

@@ -134,10 +134,7 @@ mod tests {
         let command = if cfg!(windows) {
             // WriteAllText is UTF-8 without BOM on every PowerShell edition;
             // Set-Content defaults to UTF-16 under Windows PowerShell 5.1.
-            format!(
-                "[IO.File]::WriteAllText('{}', 'ready')",
-                output.display()
-            )
+            format!("[IO.File]::WriteAllText('{}', 'ready')", output.display())
         } else {
             format!("printf ready > '{}'", output.display())
         };

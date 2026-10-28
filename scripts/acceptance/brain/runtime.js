@@ -11,6 +11,7 @@ const { captureFailure } = require('./failure');
 const base = process.argv[2];
 assert(base, 'Fleet base URL required');
 const artifacts = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-brain-v7-browser-'));
+const planTitle = '大脑 schema 7 闭环验收';
 
 async function chooseCapability(page, label) {
   await page.getByRole('combobox', { name: '绑定能力', exact: true }).click();
@@ -56,7 +57,7 @@ function assertRun(view) {
 }
 
 async function openRound(page, round) {
-  const drawer = page.getByRole('dialog', { name: '计划运行详情', exact: true });
+  const drawer = page.getByRole('dialog', { name: new RegExp(planTitle) });
   await drawer.getByRole('tab', { name: '执行记录', exact: true }).click();
   await drawer.locator('.brain-round-selector button').filter({ hasText: `第 ${round} 轮` }).first().click();
   return drawer;
@@ -98,7 +99,7 @@ async function main() {
     assert.equal(await page.locator('.brain-execution-node').count(), 3, 'canvas draft must survive closing');
     assert.equal(await page.locator('.react-flow__edge').count(), 1, 'milestone order must survive closing');
     await page.getByRole('button', { name: '下一步：计划信息', exact: true }).click();
-    await page.getByLabel('计划名称', { exact: true }).fill('大脑 schema 7 闭环验收');
+    await page.getByLabel('计划名称', { exact: true }).fill(planTitle);
     await page.getByLabel('整体目标与交付物', { exact: true }).fill('层内并行、测试回退、再次验证后完成');
     const saved = page.waitForResponse((response) => response.url().endsWith('/api/brain/plan-defs') && response.request().method() === 'POST');
     await page.getByRole('button', { name: '保存计划版本', exact: true }).click();
@@ -141,11 +142,11 @@ async function main() {
       assert.equal(detail.nodes.flatMap((node) => node.operations).length, event.layer === 1 ? 2 : 1);
     }
     await page.getByRole('button', { name: '查看详情', exact: true }).click();
-    const composer = page.getByRole('dialog', { name: '计划运行详情' }).getByLabel('大脑人工输入');
-    await composer.waitFor();
-    assert(await composer.isDisabled(), 'completed Brain must keep the conversation read-only');
+    const drawer = page.getByRole('dialog', { name: new RegExp(planTitle) });
+    await drawer.waitFor();
+    assert.equal(await drawer.getByLabel('大脑人工输入').count(), 0, 'completed Brain must keep the conversation read-only');
+    assert.equal(await drawer.getByRole('button', { name: '补充信息' }).count(), 0, 'completed Brain must not accept more guidance');
     await page.setViewportSize({ width: 390, height: 844 });
-    const drawer = page.getByRole('dialog', { name: '计划运行详情' });
     let drawerBox;
     for (let attempt = 0; attempt < 60; attempt++) {
       drawerBox = await drawer.boundingBox();

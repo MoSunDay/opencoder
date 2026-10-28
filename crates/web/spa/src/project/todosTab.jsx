@@ -10,7 +10,7 @@ import { todoTags } from './model/catalog.js';
 import { ProjectTable, TableText, dateColumn } from './views/projectTable.jsx';
 import { CreateTodo } from './views/todoForm.jsx';
 
-export function TodosTab({ overview, refresh, openTodo, onNotice }) {
+export function TodosTab({ overview, loading, refresh, openTodo, onNotice }) {
   const canEdit = useCanEdit();
   const [createOpen, setCreateOpen] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -36,7 +36,7 @@ export function TodosTab({ overview, refresh, openTodo, onNotice }) {
   ];
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
     <EditButton type="primary" onClick={() => setCreateOpen(true)}>新建 TODO</EditButton>
-    <ProjectTable scroll={{ x: 1530 }} label="TODO 表格" columns={columns} rows={rows} onRowClick={(r) => openTodo(r.id)} locale={{ emptyText: '还没有 TODO' }} />
+    <ProjectTable scroll={{ x: 1530 }} label="TODO 表格" columns={columns} rows={rows} onRowClick={(r) => openTodo(r.id)} loading={loading} locale={{ emptyText: '还没有 TODO' }} />
     <CreateTodo key={createOpen ? 'open' : 'closed'} open={createOpen} overview={overview} onNotice={onNotice} onClose={() => setCreateOpen(false)} onCreated={async (id) => { setCreateOpen(false); await refresh(); openTodo(id); }} />
   </Space>;
 }

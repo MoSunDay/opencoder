@@ -28,6 +28,8 @@ pub struct MockState {
     pub auth_denied: bool,
     pub payload: Vec<u8>,
     pub questions: Vec<Value>,
+    /// Execution status served by `/index` (empty = "running").
+    pub status: String,
 }
 pub struct Fixture {
     pub url: String,
@@ -167,8 +169,13 @@ async fn handler(State(state): State<Arc<Mutex<MockState>>>, request: Request<Bo
         } else {
             "agent"
         };
+        let status = if state.status.is_empty() {
+            "running"
+        } else {
+            &state.status
+        };
         return axum::Json(
-            json!({"id":id,"kind":kind,"node_id":"auto-node","status":"running","created_at":1}),
+            json!({"id":id,"kind":kind,"node_id":"auto-node","status":status,"created_at":1}),
         )
         .into_response();
     }

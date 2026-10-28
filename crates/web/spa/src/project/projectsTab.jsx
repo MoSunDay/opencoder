@@ -11,7 +11,7 @@ import { TodoProgress } from './views/progress.jsx';
 import { progressOf } from './model/catalog.js';
 import { err, ok } from '../notice.js';
 
-export function ProjectsTab({ overview, refresh, onNotice, openProject }) {
+export function ProjectsTab({ overview, loading, refresh, onNotice, openProject }) {
   const [modal, contextHolder] = Modal.useModal();
   const [editing, setEditing] = useState(null);
   const [open, setOpen] = useState(false);
@@ -50,7 +50,7 @@ export function ProjectsTab({ overview, refresh, onNotice, openProject }) {
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
     {contextHolder}
     <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建项目</EditButton>
-    <ProjectTable scroll={{ x: 1840 }} label="项目表格" rows={rows} columns={columns} onRowClick={(row) => openProject(row.id)} locale={{ emptyText: '还没有项目' }} />
+    <ProjectTable scroll={{ x: 1840 }} label="项目表格" rows={rows} columns={columns} onRowClick={(row) => openProject(row.id)} loading={loading} locale={{ emptyText: '还没有项目' }} />
     <MdEditDrawer open={open} title={editing ? '编辑项目' : '新建项目'} initial={editing} onCancel={() => setOpen(false)} onOk={save} />
   </Space>;
 }

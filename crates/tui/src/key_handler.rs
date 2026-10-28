@@ -27,6 +27,10 @@ pub(crate) enum KeyAction {
     /// child view's steer panel (see `subagent_input::admit_subagent_steer`);
     /// the parent's turn, skill tokens and steer panel are untouched.
     SubagentSteer(String),
+    /// Ctrl+Enter inside a subtask child session: append the finished subtask's
+    /// result to the parent (main) task and switch back. The payload is the
+    /// CURRENT session id (the subtask child).
+    AppendSubtask(String),
     Queue(String),
     /// Tab-queue attempted while a running subagent is focused. A queue
     /// normally targets the *parent* session, which would leak input into
@@ -112,6 +116,10 @@ pub(crate) fn handle_key(
     undo_state: &mut crate::undo::UndoState,
     queue_scroll: &mut u32,
     agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
+    // `Some(current_session_id)` only when the app descended into this
+    // session FROM a parent task (subtask child). Arms Ctrl+Enter as the
+    // return-to-parent action; `None` keeps Ctrl+Enter swallowed.
+    subtask_child: Option<&str>,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
     if skill_menu.is_some() {
@@ -277,6 +285,15 @@ pub(crate) fn handle_key(
             *cursor_idx = i;
         }
         return KeyAction::None;
+    }
+    // Ctrl+Enter: return from a subtask child session to its parent task,
+    // appending the subtask's question/result/tokens there. Armed only when
+    // the TUI entered this session from a parent (main_task_id); every other
+    // Ctrl+Enter remains swallowed (previous behavior).
+    if let Some(id) = subtask_child {
+        if k.code == KeyCode::Enter && k.modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::AppendSubtask(id.to_string());
+        }
     }
     // Swallow any remaining Ctrl+key that didn't match a binding.
     if k.modifiers.contains(KeyModifiers::CONTROL) {

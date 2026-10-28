@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import '../test/setup-dom.js';
 const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPatch: vi.fn(), apiDel: vi.fn(), apiPut: vi.fn() }));
@@ -73,4 +73,17 @@ it('filters a table by its title column and preserves the filter after a refresh
   expect(within(table).getByText('未归属任务')).toBeTruthy();
   fireEvent.click(within(table).getByRole('button', { name: '清除全部列筛选' }));
   expect(within(table).getByText('子项任务')).toBeTruthy();
+});
+
+it('does not claim 还没有项目 while the first overview fetch is still in flight', async () => {
+  let resolveOverview;
+  api.apiGet.mockImplementation((path) => {
+    if (path === '/api/project/overview') return new Promise((resolve) => { resolveOverview = resolve; });
+    return Promise.resolve(path === '/api/project/people' ? { people: [] } : { assignments: [] });
+  });
+  render(<ProjectPanel onNotice={vi.fn()} />);
+  await waitFor(() => expect(api.apiGet).toHaveBeenCalledWith('/api/project/overview'));
+  expect(screen.queryByText('还没有项目')).toBeNull();
+  await act(async () => { resolveOverview(snapshot); });
+  expect(await screen.findByText('项目甲')).toBeTruthy();
 });

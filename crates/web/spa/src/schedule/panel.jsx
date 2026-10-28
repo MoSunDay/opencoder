@@ -10,7 +10,7 @@ import { EditButton } from '../ui/permissions.jsx';
 // 5s 轮询对齐 topics 的口径（调度扫描本身最密 15s）。
 
 import { Alert, Button, Popconfirm, Space, Table, Tag } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { apiDel, apiGet, apiPatch, apiPost } from '../api.js';
 import { useNodes } from '../fleet/useNodes.js';
 import { KIND_LABELS } from '../fleet/model.js';
@@ -19,6 +19,7 @@ import { PageShell } from '../shell/pageShell.jsx';
 import { MONO_VAR } from '../ui/mono.js';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { tableLoading, tableRows } from '../ui/tableLoading.js';
+import { usePoll } from '../ui/usePoll.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { ScheduleEditorModal, OVERLAP_LABELS } from './editor.jsx';
 import { ScheduleRunsDrawer } from './history.jsx';
@@ -46,12 +47,7 @@ export function SchedulePanel({ onNotice }) {
     catch (e) { setError(e.message); onNotice(err(e.message)); }
     finally { if (mode !== 'poll') setLoading(false); }
   }, [onNotice]);
-  useEffect(() => {
-    let live = true;
-    const refresh = () => { if (live) load('poll'); };
-    load('reset'); const timer = setInterval(refresh, 5000);
-    return () => { live = false; clearInterval(timer); };
-  }, [load]);
+  usePoll({ first: () => load('reset'), poll: () => load('poll'), intervalMs: 5000 });
 
   const saved = async (notice, close) => {
     onNotice(notice);

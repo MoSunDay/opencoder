@@ -5,9 +5,10 @@ import { PageShell } from '../shell/pageShell.jsx';
 import { StatusTag } from '../ui/statusTag.jsx';
 import { MONO_VAR } from '../ui/mono.js';
 import { tableLoading, tableRows } from '../ui/tableLoading.js';
+import { usePoll } from '../ui/usePoll.js';
 import { TimeText } from '../ui/timeText.jsx';
 import { ExecutionDetail } from './detail.jsx';
-import { KIND_LABELS, KINDS, executionPagePath } from './model.js';
+import { EXECUTION_PAGE_LIMIT, KIND_LABELS, KINDS, executionPagePath } from './model.js';
 import { err } from '../notice.js';
 import { executionHref, withoutExecutionLink } from './navigation/links.js';
 import { useLinkedLocation } from './navigation/location.js';
@@ -17,6 +18,7 @@ export function ExecutionsPanel({ onNotice }) {
   const [rows, setRows] = useState([]); const [nodes, setNodes] = useState([]);
   const { execution: detail } = useLinkedLocation();
   const [filter, setFilter] = useState(() => KINDS.some(({ value }) => value === detail?.kind) ? detail.kind : '');
+  const [error, setError] = useState('');
   useEffect(() => {
     if (KINDS.some(({ value }) => value === detail?.kind)) setFilter(detail.kind);
   }, [detail]);
@@ -29,19 +31,15 @@ export function ExecutionsPanel({ onNotice }) {
       const page = a.executions || [];
       setRows(page);
       setNodes(b.nodes || []);
+      setError('');
     }
-    catch (e) { onNotice(err(e.message)); }
+    catch (e) { setError(e.message); onNotice(err(e.message)); }
     finally { if (mode !== 'poll') setLoading(false); }
   }, [filter, onNotice]);
-  useEffect(() => {
-    let live = true;
-    const refresh = () => { if (live) load('poll'); };
-    load('reset'); const timer = setInterval(refresh, 3000);
-    return () => { live = false; clearInterval(timer); };
-  }, [filter, load]);
+  usePoll({ first: () => load('reset'), poll: () => load('poll'), intervalMs: 3000, deps: [filter] });
   return <PageShell page="topics">
     <Space style={{ margin: '12px 0' }}><Select aria-label="执行类型筛选" style={{ width: 180 }} value={filter} onChange={setFilter} options={[{ value: '', label: '全部执行' }, ...KINDS]} /><Button onClick={() => load('reset')}>刷新</Button></Space>
-    <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={tableRows(loading, rows)} size="small" loading={tableLoading(loading)} columns={[
+    <Table scroll={{ x: 'max-content' }} rowKey="id" dataSource={tableRows(loading, rows)} size="small" loading={tableLoading(loading)} pagination={{ showTotal: () => `仅显示最近 ${EXECUTION_PAGE_LIMIT} 条` }} locale={{ emptyText: error ? '执行列表读取失败，请点击刷新重试' : '暂无执行' }} columns={[
       { title: 'ID', dataIndex: 'id', render: (id) => <Button type="link" style={{ fontFamily: MONO_VAR }} onClick={() => pushLocation(executionHref(id))}>{id}</Button> },
       { title: '类型', dataIndex: 'kind', render: (v) => KIND_LABELS[v] || v },
       { title: '名称', dataIndex: 'name', render: (v) => v || '-' },

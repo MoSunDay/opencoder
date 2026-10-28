@@ -37,7 +37,10 @@ export function executionActions(execution) {
   };
 }
 
-export function executionPagePath(kind, cursor, limit = 50) {
+/// 执行索引默认单页上界；前端「仅显示最近 N 条」的知情权文案同源于此。
+export const EXECUTION_PAGE_LIMIT = 50;
+
+export function executionPagePath(kind, cursor, limit = EXECUTION_PAGE_LIMIT) {
   const query = new URLSearchParams({ limit: String(limit) });
   if (kind) query.set('kind', kind);
   if (cursor) {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from '../api.js';
+import { usePoll } from '../ui/usePoll.js';
 const POLL_IDLE_MS = 8000;
 
 /// useOverview({ onNotice }) → { overview, loading, refresh }
@@ -17,7 +18,6 @@ export function useOverview({ onNotice } = {}) {
   const [updated, setUpdated] = useState(null);
   const serial = useRef(0);
   const [loading, setLoading] = useState(false);
-  const timer = useRef(null);
   const alive = useRef(true);
 
   // Keep `load` identity STABLE regardless of the onNotice prop identity: a
@@ -57,17 +57,10 @@ export function useOverview({ onNotice } = {}) {
 
   useEffect(() => {
     alive.current = true;
-    load(false);
-    return () => {
-      alive.current = false;
-      clearInterval(timer.current);
-    };
-  }, [load]);
+    return () => { alive.current = false; };
+  }, []);
 
-  useEffect(() => {
-    timer.current = setInterval(() => load(true), POLL_IDLE_MS);
-    return () => clearInterval(timer.current);
-  }, [load]);
+  usePoll({ first: () => load(false), poll: () => load(true), intervalMs: POLL_IDLE_MS });
 
   const refresh = useCallback(() => load(true), [load]);
   return { overview, loading, refresh, error, updated };

@@ -484,11 +484,6 @@ pub(crate) async fn fold_ui_events(
                     crate::hooks::emit(crate::hooks::Event::TurnDone);
                 }
             }
-            // Subtask watcher deliveries never arrive here: they travel on
-            // the dedicated `SubtaskUi` channel drained by the app loop
-            // (workers are quit on every session switch, so the session
-            // worker channel cannot carry them across switches).
-            UiEvent::SubtaskUpdate { .. } => {}
         }
         batch_needs_render |= !hidden_reasoning_append;
         *skip_next_render = !batch_needs_render;
@@ -727,8 +722,8 @@ mod app_loop_actions;
 #[cfg(test)]
 pub(crate) use app_loop_actions::fire_clear_confirm;
 pub(crate) use app_loop_actions::{
-    append_subtask_result, cancel_running_turn, confirm_tick, dispatch_mode_switch,
-    dispatch_slash_action, handle_confirm_key, steer_submit_after_mouse, ModeSwitch,
+    cancel_running_turn, confirm_tick, dispatch_mode_switch, dispatch_slash_action,
+    handle_confirm_key, steer_submit_after_mouse, ModeSwitch,
 };
 
 /// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,

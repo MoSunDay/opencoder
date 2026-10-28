@@ -26,11 +26,6 @@ pub struct SessionUiState {
     pub active_skill: Option<String>,
     pub active_skill_body: Option<String>,
     pub agent_name: String,
-    /// Σ subtask registry tokens at switch-away. Dormant-session folds are
-    /// invisible to the snapshot, so this baseline lets the restore floor
-    /// (see [`subtask_restore_floor`]) add only the growth that happened
-    /// while the session was away — monotonic and double-count free.
-    pub subtask_tokens_seen: u64,
 }
 
 impl SessionUiState {
@@ -52,7 +47,6 @@ impl SessionUiState {
             active_skill: None,
             active_skill_body: None,
             agent_name,
-            subtask_tokens_seen: 0,
         }
     }
 
@@ -70,7 +64,6 @@ impl SessionUiState {
         queue_items: &[(i64, String)],
         active_skill: &Option<String>,
         active_skill_body: &Option<String>,
-        subtask_tokens_seen: u64,
     ) -> Self {
         SessionUiState {
             running,
@@ -92,20 +85,8 @@ impl SessionUiState {
             active_skill: active_skill.clone(),
             active_skill_body: active_skill_body.clone(),
             agent_name: chat.agent.clone(),
-            subtask_tokens_seen,
         }
     }
-}
-
-/// Restore floor for `[tok cost]`: the snapshot's total plus any registry
-/// token growth that happened while the session was dormant. Monotonic and
-/// double-count free: folds up to switch-away already live in the snapshot.
-pub fn subtask_restore_floor(
-    snapshot_tokens_total: u64,
-    snapshot_seen: u64,
-    registry_now: u64,
-) -> u64 {
-    snapshot_tokens_total.saturating_add(registry_now.saturating_sub(snapshot_seen))
 }
 
 #[cfg(test)]
@@ -137,7 +118,6 @@ mod tests {
         assert!(st.queue_items.is_empty());
         assert!(st.active_skill.is_none());
         assert!(st.history.is_empty());
-        assert_eq!(st.subtask_tokens_seen, 0);
     }
 
     #[test]
@@ -165,7 +145,6 @@ mod tests {
             &queues,
             &skill,
             &skill_body,
-            250,
         );
 
         assert!(snap.running);
@@ -180,7 +159,6 @@ mod tests {
         assert_eq!(snap.active_skill, skill);
         assert_eq!(snap.active_skill_body, skill_body);
         assert_eq!(snap.agent_name, "act");
-        assert_eq!(snap.subtask_tokens_seen, 250);
     }
 
     #[test]
@@ -200,7 +178,6 @@ mod tests {
             &queues,
             &None,
             &None,
-            0,
         );
         assert_eq!(snap.queue_items, vec![(7_i64, "real".to_string())]);
     }
@@ -292,7 +269,7 @@ mod tests {
     fn snapshot_is_independent_of_source() {
         // Mutating the source chat after snapshot must not affect the snapshot.
         let mut chat = sample_chat();
-        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, 0, &[], &None, &None, 0);
+        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, 0, &[], &None, &None);
         chat.push_marker(ratatui::text::Line::from("new line"));
         assert_ne!(snap.chat, chat, "snapshot must be a deep copy");
     }
@@ -315,7 +292,6 @@ mod tests {
             &queues,
             &Some("s".into()),
             &Some("body-of-s".into()),
-            90,
         );
         // After "restore", all fields must match the snapshot.
         assert!(snap.running);
@@ -329,23 +305,6 @@ mod tests {
         assert_eq!(snap.queue_items, queues);
         assert_eq!(snap.active_skill.as_deref(), Some("s"));
         assert_eq!(snap.active_skill_body.as_deref(), Some("body-of-s"));
-        assert_eq!(snap.subtask_tokens_seen, 90);
-    }
-
-    #[test]
-    fn subtask_restore_floor_adds_only_dormant_growth() {
-        // Folds up to switch-away live in the snapshot total; only registry
-        // growth while dormant is added on top.
-        assert_eq!(subtask_restore_floor(1000, 400, 550), 1150);
-        // No dormant growth: floor equals the snapshot total exactly.
-        assert_eq!(subtask_restore_floor(1000, 400, 400), 1000);
-        // Registry never visited by the snapshot (seen 0): everything folds.
-        assert_eq!(subtask_restore_floor(0, 0, 77), 77);
-        // Token regression while dormant never lowers the floor below the
-        // snapshot total (saturating, monotonic).
-        assert_eq!(subtask_restore_floor(1000, 400, 100), 1000);
-        // Overflow saturates instead of wrapping.
-        assert_eq!(subtask_restore_floor(u64::MAX, 0, 1), u64::MAX);
     }
 
     #[test]

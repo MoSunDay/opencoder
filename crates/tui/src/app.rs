@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::cache_salt_menu::CacheSaltMenu;
+use crate::cache_salt_menu::{handle_cache_salt_key, CacheSaltMenu, CacheSaltOutcome};
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::key_handler::{handle_key, KeyAction};
@@ -19,7 +19,7 @@ use crate::model_menu::ModelMenu;
 use crate::queue_admitter;
 use crate::render::{MouseHits, Term};
 use crate::skill_persist::{act_plan_highlight, initial_skill_state};
-use crate::task::TaskPicker;
+use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::consume_modifier_or_release;
 use crate::worker::{UiCmd, UiEvent};
 use crate::TuiOpts;
@@ -31,8 +31,6 @@ mod app_display;
 pub(crate) mod app_loop;
 #[path = "app_notepad.rs"]
 mod app_notepad;
-#[path = "app_popups.rs"]
-mod app_popups;
 #[path = "app_submit.rs"]
 mod app_submit;
 #[path = "app_task.rs"]
@@ -155,17 +153,6 @@ pub(super) async fn run_app(
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
     let mut pending_task_pick = None;
     let mut selection: crate::remote::Selection = None;
-    // TUI-internal subtask hub: dedicated watcher channel + dispatch slot
-    // (survives `/task` switches, unlike the session worker channels).
-    let mut subtask_ui = crate::subtask_events::SubtaskUi::new();
-    // Resume any still-pending subtask pollers for the startup session; the
-    // server keeps executing while the TUI was closed. Remote sessions have
-    // no local parent registry to watch.
-    if !chat.remote {
-        subtask_ui
-            .maybe_spawn_watcher(&config, &store, &session_id)
-            .await;
-    }
     loop {
         let (changed, pick) =
             crate::remote::poll_ui(&mut agent_menu, &mut selection, &mut mode_flash, anim_tick);
@@ -229,15 +216,6 @@ pub(super) async fn run_app(
                     task_elapsed_ms = 0;
                     plan_skill_active = false;
                     admit_st = Default::default();
-                    // User-driven switches drop the subtask descent pointer
-                    // (Ctrl+Enter only returns from a session the TUI itself
-                    // descended into) and resume this session's watchers.
-                    subtask_ui.main_task_id = None;
-                    if !chat.remote {
-                        subtask_ui
-                            .maybe_spawn_watcher(&config, &store, &session_id)
-                            .await;
-                    }
                     dirty = true;
                     render_pending = true;
                     body_refresh_pending = true;
@@ -378,28 +356,96 @@ pub(super) async fn run_app(
                             dirty = true; continue;
                         }
                         // Task picker modal: intercept all keys while open.
-                        match app_popups::handle_popup_key(
-                            k, &mut task_picker, &mut selection, &mut pending_task_pick,
-                            &cmd_tx, &mut running, &mut chat, &store, &mut model_menu,
-                            &mut client, &mut config, &mut model_label, &mut compaction_threshold,
-                            &mut context_limit, &mut frame_ms, &mut frame_ticker, &mut mcp_menu,
-                            &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu, &mut question_menu,
-                            &question_hub, terminal, &mut cache_salt_menu, &mut keymap,
-                            &mut keymap_menu, &mut command_menu, &sidecar_ask, &mut cancel,
-                            &mut follow, &session_id, &agent_name, &mut input, &mut cursor_idx,
-                            &workdir, &mut mode_flash, anim_tick, &mut sys_tokens, &mut plan_edit,
-                            &mut notepad, &mut clear_confirm, &mut agent_menu,
-                        )
-                        .await
-                        {
-                            app_popups::PopupFlow::NotOpen => {}
-                            app_popups::PopupFlow::Consumed => continue,
-                            app_popups::PopupFlow::Redraw => {
-                                dirty = true;
-                                render_pending = true;
-                                continue;
+                        if task_picker.is_some() {
+                            match handle_task_key(&mut task_picker, k) {
+                                TaskOutcome::Pick(pick) => {
+                                    selection = None; pending_task_pick = Some(pick);
+                                }
+                                TaskOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                                TaskOutcome::ClearAll { keep_session_id } => {
+                                    app_task::handle_clear_all(
+                                        keep_session_id,
+                                        running,
+                                        &mut task_picker,
+                                        &mut chat,
+                                        &store,
+                                    )
+                                    .await;
+                                }
+                                TaskOutcome::Idle => {}
                             }
-                            app_popups::PopupFlow::Quit => break,
+                            continue;
+                        }
+                        if model_menu.is_some() {
+                            match app_loop::handle_model_outcome(&mut model_menu, k, &mut client, &mut config, &mut model_label,
+                                &mut compaction_threshold, &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx, &mut chat, &workdir).await {
+                                app_loop::LoopFlow::Quit => break, app_loop::LoopFlow::Redraw => continue, _ => {}
+                            }
+                            continue;
+                        }
+                        if mcp_menu.is_some() {
+                            let _ = app_loop::handle_mcp_outcome(
+                                &mut mcp_menu, k, &mut config, &cmd_tx, &mut chat, &workdir,
+                            ).await;
+                            continue;
+                        }
+                        if cli_menu.is_some() {
+                            let _ = app_loop::handle_cli_outcome(
+                                &mut cli_menu, k, &mut config, &cmd_tx, &mut chat, &workdir,
+                            ).await;
+                            continue;
+                        }
+                        // `/skill` toggle modal (after cli/mcp blocks, which `continue` first).
+                        if skill_toggle_menu.is_some() {
+                            let _ = app_loop::handle_skill_outcome(&mut skill_toggle_menu, k, &mut config, &cmd_tx, &mut chat, &workdir).await; continue;
+                        }
+                        // `/ap` mode-picker modal (same slot.take() pattern as /skill).
+                        if ap_menu.is_some() {
+                            let _ = app_loop::handle_ap_outcome(&mut ap_menu, k, &mut config, &cmd_tx, &mut chat, &workdir).await; continue; }
+                        // Question dialog: answers resolve on the hub, mid-turn.
+                        if question_menu.is_some() {
+                            // Wrap width mirrors the popup renderer so Up/Down
+                            // cursor movement tracks the drawn wrapped rows.
+                            let q_width = terminal
+                                .size()
+                                .map(|r| crate::question_menu::input_wrap_width(r.width))
+                                .unwrap_or(55);
+                            crate::question_menu::route_question_key(
+                                &mut question_menu, k, &question_hub, q_width,
+                            );
+                            dirty = true;
+                            continue;
+                        }
+                        if cache_salt_menu.is_some() {
+                            if matches!(handle_cache_salt_key(&mut cache_salt_menu, k), CacheSaltOutcome::Quit) { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                            continue;
+                        }
+                        if keymap_menu.is_some() {
+                            if let app_loop::LoopFlow::Quit = app_loop::handle_keymap_outcome(&mut keymap_menu, k, &mut config, &mut keymap, &workdir, &cmd_tx).await { break }
+                            dirty = true; render_pending = true; continue;
+                        }
+                        // `/` command picker: intercept all keys while open.
+                        if command_menu.is_some() {
+                            match app_loop::dispatch_command(
+                                &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
+                                &sidecar_ask, &mut running, &mut follow, &store,
+                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
+                                &mut cache_salt_menu, &mut keymap_menu, &agent_name,
+                                &mut input, &mut cursor_idx,
+                                &mut config, &workdir,
+                                &mut mode_flash, anim_tick, &mut sys_tokens,
+                                &mut plan_edit,
+                                &mut notepad,
+                                &mut clear_confirm,
+                                &mut agent_menu,
+                            )
+                            .await
+                            {
+                                app_loop::LoopFlow::Quit => break,
+                                app_loop::LoopFlow::Proceed => {}
+                                app_loop::LoopFlow::Redraw => continue,
+                            }
+                            continue;
                         }
                         let mut needs_clear = false;
                         if pre_key_intercept(
@@ -448,9 +494,6 @@ pub(super) async fn run_app(
                             &mut undo_state,
                             &mut queue_scroll,
                             &mut agent_menu,
-                            // Armed only when the TUI descended into this
-                            // session from a parent task (subtask child).
-                            subtask_ui.main_task_id.is_some().then_some(session_id.as_str()),
                         );
                         if chat.remote && crate::remote::local_control(&action) {
                             mode_flash = Some(("This control is available for /agent self tasks".into(), anim_tick));
@@ -481,17 +524,6 @@ pub(super) async fn run_app(
                             KeyAction::SubagentSteer(text) => {
                                 subagent_input::handle_subagent_steer(&store, &child_runtime.steer_gates, &mut chat, subagent_focus, text, &mut pending_images, &mut input, &mut cursor_idx).await;
                                 follow = true;
-                            }
-                            KeyAction::AppendSubtask(child_id) => {
-                                if let Some(pick) = app_loop::append_subtask_result(
-                                    &child_id, &store, &session_id, &mut chat,
-                                    subtask_ui.main_task_id.as_deref(), &admit_tx, &mut admit_st,
-                                    &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick,
-                                ).await {
-                                    subtask_ui.main_task_id = None;
-                                    pending_task_pick = Some(pick);
-                                }
-                                dirty = true;
                             }
                             KeyAction::Steer(text) => {
                                 // Typed clear_context while running: arm the countdown
@@ -733,40 +765,6 @@ pub(super) async fn run_app(
                     dirty = true;
                 }
                 if app_notepad::poll_bash(&mut bash_rx, &mut chat) { dirty = true; }
-                // Subtask watcher deliveries (dedicated channel; the session
-                // worker channel is quit on every switch).
-                for ev in subtask_ui.drain_updates() {
-                    if let UiEvent::SubtaskUpdate { ref session, ref id, ref status, ref summary, tokens } = ev {
-                        if let Some((done, total, _)) = crate::subtask_events::apply_update(
-                            &store, &mut session_states, &session_id, &mut chat,
-                            session, id, status, summary.as_deref(), tokens,
-                        ).await {
-                            let _ = (done, total);
-                            if crate::subtask_registry::is_terminal(status) {
-                                mode_flash = Some((format!("subtask {id} {status}"), anim_tick));
-                            }
-                            dirty = true; render_pending = true;
-                        }
-                    }
-                }
-                // One-shot `@capability` dispatch completion (Stage 2b arms
-                // the slot; polling stays harmless while it is empty).
-                if let Some(result) = subtask_ui.poll_dispatch() {
-                    match result {
-                        Ok(outcome) => {
-                            mode_flash = Some((format!("subtask {} 已提交", outcome.execution_id), anim_tick));
-                            if let Ok(registry) = crate::remote::subtasks::load_registry(&store, &session_id).await {
-                                chat.subtask_done = crate::subtask_registry::done_count(&registry);
-                                chat.subtask_total = crate::subtask_registry::total_count(&registry);
-                            }
-                            if !chat.remote {
-                                subtask_ui.maybe_spawn_watcher(&config, &store, &session_id).await;
-                            }
-                            dirty = true; render_pending = true;
-                        }
-                        Err(error) => mode_flash = Some((format!("{error:#}"), anim_tick)),
-                    }
-                }
             }
             _ = frame_ticker.tick() => {
                 render_pending = true;

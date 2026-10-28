@@ -398,14 +398,7 @@ fn render_body(
         );
         return;
     }
-    let block = theme::rounded_block_line_tok(
-        title,
-        chat.tokens_total,
-        area.width,
-        tail_ms,
-        chat.subtask_done,
-        chat.subtask_total,
-    );
+    let block = theme::rounded_block_line_tok(title, chat.tokens_total, area.width, tail_ms);
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);

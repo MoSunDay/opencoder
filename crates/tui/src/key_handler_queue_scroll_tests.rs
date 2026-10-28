@@ -39,7 +39,6 @@ fn shift_page_up_scrolls_queue_panel_not_body() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(queue_scroll, 1, "Shift+PageUp looks at older entries (top)");
@@ -82,7 +81,6 @@ fn shift_page_down_advances_toward_newest() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(
@@ -131,7 +129,6 @@ fn shift_page_up_floors_at_zero() {
             &mut undo_state,
             &mut queue_scroll,
             &mut None,
-            None,
         );
         assert!(matches!(action, KeyAction::None));
     }
@@ -175,7 +172,6 @@ fn plain_page_up_still_scrolls_body() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(scroll, 30, "plain PageUp scrolls the body");

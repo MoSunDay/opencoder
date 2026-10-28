@@ -38,7 +38,6 @@ fn press(code: KeyCode, text: &str, running: bool, sidecar_focused: bool) -> (Ke
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     (action, input)
 }

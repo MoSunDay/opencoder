@@ -59,16 +59,6 @@ pub enum UiEvent {
     /// TurnDone; every interim streaming answer is also delivered losslessly.
     AssistantFinal(String),
     TurnDone(String),
-    /// Background subtask watcher progress. `session` is the parent session whose
-    /// registry owns the subtask; delivered on a TUI-internal channel so it
-    /// survives session switches (workers are quit on switch).
-    SubtaskUpdate {
-        session: String,
-        id: String,
-        status: String,
-        summary: Option<String>,
-        tokens: u64,
-    },
 }
 
 /// Bounded worker-to-UI channel capacity shared by initial and switched tasks.

@@ -31,7 +31,6 @@ axum HTTP + SSE 会话管理 + 内嵌 SPA。
 - [nav.js](../../crates/web/spa/src/nav.js)、[shell/categoryTabs.jsx](../../crates/web/spa/src/shell/categoryTabs.jsx) — 项目、Agent、Ontology、后台管理四类导航；标签保持完整宽度，容器支持滚轮、触摸和键盘滚动，并保持当前标签可见。editor 与 viewer 可打开平台页面，后台管理仅管理员可见；viewer 的写入控件禁用。项目 Overview 登记为 `body-title`，从项目、子项、TODO 页签开始，PageShell 不生成额外标题行。用户权限登记为 `menu-only`，页面从表格工具栏开始，不渲染额外的标题和说明；不设独立 Token 管理页。
 - [Ontology 前端](ontology.md) — 四个页面固定使用当前 Server 的默认数据空间，提供图谱与结果列表、实体详情草稿及观测记忆；复用平台身份、请求与 antd。接口与存储见 [ontology](../ontology/index.md)。
 - `spa/src/ui/requests/query.js` — 读取请求的取消、迟到响应丢弃、响应校验与错误状态；失败不替换为空数据。
-- `spa/src/ui/tableLoading.js`、`spa/src/ui/usePoll.js` — 列表表格 loading 的唯一约定与可见性感知轮询：表格 loading 统一带 200ms delay 的对象形式，拉取中 `dataSource` 交回 `undefined`（不渲染「暂无…」假空态、不锁行内按钮）；轮询在 `document.hidden` 时挂起、回前台立即补拉一次，失败保留旧数据只更新错误文案。新增列表页与轮询一律复用这两个模块。
 - `spa/src/fleet/`、`spa/src/schedule/` — 执行表与定时任务页；`schedule/history.jsx` 按历史记录的执行 ID 打开原执行，不重新派发。节点调度设置读取失败时禁止保存默认值。
 - [fleet/detail.jsx](../../crates/web/spa/src/fleet/detail.jsx)、[fleet/detail/workloads.jsx](../../crates/web/spa/src/fleet/detail/workloads.jsx) — TODO 执行明细在工作流建立后加载工作台；初始化、停止和初始化失败只展示对应状态，初始化错误只显示一次。工作流建立后的读取错误仍显示实际原因。
 - [fleet/teams/](../../crates/web/spa/src/fleet/teams/) — Team 列表、成员编辑、启动表单与可复用的 `TeamExecutionHistory`；历史记录按服务端游标分页并自动刷新，点击打开原执行。`submission.js` 限制提交与回执读取的等待时间并校验执行身份，`useSubmission.js` 在提交超时或回复不确定后查询现有 `/receipt`，确认受理后跳转详情。重试保留原请求，关闭时取消读取并忽略迟到响应。

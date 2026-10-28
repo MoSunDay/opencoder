@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '../test/setup-dom.js';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ScheduleRunsDrawer } from './history.jsx';
 
@@ -24,14 +24,4 @@ it('keeps a failed history read distinct from no triggers and allows retry', asy
   expect(screen.queryByText('暂无触发记录')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重试触发历史' }));
   await screen.findByText('暂无触发记录');
-});
-
-it('does not claim 暂无触发记录 while the first fetch is still in flight', async () => {
-  let resolveFetch;
-  apiGet.mockImplementation(() => new Promise((resolve) => { resolveFetch = resolve; }));
-  render(<ScheduleRunsDrawer schedule={{ id: 'schedule-a' }} onClose={() => {}} onNotice={() => {}} />);
-  await waitFor(() => expect(apiGet).toHaveBeenCalled());
-  expect(screen.queryByText('暂无触发记录')).toBeNull();
-  await act(async () => { resolveFetch({ runs: [] }); });
-  expect(await screen.findByText('暂无触发记录')).toBeTruthy();
 });

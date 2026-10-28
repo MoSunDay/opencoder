@@ -228,10 +228,6 @@ pub struct ChatView {
     /// actor, never to the parent's steer/queue paths. Display-only state —
     /// never persisted, cleared on `/task` switches.
     pub sidecar_focus: bool,
-    /// Completed/total one-shot remote subtasks registered on this session
-    /// (drives the `[sub x/x]` bottom-border badge; 0/0 hides it).
-    pub subtask_done: u32,
-    pub subtask_total: u32,
     /// The `/sidecar` Q/A panel while it is open (never inside `blocks` —
     /// see `SidecarPanel`). Cleared on exit (ESC / Ctrl+L) and on `/task`
     /// switches; `None` plus `sidecar_focus == false` is the closed state.

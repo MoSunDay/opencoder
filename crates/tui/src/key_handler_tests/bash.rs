@@ -35,7 +35,6 @@ fn bang_prefix_returns_bash_action() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(
@@ -80,7 +79,6 @@ fn bang_prefix_with_spaces_returns_bash() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "echo hi"));
     assert!(
@@ -124,7 +122,6 @@ fn bare_bang_is_noop() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty(), "input must be cleared even on bare bang");
@@ -166,7 +163,6 @@ fn bang_prefix_works_while_running() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(

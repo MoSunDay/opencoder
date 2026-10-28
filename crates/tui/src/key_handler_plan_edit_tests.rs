@@ -85,7 +85,6 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::EnterPlanEdit));
     assert!(
@@ -130,7 +129,6 @@ fn shift_i_in_act_mode_does_not_enter_plan_edit() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
     assert_eq!(input, "I", "should insert the character 'I'");
@@ -172,7 +170,6 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
     assert_eq!(input, "I", "should insert the character 'I'");
@@ -214,7 +211,6 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
     assert_eq!(input, "helloI", "should append the character 'I'");
@@ -256,7 +252,6 @@ fn lowercase_i_in_plan_mode_inserts_normally() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "i", "lowercase i should be inserted into input");
@@ -302,7 +297,6 @@ fn up_down_navigate_soft_wrapped_rows() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(matches!(res, KeyAction::None));
     // History was NOT cycled (input unchanged, hist_idx still None)
@@ -349,7 +343,6 @@ fn enter_produces_steer_when_subagent_focused() {
         &mut undo_state, // input_disabled
         &mut queue_scroll,
         &mut None,
-        None,
     );
 
     assert!(matches!(action, KeyAction::SubagentSteer(ref t) if t == "steer the subagent"));
@@ -394,7 +387,6 @@ fn enter_produces_steer_when_running_and_not_subagent_focused() {
         &mut undo_state, // input_disabled
         &mut queue_scroll,
         &mut None,
-        None,
     );
 
     assert!(matches!(action, KeyAction::Steer(ref t) if t == "steer the parent"));

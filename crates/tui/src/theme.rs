@@ -153,30 +153,25 @@ pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
     rounded_block_plain().title(Line::from(spans))
 }
 
-/// [`rounded_block_line`] plus a session-lifetime `[tok cost]` label, a
-/// `·`-separated `[call cost]` duration (when `turn_ms > 0`) and a
-/// `[sub x/x]` one-shot subtask badge (when `subtask_total > 0`) on the
-/// bottom border's left corner — the fourth info corner of the body block
-/// (right-bottom holds the follow indicator). All segments render in the
-/// warn colour — the same as the status bar's task timer and running-spinner
+/// [`rounded_block_line`] plus a session-lifetime `[tok cost]` label (and,
+/// when `turn_ms > 0`, a `·`-separated `[call cost]` duration) on the bottom
+/// border's left corner — the fourth info corner of the body block (right-
+/// bottom holds the follow indicator). Both segments render in the warn
+/// colour — the same as the status bar's task timer and running-spinner
 /// spans — so the accent stays reserved for the live `跟随中…` indicator
 /// and the model name, and the `·` separator nearly vanishes (muted).
-/// `area_w` guards narrow terminals with graded dropping: when the `[tok
-/// cost]` segment alone could collide with the right-bottom indicator (which
+/// `area_w`
+/// guards narrow terminals with graded dropping: when the `[tok cost]`
+/// segment alone could collide with the right-bottom indicator (which
 /// reserves ~10 display columns at the right edge) the whole label is
-/// dropped; below that the visible segments shrink as a prefix of
-/// `[tok cost] · [call cost] · [sub]` — the sub badge drops first and never
-/// resurrects below a dropped call-cost segment, then the call-cost segment
-/// drops, keeping `[tok cost]`. `turn_ms == 0` omits the turn segment and
-/// `subtask_total == 0` omits the sub badge entirely.
+/// dropped; when only the `[call cost]` addition would overflow, just the
+/// tok segment is kept. `turn_ms == 0` omits the turn segment entirely.
 /// Pure builder — no globals.
 pub fn rounded_block_line_tok(
     title: &Line<'static>,
     tokens_total: u64,
     area_w: u16,
     turn_ms: u64,
-    subtask_done: u32,
-    subtask_total: u32,
 ) -> Block<'static> {
     let block = rounded_block_line(title);
     let tok = format!(
@@ -188,11 +183,6 @@ pub fn rounded_block_line_tok(
     } else {
         String::new()
     };
-    let sub = if subtask_total > 0 {
-        format!("[sub {subtask_done}/{subtask_total}]")
-    } else {
-        String::new()
-    };
     // Right-edge reservation: follow/jump indicator ("    v    " style) plus
     // spacing, never wider than this.
     const RIGHT_RESERVE: u16 = 12;
@@ -200,16 +190,10 @@ pub fn rounded_block_line_tok(
     // `·` (U+00B7) is width-1, so char count == display width.
     let tok_w = tok.chars().count() as u16 + 2; // surrounding spaces
     let turn_w = turn.chars().count() as u16;
-    let sub_w = sub.chars().count() as u16;
     if avail < tok_w {
         return block; // too narrow: drop the whole bottom label
     }
     let show_turn = turn_ms > 0 && avail >= tok_w + turn_w;
-    // Visible segments form a prefix of tok · call cost · sub: the sub badge
-    // drops first and never resurrects below a dropped call-cost segment.
-    let show_sub = subtask_total > 0
-        && (turn_ms == 0 || show_turn)
-        && avail >= tok_w + if show_turn { turn_w } else { 0 } + sub_w;
     // Graded spans: labels in the warn colour (the status bar's task-timer /
     // running-spinner colour), separator nearly invisible (muted) — accent
     // stays reserved for the live follow indicator. (` · ` adds one column
@@ -220,10 +204,6 @@ pub fn rounded_block_line_tok(
     if show_turn {
         spans.push(Span::styled(" \u{00b7} ", Style::default().fg(muted())));
         spans.push(Span::styled(turn, label));
-    }
-    if show_sub {
-        spans.push(Span::styled(" \u{00b7} ", Style::default().fg(muted())));
-        spans.push(Span::styled(sub, label));
     }
     spans.push(Span::raw(" "));
     block.title_bottom(Line::from(spans).alignment(ratatui::layout::Alignment::Left))

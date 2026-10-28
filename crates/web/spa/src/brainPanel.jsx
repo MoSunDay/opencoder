@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiDel, apiGet, apiPost } from './api.js';
 import { KIND_LABELS } from './fleet/model.js';
 import { TimeText } from './ui/timeText.jsx';
-import { tableLoading, tableRows } from './ui/tableLoading.js';
 import { CapabilityEditor } from './brain/capabilityEditor.jsx';
 import { ok } from './notice.js';
 import './brain/library.css';
@@ -13,7 +12,7 @@ import './brain/library.css';
 const K_OPTIONS = [3, 5, 10, 20, 50].map((value) => ({ value, label: `前 ${value} 条` }));
 
 export function BrainPanel({ onNotice, executionCatalog = null, catalogLoading = false, catalogError = '', onRefreshCatalog }) {
-  const [rows, setRows] = useState(null);
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editor, setEditor] = useState(null);
   const [query, setQuery] = useState('');
@@ -27,7 +26,7 @@ export function BrainPanel({ onNotice, executionCatalog = null, catalogLoading =
   const listRequest = useRef(null);
   const targets = useMemo(() => new Map((executionCatalog || []).map((item) => [item.id, item])), [executionCatalog]);
   const data = hits ?? rows;
-  const currentPage = Math.min(current, Math.max(1, Math.ceil((data?.length ?? 0) / pageSize)));
+  const currentPage = Math.min(current, Math.max(1, Math.ceil(data.length / pageSize)));
   useEffect(() => { setCurrent(currentPage); }, [currentPage]);
   const load = useCallback(async () => {
     listRequest.current?.abort();
@@ -100,8 +99,8 @@ export function BrainPanel({ onNotice, executionCatalog = null, catalogLoading =
     </div>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
     {catalogError && <Alert type="error" showIcon title={`获取执行绑定失败: ${catalogError}`} action={<Button onClick={onRefreshCatalog}>重试</Button>} style={{ marginBottom: 12 }} />}
-    <Table className="brain-capability-table" rowKey={(row) => row.capability.id} size="middle" tableLayout="fixed" columns={columns} dataSource={tableRows(loading || searching, data)}
-      loading={tableLoading(loading || searching)} scroll={{ x: hits ? 1110 : 1020 }} pagination={{ current: currentPage, pageSize, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100],
+    <Table className="brain-capability-table" rowKey={(row) => row.capability.id} size="middle" tableLayout="fixed" columns={columns} dataSource={data}
+      loading={loading || searching} scroll={{ x: hits ? 1110 : 1020 }} pagination={{ current: currentPage, pageSize, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100],
         onChange: (page, size) => { setPageSize(size); setCurrent(size === pageSize ? page : 1); }, showTotal: (total) => `共 ${total} 项` }}
       onRow={(row) => ({ onClick: () => edit(row), style: { cursor: 'pointer' } })}
       locale={{ emptyText: hits !== null ? '没有匹配的能力' : '暂无能力，点击「新建能力」添加' }} />

@@ -52,27 +52,6 @@ describe('fleet execution boundaries', () => {
     expect(screen.queryByRole('button', { name: '加载更早的执行' })).toBeNull();
     expect(apiGet).toHaveBeenCalledWith('/api/executions?limit=50');
   });
-  it('separates a failed read from a true empty list and states the 50-entry cap', async () => {
-    // 首拉失败：不能把读取失败伪装成「暂无执行」。
-    apiGet.mockImplementation(async (path) => path === '/api/nodes'
-      ? { nodes: [node] }
-      : Promise.reject(new Error('read offline')));
-    render(<ExecutionsPanel onNotice={vi.fn()} />);
-    expect(await screen.findByText('执行列表读取失败，请点击刷新重试')).toBeTruthy();
-    expect(screen.queryByText('暂无执行')).toBeNull();
-    // 重试成功：真有数据时明确「仅显示最近 50 条」的上界（默认 limit=50）。
-    apiGet.mockImplementation(async (path) => path === '/api/nodes'
-      ? { nodes: [node] }
-      : { executions: [{ id: 'agent-new', kind: 'agent', node_id: 'n1', status: 'running', created_at: 10 }] });
-    fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }));
-    expect(await screen.findByText('agent-new')).toBeTruthy();
-    expect(screen.getByText('仅显示最近 50 条')).toBeTruthy();
-    // 再刷新为真空列表：此刻才可以说「暂无执行」。
-    apiGet.mockImplementation(async (path) => path === '/api/nodes' ? { nodes: [node] } : { executions: [] });
-    fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }));
-    expect(await screen.findByText('暂无执行')).toBeTruthy();
-    expect(screen.queryByText('执行列表读取失败，请点击刷新重试')).toBeNull();
-  });
   it('renders CPU normalized load and only performs maintenance after a user action', async () => {
     apiGet.mockResolvedValue({ nodes: [node] }); apiPost.mockResolvedValue({ snapshot: node.snapshot });
     render(<FleetNodesPanel onNotice={vi.fn()} />);

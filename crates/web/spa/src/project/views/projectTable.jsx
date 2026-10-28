@@ -4,7 +4,6 @@ import { useState } from 'react';
 import dayjs from 'dayjs';
 import { useProjectView } from './viewState.jsx';
 import { RowDragHandle, SortableRow, SortableRows } from '../sorting/rows.jsx';
-import { tableLoading, tableRows } from '../../ui/tableLoading.js';
 
 function Filter({ column, rows, value, onApply, onClear }) {
   const [draft, setDraft] = useState(value ?? (column.kind === 'enum' ? [] : column.kind === 'text' || !column.kind ? '' : [null, null]));
@@ -25,7 +24,7 @@ export function matchesColumn(column, row, filter) {
   if (column.kind === 'number' || column.kind === 'date') return (filter?.[0] == null || value >= filter[0]) && (filter?.[1] == null || value <= (column.kind === 'date' ? dayjs(filter[1]).endOf('day').valueOf() : filter[1]));
   return String(value ?? '').toLocaleLowerCase().includes(String(filter ?? '').trim().toLocaleLowerCase());
 }
-export function ProjectTable({ columns, rows, label, onRowClick, pagination, viewKey, rowSorting, loading = false, ...rest }) {
+export function ProjectTable({ columns, rows, label, onRowClick, pagination, viewKey, rowSorting, ...rest }) {
   const [view, setView] = useProjectView(`table:${viewKey || label}`, { filters: {}, page: 1 });
   const { filters, page } = view;
   const setFilters = (next) => setView((current) => ({ ...current, filters: typeof next === 'function' ? next(current.filters) : next }));
@@ -40,7 +39,7 @@ export function ProjectTable({ columns, rows, label, onRowClick, pagination, vie
       onClear={() => { setFilters((current) => { const next = { ...current }; delete next[column.key]; return next; }); setPage(1); close(); }} />,
   } : column);
   const displayedColumns = rowSorting ? [{ key: 'drag', width: 44, fixed: 'left', render: (_, row) => <RowDragHandle title={row.title} /> }, ...mapped] : mapped;
-  const table = <Table {...rest} rowKey="id" tableLayout="fixed" size="small" columns={displayedColumns} dataSource={tableRows(loading, shown)} loading={tableLoading(loading)}
+  const table = <Table {...rest} rowKey="id" tableLayout="fixed" size="small" columns={displayedColumns} dataSource={shown}
       components={rowSorting ? { body: { row: SortableRow } } : undefined}
       pagination={pagination === false ? false : { current: page, pageSize: 20, showSizeChanger: false, onChange: setPage, hideOnSinglePage: true }}
       onRow={(row) => ({ onClick: () => onRowClick?.(row), className: onRowClick ? 'project-table-row' : '' })} />;

@@ -36,7 +36,6 @@ fn press_running_command(
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     (action, input, cursor)
 }
@@ -92,7 +91,6 @@ fn press_ctrl_t(agent: &str, running: bool, input_disabled: bool) -> (KeyAction,
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     (action, input)
 }
@@ -200,7 +198,6 @@ fn idle_tab_with_live_subagents_becomes_queue() {
         &mut undo_state,
         &mut queue_scroll,
         &mut None,
-        None,
     );
     assert!(
         matches!(action, KeyAction::Queue(ref t) if t == "after the subagents finish"),

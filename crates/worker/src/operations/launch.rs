@@ -133,6 +133,7 @@ pub(super) async fn launch_locked(
             .await
             .finalize(&id, status, result, error)
             .await;
+        #[cfg(target_os = "linux")]
         let terminal = persisted
             .as_ref()
             .is_ok_and(|status: &ExecutionStatus| status.terminal());

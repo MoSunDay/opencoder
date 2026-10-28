@@ -1,4 +1,5 @@
 //! Real worker admission and reads before the first session event exists.
+#![cfg(not(windows))]
 #[path = "../support/mod.rs"]
 mod support;
 use opencoder_core::fleet::*;

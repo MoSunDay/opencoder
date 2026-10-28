@@ -11,6 +11,7 @@ pub(crate) struct Summary {
     pub queue: Option<QueueSummary>,
     pub stop_intent: Option<StopIntent>,
     pub stopping_rerun: bool,
+    #[cfg_attr(windows, allow(dead_code))]
     pub dag_parent: bool,
     pub schema_version: Option<u64>,
     pub(super) intent_generation: Option<u64>,

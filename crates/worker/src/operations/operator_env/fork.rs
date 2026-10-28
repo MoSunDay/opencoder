@@ -10,7 +10,7 @@ pub fn fork_environment(
     parent: &str,
     id: &str,
     version: Option<&serde_json::Value>,
-    config: &opencoder_core::Config,
+    _config: &opencoder_core::Config,
 ) -> Result<Option<OperatorEnvironment>> {
     let Some(source) = resolve(layout, kind, parent, version)? else {
         return Ok(None);
@@ -32,7 +32,7 @@ pub fn fork_environment(
     }
     #[cfg(target_os = "linux")]
     let run_as =
-        super::linux_identity::materialize_ownership(layout, config, &home, &workspace, id)?;
+        super::linux_identity::materialize_ownership(layout, _config, &home, &workspace, id)?;
     #[cfg(not(target_os = "linux"))]
     let run_as = None;
     Ok(Some(OperatorEnvironment {

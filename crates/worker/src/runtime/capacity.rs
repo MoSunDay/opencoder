@@ -2,8 +2,9 @@
 use anyhow::{ensure, Result};
 use opencoder_store::fleet::FleetStore;
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "linux")]
+use std::fs;
 use std::{
-    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -39,6 +40,7 @@ impl HostCapacity {
             managed_runtime_is_alone(Path::new("/proc"), std::process::id())?;
             #[cfg(not(target_os = "linux"))]
             anyhow::bail!("running capacity recovery requires explicit process cleanup proof");
+            #[cfg(target_os = "linux")]
             recover_running_tickets(
                 &store,
                 &binding.runtime_id,
@@ -55,6 +57,7 @@ impl HostCapacity {
 
 /// The caller holds the node lock, has cleaned its containers, and has proved
 /// that its managed service has no other kernel process owners.
+#[cfg(target_os = "linux")]
 async fn recover_running_tickets(
     store: &FleetStore,
     runtime: &str,
@@ -177,7 +180,7 @@ impl crate::Worker {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
     use opencoder_store::fleet::FleetStore;

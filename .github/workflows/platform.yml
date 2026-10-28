@@ -93,10 +93,14 @@ jobs:
           $log = "$env:RUNNER_TEMP/windows-check.log"
           & cargo check --locked -p opencoder -p opencoder-agent -p opencoder-core -p opencoder-session -p opencoder-tui -p opencoder-worker --all-targets 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
-            $tail = [string](@(Get-Content $log -Tail 160) -join "`n")
-            $annotation = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-            Write-Output "::error title=Windows cargo check failure::$annotation"
-            @('### Windows cargo check failure', '```text', $tail, '```') | Add-Content $env:GITHUB_STEP_SUMMARY
+            $errs = @(Get-Content $log | Select-String -Pattern 'error(\[|:)' -Context 1,10 | Select-Object -First 12)
+            $errText = [string]($errs | ForEach-Object { $_.Context.PreContext + $_.Line + $_.Context.PostContext } | Select-Object -Unique)
+            $annotation = $errText.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            if ($annotation.Length -gt 0) { Write-Output "::error title=Windows cargo check errors::$annotation" }
+            $tail = [string](@(Get-Content $log -Tail 25) -join "`n")
+            $tailAnnotation = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows cargo check tail::$tailAnnotation"
+            @('### Windows cargo check failure', '```text', $errText, '```', '### Tail', '```text', $tail, '```') | Add-Content $env:GITHUB_STEP_SUMMARY
             exit 1
           }
       - name: build native programs and test supervisor

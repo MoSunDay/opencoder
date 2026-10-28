@@ -19,6 +19,8 @@ use std::{
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
+
+mod config_cache;
 pub struct WorkerOptions {
     pub name: String,
     pub workdir: PathBuf,
@@ -60,6 +62,7 @@ pub(crate) struct Inner {
     pub admission: Arc<Mutex<()>>,
     pub resource_preparations: Arc<Semaphore>,
     pub maintenance: std::sync::Mutex<HashMap<String, opencoder_session::extensions::Registration>>,
+    pub config_cache: std::sync::Mutex<Option<(config_cache::ConfigKey, Arc<Config>)>>,
     _lock: NodeLock,
 }
 
@@ -263,6 +266,7 @@ impl Worker {
                 admission: Arc::new(Mutex::new(())),
                 resource_preparations: Arc::new(Semaphore::new(4)),
                 maintenance: std::sync::Mutex::new(HashMap::new()),
+                config_cache: std::sync::Mutex::new(None),
                 _lock: lock,
             }),
         };
@@ -422,9 +426,7 @@ impl Worker {
             .clone()
     }
     pub(crate) fn configuration(&self) -> Result<Config> {
-        Ok(opencoder_core::agent::scope::with_root_sync(None, || {
-            Config::load(&crate::brain::workdir::node_workdir(self))
-        })?)
+        Ok((*configuration_shared(self)?).clone())
     }
     /// Configuration for a FRESH admission of `kind`. Operator executions
     /// read the dedicated operator-plane directory under the node data root
@@ -482,6 +484,65 @@ impl ExecutionTasks {
     pub(crate) fn active_count(&self) -> usize {
         self.tracker.len()
     }
+}
+
+/// Effective node config as a shared value, cached on the stat fingerprint
+/// of the config input files (`config_cache`). Snapshot/report and inventory
+/// paths call this every cycle; the daemon environment is fixed for the
+/// process lifetime, so file mtime/size is a sufficient invalidation signal.
+/// Calls inside a harness task-local scope bypass the cache (core folds
+/// those call-site overrides into the loaded config), and load errors are
+/// never cached so every cycle keeps surfacing them.
+pub(crate) fn configuration_shared(worker: &Worker) -> Result<Arc<Config>> {
+    if opencoder_core::harness::scope::current().is_some()
+        || opencoder_core::harness::scope::current_runtime().is_some()
+    {
+        return Ok(Arc::new(load_node_config(worker)?));
+    }
+    let workdir = crate::brain::workdir::node_workdir(worker);
+    let key = config_cache::config_key(&workdir);
+    let mut cache = worker
+        .inner
+        .config_cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some((cached, config)) = cache.as_ref() {
+        if *cached == key {
+            return Ok(config.clone());
+        }
+    }
+    let config = Arc::new(load_node_config(worker)?);
+    *cache = Some((key, config.clone()));
+    Ok(config)
+}
+
+fn load_node_config(worker: &Worker) -> Result<Config> {
+    Ok(opencoder_core::agent::scope::with_root_sync(None, || {
+        Config::load(&crate::brain::workdir::node_workdir(worker))
+    })?)
+}
+
+/// Release per-execution worker state at a terminal point (where `active`
+/// drops the execution). Gate entries survive only while a caller still
+/// holds a clone of the gate (the map's own Arc counts as one), so in-flight
+/// gated sections keep working; removing the maintenance registration lets
+/// its Drop free the process-global extension slot.
+pub(crate) async fn release_execution_state(inner: &Inner, id: &str) {
+    inner
+        .lifecycle_gates
+        .lock()
+        .await
+        .retain(|_, gate| Arc::strong_count(gate) > 1);
+    inner
+        .preparation_gates
+        .lock()
+        .await
+        .retain(|_, gate| Arc::strong_count(gate) > 1);
+    inner
+        .maintenance
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(id);
 }
 
 struct ConfiguredClient(Config);

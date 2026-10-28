@@ -196,7 +196,9 @@ mod tests {
         buffer.drain(..consumed);
         assert_eq!(emitted.len(), 1);
         assert_eq!(emitted[0].data, r#"{"a":1}"#);
-        assert_eq!(buffer, b"data: 2\n");
+        // The trailing newline completes the `data: 2` line, so nothing
+        // partial survives in the buffer.
+        assert!(buffer.is_empty());
     }
 
     #[test]
@@ -218,6 +220,11 @@ mod tests {
         frame.event = None;
         frame.id = Some("not-a-number".into());
         let line = String::from_utf8(frame_line(&frame)).unwrap();
-        assert_eq!(line, r#"{"event":null,"seq":null,"data":"plain "text""}"#);
+        assert_eq!(
+            line,
+            r#"{"event":null,"seq":null,"data":"plain \"text\""}"#
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(parsed["data"], "plain \"text\"");
     }
 }

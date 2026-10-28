@@ -25,6 +25,19 @@ impl Drop for Active {
 /// re-runs to reaffirm and heal out-of-band catalog edits.
 const MEMO_TTL: Duration = Duration::from_secs(10 * 60);
 
+/// Timer cadence: 30s normally; a memo hit proved the source snapshot matches
+/// the last Apply, so the next full snapshot build (Config load, capability
+/// walks, fs scans — the dominant idle cost) can wait 120s. Any other outcome
+/// (changed entries, a MEMO_TTL expiry forcing the heal cycle, or an error)
+/// keeps 30s, so the 600s heal guarantee is unaffected by the cap.
+fn timer_delay(memo_hit: bool) -> Duration {
+    if memo_hit {
+        Duration::from_secs(120)
+    } else {
+        Duration::from_secs(30)
+    }
+}
+
 /// In-process memory of the last successful Apply, used only by the timer.
 #[derive(Default)]
 struct Memo {
@@ -42,10 +55,12 @@ impl Memo {
 
 /// A finished cycle: the caller-visible result plus the memo carried into the
 /// next timer cycle. Any failure drops the memo so the next cycle retries the
-/// full path.
+/// full path. `memo_hit` marks cycles that skipped the writer lease and Apply
+/// because the fresh snapshot matched the memo.
 struct Outcome {
     result: Result<Value, AppError>,
     memo: Option<Memo>,
+    memo_hit: bool,
 }
 
 pub(super) async fn synchronize(
@@ -53,7 +68,7 @@ pub(super) async fn synchronize(
     env: String,
     check: bool,
 ) -> Result<Value, AppError> {
-    cycle(state, env, check, None).await.0
+    cycle(state, env, check, None).await.result
 }
 
 async fn cycle(
@@ -61,11 +76,15 @@ async fn cycle(
     env: String,
     check: bool,
     memo: Option<Memo>,
-) -> (Result<Value, AppError>, Option<Memo>) {
+) -> Outcome {
     let active = {
         let _gate = state.lifecycle.request_gate.lock().unwrap();
         if state.lifecycle.retiring.load(Ordering::SeqCst) {
-            return (Err(AppError::dependency("Server is retiring")), None);
+            return Outcome {
+                result: Err(AppError::dependency("Server is retiring")),
+                memo: None,
+                memo_hit: false,
+            };
         }
         state.lifecycle.requests.fetch_add(1, Ordering::SeqCst);
         Active(state.lifecycle.clone())
@@ -96,6 +115,7 @@ async fn cycle(
             return Ok(Outcome {
                 result: Ok(Value::Null),
                 memo,
+                memo_hit: true,
             });
         }
         let _writer = if check {
@@ -152,13 +172,25 @@ async fn cycle(
             }),
             _ => memo,
         };
-        Ok(Outcome { result, memo })
+        Ok(Outcome {
+            result,
+            memo,
+            memo_hit: false,
+        })
     })
     .await;
     match joined {
-        Ok(Ok(outcome)) => (outcome.result, outcome.memo),
-        Ok(Err(error)) => (Err(error), None),
-        Err(error) => (Err(AppError::dependency(error.to_string())), None),
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(error)) => Outcome {
+            result: Err(error),
+            memo: None,
+            memo_hit: false,
+        },
+        Err(error) => Outcome {
+            result: Err(AppError::dependency(error.to_string())),
+            memo: None,
+            memo_hit: false,
+        },
     }
 }
 
@@ -178,18 +210,24 @@ pub(crate) fn start(state: &Arc<AppState>) {
             if state.lifecycle.retiring.load(Ordering::SeqCst) {
                 return;
             }
-            let (result, carried) = cycle(&state, "debug".into(), false, memo.take()).await;
-            memo = carried;
-            if let Err(error) = result {
+            let outcome = cycle(&state, "debug".into(), false, memo.take()).await;
+            memo = outcome.memo;
+            if let Err(error) = outcome.result {
                 tracing::warn!(%error, "Ontology capability synchronization failed");
             }
+            let memo_hit = outcome.memo_hit;
             // Keep only Lifecycle while waiting, so dropping AppState stops the task.
             let lifecycle = state.lifecycle.clone();
             drop(state);
+            // A memo hit means the freshly built snapshot matched the last
+            // Apply, so the next expensive snapshot build can wait longer;
+            // changed entries, a TTL expiry forcing a full heal cycle, or an
+            // error all keep the normal cadence. The notify arm stays ahead of
+            // the sleep, so explicit synchronizations remain immediate.
             tokio::select! {
                 _ = lifecycle.retired() => return,
                 _ = lifecycle.catalog_changed.notified() => {},
-                _ = tokio::time::sleep(Duration::from_secs(30)) => {},
+                _ = tokio::time::sleep(timer_delay(memo_hit)) => {},
             }
         }
     });
@@ -246,5 +284,15 @@ mod tests {
         assert!(!memo.skips(&entries(&["b", "a"]), now));
         // Never applied (initial state) or cleared after a failure.
         assert!(!Memo::default().skips(&[], now));
+    }
+
+    #[test]
+    fn timer_delay_extends_only_after_a_memo_hit() {
+        // Normal cadence: changed entries, TTL-expiry heal cycles, errors.
+        assert_eq!(timer_delay(false), Duration::from_secs(30));
+        // A memo hit skips the writer lease and Apply, so the next snapshot
+        // build can wait longer; the 120s cap stays far inside MEMO_TTL.
+        assert_eq!(timer_delay(true), Duration::from_secs(120));
+        assert!(timer_delay(true) < MEMO_TTL);
     }
 }

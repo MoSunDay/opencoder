@@ -161,6 +161,11 @@ pub(super) async fn launch_locked(
         worker.inner.active.lock().await.remove(&id);
         drop(loop_guard);
         drop(permit);
+        // Release the task's own gate clone first so the entry below can be
+        // collected; concurrent holders keep it alive via their clones.
+        drop(_guard);
+        drop(gate);
+        crate::state::release_execution_state(&worker.inner, &id).await;
         opencoder_session::loop_registry::notify_change();
     });
     Ok(LaunchOutcome::Started)

@@ -16,7 +16,8 @@ Windows 节点只声明并接受 `ExecutionKind::Operator`；其他执行种类�
 - [workloads/agent.rs](../../crates/worker/src/workloads/agent.rs) — Agent/Operator 宿主会话首轮使用队列投递，保留用户输入原文；Operator 默认规则由 [session](../session/index.md) 按会话类型构建，Maintenance 首轮附加维护指令。托管 Codex 设置由 Server 冻结。
 - [workloads/agent/initialization.rs](../../crates/worker/src/workloads/agent/initialization.rs) — 首轮投递前补齐 Harness、启动环境、展示策略及 Server 模型设置；已有 session 行也执行该步骤。恢复保留已启动的 Codex 线程和冻结设置，Operator HOME 最后覆盖输入与托管环境。
 - `crates/worker/src/operations/` — 准入/launch/维护命令/查询（含 `query/instances/`、`artifacts.rs`、`operator_env.rs` Operator 隔离快照、`operator_config.rs` 节点级 Operator 配置平面）
-- [operations/queue](../../crates/worker/src/operations/queue/mod.rs) — 接受/调度循环节拍自适应：存在 pending run 时 100 毫秒，空闲退避到 500 毫秒
+- [state/config_cache.rs](../../crates/worker/src/state/config_cache.rs) — 节点级有效配置按输入文件 mtime/size 指纹缓存（`configuration()`），报告快照路径每周期只做 stat 探测
+- [operations/queue](../../crates/worker/src/operations/queue/mod.rs) — 接受/调度循环节拍自适应：存在 pending run 时 100 毫秒，空闲退避到 500 毫秒。终态时释放按执行累积的 gates 与维护注册（`release_execution_state`，在用 gate 经强计数保留）
 - [operations/command.rs](../../crates/worker/src/operations/command.rs) 在同一次 journal guard 内保存取消意图和停止中的 TODO 重跑状态，然后立即发送取消信号，避免持久化后再次排在库存/调度读取之后；阶段计时仅记录执行 ID 和耗时，不记录输入或凭据。定向回归见 [stop_signal.rs](../../crates/worker/src/operations/admission/tests/stop_signal.rs)，包含排队锁竞争与零模型真实 runc 清理。
 - [operations/create/preflight_agents.rs](../../crates/worker/src/operations/create/preflight_agents.rs) — 项目 Agent、Team、DAG 的 Agent 依赖提取纯函数；DAG 仅收集 Agent 步骤。
 - `crates/worker/src/state.rs`、`src/layout.rs`、`src/journal/` — runtime.db、执行布局与原子落盘（layout 含 `<data>/operator/<id>/{home,workspace}` 预留）

@@ -1,9 +1,10 @@
 //! Linux backend: build the commands that run below the hidden supervisor.
 
-use super::{pidfd::SignalTarget, supervisor::RuncCleanup, tracker};
+use super::{identity, pidfd::SignalTarget, supervisor::RuncCleanup, tracker};
 use anyhow::{Context, Result};
+use opencoder_core::platform::RunAsIdentity;
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -29,13 +30,19 @@ pub fn configure_supervisor_binary(path: PathBuf) -> Result<()> {
 }
 
 /// Return a supervised command when the node configured its agent binary.
-/// Other library embedders retain the existing direct-process behavior.
-pub fn command(program: impl AsRef<OsStr>) -> Result<Option<(Command, SpawnLease)>> {
-    build(program.as_ref(), None)
+/// `run_as` asks the supervisor to drop the workload to that identity before
+/// exec; other library embedders retain the existing direct-process behavior.
+pub fn command(
+    program: impl AsRef<OsStr>,
+    run_as: Option<&RunAsIdentity>,
+) -> Result<Option<(Command, SpawnLease)>> {
+    build(program.as_ref(), None, run_as)
 }
 
 /// Supervise a direct `runc run` and ask the same owner to delete its private
 /// container state before exiting on both normal completion and node crash.
+/// The DAG/runc chain never drops privileges here: its identity lives in the
+/// container spec, which is why this constructor takes none.
 pub fn runc_command(
     program: impl AsRef<OsStr>,
     root: &Path,
@@ -47,28 +54,52 @@ pub fn runc_command(
             root: root.to_path_buf(),
             id: id.to_string(),
         }),
+        None,
     )
 }
 
-fn build(program: &OsStr, cleanup: Option<RuncCleanup>) -> Result<Option<(Command, SpawnLease)>> {
+/// Supervisor argv prefix: binary, subcommand, cleanup flags, the raw-command
+/// separator, identity flags (with their own separator) and the program.
+/// Callers append the program's arguments afterwards.
+fn supervisor_argv(
+    binary: &Path,
+    program: &OsStr,
+    cleanup: Option<&RuncCleanup>,
+    run_as: Option<&RunAsIdentity>,
+) -> Result<Vec<OsString>> {
+    anyhow::ensure!(!program.is_empty(), "supervised program is empty");
+    let mut argv = vec![binary.as_os_str().to_os_string(), "internal-process-supervisor".into()];
+    if let Some(cleanup) = cleanup {
+        argv.push("--runc-root".into());
+        argv.push(cleanup.root.as_os_str().to_os_string());
+        argv.push("--runc-id".into());
+        argv.push(OsString::from(&cleanup.id));
+    }
+    argv.push(identity::SEPARATOR.into());
+    if let Some(identity) = run_as {
+        identity::validate(identity)?;
+        argv.extend(identity::flags(identity));
+        argv.push(identity::SEPARATOR.into());
+    }
+    argv.push(program.to_os_string());
+    Ok(argv)
+}
+
+fn build(
+    program: &OsStr,
+    cleanup: Option<RuncCleanup>,
+    run_as: Option<&RunAsIdentity>,
+) -> Result<Option<(Command, SpawnLease)>> {
     let Some(binary) = SUPERVISOR_BINARY.get() else {
         return Ok(None);
     };
-    anyhow::ensure!(!program.is_empty(), "supervised program is empty");
+    let argv = supervisor_argv(binary, program, cleanup.as_ref(), run_as)?;
     let lease = SpawnLease::new()?;
     let read_fd = lease.read.as_raw_fd();
     let write_fd = lease.write.as_raw_fd();
     let parent = std::process::id() as libc::pid_t;
-    let mut command = Command::new(binary);
-    command.arg("internal-process-supervisor");
-    if let Some(cleanup) = cleanup {
-        command
-            .arg("--runc-root")
-            .arg(cleanup.root)
-            .arg("--runc-id")
-            .arg(cleanup.id);
-    }
-    command.arg("--").arg(program);
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
     command.process_group(0);
     unsafe {
         command.pre_exec(move || {
@@ -162,5 +193,111 @@ impl OwnedSupervisor {
 impl Drop for OwnedSupervisor {
     fn drop(&mut self) {
         self.terminate();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity(uid: u32, gid: u32, groups: Vec<u32>) -> RunAsIdentity {
+        RunAsIdentity {
+            uid,
+            gid,
+            groups,
+            username: None,
+        }
+    }
+
+    #[test]
+    fn argv_appends_identity_flags_between_separators() {
+        let argv = supervisor_argv(
+            Path::new("/agent"),
+            "bash".as_ref(),
+            None,
+            Some(&identity(950, 951, vec![960])),
+        )
+        .unwrap();
+        assert_eq!(
+            argv,
+            [
+                "/agent",
+                "internal-process-supervisor",
+                "--",
+                "--uid",
+                "950",
+                "--gid",
+                "951",
+                "--groups",
+                "960",
+                "--",
+                "bash"
+            ]
+            .map(OsString::from)
+        );
+    }
+
+    #[test]
+    fn argv_without_identity_keeps_the_legacy_shape() {
+        let cleanup = RuncCleanup {
+            root: Path::new("/state").into(),
+            id: "container".into(),
+        };
+        let argv = supervisor_argv(
+            Path::new("/agent"),
+            "runc".as_ref(),
+            Some(&cleanup),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            argv,
+            [
+                "/agent",
+                "internal-process-supervisor",
+                "--runc-root",
+                "/state",
+                "--runc-id",
+                "container",
+                "--",
+                "runc"
+            ]
+            .map(OsString::from)
+        );
+    }
+
+    #[test]
+    fn argv_refuses_root_identities_and_empty_programs() {
+        assert!(
+            supervisor_argv(Path::new("/agent"), "bash".as_ref(), None, Some(&identity(0, 1, Vec::new())))
+                .is_err()
+        );
+        assert!(
+            supervisor_argv(Path::new("/agent"), "bash".as_ref(), None, Some(&identity(1, 0, Vec::new())))
+                .is_err()
+        );
+        assert!(supervisor_argv(Path::new("/agent"), "".as_ref(), None, None).is_err());
+    }
+
+    #[test]
+    fn argv_round_trips_through_the_supervisor_parser() {
+        for run_as in [None, Some(identity(950, 951, vec![951, 960]))] {
+            let argv = supervisor_argv(Path::new("/agent"), "bash".as_ref(), None, run_as.as_ref())
+                .unwrap();
+            // The binary CLI consumes the leading raw-command separator, so
+            // the supervisor sees everything after argv[2].
+            let parsed = super::super::supervisor_args(&argv[3..]).unwrap();
+            assert_eq!(parsed.program, "bash");
+            assert!(parsed.args.is_empty());
+            assert_eq!(parsed.identity, run_as);
+        }
+    }
+
+    #[test]
+    fn command_without_configured_supervisor_returns_none() {
+        assert!(command("bash", Some(&identity(950, 951, Vec::new())))
+            .unwrap()
+            .is_none());
+        assert!(command("bash", None).unwrap().is_none());
     }
 }

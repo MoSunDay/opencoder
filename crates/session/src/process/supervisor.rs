@@ -2,6 +2,7 @@
 
 use super::{owned::LEASE_FD, pidfd::start_time, supervisor_args, SignalTarget};
 use anyhow::{bail, Context, Result};
+use opencoder_core::platform::RunAsIdentity;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     ffi::OsString,
@@ -30,14 +31,17 @@ pub fn supervisor_main(command: Vec<OsString>, cleanup: Option<RuncCleanup>) -> 
     install_stop_handlers();
     watch_node_lease();
 
-    let (program, args) = supervisor_args(&command)?;
-    let mut child_command = Command::new(program);
+    let workload = supervisor_args(&command)?;
+    let mut child_command = Command::new(workload.program);
     child_command
-        .args(args)
+        .args(workload.args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
     child_command.process_group(0);
+    if let Some(identity) = &workload.identity {
+        drop_privileges(&mut child_command, identity);
+    }
     let mut child = child_command.spawn().context("spawn supervised workload")?;
     let natural = wait_until_exit_or_stop(&mut child);
     terminate_descendants(std::process::id());
@@ -45,6 +49,32 @@ pub fn supervisor_main(command: Vec<OsString>, cleanup: Option<RuncCleanup>) -> 
     container?;
     let natural = natural?;
     Ok(natural.map(exit_code).unwrap_or(128 + libc::SIGKILL))
+}
+
+/// Drop the workload child to the identity before exec. Ordering is fixed —
+/// setgroups, setgid, then setuid last — so the child can never regain
+/// privileges mid-drop; a restrictive umask closes private-file leakage.
+/// Only async-signal-safe libc calls run inside the pre_exec closure.
+fn drop_privileges(command: &mut Command, identity: &RunAsIdentity) {
+    let uid = identity.uid;
+    let gid = identity.gid;
+    let groups: Box<[libc::gid_t]> = identity.groups.clone().into_boxed_slice();
+    unsafe {
+        command.pre_exec(move || {
+            // Clear inherited supplementary groups even when empty.
+            if libc::setgroups(groups.len(), groups.as_ptr()) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::setgid(gid) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::setuid(uid) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            libc::umask(0o077);
+            Ok(())
+        });
+    }
 }
 
 fn ensure_lease_fd() -> Result<()> {

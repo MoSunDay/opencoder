@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use opencoder_core::platform::RunAsIdentity;
 use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 
@@ -39,7 +40,24 @@ pub(crate) const BASH_TIMEOUT_MARKER: &str = if cfg!(windows) {
     "[bash-timeout:"
 };
 
-pub struct ShellTool;
+/// Host shell tool. Carries the harness privilege-drop identity so the Linux
+/// supervisor can drop each workload to the session's operator user; the
+/// field is inert where no supervisor runs (default) or on other platforms.
+pub struct ShellTool {
+    run_as: Option<RunAsIdentity>,
+}
+
+impl ShellTool {
+    pub fn new(run_as: Option<RunAsIdentity>) -> Self {
+        Self { run_as }
+    }
+}
+
+impl Default for ShellTool {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
 
 fn script_with_tools_path(command: &str, tools_path: Option<&str>) -> String {
     match tools_path {
@@ -119,7 +137,7 @@ impl Tool for ShellTool {
         };
         let program = host::program().await?;
 
-        let supervised = crate::process::command(&program)?;
+        let supervised = crate::process::command(&program, self.run_as.as_ref())?;
         let (mut cmd, lease) = match supervised {
             Some((command, lease)) => (command, Some(lease)),
             None => (tokio::process::Command::new(&program), None),

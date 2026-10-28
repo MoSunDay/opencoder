@@ -9,7 +9,7 @@ use std::time::Duration;
 #[cfg(unix)]
 async fn bash_timeout_triggers_handoff() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     // The indirection deliberately avoids a literal `sleep N` hint, so the
     // command keeps the 1 s cfg(test) default and exercises handoff.
     let input = json!({"command": "s=sleep; \"$s\" 3"});
@@ -55,7 +55,7 @@ async fn bash_timeout_triggers_handoff() {
 #[cfg(unix)]
 async fn bash_timeout_message_uses_display_constant() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     // Avoid a literal `sleep N` hint so the cfg(test) default remains 1 s.
     let input = json!({"command": "s=sleep; \"$s\" 3"});
     let out = tool.execute(input, &ctx()).await.unwrap();
@@ -78,7 +78,7 @@ async fn bash_registers_while_running_unregisters_after() {
     let _g = test_registry_mutex().lock().await;
     let dir = tempfile::tempdir().unwrap();
     let pidfile = dir.path().join("pid");
-    let tool = BashTool;
+    let tool = BashTool::default();
     let mut c = ctx();
     c.working_dir = dir.path().to_path_buf();
     // Keep the child alive until its registry entry is checked, then release
@@ -130,7 +130,7 @@ async fn dropping_tool_future_kills_descendants_and_unregisters() {
     let dir = tempfile::tempdir().unwrap();
     let leader_file = dir.path().join("leader");
     let child_file = dir.path().join("child");
-    let tool = BashTool;
+    let tool = BashTool::default();
     let mut context = ctx();
     context.working_dir = dir.path().to_path_buf();
     let input = json!({
@@ -189,7 +189,7 @@ fn parameters_schema_hides_timeout_from_model() {
     // a bounded deadline from command text and hands long-running commands
     // to the background. Exposing a separate field would restore two
     // competing inputs; `command`/`workdir` stay exposed.
-    let schema = BashTool.parameters();
+    let schema = BashTool::default().parameters();
     let props = schema
         .get("properties")
         .expect("schema has a properties object");
@@ -211,7 +211,7 @@ fn parameters_schema_hides_timeout_from_model() {
 #[cfg(unix)]
 async fn legacy_timeout_prefix_triggers_handoff_and_is_not_executed() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     let input = json!({"command": "timeout 2; sleep 5"});
     let out = tool.execute(input, &ctx()).await.unwrap();
 
@@ -230,7 +230,7 @@ async fn legacy_timeout_prefix_triggers_handoff_and_is_not_executed() {
 #[cfg(unix)]
 async fn legacy_timeout_prefix_widens_default_test_deadline() {
     let _g = test_registry_mutex().lock().await;
-    let tool = BashTool;
+    let tool = BashTool::default();
     let input = json!({"command": "timeout 5; sleep 2; echo ok"});
     let out = tool.execute(input, &ctx()).await.unwrap();
 
@@ -245,7 +245,7 @@ async fn legacy_timeout_prefix_widens_default_test_deadline() {
 
 #[tokio::test]
 async fn legacy_timeout_prefix_with_empty_rest_errors() {
-    let out = BashTool
+    let out = BashTool::default()
         .execute(json!({"command": "timeout 7;"}), &ctx())
         .await
         .unwrap();

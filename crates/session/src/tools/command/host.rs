@@ -34,6 +34,7 @@ pub async fn program() -> Result<PathBuf> {
             "$PSVersionTable.PSVersion.ToString()",
             None,
             Duration::from_secs(3),
+            None,
         )
         .await
         .context("PowerShell version check failed")?;
@@ -83,13 +84,24 @@ pub async fn run(
     workdir: Option<&Path>,
     timeout: Duration,
 ) -> Result<std::process::Output> {
+    run_as(script, workdir, timeout, None).await
+}
+
+/// `run` with an explicit privilege-drop identity handed to the supervised
+/// spawn (session-scoped callers); embedders without a session pass None.
+pub async fn run_as(
+    script: &str,
+    workdir: Option<&Path>,
+    timeout: Duration,
+    run_as: Option<&opencoder_core::platform::RunAsIdentity>,
+) -> Result<std::process::Output> {
     let program = program().await?;
     let script = if cfg!(windows) {
         super::powershell::script(script)
     } else {
         script.to_owned()
     };
-    run_program(&program, &script, workdir, timeout).await
+    run_program(&program, &script, workdir, timeout, run_as).await
 }
 
 async fn run_program(
@@ -97,8 +109,9 @@ async fn run_program(
     script: &str,
     workdir: Option<&Path>,
     timeout: Duration,
+    run_as: Option<&opencoder_core::platform::RunAsIdentity>,
 ) -> Result<std::process::Output> {
-    let (mut command, lease) = match crate::process::command(program)? {
+    let (mut command, lease) = match crate::process::command(program, run_as)? {
         Some((command, lease)) => (command, Some(lease)),
         None => (Command::new(program), None),
     };
@@ -159,5 +172,20 @@ mod version_tests {
         ] {
             assert!(!supported_powershell_version(version), "{version}");
         }
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn run_as_without_identity_executes_the_script_directly() {
+        let root = tempfile::tempdir().unwrap();
+        let output = run_as("printf ok", Some(root.path()), Duration::from_secs(10), None)
+            .await
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
     }
 }

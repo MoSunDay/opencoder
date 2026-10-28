@@ -677,7 +677,8 @@ async fn replay_child(
     let flush_store = Some(store.clone());
     // Batched, lossless drain (shared with TUI/web/subagent surfaces).
     let flusher = tokio::spawn(crate::event_sink::run_flusher(flush_store, ev_rx));
-    let registry = crate::tools::registry();
+    let mut registry = crate::tools::registry();
+    crate::tools::bind_shell_identity(&mut registry, child.harness.run_as.as_ref());
 
     // Overall replay deadline. Recovery must not block the user indefinitely:
     // the only internal cap on `run_with_registry` is the per-LLM-turn idle

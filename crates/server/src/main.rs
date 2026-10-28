@@ -5,6 +5,9 @@
 //! never links the VM/runc chain (those live in `opencoder-agent`). Extracted
 //! from the former `opencoder daemon --server` arm when the project split
 //! into three binaries (tui/cli, server, agent).
+//!
+//! Runtime is Linux-only: other platforms build the binary but `main`
+//! refuses to start, so cross-platform TUI development keeps one workspace.
 
 use std::path::PathBuf;
 
@@ -91,12 +94,28 @@ fn resolve_token(flag: Option<String>, file: Option<PathBuf>) -> Result<String> 
     }
 }
 
+fn platform_supported() -> bool {
+    cfg!(target_os = "linux")
+}
+
+fn unsupported_platform_error() -> String {
+    format!(
+        "opencode-server requires Linux (current platform: {}); refusing to start. \
+The opencode TUI/CLI remains cross-platform.",
+        std::env::consts::OS
+    )
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
     if args.build_info {
         println!("{}", opencoder_core::version::build_info_json());
         return Ok(());
+    }
+    if !platform_supported() {
+        eprintln!("{}", unsupported_platform_error());
+        std::process::exit(1);
     }
     logging::init_logging(args.verbose);
     let workdir = args
@@ -176,7 +195,7 @@ mod logging {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_token, Args};
+    use super::{platform_supported, resolve_token, unsupported_platform_error, Args};
     use clap::Parser;
 
     /// The flag always wins and never consults the process env, so the
@@ -187,6 +206,17 @@ mod tests {
             resolve_token(Some("explicit".into()), None).unwrap(),
             "explicit"
         );
+    }
+
+    #[test]
+    fn platform_gate_is_deterministic_and_message_names_linux_and_tui() {
+        assert_eq!(platform_supported(), cfg!(target_os = "linux"));
+        assert_eq!(platform_supported(), platform_supported());
+        let message = unsupported_platform_error();
+        assert!(message.contains("Linux"), "message: {message}");
+        assert!(message.contains("cross-platform"), "message: {message}");
+        assert!(message.contains("TUI"), "message: {message}");
+        assert!(message.contains(std::env::consts::OS), "message: {message}");
     }
 
     #[test]

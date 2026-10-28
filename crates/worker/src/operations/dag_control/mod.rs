@@ -31,10 +31,10 @@ pub(super) async fn handle(
     {
         // The native DAG runtime is Linux-only and the Windows workload
         // stub rejects DAG executions, so step control has nothing to drive.
-        return Ok(RpcReply::error(
+        Ok(RpcReply::error(
             400,
             "step control requires the native DAG runtime",
-        ));
+        ))
     }
     #[cfg(not(windows))]
     {

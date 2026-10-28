@@ -15,7 +15,7 @@ pub fn dispatch() -> bool {
         runtime.block_on(async {
             let binary = std::env::current_exe().unwrap();
             opencoder_session::process::configure_supervisor_binary(binary.clone()).unwrap();
-            let (mut command, lease) = opencoder_session::process::command(binary)
+            let (mut command, lease) = opencoder_session::process::command(binary, None)
                 .unwrap()
                 .unwrap();
             command

@@ -71,7 +71,7 @@ async fn prepared_read_only_commands_disable_git_and_rg_external_configuration()
         let prepared = powershell::prepare_read_only(script, root.path())
             .await
             .unwrap();
-        let output = ShellTool
+        let output = ShellTool::default()
             .execute(json!({"command":prepared}), &ctx)
             .await
             .unwrap();
@@ -138,7 +138,7 @@ async fn prepared_read_only_commands_disable_git_and_rg_external_configuration()
         .await
         .unwrap();
     assert!(
-        ShellTool
+        ShellTool::default()
             .execute(json!({"command":prepared}), &ctx)
             .await
             .unwrap()
@@ -153,7 +153,7 @@ async fn prepared_read_only_commands_disable_git_and_rg_external_configuration()
     let prepared = powershell::prepare_read_only("rg 'after' notes.txt", root.path())
         .await
         .unwrap();
-    let output = ShellTool
+    let output = ShellTool::default()
         .execute(json!({"command":prepared}), &ctx)
         .await
         .unwrap();

@@ -9,6 +9,8 @@
 //! Job Object and a start gate. Other platforms use direct child processes.
 
 #[cfg(target_os = "linux")]
+mod identity;
+#[cfg(target_os = "linux")]
 mod owned;
 #[cfg(target_os = "linux")]
 mod pidfd;
@@ -21,6 +23,15 @@ mod tracker;
 mod fallback;
 #[cfg(windows)]
 mod windows;
+
+// Portability probe: compile the non-Linux fail-closed facade (and run its
+// stub tests) on Linux hosts too, so its accept-and-ignore signatures cannot
+// rot while native toolchains cannot reach them. The real module's consumers
+// exist only off-Linux, so the probe silences dead-code noise.
+#[cfg(all(test, target_os = "linux"))]
+#[path = "fallback.rs"]
+#[allow(dead_code)]
+mod fallback_probe;
 
 #[cfg(target_os = "linux")]
 pub use owned::{command, configure_supervisor_binary, runc_command, OwnedSupervisor, SpawnLease};
@@ -69,11 +80,24 @@ pub async fn wait_owned_child(
 // Only the Linux supervisor consumes this split; keep it out of non-Linux
 // builds so the fail-closed facade stays dead-code clean.
 #[cfg(target_os = "linux")]
-pub(crate) fn supervisor_args(command: &[OsString]) -> Result<(&OsStr, &[OsString])> {
-    let (program, args) = command
+pub(crate) struct SupervisedWorkload<'a> {
+    pub program: &'a OsStr,
+    pub args: &'a [OsString],
+    /// Privilege-drop identity parsed from `--uid/--gid/--groups` flags.
+    pub identity: Option<opencoder_core::platform::RunAsIdentity>,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn supervisor_args(command: &[OsString]) -> Result<SupervisedWorkload<'_>> {
+    let (identity, rest) = identity::parse(command)?;
+    let (program, args) = rest
         .split_first()
         .context("supervised command missing")?;
-    Ok((program.as_os_str(), args))
+    Ok(SupervisedWorkload {
+        program: program.as_os_str(),
+        args,
+        identity,
+    })
 }
 
 #[cfg(all(test, target_os = "linux"))]

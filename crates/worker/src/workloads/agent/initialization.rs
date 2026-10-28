@@ -19,9 +19,16 @@ pub(super) async fn ensure(
         .get("harness")
         .map(|v| serde_json::from_value(v.clone()))
         .transpose()?;
-    let mut envs = launch_environment(input, how_append, config_home)?;
+    let mut envs = launch_environment(input, how_append, config_home, config.operator.access)?;
+    let mut identity = None;
     if let Some(record) = worker.inner.journal.lock().await.get(id).await? {
         envs.extend(crate::brain::workspace::envs(&record)?);
+        // Operator executions provisioned a dedicated Linux account at
+        // creation; re-attach it so later phases can drop privileges.
+        identity = record
+            .annotations
+            .get("operator_identity")
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
     }
     opencoder_core::agent::scope::with_root(
         config.agent.agents_dir.clone(),
@@ -55,6 +62,9 @@ pub(super) async fn ensure(
     if let Some(literal) = input["literal_mentions"].as_bool() {
         runtime.literal_mentions = literal;
     }
+    if runtime.run_as.is_none() {
+        runtime.run_as = identity;
+    }
     worker
         .inner
         .state
@@ -67,6 +77,7 @@ fn launch_environment(
     input: &Value,
     how_append: Option<&str>,
     config_home: Option<&Path>,
+    access: opencoder_core::config::OperatorAccessMode,
 ) -> Result<BTreeMap<String, String>> {
     let mut envs: BTreeMap<String, String> = input
         .get("envs")
@@ -78,9 +89,10 @@ fn launch_environment(
             text,
         )));
     }
-    // Frozen operator HOME wins over user and managed environment values.
+    // Frozen operator HOME wins over user and managed environment values;
+    // the tier's TMPDIR rides along (read-only runs get none).
     if let Some(home) = config_home {
-        envs.extend(crate::operations::operator_env::env_pairs(home));
+        envs.extend(crate::operations::operator_env::env_pairs(home, access));
     }
     Ok(envs)
 }

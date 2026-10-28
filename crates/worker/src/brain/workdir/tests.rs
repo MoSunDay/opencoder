@@ -112,7 +112,11 @@ async fn managed_session_keeps_admitted_settings_in_an_isolated_workspace() {
             item.annotations = json!({"operator_environment_version":1});
             let mut frozen = config.clone();
             frozen.model = "fixture/frozen-model".into();
-            let (home, _) = crate::operations::operator_env::materialize(
+            // Unit-test materialize keeps the node-owned layout (identity
+            // provisioning is integration-level).
+            frozen.operator.linux_identity =
+                opencoder_core::config::LinuxIdentityMode::Off;
+            let environment = crate::operations::operator_env::materialize(
                 &worker.inner.layout,
                 kind,
                 suffix,
@@ -120,7 +124,7 @@ async fn managed_session_keeps_admitted_settings_in_an_isolated_workspace() {
             )
             .unwrap()
             .unwrap();
-            Some(home)
+            Some(environment.home)
         } else {
             None
         };

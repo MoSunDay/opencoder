@@ -37,10 +37,25 @@ pub fn mock() -> Arc<MockChatClient> {
         }]),
     )
 }
+/// Keep operator executions in these fixtures on the node user: integration
+/// tests must not provision real Linux accounts (`operator.linux_identity`).
+/// Pre-publishing the operator-plane config wins over the one-shot bootstrap,
+/// so the override is stable for the worker's lifetime.
+pub fn disable_operator_identity(root: &std::path::Path) {
+    let dir = root.join("node/operator-config");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"operator":{"linux_identity":"off"}}"#,
+    )
+    .unwrap();
+}
+
 pub async fn worker(root: &std::path::Path, client: Arc<dyn ChatStream>) -> Worker {
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    disable_operator_identity(root);
     Worker::open(
         WorkerOptions {
             name: "test-node".into(),
@@ -134,6 +149,7 @@ pub async fn worker_with_client(root: &std::path::Path, client: Arc<dyn ChatStre
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    disable_operator_identity(root);
     Worker::open(
         WorkerOptions {
             name: "test-node".into(),

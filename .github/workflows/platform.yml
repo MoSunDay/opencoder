@@ -176,7 +176,16 @@ jobs:
         run: brew install cmake
 
       - name: check (non-Linux closure compiles)
-        run: cargo check -p opencoder -p opencoder-server
+        run: |
+          set +e
+          cargo check -p opencoder -p opencoder-server 2>&1 | tee "$RUNNER_TEMP/macos-check.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          if [ "$result" -ne 0 ]; then
+            tail -n 60 "$RUNNER_TEMP/macos-check.log" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}' > "$RUNNER_TEMP/macos-annotation.txt"
+            printf '::error title=macOS cargo check failure::%s\n' "$(cat "$RUNNER_TEMP/macos-annotation.txt")" >&2
+            exit 1
+          fi
 
       - name: clippy
         run: cargo clippy -p opencoder -p opencoder-server --all-targets -- -D warnings

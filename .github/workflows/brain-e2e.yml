@@ -53,7 +53,7 @@ jobs:
       - name: Browser and native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libclang-dev cmake pkg-config nfs-common
+          sudo apt-get install -y libclang-dev cmake pkg-config nfs-common ripgrep
           if ! command -v runc >/dev/null; then sudo apt-get install -y runc; fi
       - name: Install SPA dependencies and Chromium
         working-directory: crates/web/spa

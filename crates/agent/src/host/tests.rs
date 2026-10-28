@@ -9,14 +9,14 @@ use std::time::Duration;
 mod forwarding;
 #[path = "tests/hibernation.rs"]
 mod hibernation;
+#[path = "tests/inventory_changes.rs"]
+mod inventory_changes;
 #[path = "tests/maintenance.rs"]
 mod maintenance;
 #[path = "tests/parent_affinity.rs"]
 mod parent_affinity;
 #[path = "tests/read_reports.rs"]
 mod read_reports;
-#[path = "tests/inventory_changes.rs"]
-mod inventory_changes;
 #[path = "tests/result_upgrade.rs"]
 mod result_upgrade;
 #[path = "tests/runtime_lifecycle.rs"]

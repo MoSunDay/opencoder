@@ -103,7 +103,9 @@ fn parse_id(flag: &str, value: &OsString) -> Result<u32> {
 }
 
 fn parse_groups(value: &OsString) -> Result<Vec<u32>> {
-    let text = value.to_str().context("supervisor --groups value invalid")?;
+    let text = value
+        .to_str()
+        .context("supervisor --groups value invalid")?;
     let mut groups = Vec::new();
     for group in text.split(',') {
         if group.is_empty() {

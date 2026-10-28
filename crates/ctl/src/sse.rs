@@ -207,14 +207,20 @@ mod tests {
             data: r#"{"a": 1,"b":[1,2]}"#.into(),
         };
         let line = String::from_utf8(frame_line(&frame)).unwrap();
-        assert_eq!(line, r#"{"event":"status","seq":7,"data":{"a": 1,"b":[1,2]}}"#);
+        assert_eq!(
+            line,
+            r#"{"event":"status","seq":7,"data":{"a": 1,"b":[1,2]}}"#
+        );
         assert!(serde_json::from_str::<serde_json::Value>(&line).is_ok());
     }
 
     #[test]
     fn frame_line_wraps_non_json_data_and_missing_fields() {
         let frame = Frame::default();
-        let mut frame = Frame { data: "plain \"text\"".into(), ..frame };
+        let mut frame = Frame {
+            data: "plain \"text\"".into(),
+            ..frame
+        };
         frame.event = None;
         frame.id = Some("not-a-number".into());
         let line = String::from_utf8(frame_line(&frame)).unwrap();

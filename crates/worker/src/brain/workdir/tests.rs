@@ -114,8 +114,7 @@ async fn managed_session_keeps_admitted_settings_in_an_isolated_workspace() {
             frozen.model = "fixture/frozen-model".into();
             // Unit-test materialize keeps the node-owned layout (identity
             // provisioning is integration-level).
-            frozen.operator.linux_identity =
-                opencoder_core::config::LinuxIdentityMode::Off;
+            frozen.operator.linux_identity = opencoder_core::config::LinuxIdentityMode::Off;
             let environment = crate::operations::operator_env::materialize(
                 &worker.inner.layout,
                 kind,

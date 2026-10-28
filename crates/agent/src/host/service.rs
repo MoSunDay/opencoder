@@ -2,7 +2,7 @@ use super::Host;
 use anyhow::{Context, Result};
 use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// The wire operation already carries an execution reference on every query.
 /// Never infer ownership from an ID prefix or from the currently active release.

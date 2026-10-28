@@ -38,7 +38,11 @@ fn layout(root: &Path) -> DirectoryLayout {
 }
 
 fn mode_of(path: &Path) -> u32 {
-    std::fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    std::fs::symlink_metadata(path)
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777
 }
 
 fn owner_of(path: &Path) -> (u32, u32) {
@@ -138,7 +142,10 @@ fn release_hands_files_back_and_deletes_the_account() {
     assert_eq!(owner_of(&produced), (0, 0));
     assert_eq!(owner_of(&environment.home), (0, 0));
     // Files survive with their content; only ownership moves.
-    assert_eq!(std::fs::read_to_string(&produced).unwrap(), "operator output");
+    assert_eq!(
+        std::fs::read_to_string(&produced).unwrap(),
+        "operator output"
+    );
 
     // Idempotent: a second release (absent account) succeeds.
     identity::release_identity(&layout, ExecutionKind::Operator, &id).unwrap();
@@ -156,10 +163,9 @@ fn fork_provisions_a_fresh_distinct_account() {
     let child = format!("operator-{}", ulid::Ulid::new());
     let version = serde_json::json!(1);
 
-    let parent_env =
-        identity::materialize(&layout, ExecutionKind::Operator, &parent, &enforced())
-            .unwrap()
-            .expect("parent materializes");
+    let parent_env = identity::materialize(&layout, ExecutionKind::Operator, &parent, &enforced())
+        .unwrap()
+        .expect("parent materializes");
     let child_env = identity::fork_environment(
         &layout,
         ExecutionKind::Operator,
@@ -178,8 +184,14 @@ fn fork_provisions_a_fresh_distinct_account() {
         AccountGuard::capture(parent_name.clone()),
         AccountGuard::capture(child_name.clone()),
     ];
-    assert_eq!(parent_identity.username.as_deref(), Some(parent_name.as_str()));
-    assert_eq!(child_identity.username.as_deref(), Some(child_name.as_str()));
+    assert_eq!(
+        parent_identity.username.as_deref(),
+        Some(parent_name.as_str())
+    );
+    assert_eq!(
+        child_identity.username.as_deref(),
+        Some(child_name.as_str())
+    );
     assert_ne!(parent_identity.username, child_identity.username);
     assert_ne!(parent_identity.uid, child_identity.uid);
     let child_account = identity::lookup(&child_name).unwrap();
@@ -224,10 +236,7 @@ fn identity_annotation_persists_the_provisioned_identity() {
         .unwrap()
         .unwrap();
     let annotation = identity::identity_annotation(&Some(environment));
-    assert_eq!(
-        annotation["username"].as_str().unwrap(),
-        username.as_str()
-    );
+    assert_eq!(annotation["username"].as_str().unwrap(), username.as_str());
     // Round-trips into the persisted harness runtime field.
     let run_as: opencoder_core::platform::RunAsIdentity =
         serde_json::from_value(annotation).unwrap();

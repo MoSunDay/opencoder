@@ -62,41 +62,35 @@ mod tests {
             status: ExecutionStatus::Running,
             ..done.clone()
         };
-        assert!(
-            store
-                .apply_index_snapshot_fenced(
-                    &done.node_id,
-                    std::slice::from_ref(&running),
-                    None,
-                    ("host-2", 10),
-                )
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(store
+            .apply_index_snapshot_fenced(
+                &done.node_id,
+                std::slice::from_ref(&running),
+                None,
+                ("host-2", 10),
+            )
+            .await
+            .unwrap()
+            .is_some());
         assert_eq!(store.index(&done.id).await.unwrap().unwrap(), done);
         let conflict = ExecutionIndex {
             created_at: 2,
             ..running.clone()
         };
-        assert!(
-            store
-                .apply_index_snapshot_fenced(&done.node_id, &[conflict], None, ("host-2", 10),)
-                .await
-                .is_err()
-        );
-        assert!(
-            store
-                .apply_index_snapshot_fenced(
-                    &done.node_id,
-                    std::slice::from_ref(&running),
-                    None,
-                    ("host-1", 99),
-                )
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(store
+            .apply_index_snapshot_fenced(&done.node_id, &[conflict], None, ("host-2", 10),)
+            .await
+            .is_err());
+        assert!(store
+            .apply_index_snapshot_fenced(
+                &done.node_id,
+                std::slice::from_ref(&running),
+                None,
+                ("host-1", 99),
+            )
+            .await
+            .unwrap()
+            .is_none());
         assert_eq!(store.index(&done.id).await.unwrap().unwrap(), done);
         store
             .apply_index_snapshot_fenced(

@@ -3,8 +3,8 @@ use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     },
     time::Duration,
 };
@@ -126,16 +126,14 @@ async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
         while inventory.reports.load(Ordering::SeqCst) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(
-            tokio::time::timeout(
-                Duration::from_millis(20),
-                state
-                    .fleet
-                    .put_definition("test", "writer-barrier", &serde_json::json!({})),
-            )
-            .await
-            .is_err()
-        );
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            state
+                .fleet
+                .put_definition("test", "writer-barrier", &serde_json::json!({})),
+        )
+        .await
+        .is_err());
         assert!(
             !tokio::time::timeout(Duration::from_secs(1), state.fleet.nodes())
                 .await
@@ -230,7 +228,7 @@ async fn report_ack(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn acknowledged_report_detach_cannot_promote_or_ack_replacement_connection() {
-    use super::report_storage::{Fixture, send, until};
+    use super::report_storage::{send, until, Fixture};
     use futures::StreamExt;
     let fixture = Fixture::start().await;
     let mut old = fixture.connect(1).await;

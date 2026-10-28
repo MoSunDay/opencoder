@@ -1,5 +1,5 @@
 //! Scalar ownership checks never parse frozen request bodies after warmup.
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use turso::Connection;
 
 pub(super) async fn apply(conn: &Connection, encoded: &str) -> Result<()> {

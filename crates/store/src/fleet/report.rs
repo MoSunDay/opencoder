@@ -1,9 +1,9 @@
 use super::FleetStore;
-use super::{FleetConnection, records::read_index};
-use anyhow::{Context, Result, bail};
-use opencoder_core::fleet::{ExecutionIndex, valid_id};
+use super::{records::read_index, FleetConnection};
+use anyhow::{bail, Context, Result};
+use opencoder_core::fleet::{valid_id, ExecutionIndex};
 use std::collections::HashSet;
-use turso::{Connection, params};
+use turso::{params, Connection};
 
 #[cfg(test)]
 mod performance;

@@ -306,7 +306,12 @@ pub(crate) fn start_scheduler(worker: &Worker) {
                 *worker.inner.persistence_error.lock().unwrap() =
                     Some(format!("pending dispatch: {error:#}"));
             }
-            delay = if worker.inner.pending_runs.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            delay = if worker
+                .inner
+                .pending_runs
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > 0
+            {
                 std::time::Duration::from_millis(DISPATCH_INTERVAL_MS)
             } else {
                 std::time::Duration::from_millis(IDLE_DISPATCH_INTERVAL_MS)

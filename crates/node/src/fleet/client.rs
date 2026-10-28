@@ -2,15 +2,15 @@ use super::NodeService;
 mod delta;
 mod report;
 mod skip;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use futures::{FutureExt, SinkExt, StreamExt};
 use opencoder_core::fleet::*;
-use report::{ReportFrames, begin_report};
+use report::{begin_report, ReportFrames};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{Message, client::IntoClientRequest, protocol::frame::coding::CloseCode},
+    tungstenite::{client::IntoClientRequest, protocol::frame::coding::CloseCode, Message},
 };
 
 pub async fn run(remote: &str, token: &str, service: Arc<dyn NodeService>) -> Result<()> {

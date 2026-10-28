@@ -56,8 +56,11 @@ async fn shared_catalog_does_not_install_runtime_reporting_schema() {
         crate::TursoStore::open_catalog(std::path::Path::new(&path))
             .await
             .unwrap();
-        std::fs::write(std::path::Path::new(&path).with_extension("opened"), b"opened")
-            .unwrap();
+        std::fs::write(
+            std::path::Path::new(&path).with_extension("opened"),
+            b"opened",
+        )
+        .unwrap();
         return;
     }
     let root = tempfile::tempdir().unwrap();

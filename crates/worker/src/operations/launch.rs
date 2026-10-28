@@ -148,7 +148,8 @@ pub(super) async fn launch_locked(
         // account (produced files handed back to the node user). Idempotent,
         // so a failed attempt can simply be retried later.
         #[cfg(target_os = "linux")]
-        if record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Operator && terminal
+        if record.assignment.index.kind == opencoder_core::fleet::ExecutionKind::Operator
+            && terminal
         {
             if let Err(error) = crate::operations::operator_env::release_identity(
                 &worker.inner.layout,

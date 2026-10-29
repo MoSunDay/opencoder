@@ -29,3 +29,4 @@ Commit: 基线 f606041c，随本笔提交
 | `cargo test -p opencoder-control --lib -- release::outbox ontology_catalog::sync transport::hub` | 14 通过（含 3 项新增） |
 | `cargo test -p opencoder-cli --lib` | 41 通过（含 2 项新增 + 2 项修正后全绿） |
 | `cargo clippy -p opencoder-control -p opencoder-cli --all-targets` | 通过，零警告 |
+| 实机复测（负载空闲后）：server(18081) + `--resources`(18082) + agent run，`/api/health` ok，空闲 60s 采样 | server 0.18%→**0.067%**、resources **0.00%**、agent **0.05%**；agent 配置合并 WARN 77 秒内 15 次→3 次（缓存生效，残留为缓存外加载点，非周期性）；服务端日志零 error/panic |

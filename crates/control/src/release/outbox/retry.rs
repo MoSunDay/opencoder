@@ -41,6 +41,12 @@ impl Retries {
         self.failures.is_empty()
     }
 
+    /// Earliest retry time among tracked failures: the next moment a tick
+    /// can make progress when only backoffs are pending.
+    pub(super) fn next_due(&self) -> Option<Instant> {
+        self.failures.values().map(|failure| failure.next).min()
+    }
+
     pub fn ready(&self, id: &str, generation: &str, now: Instant) -> bool {
         self.failures
             .get(id)
@@ -90,6 +96,27 @@ mod tests {
         assert!(retry.ready("old", "host-2", now + Duration::from_secs(1)));
         retry.completed("old".into(), "host-2".into(), 202, now);
         assert!(retry.ready("old", "host-2", now));
+    }
+
+    #[test]
+    fn next_due_reports_the_earliest_pending_retry() {
+        let mut retry = Retries::default();
+        assert_eq!(
+            retry.next_due(),
+            None,
+            "no failures tracked means no due time"
+        );
+        let now = Instant::now();
+        retry.completed("a".into(), "host-1".into(), 503, now);
+        retry.completed("b".into(), "host-1".into(), 503, now);
+        assert_eq!(retry.next_due(), Some(now + Duration::from_secs(1)));
+        // A later retry for "a" must not move the earliest due time.
+        retry.completed("a".into(), "host-1".into(), 503, now + Duration::from_secs(2));
+        assert_eq!(retry.next_due(), Some(now + Duration::from_secs(1)));
+        retry.completed("a".into(), "host-1".into(), 202, now + Duration::from_secs(2));
+        assert_eq!(retry.next_due(), Some(now + Duration::from_secs(1)));
+        retry.completed("b".into(), "host-1".into(), 202, now + Duration::from_secs(2));
+        assert_eq!(retry.next_due(), None, "accepted dispatches clear the due time");
     }
 
     #[test]

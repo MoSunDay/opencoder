@@ -14,8 +14,23 @@ use std::{
     collections::VecDeque, convert::Infallible, future::Future, pin::Pin, sync::Arc, time::Duration,
 };
 
-/// Poll interval between node round-trips once the local queue drains.
-const POLL_INTERVAL: Duration = Duration::from_millis(300);
+/// Poll interval for the first re-fetch once the local queue drains.
+const POLL_FLOOR: Duration = Duration::from_millis(300);
+/// Poll interval cap after consecutive empty pages. Bounds the control
+/// plane to node RPC rate of idle spectator streams while keeping new-event
+/// visibility at one second.
+const POLL_CAP: Duration = Duration::from_secs(1);
+
+/// Poll interval after `empty_polls` consecutive pages delivered nothing
+/// new: ramps from the floor to the cap. Any delivered frame resets the
+/// ladder (see the unfold loop).
+fn poll_delay(empty_polls: u32) -> Duration {
+    if empty_polls == 0 {
+        POLL_FLOOR
+    } else {
+        POLL_CAP
+    }
+}
 
 #[derive(Deserialize)]
 pub struct Cursor {
@@ -37,8 +52,10 @@ fn cursor_after(query: &Cursor, headers: &HeaderMap) -> i64 {
 }
 
 /// Turn a paged node query into an SSE stream: emit queued frames, refetch
-/// after `POLL_INTERVAL` when the queue drains, and end once the node reports
-/// `finished` with no further page. A non-200 poll becomes one `error` frame.
+/// after [`poll_delay`] when the queue drains (the interval ramps to its cap
+/// across consecutive empty pages and resets on any delivered frame), and
+/// end once the node reports `finished` with no further page. A non-200
+/// poll becomes one `error` frame.
 fn sse(
     first: RpcReply,
     fetch: PageFetch,
@@ -56,9 +73,10 @@ fn sse(
             VecDeque::<Value>::new(),
             Some(first.body),
             false,
+            0u32,
             false,
         ),
-        |(lifecycle, fetch, mut cursor, mut queue, mut page, mut ended, end_sent)| async move {
+        |(lifecycle, fetch, mut cursor, mut queue, mut page, mut ended, mut empty_polls, end_sent)| async move {
             if end_sent {
                 return None;
             }
@@ -71,7 +89,7 @@ fn sse(
                         .data("release switch");
                     return Some((
                         Ok(event),
-                        (lifecycle, fetch, cursor, queue, None, false, true),
+                        (lifecycle, fetch, cursor, queue, None, false, empty_polls, true),
                     ));
                 }
                 if let Some(frame) = queue.pop_front() {
@@ -83,9 +101,12 @@ fn sse(
                         .event(frame["kind"].as_str().unwrap_or("status"))
                         .json_data(&frame["data"])
                         .expect("JSON event");
+                    // Frames flowing means an active stream: reset the
+                    // empty-poll ladder so the next re-fetch stays fast.
+                    empty_polls = 0;
                     return Some((
                         Ok::<_, Infallible>(event),
-                        (lifecycle, fetch, cursor, queue, page, ended, false),
+                        (lifecycle, fetch, cursor, queue, page, ended, empty_polls, false),
                     ));
                 }
                 if ended {
@@ -95,14 +116,14 @@ fn sse(
                         .expect("JSON stream end");
                     return Some((
                         Ok(event),
-                        (lifecycle, fetch, cursor, queue, None, true, true),
+                        (lifecycle, fetch, cursor, queue, None, true, empty_polls, true),
                     ));
                 }
                 let body = match page.take() {
                     Some(body) => body,
                     None => {
                         let reply = tokio::select! {
-                            reply = async { tokio::time::sleep(POLL_INTERVAL).await; fetch(cursor).await } => reply,
+                            reply = async { tokio::time::sleep(poll_delay(empty_polls)).await; fetch(cursor).await } => reply,
                             _ = lifecycle.retired() => continue,
                         };
                         if reply.status != 200 {
@@ -112,7 +133,7 @@ fn sse(
                                 .expect("JSON error");
                             return Some((
                                 Ok(event),
-                                (lifecycle, fetch, cursor, queue, None, true, true),
+                                (lifecycle, fetch, cursor, queue, None, true, empty_polls, true),
                             ));
                         }
                         reply.body
@@ -121,10 +142,14 @@ fn sse(
                 let rows = body["events"].as_array().cloned().unwrap_or_default();
                 ended = body["finished"].as_bool().unwrap_or(false)
                     && !body["more"].as_bool().unwrap_or(false);
+                let delivered = queue.len();
                 queue.extend(
                     rows.into_iter()
                         .filter(|row| row["seq"].as_i64().is_some_and(|seq| seq > cursor)),
                 );
+                if queue.len() == delivered {
+                    empty_polls = empty_polls.saturating_add(1);
+                }
             }
         },
     );
@@ -215,4 +240,16 @@ pub async fn dag_instance_events(
     };
     let first = fetch(after).await;
     sse(first, fetch, after, state.lifecycle.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_delay_ramps_on_empty_pages_and_caps_at_one_second() {
+        assert_eq!(poll_delay(0), POLL_FLOOR);
+        assert_eq!(poll_delay(1), POLL_CAP, "an empty page steps to the cap");
+        assert_eq!(poll_delay(9), POLL_CAP, "the ladder never grows past the cap");
+    }
 }

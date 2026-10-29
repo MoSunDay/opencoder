@@ -90,6 +90,12 @@ pub(super) fn check_path(path: &Path) -> Result<()> {
     let mut cursor = std::path::PathBuf::new();
     for component in path.components() {
         cursor.push(component);
+        // Drive prefixes and roots cannot be symlinks, and a Windows
+        // verbatim prefix (`\\?\C:`) is not probeable until the first
+        // real segment is appended, so only normal segments are checked.
+        if !matches!(component, std::path::Component::Normal(_)) {
+            continue;
+        }
         ensure!(
             !opencoder_core::platform::fs::is_link(&std::fs::symlink_metadata(&cursor)?),
             "result path contains a symlink"

@@ -192,6 +192,7 @@ async fn workspace_admission_shares_files_and_preserves_activation_identity() {
     assert!(prepare(&worker, &changed).await.is_err());
 }
 
+#[cfg(not(windows))] // Windows nodes reject Brain operations at the capability gate
 #[tokio::test]
 async fn recovered_terminal_notice_commits_through_worker_without_resuming() {
     use opencoder_node::fleet::NodeService;

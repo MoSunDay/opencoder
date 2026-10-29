@@ -203,6 +203,12 @@ pub(crate) fn checked(root: &Path, path: &Path) -> Result<()> {
             "invalid workspace path"
         );
         cursor.push(part);
+        // Drive prefixes and roots cannot be symlinks, and a Windows
+        // verbatim prefix (`\\?\C:`) is not probeable until the first
+        // real segment is appended, so only normal segments are checked.
+        if !matches!(part, std::path::Component::Normal(_)) {
+            continue;
+        }
         crate::layout::reject_symlink(&cursor, "shared workspace path")
             .with_context(|| format!("verify shared workspace component {}", cursor.display()))?;
     }

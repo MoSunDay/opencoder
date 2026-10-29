@@ -96,7 +96,9 @@ async function main() {
 
     await page.getByRole('button', { name: '关闭画布', exact: true }).click();
     await page.getByRole('button', { name: '新建计划', exact: true }).click();
+    await page.locator('.brain-execution-node').first().waitFor({ timeout: 10000 });
     assert.equal(await page.locator('.brain-execution-node').count(), 3, 'canvas draft must survive closing');
+    await page.locator('.react-flow__edge').first().waitFor({ timeout: 10000 });
     assert.equal(await page.locator('.react-flow__edge').count(), 1, 'milestone order must survive closing');
     await page.getByRole('button', { name: '下一步：计划信息', exact: true }).click();
     await page.getByLabel('计划名称', { exact: true }).fill(planTitle);

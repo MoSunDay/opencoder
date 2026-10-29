@@ -51,6 +51,7 @@ target-rev/
 target-clean/
 
 # Gate-test build dirs
+/target-submit/
 .target-gate/
 .target-rv2/
 .target-rv3/

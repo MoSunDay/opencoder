@@ -30,6 +30,8 @@ pub struct MockState {
     pub questions: Vec<Value>,
     /// Execution status served by `/index` (empty = "running").
     pub status: String,
+    /// `summary` string served by `/result` (None = empty object).
+    pub result_summary: Option<String>,
 }
 pub struct Fixture {
     pub url: String,
@@ -217,61 +219,79 @@ async fn handler(State(state): State<Arc<Mutex<MockState>>>, request: Request<Bo
         let end = (offset + 4096).min(state.payload.len());
         return axum::Json(json!({"seq":7,"offset":offset,"next_offset":end,"total_bytes":state.payload.len(),"eof":end==state.payload.len(),"encoding":"utf8-base64","bytes_b64":base64::engine::general_purpose::STANDARD.encode(&state.payload[offset..end])})).into_response();
     }
+    if path.ends_with("/result") {
+        return axum::Json(json!({"summary":state.result_summary})).into_response();
+    }
+    // Direct per-execution message paging (`fetch_tokens`): the same chunk
+    // encoding as `/transcript`, served from the same seeded messages.
+    if path.ends_with("/messages") {
+        let cursor = MessageCursor {
+            seq: query_value("seq") as i64,
+            offset: query_value("offset"),
+        };
+        return axum::Json(message_page(&state.messages, cursor)).into_response();
+    }
     if path.ends_with("/transcript") {
         let cursor = MessageCursor {
             seq: query_value("seq") as i64,
             offset: query_value("offset"),
         };
-        let mut chunks = Vec::new();
-        let mut next_cursor = None;
-        for (index, message) in state.messages.iter().enumerate() {
-            let seq = (index + 1) as i64;
-            if seq < cursor.seq || (seq == cursor.seq && cursor.offset == 0) {
-                continue;
-            }
-            let bytes = serde_json::to_vec(message).unwrap();
-            let offset = if seq == cursor.seq {
-                cursor.offset as usize
-            } else {
-                0
-            };
-            let end = (offset + 4096).min(bytes.len());
-            let eof = end == bytes.len();
-            chunks.push(MessageChunk {
-                seq,
-                role: serde_json::to_value(message.role)
-                    .unwrap()
-                    .as_str()
-                    .unwrap()
-                    .into(),
-                created_at: message.created_at,
-                offset: offset as u64,
-                next_offset: end as u64,
-                total_bytes: bytes.len() as u64,
-                eof,
-                encoding: "base64".into(),
-                bytes_b64: base64::engine::general_purpose::STANDARD.encode(&bytes[offset..end]),
-            });
-            if !eof {
-                next_cursor = Some(MessageCursor {
-                    seq,
-                    offset: end as u64,
-                });
-                break;
-            }
-        }
-        return axum::Json(MessagePage {
-            chunks,
-            more: next_cursor.is_some(),
-            next_cursor,
-        })
-        .into_response();
+        return axum::Json(message_page(&state.messages, cursor)).into_response();
     }
     (
         StatusCode::NOT_FOUND,
         axum::Json(json!({"error":"mock endpoint not found"})),
     )
         .into_response()
+}
+
+/// Encode `messages` as one base64-chunked [`MessagePage`] from `cursor`,
+/// mirroring the real server's 4096-byte chunking (one incomplete chunk per
+/// page; small fixtures usually fit in a single page).
+fn message_page(messages: &[Message], cursor: MessageCursor) -> MessagePage {
+    let mut chunks = Vec::new();
+    let mut next_cursor = None;
+    for (index, message) in messages.iter().enumerate() {
+        let seq = (index + 1) as i64;
+        if seq < cursor.seq || (seq == cursor.seq && cursor.offset == 0) {
+            continue;
+        }
+        let bytes = serde_json::to_vec(message).unwrap();
+        let offset = if seq == cursor.seq {
+            cursor.offset as usize
+        } else {
+            0
+        };
+        let end = (offset + 4096).min(bytes.len());
+        let eof = end == bytes.len();
+        chunks.push(MessageChunk {
+            seq,
+            role: serde_json::to_value(message.role)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .into(),
+            created_at: message.created_at,
+            offset: offset as u64,
+            next_offset: end as u64,
+            total_bytes: bytes.len() as u64,
+            eof,
+            encoding: "base64".into(),
+            bytes_b64: base64::engine::general_purpose::STANDARD.encode(&bytes[offset..end]),
+        });
+        if !eof {
+            next_cursor = Some(MessageCursor {
+                seq,
+                offset: end as u64,
+            });
+            break;
+        }
+    }
+    MessagePage {
+        chunks,
+        more: next_cursor.is_some(),
+        next_cursor,
+    }
 }
 
 pub async fn until(

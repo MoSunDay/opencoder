@@ -83,6 +83,7 @@ fn draw_frame(
         "act",
         false,
         None,
+        None,
     )
     .unwrap();
 }
@@ -356,6 +357,7 @@ async fn notepad_fullscreen_hides_chat_and_clears_hits() {
         "act",
         false,
         Some(view),
+        None,
     )
     .unwrap();
 

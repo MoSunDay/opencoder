@@ -81,6 +81,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             "act",
             false,
             None,
+            None,
         )
         .unwrap();
         let btn = hits
@@ -170,6 +171,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             opencoder_core::ApMode::Off,
             "act",
             false,
+            None,
             None,
         )
         .unwrap();

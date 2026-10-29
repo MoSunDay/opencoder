@@ -161,6 +161,9 @@ pub(crate) async fn dispatch_slash_action(
     // leaves it untouched. (Trailing param so existing call sites can
     // append one argument instead of reshuffling.)
     agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
+    // `/subtasks` fullscreen view slot — the Subtasks arm fills it; every
+    // other action leaves it untouched (trailing param, same pattern).
+    subtask_view: &mut Option<crate::subtask_detail::SubtaskView>,
 ) -> LoopFlow {
     if chat.remote
         && !matches!(
@@ -304,6 +307,14 @@ pub(crate) async fn dispatch_slash_action(
         }
         SlashAction::Ap => {
             *ap_menu = Some(crate::ap_menu::ApMenu::new(config));
+        }
+        SlashAction::Subtasks => {
+            // Fullscreen detail view over this session's subtask registry
+            // (owned copy; `r`/watcher updates refresh it).
+            let entries = crate::remote::subtasks::load_registry(store, session_id)
+                .await
+                .unwrap_or_default();
+            *subtask_view = Some(crate::subtask_detail::SubtaskView::new(entries));
         }
         SlashAction::Sidecar => {
             // Bypass semantics: the panel opens even mid-turn — the sidecar

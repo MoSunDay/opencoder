@@ -87,6 +87,7 @@ pub(crate) fn render_frame(
     display_mode: &str,
     plan_skill_active: bool,
     notepad: Option<&crate::notepad::NotepadView>,
+    subtask_view: Option<&crate::subtask_detail::SubtaskView>,
 ) -> anyhow::Result<()> {
     let plan_edit_label = plan_edit.as_ref().map(|pe| pe.mode_label());
     let (render_input, render_cursor) = match plan_edit {
@@ -142,6 +143,7 @@ pub(crate) fn render_frame(
         display_mode,
         plan_skill_active,
         notepad,
+        subtask_view,
     )
 }
 

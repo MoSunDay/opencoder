@@ -116,7 +116,7 @@ pub(super) fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
 /// isolation, so production callers stay deterministic. Operator execution
 /// isolation (`Config::load_with_home`) uses this to pin a session's global
 /// config view to its frozen snapshot.
-pub(super) fn candidates_with_home(
+pub fn candidates_with_home(
     working_dir: &Path,
     home_override: Option<&Path>,
 ) -> Vec<PathBuf> {

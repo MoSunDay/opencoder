@@ -37,5 +37,9 @@ ratatui + crossterm 交互界面。细节以代码为准。
 - [remote/transcript.rs](../../crates/tui/src/remote/transcript.rs) 恢复有界消息块与事件，按消费事件确定用户消息边界；压缩后恢复未结束回合的增量，保留用量与展示原文。
 - `/act`、`/plan` 通过 worker 切换和持久化，独立于菜单目录；恢复与无额外消息约束见
   [agent_switch_persist.rs](../../crates/tui/tests/agent_switch_persist.rs)。
+- 本地会话记录按需落库：仅打开 TUI 不写任何会话行；首条普通提示词由 session 层
+  `persist()` 懒创建（含标题），`@capability` 一次性派发作为首条输入时由
+  [remote/subtasks.rs](../../crates/tui/src/remote/subtasks.rs) 的 `ensure_parent_runtime`
+  补建父会话行与 runtime，已存在则原样返回不覆盖。
 
 相关模块：[core](../core/index.md)、[session](../session/index.md)、[control](../control/index.md)、[web](../web/index.md)。行为规则见 [Agent 调度平台](../../features/agent-platform/index.md#tui-任务入口)。

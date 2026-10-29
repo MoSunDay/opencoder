@@ -5,6 +5,7 @@ mod questions;
 mod selection;
 mod session;
 pub mod stream;
+mod subtask_parent;
 pub(crate) mod subtasks;
 pub mod transcript;
 mod worker;

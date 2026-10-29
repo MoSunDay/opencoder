@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use opencoder_core::Config;
-use opencoder_llm::estimate;
+use opencoder_llm::{estimate, ChatStream};
 use opencoder_store::Store;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -69,6 +69,12 @@ pub(crate) async fn handle_submit_action(
     follow: &mut bool,
     body_refresh_pending: &mut bool,
     agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
+    // The `@capability` mention path (dispatch slot + catalog) and the
+    // `/subtasks` fullscreen view slot (trailing params, mirroring the
+    // agent_menu precedent).
+    subtask_ui: &mut crate::subtask_events::SubtaskUi,
+    client_llm: &Arc<dyn ChatStream>,
+    subtask_view: &mut Option<crate::subtask_detail::SubtaskView>,
 ) -> LoopFlow {
     if *running {
         // Submit while running is unreachable (Enter/Tab map to
@@ -91,6 +97,28 @@ pub(crate) async fn handle_submit_action(
             mode_flash,
         );
         push_history(history, hist_idx, &text);
+        return LoopFlow::Proceed;
+    }
+    // `@<capability> <question>`: one-shot subtask dispatch to a
+    // registered Server Agent/Operator. The child runs server-side; the
+    // result is appended back with Ctrl+Enter or from the /subtasks view.
+    // Unknown @-tokens fall through to the normal submit (@file mentions
+    // are unaffected).
+    if mention_dispatch(
+        &text,
+        chat,
+        subtask_ui,
+        store,
+        config,
+        client_llm,
+        workdir,
+        session_id,
+        agent_name,
+        history,
+        hist_idx,
+        mode_flash,
+        anim_tick,
+    ) {
         return LoopFlow::Proceed;
     }
     // Idle submit: the turn starts now, so eager skill
@@ -162,6 +190,7 @@ pub(crate) async fn handle_submit_action(
             notepad,
             clear_confirm,
             agent_menu,
+            subtask_view,
         )
         .await;
         match f {
@@ -217,4 +246,64 @@ pub(crate) async fn handle_submit_action(
         *body_refresh_pending = true;
     }
     LoopFlow::Proceed
+}
+
+
+/// `@<capability> <question>` one-shot subtask dispatch: route the
+/// submit to a registered Server Agent/Operator instead of a local turn. The
+/// child execution runs server-side (its `tui_remote_*` bookmark session and
+/// the parent registry entry are created by `remote::subtasks::dispatch`);
+/// the main-loop dispatch poller flashes completion and spawns the watcher.
+/// Returns `true` when the input was consumed as a subtask dispatch.
+#[allow(clippy::too_many_arguments)]
+fn mention_dispatch(
+    text: &str,
+    chat: &ChatView,
+    subtask_ui: &mut crate::subtask_events::SubtaskUi,
+    store: &Arc<dyn Store>,
+    config: &Config,
+    client_llm: &Arc<dyn ChatStream>,
+    workdir: &Path,
+    session_id: &str,
+    agent_name: &str,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+) -> bool {
+    // Remote sessions cannot own a local parent registry entry.
+    if chat.remote {
+        return false;
+    }
+    let Some((capability_id, question)) =
+        crate::remote::subtasks::parse_mention(text, &subtask_ui.caps)
+    else {
+        return false;
+    };
+    let Some(capability) = subtask_ui
+        .caps
+        .iter()
+        .find(|capability| capability.id == capability_id)
+        .cloned()
+    else {
+        return false;
+    };
+    subtask_ui.dispatch = Some(crate::remote::subtasks::request_dispatch(
+        Arc::clone(store),
+        config.clone(),
+        Arc::clone(client_llm),
+        workdir.to_path_buf(),
+        capability,
+        question,
+        session_id.to_string(),
+        agent_name.to_string(),
+    ));
+    *mode_flash = Some((format!("正在提交 subtask 给 {capability_id}…"), anim_tick));
+    // The composer already cleared the draft (the Submit key path); keep the
+    // raw mention for arrow-up recall, mirroring the normal submit history.
+    if history.last().map(String::as_str) != Some(text) {
+        history.push(text.to_string());
+    }
+    *hist_idx = None;
+    true
 }

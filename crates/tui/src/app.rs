@@ -31,6 +31,8 @@ mod app_display;
 pub(crate) mod app_loop;
 #[path = "app_notepad.rs"]
 mod app_notepad;
+#[path = "app_subtask.rs"]
+mod app_subtask;
 #[path = "app_popups.rs"]
 mod app_popups;
 #[path = "app_submit.rs"]
@@ -158,6 +160,11 @@ pub(super) async fn run_app(
     // TUI-internal subtask hub: dedicated watcher channel + dispatch slot
     // (survives `/task` switches, unlike the session worker channels).
     let mut subtask_ui = crate::subtask_events::SubtaskUi::new();
+    // Fullscreen `/subtasks` detail view; `None` = closed. Owned here so it
+    // survives nothing (cleared on every `/task` switch, like the modals).
+    let mut subtask_view: Option<crate::subtask_detail::SubtaskView> = None;
+    // Warm the `@capability` mention catalog (idle no-op when remote is off).
+    subtask_ui.refresh_caps(&config);
     // Resume any still-pending subtask pollers for the startup session; the
     // server keeps executing while the TUI was closed. Remote sessions have
     // no local parent registry to watch.
@@ -231,8 +238,15 @@ pub(super) async fn run_app(
                     admit_st = Default::default();
                     // User-driven switches drop the subtask descent pointer
                     // (Ctrl+Enter only returns from a session the TUI itself
-                    // descended into) and resume this session's watchers.
+                    // descended into), close the fullscreen subtask view and
+                    // resume this session's watchers.
                     subtask_ui.main_task_id = None;
+                    // A staged descent (Enter key in the `/subtasks` view)
+                    // adopts its parent pointer right after the clear above.
+                    if let Some(parent) = subtask_ui.arm_after_switch.take() {
+                        subtask_ui.main_task_id = Some(parent);
+                    }
+                    subtask_view = None;
                     if !chat.remote {
                         subtask_ui
                             .maybe_spawn_watcher(&config, &store, &session_id)
@@ -329,6 +343,7 @@ pub(super) async fn run_app(
                     &display_mode,
                     plan_skill_active,
                     notepad.as_ref(),
+                    subtask_view.as_ref(),
                 )?;
             }
             dirty = false;
@@ -377,6 +392,13 @@ pub(super) async fn run_app(
                         if r.handled {
                             dirty = true; continue;
                         }
+                        // Fullscreen `/subtasks` view: intercept all keys.
+                        if subtask_view.is_some() {
+                            let term_h = terminal.size().map(|r| r.height).unwrap_or(app_subtask::FALLBACK_TERM_H);
+                            if app_subtask::key(&mut subtask_view, k, term_h, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, &config).await {
+                                dirty = true; continue;
+                            }
+                        }
                         // Task picker modal: intercept all keys while open.
                         match app_popups::handle_popup_key(
                             k, &mut task_picker, &mut selection, &mut pending_task_pick,
@@ -389,6 +411,7 @@ pub(super) async fn run_app(
                             &mut follow, &session_id, &agent_name, &mut input, &mut cursor_idx,
                             &workdir, &mut mode_flash, anim_tick, &mut sys_tokens, &mut plan_edit,
                             &mut notepad, &mut clear_confirm, &mut agent_menu,
+                            &mut subtask_view,
                         )
                         .await
                         {
@@ -471,6 +494,7 @@ pub(super) async fn run_app(
                                     &mut cache_salt_menu, &mut config, &cmd_tx, &mut cancel,
                                     &mut task_elapsed_ms, &mut cancelled, &mut follow,
                                     &mut body_refresh_pending, &mut agent_menu,
+                                    &mut subtask_ui, &client, &mut subtask_view,
                                 )
                                 .await
                                     == app_loop::LoopFlow::Quit
@@ -483,14 +507,7 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::AppendSubtask(child_id) => {
-                                if let Some(pick) = app_loop::append_subtask_result(
-                                    &child_id, &store, &session_id, &mut chat,
-                                    subtask_ui.main_task_id.as_deref(), &admit_tx, &mut admit_st,
-                                    &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick,
-                                ).await {
-                                    subtask_ui.main_task_id = None;
-                                    pending_task_pick = Some(pick);
-                                }
+                                app_subtask::append_and_pick(&child_id, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick).await;
                                 dirty = true;
                             }
                             KeyAction::Steer(text) => {
@@ -733,40 +750,15 @@ pub(super) async fn run_app(
                     dirty = true;
                 }
                 if app_notepad::poll_bash(&mut bash_rx, &mut chat) { dirty = true; }
-                // Subtask watcher deliveries (dedicated channel; the session
-                // worker channel is quit on every switch).
-                for ev in subtask_ui.drain_updates() {
-                    if let UiEvent::SubtaskUpdate { ref session, ref id, ref status, ref summary, tokens } = ev {
-                        if let Some((done, total, _)) = crate::subtask_events::apply_update(
-                            &store, &mut session_states, &session_id, &mut chat,
-                            session, id, status, summary.as_deref(), tokens,
-                        ).await {
-                            let _ = (done, total);
-                            if crate::subtask_registry::is_terminal(status) {
-                                mode_flash = Some((format!("subtask {id} {status}"), anim_tick));
-                            }
-                            dirty = true; render_pending = true;
-                        }
-                    }
-                }
-                // One-shot `@capability` dispatch completion (Stage 2b arms
-                // the slot; polling stays harmless while it is empty).
-                if let Some(result) = subtask_ui.poll_dispatch() {
-                    match result {
-                        Ok(outcome) => {
-                            mode_flash = Some((format!("subtask {} 已提交", outcome.execution_id), anim_tick));
-                            if let Ok(registry) = crate::remote::subtasks::load_registry(&store, &session_id).await {
-                                chat.subtask_done = crate::subtask_registry::done_count(&registry);
-                                chat.subtask_total = crate::subtask_registry::total_count(&registry);
-                            }
-                            if !chat.remote {
-                                subtask_ui.maybe_spawn_watcher(&config, &store, &session_id).await;
-                            }
-                            dirty = true; render_pending = true;
-                        }
-                        Err(error) => mode_flash = Some((format!("{error:#}"), anim_tick)),
-                    }
-                }
+                // Subtask pollers: watcher deliveries, `@capability`
+                // dispatch completion, caps catalog and the open detail
+                // view's refresh/cancel requests (extracted to app_subtask).
+                let (st_dirty, st_render) = app_subtask::tick(
+                    &mut subtask_ui, &mut subtask_view, &store, &mut session_states,
+                    &session_id, &mut chat, &config, &mut mode_flash, anim_tick,
+                ).await;
+                if st_dirty { dirty = true; }
+                if st_render { render_pending = true; }
             }
             _ = frame_ticker.tick() => {
                 render_pending = true;

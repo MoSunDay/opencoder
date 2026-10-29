@@ -8,7 +8,7 @@ fn fold(chat: &mut ChatView, event: UiEvent) {
         UiEvent::AssistantFinal(text) => chat.reconcile_completed_assistant(&text),
         UiEvent::TurnDone(_) => chat.finalize_assistant(),
         UiEvent::RemoteSnapshot { chat: restored, .. } => *chat = *restored,
-        // No transcript fold: Stage 2 folds registry updates elsewhere.
+        // No transcript fold: subtask_events folds registry updates elsewhere.
         UiEvent::SubtaskUpdate { .. } => {}
     }
 }

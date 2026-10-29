@@ -109,6 +109,7 @@ async fn dispatch_popup(
         &mut None,
         &mut clear_confirm,
         &mut None,
+        &mut None,
     )
     .await;
     let chat_markers = marker_texts(chat);

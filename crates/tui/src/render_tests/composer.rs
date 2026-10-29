@@ -275,6 +275,7 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
         "act",
         false,
         None,
+        None,
     )
     .unwrap();
 

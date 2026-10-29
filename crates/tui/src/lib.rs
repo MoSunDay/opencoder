@@ -58,6 +58,7 @@ pub mod skill_menu;
 pub mod skill_persist;
 pub mod skill_token;
 pub mod steer_admit;
+pub mod subtask_detail;
 pub mod subtask_events;
 pub mod subtask_registry;
 pub mod subtask_watcher;

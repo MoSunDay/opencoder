@@ -57,6 +57,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "旁路快照问答：进入临时问询界面，ESC 返回即销毁不留痕（token 计入主任务）",
     ),
     ("/ap", "选择 autopilot 模式 (off / 完全自动 / 自动 review)"),
+    (
+        "/subtasks",
+        "查看/管理本会话的 one-shot subtask（全屏：刷新/取消/追加回主任务）",
+    ),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -92,6 +96,8 @@ pub enum SlashAction {
     /// `/sidecar` — enter the bypass Q/A panel (never enters model context;
     /// destroy-on-entry / destroy-on-exit).
     Sidecar,
+    /// `/subtasks` — open the fullscreen one-shot subtask detail view.
+    Subtasks,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries
@@ -233,6 +239,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "skill" | "sk" => Some(SlashAction::Skill),
         "ps" => Some(SlashAction::Ps),
         "sidecar" => Some(SlashAction::Sidecar),
+        "subtasks" | "sub" => Some(SlashAction::Subtasks),
         "stop" => Some(SlashAction::Stop),
         "ap" => Some(SlashAction::Ap),
         _ => None,
@@ -258,6 +265,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
         "/sidecar" => Some(SlashAction::Sidecar),
+        "/subtasks" => Some(SlashAction::Subtasks),
         "/ap" => Some(SlashAction::Ap),
         _ => None,
     }

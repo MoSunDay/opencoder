@@ -44,6 +44,23 @@ fn parse_known_commands() {
 }
 
 #[test]
+fn parse_subtasks_aliases() {
+    assert_eq!(parse("/subtasks"), Some(SlashAction::Subtasks));
+    assert_eq!(parse("/sub"), Some(SlashAction::Subtasks));
+    assert_eq!(parse(" /subtasks "), Some(SlashAction::Subtasks));
+    assert_eq!(parse("/subtasks extra"), None);
+    assert_eq!(parse("/subtask"), None, "no partial-word alias");
+}
+
+#[test]
+fn subtasks_entry_is_available_in_picker() {
+    assert!(COMMANDS.iter().any(|(name, _)| *name == "/subtasks"));
+    let mut m = CommandMenu::new();
+    m.paste("subtasks");
+    assert_eq!(m.selected_action(), Some(SlashAction::Subtasks));
+}
+
+#[test]
 fn agent_entry_is_available_in_picker() {
     assert!(COMMANDS.iter().any(|(name, _)| *name == "/agent"));
     let mut m = CommandMenu::new();

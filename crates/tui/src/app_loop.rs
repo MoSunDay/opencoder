@@ -534,6 +534,7 @@ pub(crate) async fn dispatch_command(
     notepad: &mut Option<crate::notepad::NotepadView>,
     clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
     agent_menu: &mut Option<crate::agent_menu::AgentMenu>,
+    subtask_view: &mut Option<crate::subtask_detail::SubtaskView>,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -569,6 +570,7 @@ pub(crate) async fn dispatch_command(
                 notepad,
                 clear_confirm,
                 agent_menu,
+                subtask_view,
             )
             .await;
         }

@@ -95,6 +95,7 @@ pub(crate) fn render<B: Backend + 'static>(
     display_mode: &str,
     plan_skill_active: bool,
     notepad: Option<&crate::notepad::NotepadView>,
+    subtask_view: Option<&crate::subtask_detail::SubtaskView>,
 ) -> Result<()> {
     crate::boot_clock::note_first_frame();
     let wrap_plan = crate::copy_wrap::frame_plan(terminal, copy_mode);
@@ -107,20 +108,16 @@ pub(crate) fn render<B: Backend + 'static>(
         // viewer/editor): render tree+editor over the entire frame, clear
         // every chat hit-target so no stale rect survives from the previous
         // chat frame, and skip all chat rendering below (body/composer/status).
+        if let Some(sv) = subtask_view {
+            // Fullscreen `/subtasks` detail view: same takeover contract as
+            // the notepad (whole frame owned, every chat hit-target cleared,
+            // body/composer/status skipped below).
+            clear_chat_hits(hits);
+            crate::subtask_detail::render_detail(f, area, sv);
+            return;
+        }
         if let Some(np) = notepad {
-            hits.body = None;
-            hits.jump_btn = None;
-            hits.top_btn = None;
-            hits.queue_panel = None;
-            hits.queue_total = 0;
-            hits.total_rows = 0;
-            hits.queue_btns.clear();
-            hits.attach_del_btns.clear();
-            hits.thinking_btns.clear();
-            hits.subagent_btns.clear();
-            hits.tool_call_btns.clear();
-            hits.compaction_btns.clear();
-            hits.keymap_btns.clear();
+            clear_chat_hits(hits);
             // Copy mode: undecorated fullscreen editor text — no tree
             // panel, no border, no line-number gutter — so native
             // selection spans pure file text (see copy_mode::render_clean
@@ -364,6 +361,24 @@ pub(crate) fn render<B: Backend + 'static>(
         }
     })?;
     Ok(())
+}
+
+/// Clear every chat hit-target so no stale rect survives a fullscreen
+/// takeover frame (notepad / subtask detail view own the whole terminal).
+fn clear_chat_hits(hits: &mut MouseHits) {
+    hits.body = None;
+    hits.jump_btn = None;
+    hits.top_btn = None;
+    hits.queue_panel = None;
+    hits.queue_total = 0;
+    hits.total_rows = 0;
+    hits.queue_btns.clear();
+    hits.attach_del_btns.clear();
+    hits.thinking_btns.clear();
+    hits.subagent_btns.clear();
+    hits.tool_call_btns.clear();
+    hits.compaction_btns.clear();
+    hits.keymap_btns.clear();
 }
 
 #[allow(clippy::too_many_arguments)]

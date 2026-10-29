@@ -105,8 +105,10 @@ pub(crate) fn freeze(path: &Path, value: &Value) -> Result<()> {
         let temporary = path.with_extension(format!("{}.tmp", ulid::Ulid::new()));
         let mut file = opencoder_core::platform::fs::create_private_file(&temporary)
             .with_context(|| format!("create private metadata file {}", temporary.display()))?;
-        file.write_all(&serde_json::to_vec_pretty(value)?)?;
-        file.sync_all()?;
+        file.write_all(&serde_json::to_vec_pretty(value)?)
+            .with_context(|| format!("write metadata file {}", temporary.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync metadata file {}", temporary.display()))?;
         let published = opencoder_core::platform::fs::publish_new(&temporary, path);
         if let Err(error) = std::fs::remove_file(&temporary) {
             if error.kind() != std::io::ErrorKind::NotFound {
@@ -201,7 +203,8 @@ pub(crate) fn checked(root: &Path, path: &Path) -> Result<()> {
             "invalid workspace path"
         );
         cursor.push(part);
-        crate::layout::reject_symlink(&cursor, "shared workspace path")?;
+        crate::layout::reject_symlink(&cursor, "shared workspace path")
+            .with_context(|| format!("verify shared workspace component {}", cursor.display()))?;
     }
     Ok(())
 }

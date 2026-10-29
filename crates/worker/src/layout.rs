@@ -162,7 +162,11 @@ pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
         }
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
+        Err(error) => Err(anyhow::Error::new(error).context(format!(
+            "inspect {} path: {}",
+            label,
+            path.display()
+        ))),
     }
 }
 
@@ -176,7 +180,13 @@ fn reject_symlink_chain(path: &Path, label: &str) -> Result<()> {
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(format!(
+                    "inspect {} chain component: {}",
+                    label,
+                    cursor.display()
+                )))
+            }
         }
     }
     Ok(())

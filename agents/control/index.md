@@ -25,7 +25,7 @@ Commit: 842e58ef5525e8f189895ad0cc7ac59031f312fc
 - `src/api/catalog.rs`、`src/api/compat/`、`src/api/project.rs` — 节点/定义目录、兼容路由与 Project 中继；项目、专项、TODO、Tag 处理器复用 Web 实现并经 `src/routes.rs` 装配
 - [api/project_links.rs](../../crates/control/src/api/project_links.rs)、[api/project_links/](../../crates/control/src/api/project_links/) — TODO 保存执行与能力引用；`dispatch` 以稳定执行 ID 和既有 Fleet 回执复用 Agent、Operator、Team、DAG、TODO 工作流及保存的 Brain 计划入口，重试不能改变输入或能力。`reference` 按真实准入记录核验能力，不信任任意请求标签。
 - [api/executions/results/](../../crates/control/src/api/executions/results/) — `GET /api/executions/:id/result` 从所属节点即时读取有界结论，不在 Server 缓存；失败、离线与内容省略显式返回。
-- `src/api/compat/dag_instances.rs`、`src/api/stream.rs`、`src/api/streaming/` — 实例中继与 SSE（v4 运行沿用同一 `/events` 通道，负载由节点按运行版本给出）
+- `src/api/compat/dag_instances.rs`、`src/api/stream.rs`、`src/api/streaming/` — 实例中继与 SSE（v4 运行沿用同一 `/events` 通道，负载由节点按运行版本给出）；结果流空页轮询按纯函数 `poll_delay` 阶梯 300ms→1s 封顶，收到任何帧即复位
 - `src/api/brain_runs/` — schema 7 计划与运行；`plan_capabilities.rs` 注册保存计划版本能力，`v4/` 实现目录负责准入、派发、读取和事件确认。
 - [brain_runs/maintenance.rs](../../crates/control/src/api/brain_runs/maintenance.rs) — 删除计划或能力前分页检查全部保存版本与未结束 Brain 运行的冻结引用；保存、删除持有目录独占锁，运行准入持有共享锁至冻结请求提交。计划版本及元数据在 Store 事务内删除；[brain.rs](../../crates/control/src/api/brain.rs) 清理能力及目标绑定，重试可收尾残留元数据。
 - [api/brain_runs/tui.rs](../../crates/control/src/api/brain_runs/tui.rs) — `GET /api/tui/agent-capabilities` 复用能力库目录，仅投影可用 Agent/Operator 的 ID、种类、目标和摘要；editor 与 viewer 可读，不返回定义与 Harness 私有设置。
@@ -60,7 +60,7 @@ Commit: 842e58ef5525e8f189895ad0cc7ac59031f312fc
 
 ## 派发与报告
 
-- [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。无分配、无到期、无重试且无资源任务时空闲轮询按纯函数梯级退避 1s→2s→5s 封顶（`idle_delay`），观察到任何工作立即恢复 100 毫秒；`hub.views()` 仅在存在待处理分配/资源任务时执行。
+- [outbox.rs](../../crates/control/src/release/outbox.rs)、[retry.rs](../../crates/control/src/release/outbox/retry.rs)：按执行 ID 退避恢复派发，节点代次变化立即重试，保留冻结的私有上下文。无分配、无到期、无重试且无资源任务时空闲轮询按纯函数梯级退避 1s→2s→5s 封顶（`idle_delay`），观察到任何工作立即恢复 100 毫秒；仅剩失败退避在等时按 `next_due` 对齐下一次到期（`backoff_wait`，100ms~5s 钳制）取代 100ms 重扫；`hub.views()` 仅在存在待处理分配/资源任务时执行。
 - [outbox/resources.rs](../../crates/control/src/release/outbox/resources.rs)：资源任务受理后先持久化等待，按创建时间及 ID 扫描，获得外部授权后才创建节点执行；不可运行项不阻挡其他项。普通任务保持持久化前预留节点容量的路径，不依赖资源提供方。 重试失败记录执行 ID、HTTP 状态与固定错误分类，不写入请求正文或凭据。
 - [socket.rs](../../crates/control/src/transport/socket.rs) 顺序处理连接的应用帧；[socket_io.rs](../../crates/control/src/transport/socket_io.rs) 独立处理心跳和写出，用 128 项有界队列及一项待入队帧施加背压。队列满时仍可发送 RPC 与交接确认。输入活性使用独立的 20 秒截止时间，仅收到有效帧才续期；非增量连接上只有索引分片消费报告 ACK 序列，交错的 Brain 帧不再回 ACK（与节点侧计数一致）；发送数据与队列满都不能延后它。截止后沿原断线路径解除连接，节点可用同一代次重连，原执行归属与持久结果保持。通道逐项等待数据库异步操作，数据库执行线程与应用 Tokio 线程分开；心跳只更新在线时间。节点注销时同步清扫其 `accepted` 标记与 `reservations`，不留永久残留。Host 库存提交并通过代次栅栏后才标记就绪，交接确认通过独立的一项队列等待实际写出。断线取消所属连接的处理 future，迟到的数据库结果不能确认替代连接。
 - [v4/view.rs](../../crates/control/src/api/brain_runs/v4/view.rs)：层调度理由只取本层 `layer_started` 事件，不被执行终态覆盖。

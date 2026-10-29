@@ -4,10 +4,47 @@ use anyhow::Result;
 use opencoder_core::{fleet::*, Config};
 use serde::{Deserialize, Serialize};
 
-/// Scheduler wakeup period while queued work exists.
+/// Scheduler wakeup period after a cycle that started work.
 const DISPATCH_INTERVAL_MS: u64 = 100;
+/// Scheduler wakeup period while queued work stays unstartable (no free
+/// slot or nothing runnable yet): 2 wakeups/sec.
+const SATURATED_DISPATCH_INTERVAL_MS: u64 = 500;
 /// Scheduler wakeup period while idle (2 wakeups/sec).
 const IDLE_DISPATCH_INTERVAL_MS: u64 = 500;
+
+/// Scheduler cadence for the cycle after `(started, pending)`:
+/// - a cycle that started work keeps the fast period, because the slot
+///   change may make further queued entries immediately runnable;
+/// - a saturated cycle (pending work, nothing started) backs off: only a
+///   slot release or a queue change can make progress, and both wake the
+///   scheduler immediately through the loop registry;
+/// - an idle cycle backs off the same way; a new enqueue wakes it up.
+pub(crate) fn dispatch_delay(started: usize, pending: u64) -> std::time::Duration {
+    if started > 0 {
+        std::time::Duration::from_millis(DISPATCH_INTERVAL_MS)
+    } else if pending > 0 {
+        std::time::Duration::from_millis(SATURATED_DISPATCH_INTERVAL_MS)
+    } else {
+        std::time::Duration::from_millis(IDLE_DISPATCH_INTERVAL_MS)
+    }
+}
+
+/// Wait one scheduler period or until the loop registry reports a change
+/// (enqueue, slot release, admission or recovery transition). A notify that
+/// lands mid-dispatch is observed by the watch receiver on the next call,
+/// so backing off never delays newly runnable work. Returns false when the
+/// worker is stopping.
+async fn await_cycle(
+    stop: &tokio_util::sync::CancellationToken,
+    delay: std::time::Duration,
+    changes: &mut tokio::sync::watch::Receiver<u64>,
+) -> bool {
+    tokio::select! {
+        _ = stop.cancelled() => false,
+        _ = tokio::time::sleep(delay) => true,
+        _ = changes.changed() => true,
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct QueuedRun {
@@ -111,13 +148,16 @@ pub(crate) async fn dispatch_owned(
         }
         // If the receiver disconnected, dropping the result releases admission
         // only after all claimed work was launched or explicitly failed.
-        let _ = send.send(result.map(|()| gate));
+        let _ = send.send(result.map(|_| gate));
     });
     receive.await?
 }
 
-/// Caller holds node admission; a slot is reserved before any workload starts.
-pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
+/// Caller holds node admission; a slot is reserved before any workload
+/// starts. Returns how many queued entries this cycle started, which drives
+/// the scheduler cadence (see [`dispatch_delay`]).
+pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<usize> {
+    let mut started = 0usize;
     let mut timing = super::admission::timing::Timing::new("", "dispatch");
     worker.reconcile_capacity().await?;
     timing.mark("capacity_reconciliation");
@@ -138,7 +178,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             .unwrap()
             .is_some()
     {
-        return Ok(());
+        return Ok(started);
     }
     let mut records: Vec<_> = worker
         .inner
@@ -267,6 +307,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
                 .inner
                 .pending_runs
                 .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            started += 1;
         } else if let super::launch::LaunchOutcome::NotRunnable(status) = outcome {
             worker.finish_slot(ticket.as_deref()).await?;
             tracing::debug!(?status, "pending execution changed before dispatch");
@@ -274,7 +315,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<()> {
             worker.finish_slot(ticket.as_deref()).await?;
         }
     }
-    Ok(())
+    Ok(started)
 }
 
 pub(crate) fn start_scheduler(worker: &Worker) {
@@ -283,13 +324,19 @@ pub(crate) fn start_scheduler(worker: &Worker) {
     // Track scheduler shutdown separately: an idle timer is not execution work
     // and must not prevent an empty Runtime from hibernating.
     worker.inner.background_tasks.spawn(async move {
-        // Idle runtimes back off to 2 wakeups/sec; any pending work returns
-        // to 100ms. dispatch_locked refreshes pending_runs each cycle. Start
-        // at the active period so journal-recovered pending runs are picked
-        // up promptly; an idle runtime backs off after its first cycle.
+        // Enqueue, slot release and recovery transitions notify the loop
+        // registry, so new runnable work wakes the scheduler immediately;
+        // the timer period is only the fallback between events. Cycles that
+        // start nothing (saturated or idle) back off to 2 wakeups/sec.
+        // dispatch_locked refreshes pending_runs each cycle. Start at the
+        // active period so journal-recovered pending runs are picked up
+        // promptly; a quiet runtime backs off after its first cycle.
+        let mut changes = opencoder_session::loop_registry::subscribe();
         let mut delay = std::time::Duration::from_millis(DISPATCH_INTERVAL_MS);
         loop {
-            tokio::select! { _ = stop.cancelled() => break, _ = tokio::time::sleep(delay) => {} }
+            if !await_cycle(&stop, delay, &mut changes).await {
+                break;
+            }
             let Some(inner) = weak.upgrade() else {
                 break;
             };
@@ -301,16 +348,67 @@ pub(crate) fn start_scheduler(worker: &Worker) {
                 _ = stop.cancelled() => break,
                 gate = worker.inner.admission.lock() => gate,
             };
-            if let Err(error) = dispatch_locked(&worker).await {
-                tracing::error!(%error, "node pending dispatch failed");
-                *worker.inner.persistence_error.lock().unwrap() =
-                    Some(format!("pending dispatch: {error:#}"));
-            }
-            delay = if worker.inner.pending_runs.load(std::sync::atomic::Ordering::SeqCst) > 0 {
-                std::time::Duration::from_millis(DISPATCH_INTERVAL_MS)
-            } else {
-                std::time::Duration::from_millis(IDLE_DISPATCH_INTERVAL_MS)
+            let started = match dispatch_locked(&worker).await {
+                Ok(started) => started,
+                Err(error) => {
+                    tracing::error!(%error, "node pending dispatch failed");
+                    *worker.inner.persistence_error.lock().unwrap() =
+                        Some(format!("pending dispatch: {error:#}"));
+                    0
+                }
             };
+            delay = dispatch_delay(
+                started,
+                worker.inner.pending_runs.load(std::sync::atomic::Ordering::SeqCst),
+            );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatch_delay_tiers_started_saturated_and_idle() {
+        assert_eq!(
+            dispatch_delay(2, 5),
+            std::time::Duration::from_millis(DISPATCH_INTERVAL_MS),
+            "a cycle that started work keeps the fast cadence"
+        );
+        assert_eq!(
+            dispatch_delay(1, 0),
+            std::time::Duration::from_millis(DISPATCH_INTERVAL_MS)
+        );
+        assert_eq!(
+            dispatch_delay(0, 3),
+            std::time::Duration::from_millis(SATURATED_DISPATCH_INTERVAL_MS),
+            "pending work with no starts backs off"
+        );
+        assert_eq!(
+            dispatch_delay(0, 0),
+            std::time::Duration::from_millis(IDLE_DISPATCH_INTERVAL_MS),
+            "an idle cycle backs off"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_notify_landing_between_cycles_wakes_the_scheduler_immediately() {
+        // A registry change that happens while the scheduler is dispatching
+        // (or before its wait starts) must not wait out the backoff period.
+        let mut changes = opencoder_session::loop_registry::subscribe();
+        opencoder_session::loop_registry::notify_change();
+        let stop = tokio_util::sync::CancellationToken::new();
+        let woken = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            await_cycle(
+                &stop,
+                std::time::Duration::from_secs(60),
+                &mut changes,
+            ),
+        )
+        .await
+        .expect("the queued notify must wake the scheduler at once");
+        assert!(woken);
+    }
 }

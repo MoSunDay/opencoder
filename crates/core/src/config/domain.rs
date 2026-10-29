@@ -48,6 +48,19 @@ pub(crate) fn domain_file_name(key: &str) -> Option<&'static str> {
     domain_entry(key).map(|(_, file)| file)
 }
 
+/// Every domain file name in table order, derived from [`DOMAIN_FILES`] so
+/// the routing table stays the single source of truth. Published for
+/// stat-fingerprint coverage checks outside this crate (worker config cache).
+pub const fn domain_file_names() -> [&'static str; DOMAIN_FILES.len()] {
+    let mut names = [""; DOMAIN_FILES.len()];
+    let mut index = 0;
+    while index < DOMAIN_FILES.len() {
+        names[index] = DOMAIN_FILES[index].1;
+        index += 1;
+    }
+    names
+}
+
 /// Project-scope domain file: `<working_dir>/.opencoder/<domain>.json`.
 /// A non-domain key yields a never-existing path (see [`NOT_A_DOMAIN_FILE`]).
 pub(crate) fn project_domain_path(working_dir: &Path, key: &str) -> PathBuf {
@@ -332,6 +345,16 @@ pub(crate) fn apply_domain(cfg: &mut Config, key: &str, value: &serde_json::Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn domain_file_names_match_the_routing_table() {
+        let names = domain_file_names();
+        assert_eq!(names.len(), DOMAIN_FILES.len());
+        for (entry, name) in DOMAIN_FILES.iter().zip(names) {
+            assert_eq!(entry.1, name);
+            assert!(name.ends_with(".json"));
+        }
+    }
 
     #[test]
     fn domain_key_table_maps_keys_to_files() {

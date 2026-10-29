@@ -63,6 +63,8 @@ pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
 pub use compaction::{CompactionConfig, OutputStreamlineConfig};
 pub use dag::DagConfig;
+pub use domain::domain_file_names;
+pub use env::candidates_with_home;
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;

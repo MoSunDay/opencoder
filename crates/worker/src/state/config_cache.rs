@@ -12,17 +12,6 @@ use std::{
     time::SystemTime,
 };
 
-/// Domain file names core config discovery routes out of `config.json`.
-/// MUST mirror core `config::domain::DOMAIN_FILES`; core does not publish
-/// the table outside its crate.
-const DOMAIN_FILES: [&str; 5] = [
-    "mcp.json",
-    "cli.json",
-    "skills.json",
-    "ap.json",
-    "schedules.json",
-];
-
 /// Stat-derived fingerprint of the existing files of a covered file set.
 /// Equal values mean no covered file was created, removed or rewritten (by
 /// mtime or size) since the previous computation.
@@ -45,29 +34,24 @@ pub(crate) struct ConfigKey {
     files: FileStats,
 }
 
-/// Candidate files a config load from `workdir` reads. MUST mirror core
-/// discovery (`config::env::candidates_with_home` plus the domain routing in
-/// `config::domain`, neither published by core): project
-/// `<workdir>/.opencoder/config.json` and `<workdir>/opencoder.json`, global
-/// `<global_dir>/{config.json,opencoder.json}` and every domain file in both
-/// config dirs, and `<xdg>/opencoder/config.json` per XDG location.
+/// Candidate files a config load from `workdir` reads. The `config.json`
+/// candidate chain comes straight from core discovery
+/// (`config::candidates_with_home`), and the domain files come from core's
+/// routing table (`config::domain_file_names`), so this set cannot drift
+/// from what `Config::load` actually stats and parses. `global_dir` must be
+/// core's resolved global config directory (`Config::global_config_path`'s
+/// parent); extra `xdg_dirs` cover locations the caller wants fingerprinted
+/// even when core's own resolution picks a different one.
 pub(crate) fn candidate_files(
     workdir: &Path,
     global_dir: Option<&Path>,
     xdg_dirs: &[PathBuf],
 ) -> Vec<PathBuf> {
-    let project_dir = workdir.join(".opencoder");
-    let mut paths = vec![
-        project_dir.join("config.json"),
-        workdir.join("opencoder.json"),
-    ];
-    for file in DOMAIN_FILES {
-        paths.push(project_dir.join(file));
-    }
-    if let Some(dir) = global_dir {
-        paths.push(dir.join("config.json"));
-        paths.push(dir.join("opencoder.json"));
-        for file in DOMAIN_FILES {
+    let home = global_dir.and_then(Path::parent);
+    let mut paths = opencoder_core::config::candidates_with_home(workdir, home);
+    for file in opencoder_core::config::domain_file_names() {
+        paths.push(workdir.join(".opencoder").join(file));
+        if let Some(dir) = global_dir {
             paths.push(dir.join(file));
         }
     }
@@ -142,22 +126,27 @@ mod tests {
     }
 
     #[test]
-    fn candidate_files_mirror_core_discovery_layout() {
+    fn candidate_files_cover_core_discovery_and_domain_routing() {
         let workdir = Path::new("/work");
         let global_dir = Path::new("/home/.opencoder");
         let xdg_dirs = vec![PathBuf::from("/xdg")];
-        let mut expected: Vec<String> = vec![
-            "/work/.opencoder/config.json".into(),
-            "/work/opencoder.json".into(),
-            "/home/.opencoder/config.json".into(),
-            "/home/.opencoder/opencoder.json".into(),
-            "/xdg/opencoder/config.json".into(),
-        ];
+        // The config.json chain is core's own candidate list for the same
+        // home view (project files, global dir, redirected XDG root) ...
+        let mut expected: Vec<String> = opencoder_core::config::candidates_with_home(
+            workdir,
+            Some(Path::new("/home")),
+        )
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+        // ... plus every domain file core routes out of config.json ...
         for dir in ["/work/.opencoder", "/home/.opencoder"] {
-            for file in DOMAIN_FILES {
+            for file in opencoder_core::config::domain_file_names() {
                 expected.push(format!("{dir}/{file}"));
             }
         }
+        // ... plus each extra XDG location the caller covers.
+        expected.push("/xdg/opencoder/config.json".into());
         let mut actual: Vec<String> = candidate_files(workdir, Some(global_dir), &xdg_dirs)
             .iter()
             .map(|path| path.display().to_string())

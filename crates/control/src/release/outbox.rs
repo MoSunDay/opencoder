@@ -120,13 +120,20 @@ pub fn start(state: &Arc<AppState>) {
             }
             // Retry backoffs are >=1s (see retry::Retries::completed), so the
             // idle ladder never delays recovery; active draining keeps a 100ms
-            // cadence so new submissions are dispatched promptly.
+            // cadence so new submissions are dispatched promptly. When the
+            // only thing pending is a failure backoff, the tick sleeps until
+            // the earliest retry is due instead of rescanning at 100ms.
             let idle =
                 !had_assignments && after.is_empty() && retries.idle() && resources.is_empty();
+            let backoff_only =
+                !had_assignments && after.is_empty() && !retries.idle() && resources.is_empty();
             let delay = if idle {
                 let delay = idle_delay(consecutive_idle);
                 consecutive_idle = consecutive_idle.saturating_add(1);
                 delay
+            } else if backoff_only {
+                consecutive_idle = 0;
+                backoff_wait(retries.next_due(), Instant::now())
             } else {
                 consecutive_idle = 0;
                 Duration::from_millis(100)
@@ -147,6 +154,16 @@ fn idle_delay(consecutive_idle: u32) -> Duration {
     }
 }
 
+/// Sleep before the next tick when only retry backoffs are pending: wait
+/// until the earliest due retry, clamped between the drain cadence floor and
+/// the idle-ladder cap, so recovery stays far under the 30s dispatch budget.
+fn backoff_wait(next_due: Option<Instant>, now: Instant) -> Duration {
+    next_due
+        .map(|due| due.saturating_duration_since(now))
+        .map(|wait| wait.clamp(Duration::from_millis(100), Duration::from_secs(5)))
+        .unwrap_or(Duration::from_millis(100))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +174,34 @@ mod tests {
         assert_eq!(idle_delay(1), Duration::from_secs(2));
         assert_eq!(idle_delay(2), Duration::from_secs(5));
         assert_eq!(idle_delay(10), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn backoff_wait_sleeps_until_the_earliest_due_retry_with_clamps() {
+        let now = Instant::now();
+        assert_eq!(
+            backoff_wait(None, now),
+            Duration::from_millis(100),
+            "no pending backoff keeps the drain cadence"
+        );
+        assert_eq!(
+            backoff_wait(Some(now), now),
+            Duration::from_millis(100),
+            "an already-due retry never sleeps past the floor"
+        );
+        let overdue = now
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or(now);
+        assert_eq!(backoff_wait(Some(overdue), now), Duration::from_millis(100));
+        assert_eq!(
+            backoff_wait(Some(now + Duration::from_secs(2)), now),
+            Duration::from_secs(2),
+            "a mid-window retry sleeps exactly until it is due"
+        );
+        assert_eq!(
+            backoff_wait(Some(now + Duration::from_secs(60)), now),
+            Duration::from_secs(5),
+            "the wait caps at the idle-ladder maximum"
+        );
     }
 }

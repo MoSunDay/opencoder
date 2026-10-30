@@ -43,4 +43,14 @@ reqwest.workspace = true
 [dev-dependencies]
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 tower = { version = "0.5", features = ["util"] }
+# TLS-termination harness for the wss channel suite: a generated CA trusted
+# through `SSL_CERT_FILE` (the native-roots path production nodes use) and a
+# rustls acceptor driving the Server router over hyper http1 (with upgrades
+# for the WebSocket route). ring-only features keep the build aws-lc-free.
+rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+hyper = { version = "1.10", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "service"] }
 opencoder-node.workspace = true

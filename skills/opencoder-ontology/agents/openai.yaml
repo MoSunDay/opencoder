@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenCoder Ontology 管理"
+  short_description: "查询能力目录并维护 Ontology 的类型、实体、关系、切面与实体目录"
+  default_prompt: "使用 $opencoder-ontology 查询能力目录与同步状态，并维护 Ontology 的数据空间、类型、实体、关系、切面和实体目录。"

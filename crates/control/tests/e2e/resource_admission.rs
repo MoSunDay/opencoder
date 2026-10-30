@@ -204,3 +204,39 @@ async fn cancellation_before_remote_acceptance_keeps_conversation_lists_empty() 
     assert!(h.node.journal_ids().is_empty());
     provider.abort();
 }
+
+#[tokio::test]
+async fn default_provider_read_reflects_configured_state() {
+    let h = Harness::new().await;
+    // Unconfigured default read: disabled, and the reply is a plain document.
+    let (status, body) = h.req(Method::GET, "/api/resource-admission-provider", None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, json!({"enabled": false}));
+
+    // The stub only has to be reachable: the default read never calls it.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/resources", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/resources",
+        post(|| async { Json(json!({"status":"granted","allocated":true})) }),
+    );
+    let provider = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let credentials = tempfile::tempdir().unwrap();
+    let token = credentials.path().join("default-provider.token");
+    std::fs::write(&token, "isolated-resource-fixture").unwrap();
+    let (status, body) = h
+        .req(
+            Method::PUT,
+            "/api/resource-admission-provider",
+            Some(json!({
+                "endpoint":endpoint,"token_file":token
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    let (status, body) = h.req(Method::GET, "/api/resource-admission-provider", None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, json!({"enabled": true}));
+    provider.abort();
+}

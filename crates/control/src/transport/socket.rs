@@ -52,6 +52,13 @@ pub async fn upgrade(
     response
 }
 
+/// Overrides the node Hello deadline for one control state. Test injection
+/// point only; production always uses the per-state default.
+#[doc(hidden)]
+pub fn set_hello_timeout_for_tests(state: &AppState, secs: u64) {
+    let _ = state.lifecycle.hello_timeout_secs.set(secs);
+}
+
 async fn serve(
     state: Arc<AppState>,
     socket: WebSocket,
@@ -64,7 +71,7 @@ async fn serve(
             writer.send(Message::Close(None)).await?;
             return Ok(());
         }
-        first = tokio::time::timeout(std::time::Duration::from_secs(10), reader.next()) => first?,
+        first = tokio::time::timeout(state.lifecycle.hello_timeout(), reader.next()) => first?,
     };
     let Some(Ok(Message::Text(text))) = first else {
         anyhow::bail!("node hello required");

@@ -357,6 +357,14 @@ impl Fleet {
     }
 }
 
+impl Fleet {
+    /// The server child's PID: signal-delivery scenarios target the
+    /// server process directly while this guard still owns its reaping.
+    pub fn server_pid(&self) -> u32 {
+        self._server.child.id()
+    }
+}
+
 impl Drop for Fleet {
     fn drop(&mut self) {
         if std::thread::panicking() {

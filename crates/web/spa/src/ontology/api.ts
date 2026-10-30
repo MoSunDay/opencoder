@@ -1,5 +1,5 @@
 import { apiJson } from "../api.js";
-import type { AttributeDefinition, CatalogManagement, DirectoryItem, Entity, EntityType, EntityTypeAction, GraphAspect, GraphResponse, Relationship, RelationshipType, RelationshipTypeCreate, RelationshipTypeUpdate, Session } from "./types";
+import type { AttributeDefinition, CatalogManagement, Directory, Entity, EntityType, EntityTypeAction, FreshnessPolicy, FreshnessReview, FreshnessRun, FreshnessReviewOutcome, GraphAspect, GraphResponse, Relationship, RelationshipType, RelationshipTypeCreate, RelationshipTypeUpdate, Session } from "./types";
 
 const ROOT = "/api/ontology";
 export class ApiError extends Error { constructor(message: string, readonly status: number, readonly code: string) { super(message); } }
@@ -32,6 +32,16 @@ export const graphPath = (env: string, query: GraphQuery = {}) => {
   if (query.expandNeighbors) params.set("expand_neighbors", "true");
   return `${envPath(env)}/graph?${params}`;
 };
+export type FreshnessRunsQuery = { includeDeleted?: boolean; offset?: number; limit?: number; policyId?: string };
+export const freshnessRunsPath = (env: string, query: FreshnessRunsQuery = {}) => {
+  const params = new URLSearchParams();
+  if (query.includeDeleted) params.set("include_deleted", "true");
+  if (query.offset !== undefined) params.set("offset", String(query.offset));
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.policyId) params.set("policy_id", query.policyId);
+  const suffix = params.toString();
+  return `${envPath(env)}/freshness/runs${suffix ? `?${suffix}` : ""}`;
+};
 export const api = {
   session: () => request<Session>("/session"),
   entityTypes: (env: string, includeDeleted = false) => request<{ items: EntityType[] }>(`${envPath(env)}/entity-types?include_deleted=${includeDeleted}`),
@@ -62,10 +72,6 @@ export const api = {
   createEntity: (env: string, value: object) => request<{ item: Entity }>(`${envPath(env)}/entities`, { method: "POST", body: JSON.stringify(value) }),
   updateEntity: (env: string, id: string, value: object) => request<{ item: Entity }>(`${envPath(env)}/entities/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   setAttribute: (env: string, entity: string, attribute: string, value: object) => request(`${envPath(env)}/entities/${entity}/attributes/${attribute}`, { method: "PUT", body: JSON.stringify(value) }),
-  directories: (env: string) => request<{ items: DirectoryItem[]; root_id: string }>(`${envPath(env)}/directories/tree`),
-  createDirectory: (env: string, value: object) => request(`${envPath(env)}/directories/tree`, { method: "POST", body: JSON.stringify(value) }),
-  moveDirectory: (env: string, id: string, parentId: string) => request(`${envPath(env)}/directories/${id}/move`, { method: "PATCH", body: JSON.stringify({ parent_id: parentId }) }),
-  updateDirectory: (env: string, id: string, value: object) => request(`${envPath(env)}/directories/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   relationships: (env: string, includeDeleted = false) => request<{ items: Relationship[] }>(`${envPath(env)}/relationships?include_deleted=${includeDeleted}`),
   createRelationship: (env: string, value: object) => request<{ item: Relationship }>(`${envPath(env)}/relationships`, { method: "POST", body: JSON.stringify(value) }),
   updateRelationship: (env: string, id: string, value: object) => request<{ item: Relationship }>(`${envPath(env)}/relationships/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
@@ -74,4 +80,17 @@ export const api = {
   textHistory: (env: string, entity: string, attribute: string) => request<{ items: Record<string, unknown>[] }>(`${envPath(env)}/entities/${entity}/attributes/${attribute}/text`),
   textContent: (env: string, entity: string, attribute: string, revision: number) => request<{ format: "md" | "html" | "nfs_path"; content: string; revision: number }>(`${envPath(env)}/entities/${entity}/attributes/${attribute}/text/${revision}`),
   setNfsPath: (env: string, entity: string, attribute: string, value: object) => request<{ revision: number }>(`${envPath(env)}/entities/${entity}/attributes/${attribute}/nfs-path`, { method: "PUT", body: JSON.stringify(value) }),
+  directoriesTree: (env: string) => request<{ items: Directory[]; root_id: string }>(`${envPath(env)}/directories/tree?include_deleted=false`),
+  createDirectory: (env: string, value: object) => request<{ item: Entity }>(`${envPath(env)}/directories/tree`, { method: "POST", body: JSON.stringify(value) }),
+  updateDirectory: (env: string, id: string, value: object) => request<{ item: Entity }>(`${envPath(env)}/directories/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
+  moveDirectory: (env: string, id: string, parentId: string) => request<{ relationship: Relationship }>(`${envPath(env)}/directories/${id}/move`, { method: "PATCH", body: JSON.stringify({ parent_id: parentId }) }),
+  freshnessPolicies: (env: string, includeDeleted = false) => request<{ items: FreshnessPolicy[] }>(`${envPath(env)}/freshness/policies?include_deleted=${includeDeleted}`),
+  freshnessPolicy: (env: string, id: string) => request<{ item: FreshnessPolicy }>(`${envPath(env)}/freshness/policies/${id}`),
+  createFreshnessPolicy: (env: string, value: object) => request<{ item: FreshnessPolicy }>(`${envPath(env)}/freshness/policies`, { method: "POST", body: JSON.stringify(value) }),
+  updateFreshnessPolicy: (env: string, id: string, value: object) => request<{ revision: number }>(`${envPath(env)}/freshness/policies/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
+  triggerFreshnessRun: (env: string, policyId: string) => request<{ item: FreshnessRun }>(`${envPath(env)}/freshness/policies/${policyId}/runs`, { method: "POST" }),
+  freshnessRuns: (env: string, query: FreshnessRunsQuery = {}) => request<{ items: FreshnessRun[] }>(freshnessRunsPath(env, query)),
+  freshnessRun: (env: string, id: string) => request<{ item: FreshnessRun }>(`${envPath(env)}/freshness/runs/${id}`),
+  freshnessReviews: (env: string, runId?: string) => request<{ items: FreshnessReview[] }>(`${envPath(env)}/freshness/reviews${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`),
+  createFreshnessReview: (env: string, value: object) => request<FreshnessReviewOutcome>(`${envPath(env)}/freshness/reviews`, { method: "POST", body: JSON.stringify(value) }),
 };

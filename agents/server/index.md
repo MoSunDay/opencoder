@@ -4,7 +4,7 @@ Commit: f23063530a72e73bddef57a2d077c39754b16e29
 
 版本 Server 与独立只读资源服务入口。
 
-[main.rs](../../crates/server/src/main.rs) 的 `--auth-enabled true|false` 默认开启公共 HTTP 鉴权；部署配置 [rolling/config.py](../../scripts/platform/rolling/config.py) 接受布尔 `deployment.auth_enabled`，由新 Server unit 传入。开关不轮换或撤销 Token；资源服务与 Runtime 继续使用现有机器凭据。操作见 [项目 CLI 与鉴权](../../docs/project-cli.md)。
+[main.rs](../../crates/server/src/main.rs) 的 `--auth-enabled true|false` 默认开启公共 HTTP 鉴权，`--web true|false` 默认挂载内置 Web 控制台（关闭时仅保留 API 路由）；部署配置 [rolling/config.py](../../scripts/platform/rolling/config.py) 接受布尔 `deployment.auth_enabled`，由新 Server unit 传入。开关不轮换或撤销 Token；资源服务与 Runtime 继续使用现有机器凭据。操作见 [项目 CLI 与鉴权](../../docs/project-cli.md)。
 
 ## 索引
 - `crates/server/src/` — 二进制装配；复用 control/web 能力

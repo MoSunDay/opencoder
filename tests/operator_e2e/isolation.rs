@@ -1,7 +1,8 @@
 //! O7 — per-execution HOME/WORKSPACE isolation for operator executions.
 //!
 //! A fresh operator execution materializes `<data>/operator/<id>/home` (a
-//! frozen `config.json` snapshot, 0600) and `.../workspace`. The session's
+//! frozen `config.json` snapshot, node-owned 0440 under the enforced
+//! per-execution identity) and `.../workspace`. The session's
 //! bash tool runs with cwd = workspace and HOME = the execution home —
 //! both verified from INSIDE a real turn via a scripted tool call, then
 //! re-verified on-disk. After an agent restart, a follow-up prompt proves
@@ -106,8 +107,9 @@ fn operator_execution_isolates_home_and_workspace() {
     // The frozen config snapshot is visible under the redirected HOME.
     assert_eq!(read_probe(&fleet, SESSION, "cfg-a.txt"), "CONFIG_OK");
 
-    // Snapshot contract: 0600, plaintext api key preserved (the execution's
-    // client is built from this file on every reload).
+    // Snapshot contract: node-owned 0440 (readable by the read-only group,
+    // writable by nobody) with the plaintext api key preserved — the
+    // execution's client is built from this file on every reload.
     let snapshot = home.join(".opencoder/config.json");
     let text = std::fs::read_to_string(&snapshot).unwrap();
     assert!(text.contains("test-key"), "api key in snapshot: {text}");
@@ -115,7 +117,7 @@ fn operator_execution_isolates_home_and_workspace() {
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&snapshot).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "snapshot must be owner-only");
+        assert_eq!(mode, 0o440, "snapshot stays node-owned and non-writable");
     }
 
     // Turn 1's tool output is transcript-visible.

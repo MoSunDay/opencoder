@@ -236,6 +236,8 @@ pub async fn serve_release(
         metrics: metrics_token,
         auth_enabled,
     } = credentials;
+    // Guard order matters: this check runs before any filesystem work, so
+    // the bootstrap-level rejection test stays side-effect free.
     anyhow::ensure!(
         metrics_token.as_deref() != Some(token.as_str()),
         "metrics credential must differ from the administrator token"
@@ -511,6 +513,32 @@ mod seed_admin_tests {
             .await
             .unwrap()
             .map(|user| user.name)
+    }
+
+    /// The second-layer guard (the CLI one fires first in real boots):
+    /// `serve_release` itself refuses a metrics credential equal to the
+    /// administrator token, before touching the data directory.
+    #[tokio::test]
+    async fn serve_release_rejects_metrics_token_equal_to_the_admin_token() {
+        let error = serve_release(
+            "127.0.0.1".into(),
+            0,
+            true,
+            PathBuf::from("/nonexistent-opencoder-workdir"),
+            None,
+            ServerCredentials {
+                server: "shared-secret".into(),
+                metrics: Some("shared-secret".into()),
+                auth_enabled: true,
+            },
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("metrics credential must differ"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[tokio::test]

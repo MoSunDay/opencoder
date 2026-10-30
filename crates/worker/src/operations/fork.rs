@@ -59,6 +59,10 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
                 &env.home,
                 config.operator.access,
             ));
+            // The fork provisioned a fresh Linux account; the copied runtime
+            // must not keep the parent's identity (initialization only
+            // re-attaches when the field is empty).
+            harness.run_as = env.run_as.clone();
             worker
                 .inner
                 .state

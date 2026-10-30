@@ -47,17 +47,26 @@ opencoder-cli --no-auth project todos delete TODO_ID
 
 不带 `--goal` 或 `--initiative` 的列表包括全部归属及未归属对象。列表不是同名对象的唯一性判断。
 
+## 看板排序
+
+```sh
+opencoder-cli --no-auth project todos reorder --json '{"initiative_id":"INITIATIVE_ID","board_status":"todo","ids":["TODO_ID_A","TODO_ID_B"]}'
+```
+
+一次调整一个看板列内的顺序；`initiative_id` 可为 `null`（作用于未归属任务的列），`board_status` 仅接受 `backlog`、`todo`、`in_progress`、`done`，`ids` 为该列内从上到下的完整顺序（最多 1000 个，且必须属于对应范围），成功返回 `{"ok":true}`。注意：这个 CLI 子命令没有位置参数，正文全部通过 `--json` 传入。
+
 ## 长正文、人员和标签
 
 ```sh
 opencoder-cli --no-auth project todos patch TODO_ID --json @/tmp/todo-patch.json
 opencoder-cli --no-auth project todos patch TODO_ID --json '{"owner_user_name":null,"follower_user_names":[]}'
 opencoder-cli --no-auth project tags list
+opencoder-cli --no-auth project tags list --scope-type initiative --scope-id INITIATIVE_ID
 opencoder-cli --no-auth project tags create --json '{"scope_type":"global","scope_id":"","name":"优先处理"}'
 opencoder-cli --no-auth project todos patch TODO_ID --json '{"tag_ids":["TAG_ID"]}'
 ```
 
-Tag 可属于 global/project/initiative；只有当前 TODO 归属范围内的标签才能关联。先查询真实 ID，`tag_ids:[]` 清空选择，修改归属由服务端按同名定义重新匹配。
+Tag 可属于 global/project/initiative；只有当前 TODO 归属范围内的标签才能关联。列表可用 `--scope-type global|project|initiative` 与 `--scope-id` 过滤，全局标签 `scope_id` 为空字符串。先查询真实 ID，`tag_ids:[]` 清空选择，修改归属由服务端按同名定义重新匹配。
 
 ## 评论与概述
 

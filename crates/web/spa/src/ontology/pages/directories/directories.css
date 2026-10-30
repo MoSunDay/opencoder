@@ -1,0 +1,35 @@
+/* Directory tab layout: toolbar on top, tree on the left, members on the right. */
+.dir-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.dir-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dir-layout { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .dir-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Tree viewport keeps long trees scrollable inside the tab. */
+.dir-tree { min-width: 0; border: 1px solid rgba(5, 5, 5, 0.06); border-radius: 8px; background: rgba(5, 5, 5, 0.02); }
+.dir-tree-viewport { max-height: 60vh; overflow: auto; padding: 6px 4px; }
+.dir-tree .ant-tree { background: transparent; }
+.dir-tree .ant-tree-node-content-wrapper { display: inline-flex; align-items: center; min-width: 0; }
+.dir-tree-row { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding-right: 2px; }
+.dir-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-tree-more-holder { display: inline-flex; flex-shrink: 0; }
+.dir-tree-more { opacity: 0; min-width: 20px; width: 20px; height: 20px; padding: 0; }
+.dir-tree .ant-tree-treenode:hover .dir-tree-more,
+.dir-tree .dir-tree-more:focus-visible,
+.dir-tree .dir-tree-more.ant-btn-loading { opacity: 1; }
+.dir-tree-input { max-width: 200px; }
+.dir-tree-error { color: #ff4d4f; font-size: 12px; line-height: 20px; padding: 2px 8px 4px; }
+.dir-move-select { width: 100%; }
+
+/* Member panel: header, add row and compact member list. */
+.dir-members { min-width: 0; border: 1px solid rgba(5, 5, 5, 0.06); border-radius: 8px; padding: 12px; }
+.dir-members-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dir-members-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-members-add { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 12px; flex-wrap: wrap; }
+.dir-members-select { flex: 1; min-width: 200px; max-width: 420px; }
+.dir-members-list { list-style: none; margin: 0; padding: 0; }
+.dir-member-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(5, 5, 5, 0.06); }
+.dir-member-row:last-child { border-bottom: none; }
+.dir-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Entity table tags link into the directory tab. */
+.entity-dir-tag { cursor: pointer; }

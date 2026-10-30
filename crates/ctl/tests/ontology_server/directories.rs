@@ -68,11 +68,54 @@ async fn cli_directory_tree_mounts_new_and_existing_entities_and_rejects_invalid
                     && relation["target_entity_id"] == id(&child)
             }));
     }
+    let second = s
+        .write(
+            &["relationships", "create"],
+            json!({
+                "relationship_type_id":id(membership),
+                "source_entity_id":id(&existing),"target_entity_id":id(&parent)
+            }),
+        )
+        .await["item"]
+        .clone();
+    let contents = s
+        .ok(&["ontology", "relationships", "list", "--anchor", id(&existing)])
+        .await;
+    for directory in [&child, &parent] {
+        assert!(contents["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|relation| {
+                relation["relationship_type_id"] == id(membership)
+                    && relation["source_entity_id"] == id(&existing)
+                    && relation["target_entity_id"] == id(directory)
+            }));
+    }
+    let contents = s
+        .ok(&["ontology", "relationships", "list", "--anchor", id(&parent)])
+        .await;
+    assert!(contents["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|relation| {
+            relation["relationship_type_id"] == id(membership)
+                && relation["source_entity_id"] == id(&existing)
+                && relation["target_entity_id"] == id(&parent)
+        }));
     s.reject(
         &["relationships", "create"],
         json!({
             "relationship_type_id":id(membership),
-            "source_entity_id":id(&existing),"target_entity_id":id(&parent)
+            "source_entity_id":id(&existing),"target_entity_id":id(&child)
+        }),
+    )
+    .await;
+    s.write(
+        &["relationships", "update", id(&second)],
+        json!({
+            "is_deleted":true,"expected_revision":1
         }),
     )
     .await;

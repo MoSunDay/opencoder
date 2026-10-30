@@ -14,12 +14,17 @@
 //! - O6 `remote_identity` — Server-managed descriptions, skills and tools
 //!   execute on the remote host in both conversation modes, including restart.
 //! - O7 `isolation` — per-execution HOME/WORKSPACE: the frozen config
-//!   snapshot (0600, key preserved), bash cwd/HOME verified from inside a
+//!   snapshot (node-owned 0440, key preserved), bash cwd/HOME verified from inside a
 //!   real turn, and the pair rebuilt after an agent restart.
+//! - O8 `active_inputs` — steer/queue prompts admitted while a round is
+//!   in flight: idempotent re-delivery (same input id + payload), a
+//!   conflicting payload is refused, the steer is promoted into the next
+//!   model round and the queued task drains as its own follow-up round.
 
 #[path = "../support/mod.rs"]
 mod support;
 
+mod active_inputs;
 mod agent_session;
 mod flow;
 mod fork;

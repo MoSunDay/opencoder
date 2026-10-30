@@ -41,7 +41,7 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     port: u16,
     /// Serve the bundled web frontend.
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     web: bool,
     /// Require HTTP credentials; machine/resource credentials remain configured.
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
@@ -254,5 +254,13 @@ mod tests {
                 .auth_enabled
         );
         assert!(Args::try_parse_from(["server", "--auth-enabled", "disable"]).is_err());
+    }
+
+    #[test]
+    fn web_defaults_on_and_takes_an_explicit_boolean() {
+        assert!(Args::try_parse_from(["server"]).unwrap().web);
+        assert!(!Args::try_parse_from(["server", "--web", "false"]).unwrap().web);
+        assert!(!Args::try_parse_from(["server", "--web=false"]).unwrap().web);
+        assert!(Args::try_parse_from(["server", "--web", "disable"]).is_err());
     }
 }

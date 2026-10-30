@@ -1,4 +1,5 @@
 //! Real Server/Node channel stays live without completing an inventory report.
+mod hello_timeout;
 mod incremental;
 mod report_flow;
 mod report_storage;

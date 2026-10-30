@@ -39,7 +39,13 @@ pub struct Lifecycle {
     pub changed: tokio::sync::Notify,
     pub credential: OnceLock<String>,
     pub platform: OnceLock<opencoder_core::fleet::release::PlatformConfig>,
+    /// Node-channel Hello deadline in seconds. Unset keeps the production
+    /// default; per-state so test injection cannot affect other states.
+    pub hello_timeout_secs: OnceLock<u64>,
 }
+
+/// Default deadline the node channel waits for the first Hello frame.
+pub const DEFAULT_HELLO_TIMEOUT_SECS: u64 = 10;
 
 impl Lifecycle {
     pub fn retire(&self) {
@@ -55,6 +61,16 @@ impl Lifecycle {
     }
     pub async fn channels_retired(&self) {
         self.wait_for(&self.channels_retiring).await;
+    }
+    /// Hello frame deadline. Tests shorten it per state; production uses
+    /// [`DEFAULT_HELLO_TIMEOUT_SECS`].
+    pub fn hello_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(
+            self.hello_timeout_secs
+                .get()
+                .copied()
+                .unwrap_or(DEFAULT_HELLO_TIMEOUT_SECS),
+        )
     }
     async fn wait_for(&self, flag: &AtomicBool) {
         loop {

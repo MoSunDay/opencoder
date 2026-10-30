@@ -165,6 +165,56 @@ async fn native_changes_automatically_update_catalog_and_keep_read_permissions()
 }
 
 #[tokio::test]
+async fn capability_detail_returns_the_listed_document() {
+    let f = Fixture::new().await;
+    f.ok("POST", "/api/ontology/envs/debug/sync", Value::Null)
+        .await;
+    let listed = f.list().await;
+    let row = listed["items"]
+        .as_array()
+        .expect("synced catalog must list capabilities")
+        .first()
+        .expect("at least one capability")
+        .clone();
+    let id = row["id"].as_str().unwrap().to_owned();
+    let detail = f
+        .ok(
+            "GET",
+            &format!("/api/ontology/envs/debug/capabilities/{id}"),
+            Value::Null,
+        )
+        .await;
+    // The detail document wraps the very row the list serves.
+    assert_eq!(detail["item"], row);
+    assert_eq!(detail["item"]["capability"]["kind"], row["capability"]["kind"]);
+
+    // Unknown but well-formed id: the store misses and the handler maps it to
+    // the not-found error contract.
+    let (code, body) = f
+        .call(
+            Role::Admin,
+            "GET",
+            "/api/ontology/envs/debug/capabilities/00000000-0000-0000-0000-000000000000",
+            Value::Null,
+        )
+        .await;
+    assert_eq!(code, 404, "{body}");
+    assert_eq!(body["code"], "not_found");
+    // Pinned: only UUID-shaped ids are addressable; anything else is rejected
+    // as an invalid request instead of a lookup miss.
+    let (code, body) = f
+        .call(
+            Role::Admin,
+            "GET",
+            "/api/ontology/envs/debug/capabilities/does-not-exist",
+            Value::Null,
+        )
+        .await;
+    assert_eq!(code, 422, "{body}");
+    assert_eq!(body["code"], "invalid_request");
+}
+
+#[tokio::test]
 async fn source_failure_keeps_previous_snapshot_and_recovers_after_restart() {
     let f = Fixture::new().await;
     f.ok("POST","/api/dag/defs",json!({"name":"catalog-dag","steps":[{"name":"run","kind":{"type":"binary","resource":"tool@v1"}}]})).await;

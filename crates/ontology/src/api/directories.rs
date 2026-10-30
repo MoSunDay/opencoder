@@ -159,19 +159,19 @@ pub(super) async fn validate_membership(
             "membership target must be an active directory",
         ));
     }
-    if !allow_existing
-        && store
-            .relationships(env, Some(source), false)
-            .await?
-            .iter()
-            .any(|r| r.relationship_type_id == BELONGS_TO && r.source_entity_id == source)
-    {
-        return Err(AppError::Conflict(
-            "entity already belongs to a directory".into(),
-        ));
-    }
     let source_entity = store.entity(env, source).await?;
+    let memberships = store
+        .relationships(env, Some(source), false)
+        .await?
+        .into_iter()
+        .filter(|r| r.relationship_type_id == BELONGS_TO && r.source_entity_id == source)
+        .collect::<Vec<_>>();
     if source_entity.entity_type_id == DIRECTORY_TYPE {
+        if !allow_existing && !memberships.is_empty() {
+            return Err(AppError::Conflict(
+                "directory already has a parent directory".into(),
+            ));
+        }
         let parents: HashMap<Uuid, Uuid> = store
             .relationships(env, None, false)
             .await?
@@ -180,6 +180,10 @@ pub(super) async fn validate_membership(
             .map(|r| (r.source_entity_id, r.target_entity_id))
             .collect();
         validate_directory_move(source, target, &parents)?;
+    } else if memberships.iter().any(|r| r.target_entity_id == target) {
+        return Err(AppError::Conflict(
+            "entity already belongs to this directory".into(),
+        ));
     }
     Ok(())
 }

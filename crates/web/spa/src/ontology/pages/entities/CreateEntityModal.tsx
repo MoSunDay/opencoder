@@ -17,13 +17,11 @@ import type { AttributeDefinition, Entity, EntityType } from "../../types";
 type Props = {
   env: string;
   types: EntityType[];
-  directoryId?: string;
   onCreated: (entity: Entity) => Promise<void>;
 };
 export default function CreateEntityModal({
   env,
   types,
-  directoryId,
   onCreated,
 }: Props) {
   const { message } = App.useApp();
@@ -81,7 +79,7 @@ export default function CreateEntityModal({
               attributes[definition.id] =
                 definition.kind === "json" ? JSON.parse(value) : value;
           }
-          const payload = { ...values, attributes, directory_id: directoryId };
+          const payload = { ...values, attributes };
           const body = JSON.stringify(payload);
           if (request.current?.body !== body)
             request.current = { body, id: requestId(crypto.getRandomValues(new Uint8Array(16))) };

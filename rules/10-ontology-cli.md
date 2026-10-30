@@ -11,7 +11,7 @@ CLI 使用已有 Server 连接配置和鉴权。默认数据空间为 `debug`，
 - 写入体使用 `--json '<JSON>'` 或 `--json @file.json`，字段与原 API 相同。
 - 更新携带查询返回的当前 `expected_revision`；发生版本冲突时重新读取，不覆盖他人修改。
 - 新建实体携带 UUID 格式的 `request_id`，同一次创建重试保持 ID 和内容不变；`source`、`ext` 必填。
-- 除切面有独立 `delete` 命令外，实体、关系、类型、属性、Action、目录和环境均通过 `update` 设置 `is_deleted:true` 软删除，仍需提供对应更新体的必填字段。
+- 除切面有独立 `delete` 命令外，实体、关系、类型、属性、Action、目录、保鲜策略和环境均通过 `update` 设置 `is_deleted:true` 软删除，仍需提供对应更新体的必填字段。
 - 普通列表排除已删除对象；`--include-deleted` 可读取保留的数据。Action 命令维护操作配置，本身不执行 Action。
 - 平台生成字段通过原模块修改；补充说明、自定义属性及自定义关系可以维护，后续同步保留。
 
@@ -50,6 +50,7 @@ opencoder-cli ontology sync run
 | `aspects` | `list`、`get`、`create`、`update`、`delete --expected-revision` |
 | `graph` | 多个 `--center`、类型和关系筛选、上下游深度、`--pinned-only`、`--expand-neighbors` |
 | `vectors` | `get`、`set`、`search` |
+| `freshness` | `policies` 的 `list`、`get`、`create`、`update`；`runs` 的 `list`、`get`、`trigger`；`reviews` 的 `list`、`create` |
 | `nfs` | `status`、`set`；管理正文只读导出 |
 
 ## 实体、关系与切面
@@ -155,14 +156,14 @@ opencoder-cli ontology relationships list --anchor <entity-id>
 
 查询目录成员时，在返回关系中筛选该目录归属类型且 `target_entity_id` 为当前目录的记录，`source_entity_id` 就是成员 ID；用 `entities get` 继续读取详情。目录自身的父级关系方向相反，不属于该目录的成员。这些记录表示直接成员，查询子目录的成员需继续遍历目录树。
 
-一个实体最多有一个父目录。解除挂载时，将对应目录归属关系软删除：
+目录节点最多有一个父目录；普通实体可同时归属多个目录，同一实体对同一目录的重复挂载会被拒绝。解除挂载即软删除对应归属关系，多个归属可并存、互不影响：
 
 ```sh
 opencoder-cli ontology relationships update <membership-relationship-id> \
   --json '{"description":"目录归属","is_deleted":true,"expected_revision":1}'
 ```
 
-普通实体换目录时，先解除原归属，再创建新归属。这是两次独立请求，第二步失败时可重新挂载。子目录换父目录直接使用 `directories move`。服务端拒绝重复归属、目录循环、移动根目录及删除非空目录；空目录通过 `directories update` 的 `is_deleted:true` 删除。
+普通实体追加目录时直接创建新的归属关系，无需先解除已有归属；移出某个目录只需软删除对应归属。子目录换父目录直接使用 `directories move`。服务端拒绝同一实体对同一目录的重复归属、目录节点的第二个父目录、目录循环、移动根目录及删除非空目录；空目录通过 `directories update` 的 `is_deleted:true` 删除。
 
 ## API 与验证入口
 

@@ -33,12 +33,15 @@ pub async fn append_many(
     Ok(all_seqs)
 }
 
+/// The immediate transaction takes the write lock up front, so a concurrent
+/// cross-process commit cannot fail the first INSERT with a busy error that
+/// busy_timeout does not retry (same rationale as input admission).
 async fn append_chunk_in_tx(
     conn: &Connection,
     session_id: &str,
     msgs: &[Message],
 ) -> Result<Vec<i64>> {
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let mut seqs = Vec::with_capacity(msgs.len());
         let mut insert = conn.prepare_cached(INSERT_MESSAGE).await?;
         for m in msgs {

@@ -5,7 +5,7 @@
 //! server owns execution truth; these helpers only shape local UI
 //! bookkeeping (badges, appended transcript lines, folded token cost).
 
-use opencoder_core::harness::SubtaskRef;
+use opencoder_core::{fleet::ExecutionStatus, harness::SubtaskRef};
 
 /// Display-safe cap for a fetched result summary. Char-boundary truncation
 /// keeps multi-byte text renderable; `bound_summary` applies it.
@@ -33,6 +33,23 @@ pub fn find<'a>(refs: &'a [SubtaskRef], id: &str) -> Option<&'a SubtaskRef> {
 /// Whether `status` is a terminal subtask lifecycle state.
 pub fn is_terminal(status: &str) -> bool {
     matches!(status, "done" | "error" | "cancelled")
+}
+
+/// Server-side statuses that mean the subtask has finished, mapped to the
+/// status string recorded in the registry. Agent/operator subtasks converge
+/// to `Idle` on success (worker never reports `Done` for them), so idle is
+/// recorded as `done`. `None` while the execution may still make progress.
+pub fn settle_status(status: ExecutionStatus) -> Option<&'static str> {
+    match status {
+        ExecutionStatus::Pending
+        | ExecutionStatus::Running
+        | ExecutionStatus::Cancelling
+        | ExecutionStatus::Interrupted => None,
+        ExecutionStatus::Idle => Some("done"),
+        ExecutionStatus::Done | ExecutionStatus::Error | ExecutionStatus::Cancelled => {
+            Some(status.as_str())
+        }
+    }
 }
 
 /// Execution ids whose subtasks are still in flight (pending/running/…).
@@ -141,6 +158,22 @@ mod tests {
             result_summary: None,
             tokens,
             created_at: 1,
+        }
+    }
+
+    #[test]
+    fn settle_status_maps_server_lifecycle_to_registry_status() {
+        for (status, expected) in [
+            (ExecutionStatus::Pending, None),
+            (ExecutionStatus::Running, None),
+            (ExecutionStatus::Cancelling, None),
+            (ExecutionStatus::Interrupted, None),
+            (ExecutionStatus::Idle, Some("done")),
+            (ExecutionStatus::Done, Some("done")),
+            (ExecutionStatus::Error, Some("error")),
+            (ExecutionStatus::Cancelled, Some("cancelled")),
+        ] {
+            assert_eq!(settle_status(status), expected, "for {status:?}");
         }
     }
 

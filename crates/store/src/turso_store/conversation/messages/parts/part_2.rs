@@ -15,8 +15,10 @@ pub async fn import(conn: &Connection, session_id: &str, msgs: &[Message]) -> Re
     })
 }
 
+/// Immediate transaction, matching `append_chunk_in_tx`: bulk imports must
+/// queue behind cross-process writers instead of failing the lock upgrade.
 async fn import_chunk_in_tx(conn: &Connection, session_id: &str, msgs: &[Message]) -> Result<u32> {
-    super::tx::run_tx(conn, "BEGIN", || async move {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let mut count = 0u32;
         let mut insert = conn.prepare_cached(INSERT_MESSAGE).await?;
         for m in msgs {

@@ -225,8 +225,9 @@ pub async fn current_version(conn: &Connection) -> Result<Option<i64>> {
 async fn set_version(conn: &Connection, version: i64) -> Result<()> {
     // Wrap DELETE + INSERT in a single transaction so a crash between them
     // cannot leave schema_version empty (which would trigger a spurious full
-    // re-migration on the next boot).
-    super::tx::run_tx(conn, "BEGIN", || write_version(conn, version)).await
+    // re-migration on the next boot). Immediate begin matches the bootstrap
+    // transaction and queues behind cross-process writers.
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || write_version(conn, version)).await
 }
 
 /// DELETE + INSERT the version row WITHOUT a surrounding transaction.

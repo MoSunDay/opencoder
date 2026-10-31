@@ -1,53 +1,37 @@
-Commit: 0047ac2515f865d7f33f99cc22764a1e80765391
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # DAG 工作流
 
-用户通过画布、JSON 定义或 API 提交依赖图。步骤可以执行 Linux 原生二进制或 Agent，动态节点展开同类步骤。
+画布/JSON/API 提交依赖图；原生二进制与 Agent 步骤在共享 runc 容器执行，
+本卡只做指路。
 
-## 执行约定
+## 索引
 
-- 每次运行在同一个节点启动一个 `runc` 容器，所有步骤共享 `/workspace`。静态步骤使用 `/workspace/<step_name>`，动态实例使用对应步骤下的 `instances/<index>`。
-- 目录用于组织文件，不隔离同一 DAG 内的步骤。步骤可以共享文件和运行容器中已有的工具，不在宿主机回退执行。
-- Server 宿主的源工作区通过只读 NFS 提供，节点使用本地写时复制工作区。运行不能改写源文件、移动源路径或修改源目录权限。
-- 受理固定资源版本、执行配置和 UTC 日期目录；修改定义、资源指针或节点配置不改变已受理任务。重启只在原节点恢复同一运行。
-- 节点必须声明 `dag_container_v1`、`execution_io_v1`；动态运行还需要 `dag_dynamic_v1`。运行器版本、镜像、挂载、二进制架构或依赖不满足时，受理明确失败。
-- 运行容器支持伪终端。知识根中的嵌套挂载资源可读且保持只读；工作区写入仍落在本次运行的本地写层。
-- 标准镜像制备要求 Python ≥ 3.11，并验证系统 CA 与 Asia/Shanghai 时区；可以显式指定制备时的解释器路径，依赖不满足时制备失败。
-- Codex 镜像须同时提供对应的工具执行伴随程序，以及 `rg`、`printenv` 等运行工具；能访问模型不等于工具调用可用。
-- 注册 Agent 明确绑定 Codex profile 和不可变启动脚本；`act` 是 OpenCoder harness 内部模式，不代替注册 Agent。managed startup 镜像校验同版 wrapper/Codext，配置、平台 CLI 与 `connection_files` 显式声明的连接只通过只读私有文件挂载提供，缺失时失败，不退回宿主执行。
-- 额外连接须在启动配置中声明已有 JSON 文件的绝对路径，关联 token 也只读挂载；省略 `connection_files` 时不增加连接，不扫描客户端目录。配置变更只影响后续启动，已冻结运行保留原挂载。
-- 同一执行节点的宿主与 DAG Codex 共用账号并发占用。容器只向每次执行的私有 broker 请求账号，取消完成进程树回收后才释放；Runtime 异常退出不会因为容器 PID 与宿主不同而提前释放。续轮保留平台创建的 session/thread/input 与共享会话索引。
-
-## 输入与结果
-
-- [单步恢复](../../docs/dag-step-control.md) 通过显式 `recovery_policy: operator` 启用。失败可等待巡检，ctl 支持暂停、继续、重试和明确失败，按操作标识去重并核对尝试次数。未决步骤不触发依赖和收尾，已完成分支保留。
-
-- 二进制步骤指定 `resource` 和参数数组 `args`；资源池管理不可变版本并允许回滚 current 指针。Agent 可以使用 OpenCoder 或 Codex 执行器。
-- 静态二进制、Agent 与动态实例读取 `OPENCODER_STEP_CONTEXT` 指向的只读上下文，取得本次运行的完整冻结输入；动态实例还取得实例编号和实际输入。通过 `output.json` 返回结构化结果，需要下载的文件必须在 `artifacts.json` 声明相对路径、大小与 SHA-256。恢复时输入漂移会明确失败。
-- 被 Brain 调用时，步骤结果和已声明文件通过执行索引交给下一步，动态实例的文件保留实例编号；DAG 继续使用自己的运行空间。文件下载核验大小与摘要，不依赖两个能力共用目录。
-- 页面提供步骤日志、Agent 会话、动态实例状态及产物下载；归档只包含声明文件，不复制整块工作区。
-- 依赖、整跑并发上限、单步超时与取消仍生效。取消步骤只终止该步骤的进程树；运行结束关闭共享容器并释放挂载。
-- Agent 步骤重试从新的事件流开始，已归档的会话和冻结输入保留。事件持久化错误返回执行失败，不能误记为用户取消；已取消执行的终态与恢复限制不变。
-
-## 二进制资源与运行环境
-
-- DAG 页的二进制资源池支持 ELF 文件上传、追加不可变版本、查看历史、下载、切换当前版本和删除；切换指针及删除须确认，失败保留输入并显示实际错误。
-- 编辑步骤时从真实资源池选择名称和版本。选择名称表示受理时固定当时的 current；选择 `name@vN` 表示明确版本。资源读取失败不能编造可选版本。
-- 运行详情和全部执行明细先展示运行画布，再展示容器标识、共享工作区和步骤固定资源表格，不显示共享容器说明提示。定时任务触发历史打开同一详情；资源池更新、切换或删除不改变已受理任务的快照。
-- 资源准备中明确显示尚未固定版本；缺少或损坏的运行快照不显示为当前资源池的版本。
+- [dag 域卡](../../agents/dag/index.md) — 定义、域与协议
+- [dag-runtime 域卡](../../agents/dag-runtime/index.md) — 运行器、沙箱与
+  恢复
+- [dag-binary 域卡](../../agents/dag-binary/index.md) — 二进制不可变版本池
+- [crates/dag/src/spec.rs](../../crates/dag/src/spec.rs) — 定义与
+  `max_concurrency`
+- [crates/dag/src/dynamic.rs](../../crates/dag/src/dynamic.rs) — 动态节点
+  展开
+- [crates/dag-runtime/src/sandbox/](../../crates/dag-runtime/src/sandbox) —
+  runc 沙箱与工作区布局
+- [workloads/dag.rs](../../crates/worker/src/workloads/dag.rs)
+  — 节点侧 DAG workload
+- [capabilities.rs](../../crates/control/src/api/executions/capabilities.rs)
+  — 节点能力声明校验（`dag_container_v1`、`execution_io_v1`、
+  `dag_dynamic_v1`）
+- [crates/web/src/api_dag.rs](../../crates/web/src/api_dag.rs)、
+  [api_dag_binaries.rs](../../crates/web/src/api_dag_binaries.rs) — 画布/
+  JSON 编辑与目录 API
+- [执行规则](../../rules/04-dag-execution-contract.md)、
+  [动态步骤 API](../../docs/dag-dynamic.md)、
+  [步骤控制](../../docs/dag-step-control.md)
+- [镜像与 rootfs 制备](../../docs/registered-runners.md)、
+  [目录去重与清理](../../scripts/maintenance/catalog_cleanup/README.md)
 
 ## 相关
 
-- [必须遵守的执行规则](../../rules/04-dag-execution-contract.md)、[动态步骤 API](../../docs/dag-dynamic.md)
-- [dag](../../agents/dag/index.md)、[dag-runtime](../../agents/dag-runtime/index.md)、[dag-binary](../../agents/dag-binary/index.md)
-- [调度平台](../agent-platform/index.md)、[Harness](../harness/index.md)、[平滑发布](../../docs/smooth-release.md)
-
-## 目录去重与清理
-
-相同名称、相同内容的 DAG 保存与当前二进制重复上传保持原时间和版本；异名相同定义或已有相同二进制返回 409，附已有条目供复用。历史二进制版本须显式切换，不能通过重复上传增加版本。页面保留编辑内容，可打开冲突条目的详情。
-
-删除前检查全部版本引用、日程、TODO、能力、活动执行、待派发请求、配置及 Agent 文件；仍被引用返回 409，条件请求内容变化返回 412，不存在返回 404。运行历史、日志、产物和工作区保持。
-
-[维护命令](../../scripts/maintenance/catalog_cleanup/README.md) 先预览并逐项备份，再通过条件删除执行；独立无引用条目须在创建、更新及最近执行受理后均超过 7 天，完整重复的额外副本可直接列入候选。未知时间或引用检查失败保留，不定期自动清理。
-
-目录清理扫描全部 Agent 资源文件，不依据扩展名推断无引用。不能确认内容或资源根时拒绝删除。删除响应丢失后保留待确认回执，重新执行先查询原对象；确认删除后仍可用原备份恢复。备份完整校验后才正式保存，恢复核对回执摘要，拒绝被改写的备份。
+- [调度平台](../agent-platform/index.md)、[Harness](../harness/index.md)、
+  [平滑发布](../../docs/smooth-release.md)

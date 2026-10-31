@@ -1,12 +1,17 @@
-Commit: f2d723ed2a32a5a394eac05f58bc5558e7cfe08f
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # shellguard 模块
 
-sandbox shell 命令安全分类器（rable AST 判定）；释放集仅 `/tmp` + `/dev/null`，判定 cwd 对齐执行 cwd。
+sandbox shell 命令安全分类器（rable AST 判定）。细节以代码为准。
+接缝：session 的 plan/sidecar 只读执行门经此判定 Bash 命令。
 
 ## 索引
-- `src/lib.rs::classify/classify_in` — 唯一入口，不可解析 fail-closed 一律 Ask
-- `src/analyzer_dispatch.rs::default_verdict` — unknown 命令 allow-by-default（`AllowReason::UnknownCommand`）
-- `src/verdict.rs` — Allow/Ask/Deny + `writes_state`
-- `src/handlers/` — 每命令 handler 注册表
-- `src/allowlists.rs` — simple-safe 白名单
+- [src/lib.rs](../../crates/shellguard/src/lib.rs) — `classify`/`classify_in`
+  唯一入口
+- [analyzer_dispatch.rs](../../crates/shellguard/src/analyzer_dispatch.rs)
+  — 命令分发与 `default_verdict`
+- [src/verdict.rs](../../crates/shellguard/src/verdict.rs) — `Verdict`
+  （Allow/Ask/Deny）与 `writes_state`
+- [src/handlers/](../../crates/shellguard/src/handlers) — 命令 handler 注册表
+- [src/allowlists.rs](../../crates/shellguard/src/allowlists.rs)
+  — simple-safe 白名单

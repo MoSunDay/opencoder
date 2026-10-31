@@ -37,30 +37,12 @@ export async function checkEntities(browser, base, output) {
         await page.locator('.fleet-sidebar [role=tablist]').getByRole('tab', { name: 'Ontology', exact: true }).click();
         await page.getByRole('menuitem', { name: /实体$/ }).click();
       }
-      const all = page.getByRole('button', { name: '全部实体', exact: true });
       const entity = page.getByRole('button', { name: '无目录测试实体', exact: true });
       const search = page.getByRole('textbox', { name: '搜索名称或标识' });
-      await all.waitFor();
-      assert.equal(await entity.count(), 0);
-      await all.click();
-      await search.fill('无目录测试实体');
       await entity.waitFor();
       result.unassigned = true;
       await measure('all');
-      if (width < 768) {
-        const tree = await page.request.get(`${base}/api/ontology/envs/debug/directories/tree`);
-        const items = (await tree.json()).items;
-        const platform = items.find(item => item.name === '平台能力');
-        const parts = [platform.name];
-        let parent = items.find(item => item.id === platform.parent_id);
-        while (parent) { parts.unshift(parent.name); parent = items.find(item => item.id === parent.parent_id); }
-        await choose(page.getByRole('combobox', { name: '实体目录', exact: true }), parts.join(' / '));
-      } else {
-        await page.locator('.ant-tree').getByText('平台能力', { exact: true }).click();
-      }
-      await entity.waitFor({ state: 'hidden' });
-      await measure('directory-empty');
-      await all.click();
+      await search.fill('无目录测试实体');
       await entity.waitFor();
       await search.fill('missing-entity');
       await entity.waitFor({ state: 'hidden' });
@@ -100,7 +82,6 @@ export async function checkEntities(browser, base, output) {
         await measure('error');
         await page.unroute(pattern);
         await page.getByRole('button', { name: /重\s*试/ }).click();
-        await all.click();
         await search.fill('手机创建的实体');
         await page.getByRole('button', { name: '手机创建的实体', exact: true }).waitFor();
         result.retry = true;

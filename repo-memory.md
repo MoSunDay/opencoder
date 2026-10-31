@@ -1,8 +1,8 @@
-Commit: bb06945c1623a3e664e743e3f2a2bcbfd2cf2085
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # OpenCoder 逻辑地图
 
-Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder-cli`（远程管理）、`opencoder-server`（控制面）、`opencoder-agent`（节点执行）。
+Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder-cli`（远程管理）、`opencoder-server`（版本与只读资源服务）、`opencoder-agent`（节点入口）。另有测试用途二进制 `mcp_mock_server`（crates/session）。
 
 仓库只保留通用基建实现和说明；具体任务及其上下文通过运行时接入，遵循 [仓库范围约定](rules/08-infrastructure-scope.md)。
 
@@ -24,7 +24,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 每次 DAG 运行归属单个节点、单个容器，共享写时复制工作区；Server 不链接。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
 - [agents/project](agents/project/index.md) — 项目、专项、TODO 与 Tag 数据；旧执行链独立保留。
-- [agents/brain](agents/brain/index.md) — 能力库、schema 7 里程碑计划、分层调度与嵌套计划。
+- [agents/brain](agents/brain/index.md) — 能力库、分层调度与嵌套计划。
 - [agents/agents](agents/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
 - [agents/team](agents/team/index.md) — 团队目录与消息扇出运行时。
 - [agents/control](agents/control/index.md) — 平台控制面：节点调度、五字段执行索引。
@@ -43,6 +43,9 @@ OpenCoder 能力入口见 [features/index.md](features/index.md)。
 - [rules/02-regression-gate.md](rules/02-regression-gate.md) — 改动及直接影响链路定向回归 + changelog 附测试清单
 - [rules/03-test-pyramid.md](rules/03-test-pyramid.md) — 测试分层（unit/integration/e2e）
 - [rules/04-dag-execution-contract.md](rules/04-dag-execution-contract.md) — DAG 单节点单容器与原生步骤执行约定
+- [rules/05-ui-acceptance.md](rules/05-ui-acceptance.md) — 只验收本次修改的页面与直接影响链路，页面范围由 `scripts/acceptance/ui/scope.js` 维护
 - [rules/06-brain-scheduling-contract.md](rules/06-brain-scheduling-contract.md) — 大脑整层调度、结果评估、返工与恢复约定
 - [rules/07-project-module-contract.md](rules/07-project-module-contract.md) — 项目、专项、TODO 的归属、看板、执行关联与进度约定
 - [rules/08-infrastructure-scope.md](rules/08-infrastructure-scope.md) — 代码、样例、提示词与文档只保留通用基建内容
+- [rules/09-ontology-capabilities.md](rules/09-ontology-capabilities.md) — Ontology 是全部平台能力的统一查询与组织入口，查找能力先走能力目录与图谱
+- [rules/10-ontology-cli.md](rules/10-ontology-cli.md) — `opencoder-cli ontology` 的命令入口与操作方式，CLI/API 约定变化时同步更新

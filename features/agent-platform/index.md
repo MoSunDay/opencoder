@@ -1,129 +1,39 @@
-Commit: e0fd40a4389ecc1ddcebf9eb661a7f716adce02f
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # Agent 调度平台
 
-Server/Node 调度、DAG 定义管理、执行查看与平滑发布；细节以代码为准。
+Server 控制面与节点执行面的调度总纲；本卡只做指路，细节以代码与域卡为准。
 
-## 执行准入与并发
+## 索引
 
-- Agent 页的 Operator 与 Agent 对话均由 Server 转发到选定节点，在远端宿主机加载所选 Agent 的描述、Skill、Tool 和 Harness；复用后台会话执行路径，不启动 TUI，也不要求普通会话的 runc 镜像。
-- 普通会话创建时只固定已注册 Agent 身份及其实际引用的资源；未使用的资源池不会拖慢或阻断会话受理。当前会话后续切换身份、续聊继续使用受理时固定的版本。
-- 远端持久接收后，Server 才建立会话执行索引；首事件尚未产生时显示初始化状态并继续订阅，读取不会误报不存在。明确拒绝不留下占位会话；重复提交同一输入保持执行 ID，修改首轮输入则使用新 ID。
-- 节点磁盘可用块至少 10%、Unix 可用 inode 至少 20% 才接收新执行；Windows 按字节容量判断，不提供 inode 数量。容量读取失败或零容量拒绝准入，已有任务继续完成。
-- [Windows 节点](../windows/index.md) 仅声明并接受 Operator；DAG 与其他执行种类在准入时拒绝。
-- DAG 定义的 `max_concurrency` 可配置为 1–30，缺省 4；画布和 JSON 编辑保存同一字段。每次运行冻结定义，修改定义不会改变在跑任务的上限。
-- [原生 DAG](../dag/index.md) 在一个节点的一次共享容器内执行，源工作区只读，文件修改落在节点本地写层；静态与动态运行都需要节点声明容器能力。
-- 已注册的 operator 卡可作为员工能力重复使用：独立调用读取卡片的 Harness，DAG Agent 步骤使用工作流的 runc 容器及受理时固定的资源版本，Brain 可在同层并行调用这些能力。项目协作见 [项目工作台](../project/index.md)。
-- 兼容发布由当前 Server 信号触发独立作业；新任务转入新版本，既有任务保留所属 runtime。
-- 执行 IO 新协议分两步启用：先发布可读取新协议的过渡版本，再发布 writer 版本。后续可回滚到过渡版本；仍保留新 Runtime 时，不允许回滚到无法读取其派发意图的旧 Server。原 Assignment 与 claim 的内容保持不变。
-- 平滑切换受理与连续调度的验收上限为 30 秒；公共入口不得出现失败请求。详细门槛与维护切换要求见 [发布说明](../../docs/smooth-release.md)。
-- Host 的新任务就绪状态由活动 Runtime 决定；已退休 Runtime 的休眠库存仍用于历史执行索引，但其中的旧资源错误不阻断新任务。候选 Host 先以自身与 Runtime 状态验证；发布和回滚激活后，必须确认其具体代次在目标 Server 在线且完成索引同步，才切换公共入口。索引写入等待不阻塞传输心跳，心跳本身不能使未同步节点就绪。通道收到有效输入才续期，持续向节点发送或待入队帧满不会保留一个已失去输入的连接；原连接释放后可重连，已有任务继续沿原归属执行。
-- 节点冻结或复开不会启动已休眠 Runtime；持久化结果与 Team topic 的分块读取由 Host 直接从原执行目录提供，也不会唤醒。其他需要 Runtime 的查询或继续执行会唤醒原版本，并在放行请求前同步当前准入模式。
-- Runtime 重启后的容量恢复只处理已证明属于当前受管 Runtime 的遗留 `running` reservation：先完成节点锁、runc 容器和 journal 恢复，再检查 systemd cgroup 内无其他进程，最后按 ticket、execution、runtime 精确身份事务化释放；任何归属、阶段或进程状态不明确都会拒绝恢复。
-
-资源受管任务可携带 `_resource_request`：Server 持久受理后等待外部授权，由同一执行队列重试派发。资源服务不可用时保留等待状态，普通任务仍可正常提交。等待中的取消只在确认未分配资源后完成；停止未知或已分配时不能直接当作空任务取消。重试保持原执行身份和冻结输入。接口与边界见 [control](../../agents/control/index.md)。
-
-## 维护升级
-
-- 历史会话清单因排序变慢时，可通过[会话索引维护工具](../../scripts/maintenance/session_index/README.md)先预览再补齐索引。此操作不重启节点，不修改应用记录，执行后仍须验证真实详情查询和任务连续性。
-- 版本部署只需指定一个持久化根目录；服务数据、工作目录、资源池、镜像、发布包与备份统一置于根下。预览可核对全部路径，准备配置时不启动服务或迁移已有数据，发现旧配置、目录别名或 Ontology 正文绑定冲突则明确拒绝。外部源工作区保持原路径与只读性质；迁移步骤见 [发布配置](../../docs/smooth-release.md)。
-- 当前存储使用 Turso，schema 保持 v39；独立 ACK writer 使用发布数据格式 12，读取过渡版本使用格式 11。新控制器按 reader/writer 能力校验二者共存及回滚，旧控制器拒绝格式 12。格式 9/10 的 libsql 程序不能与 Turso 打开同一数据库；首次切换通过维护窗口完成。
-- 停止全部写入服务并保存一致性备份后安装固定配置，先升级独立资源服务，再建立原生二进制与工作区的只读 NFS 挂载；已有 Agent 只读挂载是预检条件。
-- 资源服务的 HTTP 就绪后，还要等待节点的实际 NFS 目录读取恢复；临时读取失败在发布等待时限内重试。超时不会启动候选进程或开放写入口，保留原备份供同候选续跑。
-- 源工作区必须已存在并允许 Server 运行用户读取和遍历；与安装配置、状态、二进制池或节点挂载路径重叠时提前拒绝。维护失败、回滚和续跑都不创建、移动源路径或改变其所有者、权限与内容。
-- 已验证的备份和固定配置快照在回滚、失败和重试之间保持不变；读取 WAL 模式备份也不能新增辅助文件。严格发布包校验不接受未提交或缺少完整构建信息的开发包。
-- 在线数据库备份保留各服务、Runtime、执行 HOME/workspace、会话及项目的实际数据库，排除 Runtime 固定资源和只读 OCI 视图，清单列明排除路径；同名用户目录不受影响。任务数据树中带 `.db` 后缀的非 SQLite 过程存储保留稳定字节副本并单独记入清单；平台 DB 或带 SQLite 头的损坏文件仍使备份失败。在线备份不包含完整执行文件与资源；停服备份仍复制完整文件树和嵌套数据库。
-- 应用 schema 迁移在重新开放写入的意图持久化前可恢复旧 schema 与服务；存储引擎切换只回退程序和路由，不恢复数据库。开放写入后，即使复开或入口切换回执丢失，也必须继续同一候选或用兼容版本修复。
-- 中断续跑使用同一候选、备份和配置快照。私有验证通过才开放接入；完成后的发布与回滚必须满足当前数据兼容要求，旧格式版本不能重新激活。
-- [Ontology](../ontology/index.md) 备份包含独立数据库与实际正文根；首次启用正文 NFS 需显式配置，升级独立资源服务后验证第四个只读导出。
-- 常规不兼容迁移要求单机排空。仅切换存储引擎时，先冻结本机 Server 和 Runtime 并等待已接纳工作结束；远端节点继续运行，公共入口在维护期间返回 503。具体操作见 [发布说明](../../docs/smooth-release.md)。
-
-## 调度监控
-
-- 管理员可通过 `GET /api/metrics/scheduler` 读取调度总览，Prometheus 使用独立 Bearer 凭据抓取 `GET /metrics`；该凭据不能访问其他接口，且不能与管理员凭据相同。Grafana“OpenCoder 调度总览”区分派发失败与执行失败，展示节点容量、运行数及下一次触发时间；指标不带任务 ID 标签。
-- 扫描与派发计数随 Server 进程重启归零；日程最近状态来自持久化记录。`active_executions` 包含未终态执行索引，可能有历史遗留；实际设备运行数以 `node_active_runs` 为准。
-
-## 页面状态与资源管理
-
-- 用户与节点列表支持搜索和筛选；创建用户、修改角色在弹窗内确认。提交期间阻止重复操作，失败保留草稿，取消后再次打开恢复初始值。创建用户自动生成一个 Token，明文只显示一次并支持复制；确认保存、离开页面或刷新后无法重新查看，编辑角色不会重新生成 Token。
-
-- 管理员管理用户、节点与配置；editor 可执行平台写入和任务操作；viewer 只读。角色修改对该用户全部 Token 的后续请求立即生效，删除用户使其全部 Token 失效。Token 管理 API 支持单独设置有效期或撤销；启动管理员凭据由启动配置管理。
-- 用户权限页以搜索、筛选和操作按钮开头，不重复显示页头标题，不设独立 Token 管理页面；平台写入控件按角色禁用，接口在路由与原生转发之前校验权限。
-
-
-- 身份确认前不展示管理页面；身份读取失败可重试，401 返回登录。读取失败与空列表、已停止、默认配置分别显示，切换页面或资源后旧请求不能覆盖新内容。
-- Agent/Operator 对话在事件流结束时补取已保存的回答；启动失败或结果读取失败显示原因并恢复输入，切换会话后的旧读取不得覆盖当前对话。实现见 [web](../../agents/web/index.md)。
-- 会话的模型选择按行展示单选按钮与名称；长名称在弹窗内换行，点击名称也可选中模型。
-- Agent 配置展示 Agent、二进制、源工作区和 Ontology 正文四个 NFS 的实际状态与路径；导出只读，停止须确认。
-- 定时任务支持创建、编辑、启停和确认手动触发；历史记录打开原执行，删除定义不删除已有触发历史。新建、修改或重新启用只计算生效后的触发时间，重复保存相同内容不推迟调度。未修改任务重启后仍在 24 小时内补跑最近一次，其余积压合并记录为“已错过”；创建前、停用期间和旧定义的触发不补跑，旧定义的失败不按新参数重试。
-- 某个定时任务等待节点准入时，其他日程仍继续扫描和触发；同一定义不会因重复扫描而并发提交。Agent、Team、TODO、DAG 的提交若已有持久化拒绝回执，保留失败历史，下一周期创建新执行；故障恢复后无需手动触发来推进日程。临时故障仍沿原执行 ID 重试，明确拒绝的原 ID 重放仍返回原结果。
-- Team 编辑在选定队长和成员后展示名称、角色、描述表格；队长置顶，超长名称和描述省略并保留全文提示，窄屏下在表格容器内横向滚动。
-- Team 页面可切换“Team 列表”和“执行记录”；启动即展示执行编号，等待响应超过 15 秒或回复不确定时自动确认受理结果，保留原输入与同一编号重试，并允许关闭或查看记录。确认受理后自动打开过程；明确拒绝时显示原因并恢复编辑。执行记录自动刷新并支持翻页，点击记录重新打开原执行。
-- Team 执行按讨论目标、结论和轮次组织内容；轮内区分首次讨论与补充澄清，展示成员发言、队长小结和待澄清问题。进行中的轮次自动展示已保存的发言与小结，无需等待整轮结束；尚未保存时显示当前等待阶段。正常完成显示最终结论，轮次用尽、取消或失败时保留阶段小结与已保存的未完成轮次；历史轮次可翻页，长记录可分段查看。Team 页面与其他执行入口共用过程组件。
-- [全站 UI 验收约定](../../rules/05-ui-acceptance.md) 同时检查全部注册页面、四种屏宽与 Server TUI；截图不能代替真实调度和完整操作链路。
-
-## Codex 启动脚本
-
-- Harness 管理的默认配置和命名档案可选择外部启动脚本；留空直接启动 Codex，脚本内容由平台外维护。
-- 每轮执行、继续会话和分叉使用会话固定的脚本入口；脚本可准备环境、组织参数和清理资源。启动失败使本轮失败，取消会停止脚本及其子进程。
-- 账号选择等定制规则由脚本负责，平台不提供 `auth_slot`。配置方式与上下文约定见 [接入文档](../../docs/codex-startup-script.md)。
-
-## Operator 执行隔离
-
-- Operator 内置默认规则：每次调用聚焦一个可验证的结果，按需读取与任务直接相关的 skill，按约定交付后结束。默认规则列出本次可查找的真实技能目录，Agent 私有技能优先。OpenCoder 在压缩或清空上下文后保留规则；OpenCoder 和 Codex 的后续对话、恢复与派生会话均携带规则。用户消息保留原文，其他会话类型不注入这些规则。实现见 [session](../../agents/session/index.md)。
-- Codex 可配置[启动脚本](../../docs/codex-startup-script.md)，按命令数组传参，每轮执行时提供当前会话上下文；启动选择随执行固定，脚本失败或取消均按原生会话结果处理。
-- 宿主机上的 Agent 与 Operator 支持运行中引导、排队输入和原执行续会话；同一输入 ID 的重试不重复添加消息。
-
-
-- 每个 Operator 执行获得独立的 HOME（私有权限的冻结配置快照）与 workspace；命令工具 cwd 即 workspace，resume 重建同一对目录。Windows 还隔离 USERPROFILE、APPDATA、LOCALAPPDATA。
-- 派生会话保留父会话的 Agent 或 Operator 类型。隔离 Operator 的派生会话继承父配置和技能快照，使用自己的 HOME 与空工作目录；重启后继续保持隔离。
-- Operator 会话创建前可选择 OpenCoder 或 Codex，并注入逐项环境变量；Codex 执行继承托管 Harness 设置，显式注入值覆盖同名托管 env，HOME 始终指向该 Operator 的隔离目录。启动选择与注入 env 随会话固定，续会话沿用。
-- 窄屏会话页将节点与会话列表置于输入区上方，Operator 启动配置与发送输入均可操作。
-- Operator 配置来自节点数据根下的专用平面（首个执行引导一次后冻结），交互端（TUI/CLI）后续保存的配置与新增的全局技能包不再影响 Operator 执行；执行技能池 = 平面包 + 内置技能。
-- 会话按创建时打上的 `kind` 泳道隔离（`operator`/`agent`/`team`/`dag`/`todos`/`project`/`brain`）；默认会话清单不显示 operator 泳道。
-
-## TUI 任务入口
-
-- 配置 `opencoder_server.enabled=true` 和 Server `url` 后，`/agent` 列出 Server 能力库中的 Agent/Operator；鉴权沿用 `OPENCODER_SERVER_TOKEN`。默认关闭时只有 `self`。`@` 按普通文本发送。
-- `/agent self` 创建空的本地任务；`/agent <能力 ID>` 创建新的远端任务，使用该能力的上下文。`/task`（`/tasks`、`/t`）列出并恢复本地任务与远端书签，切换时只展示目标任务的内容。
-- 首轮与后续输入都由 Server 执行；连续对话、队列输入和引导沿用同一个执行 ID。首轮准入失败可按原 ID 重试，恢复任务不会重新创建执行。
-- 文本、工具、问题和历史内容复用 TUI 的聊天展示。远端用户消息显示原文，内部执行前缀不作为用户内容回显；断线后从已消费位置继续读取。
-- 切换和退出 TUI 只断开远端连接，Server 任务继续执行；`/stop` 或双 Esc 显式中断任务。
-- Operator 可以使用 Server 注册的 Codex 包装器。TUI 的本地执行器、模型和环境选择不覆盖它；仅使用远端能力时无需本地模型凭据。
-- 远端任务的本地模型、执行器和会话改写命令显示不可用；连接、权限或书签错误明确显示，不启动本地模型。
-
-实现索引见 [tui](../../agents/tui/index.md)、[control](../../agents/control/index.md)、[worker](../../agents/worker/index.md)。
-
-## DAG 私有任务文件
-
-- `POST /api/executions` 的 `private_context` 承载有期限的执行专属文件，与公开 `input` 分离；节点能力接口为 `GET /api/nodes/{id}/execution-capabilities`。
-- 调用方冻结 `image_digest`（运行中节点执行文件 SHA256）、`definition_sha256` 和 `expires_at_ms`。节点准入及恢复核验执行文件，私有文件变化不能复用旧执行 ID。
-- 节点使用 0700 私有目录和 0600 文件，共享 runc 容器只读挂载 `/run/opencoder-task`；模型仅接收目录路径，系统不自动归档私有目录。DAG rootfs 安装脚本包含 Python 标准库运行时。
-- 边界与回归映射见 [私有任务文件](../changelog/2026-09-22/private-dag-task-files.md)。
+- [control 域卡](../../agents/control/index.md) — 控制面：节点接入、全局
+  定义、执行索引与调度
+- [crates/control/src/admission.rs](../../crates/control/src/admission.rs)、
+  [capabilities.rs](../../crates/control/src/api/executions/capabilities.rs)
+  — 执行准入与节点能力校验
+- [crates/control/src/scheduler.rs](../../crates/control/src/scheduler.rs)、
+  [scheduler/](../../crates/control/src/scheduler) — 调度循环与日程扫描
+- [resource_admission/](../../crates/control/src/api/resource_admission)
+  — `_resource_request` 资源授权准入
+- [crates/control/src/release/](../../crates/control/src/release) — 平滑发布
+  信号、中继与资源切换
+- [server 域卡](../../agents/server/index.md) — Server 二进制入口
+- [node 域卡](../../agents/node/index.md) — 节点接入与执行转发
+- [agent 域卡](../../agents/agent/index.md) — 节点执行程序
+  `opencoder-agent`
+- [worker 域卡](../../agents/worker/index.md) — 受理/恢复、资源快照与
+  workload 适配；[health.rs](../../crates/worker/src/runtime/health.rs)
+  节点容量健康检查，[journal.md](../../agents/worker/journal.md) 执行日志
+- [web 域卡](../../agents/web/index.md) — Web 控制台 API
+- [session 域卡](../../agents/session/index.md) — Operator 规则与会话隔离
+- [crates/tui/src/worker.rs](../../crates/tui/src/worker.rs) — TUI 的
+  Server 任务入口
+- [平台文档](../../docs/agent-platform.md)、
+  [发布配置](../../docs/smooth-release.md)
+- [会话索引维护](../../scripts/maintenance/session_index/README.md)、
+  [UI 验收约定](../../rules/05-ui-acceptance.md)
 
 ## 相关
 
-- [协议与 API 明细](../../docs/agent-platform.md)、[平滑发布](../../docs/smooth-release.md)
-- [动态 DAG 步骤](../../docs/dag-dynamic.md)
-- [agents/control](../../agents/control/index.md) — 控制面与节点调度
-- [agents/worker](../../agents/worker/index.md)、[agents/node](../../agents/node/index.md) — 节点执行与出站连接
-
-取消执行会先保存停止意图与相关重跑状态，再向原归属 Runtime 的进程发出信号。这两个持久步骤共用一次 journal 锁，不在已保存取消后重新排队；慢请求记录锁等待、落盘和信号阶段耗时，日志不包含用户输入或凭据。取消回执与最终进程、容量清理是不同阶段。
-
-共享工作区 Brain 在平滑发布后继续使用原 Runtime 执行后续子任务；能力探测与创建采用相同归属。原有执行不会因新活动版本改变位置，普通跨节点子任务仍按冻结的选点约束运行。
-
-存储引擎维护会为所有登记的历史 Runtime 建立独立程序和镜像关联，保留原发布包、ID、数据目录、执行归属和冻结资源。开放写入前失败只回退程序及路由，不恢复旧数据库；开放后只允许新修复版本。在线检查与备份使用数据库所属引擎。
-
-## 后台索引同步
-
-Server 归属校验读取独立小表，历史冻结请求按批补齐一次，之后随正常写入同步维护。执行索引仍为五字段，不改任务正文、归属或已有凭据。
-
-新版本双方协商增量：首次连接、断线重连及每 10 分钟全量校准，平时只传变化与移除；无变化不执行索引上报事务。基准在 Server 提交后推进，旧版本对端继续全量。Server 切换使共享基准变化时重新全量同步；清单移除不会删除历史或释放活动容量。
-
-Runtime → Host → Server 逐层传递源变化。运行摘要常驻，完整执行数据按需读取，消息预览和项目正文不进入索引查询。Brain 上报先选最多 64 项，再构造消息；确认写独立小记录，重复确认不写入完整执行文件。终态已确认历史不参与轮询，重启保持重放和引导顺序。
-
-完整历史记录保留在原文件中，查询和恢复按需读取。读取缓存的正文最多 48 MiB、128 条，小型详情最多 16 MiB、32,768 条，合计字节预算仍为 64 MiB；详情单条超过 8 KiB 时回到完整读取，原始数据和接口内容保持不变；已有执行的文件丢失或损坏会明确报错。内存处理方式见 [执行记录](../../agents/worker/journal.md)，实测和验证见 [内存修复记录](../changelog/2026-10-22/runtime-journal-memory.md)。
-
-实现与定向验证见 [首次索引优化](../changelog/2026-10-22/cpu-index-sync.md) 和 [源增量与按需读取](../changelog/2026-10-22/cpu-source-reporting.md)。
-
-兼容边界：本次仅受管 Host 请求增量协商。旧 Server 对直连 Worker 不保存报告提交序号，无法防止迟到旧报告覆盖状态，因此直连 Worker 继续周期性全量；候选提取优化仍生效。Server 拒绝非 Host 代次启用增量。
+- [原生 DAG](../dag/index.md)、[Windows 节点](../windows/index.md)
+- [项目工作台](../project/index.md)、[Ontology](../ontology/index.md)

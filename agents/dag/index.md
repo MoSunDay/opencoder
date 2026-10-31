@@ -1,17 +1,20 @@
-Commit: 0047ac2515f865d7f33f99cc22764a1e80765391
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # dag 模块
 
-DAG 纯域 + 线协议；DTO LOCKED，无 IO，线协议变更需跨端同步。
+DAG 纯域 + 线协议；DTO LOCKED，无 IO，线协议变更需跨端同步（lib.rs）。
 
 ## 索引
-- `src/spec.rs`、`src/domain.rs` — Binary、Agent 与 Dynamic 模板定义；二进制资源引用和参数数组严格校验，拒绝未知字段与未知执行类型。
-- `src/policies.rs` — 整跑 `max_concurrency` 的纯策略：缺省 4，合法范围 1–30；API 与节点调度使用同一 spec 字段。
-- `src/dynamic.rs` — 动态节点展开与批次校验（纯函数）
-- `src/artifacts.rs` — 逻辑节点、实例路径与保留目录名称约束；动态实例使用 `<step>/instances/<index>`。
-- [artifacts/declarations.rs](../../crates/dag/src/artifacts/declarations.rs) — 共享的任务产物文件声明校验纯函数，解析 `artifacts.json` 及输出中的 `report_archive`；拒绝路径逃逸、保留目录冲突、重复路径与无效大小或摘要，供 DAG 归档和 Worker 文件索引共用。
-- `src/protocol.rs` — 生命周期事件
-- [control/mod.rs](../../crates/dag/src/control/mod.rs) — 可选 `recovery_policy: operator` 的单步命令、尝试次数和持久回执；默认失败语义保持。
+- [spec.rs](../../crates/dag/src/spec.rs) — 持久化工作流定义：步骤种类与依赖边
+- [domain.rs](../../crates/dag/src/domain.rs) — 纯调度决策：校验、拓扑序、就绪集与上下文渲染，无 IO 无时钟
+- [transitions.rs](../../crates/dag/src/transitions.rs) — 运行状态机，复用 `node_tasks` 的状态语义
+- [policies.rs](../../crates/dag/src/policies.rs) — 调度策略纯函数：整跑 `max_concurrency` 的缺省与上限
+- [dynamic.rs](../../crates/dag/src/dynamic.rs) — 动态节点输入校验、展开与进度聚合（纯函数）
+- [artifacts.rs](../../crates/dag/src/artifacts.rs) — 节点本地产物目录契约（纯路径/slug/截断助手）
+- [artifacts/declarations.rs](../../crates/dag/src/artifacts/declarations.rs) — `artifacts.json`/`report_archive` 声明校验，双端共用
+- [layout.rs](../../crates/dag/src/layout.rs) — 按日期的运行父目录（`run_parent`）
+- [protocol.rs](../../crates/dag/src/protocol.rs) — 节点侧 DAG 调度协议线 DTO，Server 链与 Agent 链共享
+- [control/mod.rs](../../crates/dag/src/control/mod.rs) — 面向具体执行尝试的版本化操作命令与持久回执
 
 ## 相关
 - [dag-runtime](../dag-runtime/index.md) — 执行与原子持久化

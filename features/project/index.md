@@ -1,56 +1,36 @@
-Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # 项目工作台
 
-网页中的“子项”对应 `initiative`；“目标”使用 `detail_md`，“现状”使用 `current_summary`，现状更新时间使用 `summary_updated_at`。API 与 CLI 沿用这些字段和命令。
+项目/子项/TODO 的目标与看板工作台，关联既有执行与任务文件；本卡只做指路。
 
-项目、子项、TODO 可以通过 `opencoder-cli project goals/initiatives/todos` 增删改查。连接到关闭鉴权的 Server 时使用 `--no-auth` 或连接文件 `auth_enabled:false`，网页自动跳过 Token 登录。字段与示例见 [项目 CLI](../../docs/project-cli.md)，可复用 [opencoder-projects skill](../../skills/opencoder-projects/SKILL.md)。
+## 索引
 
-项目分类提供 Overview 和 Tag 两个菜单。Overview 顶部直接显示项目、子项、TODO 三个表格页签，不重复展示页面标题和工作台介绍；Tag 独立管理标签。数据列可按文本、Tag、人员、数值或日期筛选；项目归档和 TODO 看板状态还可按状态筛选；保存刷新和关闭抽屉后重新打开会保留视图中的筛选条件。
+- [project 域卡](../../agents/project/index.md) — 项目域完整代码索引
+- 字段口径：`initiative`、`detail_md`、`current_summary`、
+  `summary_updated_at`
+- [crates/project/src/service.rs](../../crates/project/src/service.rs)、
+  [context.rs](../../crates/project/src/context.rs) — 领域服务与
+  `project todos context` 证据读取
+- [crates/store/src/project/](../../crates/store/src/project) — 存储投影与
+  看板校验（summary/tags/people/acceptance/comments）
+- [project_links.rs](../../crates/control/src/api/project_links.rs)、
+  [project_links/](../../crates/control/src/api/project_links) — 关联既有执行
+  与派发
+- [project_files/](../../crates/control/src/project_files) —
+  任务文件上传与只读 NFS 导出
+- [crates/web/src/api_project.rs](../../crates/web/src/api_project.rs)、
+  [api_project/](../../crates/web/src/api_project) — 工作台 API
+- [crates/ctl/src/cmd/project.rs](../../crates/ctl/src/cmd/project.rs) —
+  `opencoder-cli project` 命令
+- [项目 CLI](../../docs/project-cli.md)、
+  [任务文件](../../docs/project-files.md)、
+  [概述与快照](../../docs/project-summaries.md)
+- [项目模块约定](../../rules/07-project-module-contract.md)、
+  [opencoder-projects skill](../../skills/opencoder-projects/SKILL.md)
 
-打开详情会将记录写入地址：`#project=项目ID`、`#initiative=子项ID`、`#todo=TODO_ID`。复制地址即可分享；对方登录后直接展开对应详情，刷新或新标签页打开也保留定位，优先于上次保存的主页。仅提供目标 ID 即可打开，独立子项和未归属 TODO 同样支持；逐层打开时地址保留父级，例如 `#project=p1&initiative=i1&todo=t1`。兼容同名查询参数，片段中的项目定位优先；关闭清除对应层及下层，浏览器前进、后退同步详情。存在未保存的任务、评论或编辑草稿时，离开须确认，取消后保留原内容和地址；保存中暂不离开。加载失败提供重试并保留地址，与记录不存在或已删除分别提示。分享沿用接收人的登录与读写权限。
+## 相关
 
-即使分享地址只含 TODO ID，也恢复所属子项和项目：关闭 TODO 后展示子项，继续关闭子项后展示项目；直接打开子项同样恢复项目。父级以当前实际归属为准，过时的父级参数不覆盖真实关系。独立子项关闭后回到列表，未归属 TODO 不生成父级。
-
-项目、子项、TODO 可分别设置一位负责人和多位关注人，只选择现有 OpenCoder 用户；三层独立，不继承，移动归属也不改变人员。负责人可为空，关注人自动去重；删除用户后清理其关系，同名用户重新创建不会继承旧关系。人员列表只展示用户名，修改沿用原有项目写权限。界面支持设置、清空与筛选，读取失败显示错误和重试入口。人员关系为后续通知提供数据，当前没有通知投递。
-
-项目和子项可维护“现状”，列表支持查看和筛选，详情中的现状和目标分别提供展开、收起按钮，默认收起正文，保留标题、现状更新时间与修改记录入口；展开后展示完整 Markdown。刷新数据保持展开状态，切换记录时重新收起。现状由用户或授权的 Codex / Operator 按需整理：子项读取全部 TODO 进展及其历史执行证据，输出关键进展、核心工作、剩余卡点；项目在更新各子项后汇总全部所属子项。节点离线、读取失败或子项现状缺失会明确提示，不据此推断任务完成。命令与写入方式见 [现状用法](../../docs/project-summaries.md)。
-
-现状更新时间由服务器在正文写入时生成；只修改负责人、名称、项目归档或目标不刷新该时间。空字符串可清空现状，未传正文保持原值；现状不自动修改 TODO 看板，也不启动定时总结。现状保留最近 10 个版本（含当前），项目、子项列表、项目内子项表格及详情均可查看现状历史，ctl 也可查看内容、时间及回滚来源。清空也留记录，回滚新增版本；写入或历史保存失败时整笔撤回，已清理的版本不能回滚。
-
-点击项目打开右侧详情抽屉，桌面宽度为视口的 70%，1024px 及以下全宽，默认展示概览，子项页签列出全部子项及进度条。子项可通过左侧手柄拖拽或键盘调整顺序，刷新后保持；筛选隐藏项保留相对顺序，保存失败恢复，其他人已修改列表或顺序时提示刷新后重试。子项页签中名称列与所属项目列等宽，长名称换行完整展示。子项完成度按已完成 TODO 数量除以总数计算；项目进度按全部子项的 TODO 总数计算，空列表显示 0%。点击子项打开全宽右侧详情，现状与目标、靠左排列的人员与进度、TODO 看板连续展示，不使用页签；内容左对齐并铺满抽屉可用宽度；用户可在待整理、待办、进行中、已完成四列之间拖动卡片，并调整列内顺序。筛选后拖动会保留隐藏卡片的顺序，保存失败恢复原状态；看板状态不随执行状态自动变化。
-
-Tag 在独立菜单中统一管理，表格显示名称、归属类型、所属项目和所属子项；可新建、编辑名称及归属、确认删除。归属类型支持全局、项目、子项；全局无需选择具体归属，所有项目、子项及未归属 TODO 均可使用，也可归属独立子项。切换至项目或子项类型后须重新选择具体归属；同一归属内名称不能重复，保存失败保留草稿。首次读取失败显示错误和重试入口；viewer 可查看标签，不能新建、修改或删除。
-
-一个 TODO 可选择多个 Tag。子项继承所属项目和全局的 Tag，同名时按子项、项目、全局的顺序选择；未归属 TODO 仅可使用全局 Tag。修改名称或归属时保留 Tag ID，已选关联按保存后的名称重新匹配；删除定义时使用原名称寻找同名可用 Tag，无法匹配则解除关联。未选择标签的 TODO 不会自动添加标签。按 Tag 分组时，同一 TODO 可显示在多个分组，状态变化会同步到所有卡片，统计只计一次。
-
-子项可不关联项目，TODO 可不关联子项；TODO 页签包含全部任务和未归属任务。删除项目会保留子项和 TODO；有 TODO 的子项须先解除挂载才可删除。项目里程碑入口已移除，存量里程碑下的 TODO 转为未归属任务，历史执行记录保留。
-
-TODO 详情分成任务、文件、设置、执行四个页签。任务标题输入框与右侧状态选择框同行，手机上也保留这一行；评论位于关键信息底部，可同时查看任务与讨论。关键信息默认预览 Markdown，通过正文旁的小尺寸“预览 / 编辑”控件切换；标题、状态和正文修改统一用底部“保存 TODO”提交。内容铺满可用宽度，不使用居中限宽容器。设置管理归属、Tag、负责人和关注人；执行管理能力、指派与原生详情，能力选择与指派按钮同行排列，不提供手动粘贴执行 ID 的输入。执行记录直接点击 ID 在新页面打开对应类型的原生记录，刷新后仍定位该记录；原 TODO 的编辑和评论草稿保留，不额外显示“查看”按钮。API/CLI 仍可关联已有执行。新建 TODO 采用任务、设置两个页签，标题和状态也同行。其余字段带可见标签，宽屏并排、手机单列，说明输入框随内容增高，多标签和关注人可换行。新建与保存按钮固定在抽屉底部，失败提示在操作区展示并保留草稿，提交中禁用字段；空标题校验切回任务页并定位标题输入框。页签切换和后台刷新保留草稿，关闭未保存内容须确认。保存任务和发表评论各自提交，切换页签不触发保存或派发。
-
-子项详情先展示现状与子项目标，再展示靠左相邻排列的所属项目、人员和进度，最后展示 TODO 看板。新建和编辑子项明确提供“子项目标（Markdown）”，位于现状之前，修改目标不刷新现状时间。看板卡片依次展示任务标题、说明摘要、标签和负责人；标题可直接打开详情，直接拖住标题、说明或卡片空白处调整状态和顺序，不显示单独的拖动按钮；更多操作不触发拖拽，删除仍要求确认。手机滑动浏览，长按后拖动。标题按 Enter 打开，空格开始键盘排序，Escape 取消并保留子项详情。摘要去掉 Markdown 语法，长标题和标签在卡片内换行；已关联执行只表示存在关联，不代表任务完成。
-
-用户保存 TODO 后，从能力库选择具体的 Agent、Operator、Team、DAG、TODO 工作流或保存的 Brain 计划版本，再填写任务和命名参数。TODO 标题和说明预填为可修改的输入，保存 TODO 本身不触发派发。提交和回复丢失后的重试使用同一个执行 ID；变更输入或能力须发起新执行。
-
-一个 TODO 可关联多次执行，也可直接关联 operator 当前正在使用的执行 ID。关联只记录能力与执行引用；会话、工具记录和产物归执行节点持有。执行列表只展示关联记录和状态，点击执行 ID 在原生执行详情中查看结论；DAG 结果从步骤明细读取。删除 TODO 或解除关联保留原执行，执行完成不自动改变看板列。
-
-全宽右侧 TODO 抽屉在执行页签展示执行列表，执行页隐藏时停止读取执行记录，任务页隐藏时停止读取评论，迟到请求不会跳页；宽度随视口变化。多个 operator 可分别执行同一 TODO；多人也可打开同一执行 ID，共享上下文并通过原生明细提交引导。人工输入在回复未确认时保持原输入 ID。项目不设置独占领取锁，也不为 TODO 新建额外会话或调度循环。
-
-
-TODO 评论支持追加、编辑和删除 Markdown 信息。网页按当前用户署名；API/CLI 可指定能力库中的 Agent、Operator、Team、DAG、TODO 工作流或 Brain 能力 ID，记录能力名称与类型快照及实际提交用户。可选执行来源须已关联当前 TODO，能力署名须与真实准入能力一致；评论不替代任务验收。viewer 阅读，editor/admin 追加；editor 只能编辑、删除自己提交的评论，admin 可管理所有评论。删除前确认，失败保留正文和编辑草稿。默认显示最近 50 条，可加载更早评论，并在可见时刷新已加载范围，同步其他人的编辑与删除。正文最大 64 KiB；编辑只改正文，保留序号、署名、来源和创建时间；读取返回 `revision` 和 `updated_at`，修改必须携带当前 `expected_revision`，过期返回 409。同一提交用户、TODO 和 request_id 的原追加请求重试返回当前正文，原输入改变或评论已删除返回冲突。新增、编辑和删除更新 TODO 更新时间，子项现状的证据收集包含全部评论；删除 TODO 清理评论，删除能力或用户不改写历史署名。
-
-API 为 `GET/POST /api/project/todos/:id/comments`；CLI 为 `project todos comments list <id>` 和 `project todos comments add <id> --json @file`。追加正文使用 `request_id`、`body_md`，能力署名和来源分别使用可选 `capability_id`、`execution_id`；重试保留原 request_id。分页使用互斥的 `before_seq`、`after_seq`，默认 50 条、最多 100 条。`after_seq` 只读取新序号，编辑和删除须重新读取相应页面。编辑为 `PATCH /api/project/todos/:id/comments/:seq`，正文 `{body_md,expected_revision}`；删除为 `DELETE` 同路径并传 `?expected_revision=N`。CLI 对应 `comments edit <id> <seq> --json @file` 和 `comments delete <id> <seq> --expected-revision N`。
-
-CLI 提供 `project people`、`project todos links/attach/detach/dispatch` 和 `exec result`，与 Web 共用 Server API；独立 Web 的旧项目 API 不提供控制台执行索引。创建和修改的人员字段为 `owner_user_name`、`follower_user_names`；PATCH 不传则保留，分别传 `null`、`[]` 清空。非法用户使整次对象和 Tag 修改回滚。
-
-`project todos context TODO_ID` 读取任务、全部评论及全部关联执行的原生详情、Session 消息、事件、结论和完整字段；可用 `--execution` 选择历史中的一次，不依赖当前能力是否仍被选择。节点离线等读取失败保留已有证据，列出 `issues`、返回 `complete:false` 和退出码 4。无关联的 TODO 正常返回空执行；读取不会继续会话或改变看板。轻量消息读取使用 `project todos messages --seq/--offset`，游标取自返回的 `next_cursor`。
-
-执行链接只需要执行 ID；即使关联没有类型、执行不在列表第一页，也向 Server 读取该 ID 的原生过程。地址中的执行定位优先于上次保存的主页，浏览器地址变化与返回/前进也更新详情。原查询参数链接继续可用；关闭详情或主动切换菜单清除执行定位。实际能力类型与 Runtime 来自 Server，不能根据 ID 前缀推测。
-
-- 子项没有自身状态，列表与创建、编辑不提供状态选择；子项进度由所属 TODO 的看板状态计算。API 不返回状态，并拒绝含 `status` 的子项创建和修改。
-
-TODO 完成请求可携带读取时的任务、归属、能力、执行及依赖前提。Server 在同一事务内核验前提并修改看板；并发修改导致前提过期时返回 409，调用方重新读取并评估。
-
-相关索引：[项目逻辑](../../agents/project/index.md)、[项目约定](../../rules/07-project-module-contract.md)、[Control](../../agents/control/index.md)。
-
-TODO 提供“文件”页签，主动上传交接文档、日志和产物，支持单文件下载和确认删除。有文件时禁止删除 TODO。文件按创建时间的 UTC 日期与 TODO ID 保存，由独立只读 NFS 共享；关键信息仍使用 `draft`，文件操作保留关键信息和评论草稿。`project todos context` 包含文件清单与下载入口。完整规则见 [任务文件](../../docs/project-files.md)。
+- [项目逻辑](../../agents/project/index.md)、
+  [项目约定](../../rules/07-project-module-contract.md)、
+  [Control](../../agents/control/index.md)、[TODO 工作台](../todos/index.md)

@@ -2,7 +2,7 @@ use super::{
     model::{observe, GraphResponse},
     query::GraphQuery,
 };
-use crate::domain::{Entity, Relationship};
+use crate::domain::{DataLevel, Entity, Relationship};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -13,6 +13,7 @@ fn entity(id: u128) -> Entity {
         entity_type_id: Uuid::from_u128(100),
         name: format!("entity {id}"),
         description: String::new(),
+        data_level: DataLevel::Draft,
         revision: 1,
         is_deleted: false,
     }

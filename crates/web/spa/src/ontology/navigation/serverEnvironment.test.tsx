@@ -30,7 +30,7 @@ it("reads and creates in the Server namespace despite a stale browser environmen
   expect(request).toHaveBeenCalledWith("GET", "/api/ontology/envs/debug/entity-types?include_deleted=true", undefined);
   expect(screen.queryByRole("combobox", { name: "Ontology 环境" })).not.toBeInTheDocument();
   expect(NAV_CATEGORIES.find((category: { key: string }) => category.key === "ontology").items.map((item: { page: string }) => item.page))
-    .toEqual(["ontologyGraph", "ontologyEntities", "ontologyTypes", "ontologyRelationships"]);
+    .toEqual(["ontologyGraph", "ontologyEntities", "ontologyTypes", "ontologyRelationships", "ontologyFreshness"]);
 
   fireEvent.click(screen.getByRole("button", { name: /新\s*增/ }));
   fireEvent.change(await screen.findByLabelText("类型 Key"), { target: { value: "new_type" } });

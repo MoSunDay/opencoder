@@ -53,7 +53,9 @@ pub async fn get(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> 
     response(read(&state, &id).await)
 }
 
-async fn read(state: &AppState, id: &str) -> RpcReply {
+/// Shared on-demand result read: freshness drivers reuse it to extract the
+/// candidate summary of a finished execution.
+pub(crate) async fn read(state: &AppState, id: &str) -> RpcReply {
     let index = match state.fleet.index(id).await {
         Ok(Some(index)) => index,
         Ok(None) => return RpcReply::error(404, "execution not found"),

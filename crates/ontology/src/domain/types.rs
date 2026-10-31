@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::DataLevel;
+
 pub const VECTOR_DIMENSION: usize = 2048;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -82,6 +84,8 @@ pub struct Entity {
     pub entity_type_id: Uuid,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub data_level: DataLevel,
     pub revision: i64,
     pub is_deleted: bool,
 }

@@ -239,6 +239,51 @@ fn ontology_commands_map_to_native_methods_paths_and_revisions() {
             "POST",
             "/api/ontology/nfs",
         ),
+        (
+            vec!["freshness", "policies", "list"],
+            "GET",
+            "/api/ontology/envs/debug/freshness/policies",
+        ),
+        (
+            vec!["freshness", "policies", "create", "--json", "{}"],
+            "POST",
+            "/api/ontology/envs/debug/freshness/policies",
+        ),
+        (
+            vec!["freshness", "policies", "get", "p"],
+            "GET",
+            "/api/ontology/envs/debug/freshness/policies/p",
+        ),
+        (
+            vec!["freshness", "policies", "update", "p", "--json", "{}"],
+            "PATCH",
+            "/api/ontology/envs/debug/freshness/policies/p",
+        ),
+        (
+            vec!["freshness", "runs", "list"],
+            "GET",
+            "/api/ontology/envs/debug/freshness/runs",
+        ),
+        (
+            vec!["freshness", "runs", "get", "r"],
+            "GET",
+            "/api/ontology/envs/debug/freshness/runs/r",
+        ),
+        (
+            vec!["freshness", "runs", "trigger", "p"],
+            "POST",
+            "/api/ontology/envs/debug/freshness/policies/p/runs",
+        ),
+        (
+            vec!["freshness", "reviews", "list"],
+            "GET",
+            "/api/ontology/envs/debug/freshness/reviews",
+        ),
+        (
+            vec!["freshness", "reviews", "create", "--json", "{}"],
+            "POST",
+            "/api/ontology/envs/debug/freshness/reviews",
+        ),
     ];
     for (args, method, path) in cases {
         let request = plan(&parse(&args)).unwrap();
@@ -259,6 +304,27 @@ fn ontology_commands_map_to_native_methods_paths_and_revisions() {
         .unwrap()
         .query,
         vec![("expected_revision".into(), "9".into())]
+    );
+    assert_eq!(
+        plan(&parse(&[
+            "freshness",
+            "runs",
+            "list",
+            "--policy-id",
+            "p",
+            "--offset",
+            "5",
+            "--limit",
+            "10"
+        ]))
+        .unwrap()
+        .query,
+        vec![
+            ("policy_id".into(), "p".into()),
+            ("offset".into(), "5".into()),
+            ("limit".into(), "10".into()),
+            ("include_deleted".into(), "false".into()),
+        ]
     );
 }
 

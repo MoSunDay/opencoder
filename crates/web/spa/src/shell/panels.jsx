@@ -14,7 +14,7 @@ import { ProjectPanel } from '../project/project.jsx';
 import { ProjectTagsPanel } from '../project/tags/panel.jsx';
 import { SchedulePanel } from '../schedule/panel.jsx';
 import { TodoPanel } from '../todoPanel.jsx';
-import { OntologyGraphPanel, OntologyEntitiesPanel, OntologyTypesPanel, OntologyRelationshipsPanel } from '../ontology/panels.tsx';
+import { OntologyGraphPanel, OntologyEntitiesPanel, OntologyTypesPanel, OntologyRelationshipsPanel, OntologyFreshnessPanel } from '../ontology/panels.tsx';
 
 /// Page components keyed by store `page` — one map instead of a ternary chain
 /// so adding a page stays one line. Keys must equal nav.js ALL_PAGES exactly
@@ -36,4 +36,5 @@ export const PANELS = {
   ontologyEntities: OntologyEntitiesPanel,
   ontologyTypes: OntologyTypesPanel,
   ontologyRelationships: OntologyRelationshipsPanel,
+  ontologyFreshness: OntologyFreshnessPanel,
 };

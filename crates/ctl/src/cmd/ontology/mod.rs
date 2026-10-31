@@ -1,5 +1,6 @@
 //! Ontology commands use the same routes and revisions as the web client.
 mod data;
+mod freshness;
 mod graph;
 
 use crate::{
@@ -11,6 +12,7 @@ use crate::{
 use anyhow::Result;
 use clap::{Args, Subcommand};
 pub use data::{CollectionCmd, EntityCmd, NestedCmd};
+pub use freshness::FreshnessCmd;
 pub use graph::{DirectoryCmd, GraphArgs, VectorCmd};
 
 #[derive(Args, Debug)]
@@ -48,6 +50,8 @@ pub enum Action {
     Graph(GraphArgs),
     #[command(subcommand)]
     Vectors(VectorCmd),
+    #[command(subcommand)]
+    Freshness(FreshnessCmd),
     #[command(subcommand)]
     Capabilities(CapabilityCmd),
     #[command(subcommand)]
@@ -157,6 +161,7 @@ pub fn plan(cmd: &OntologyCmd) -> Result<RequestPlan> {
         Action::Directories(c) => graph::directory(&root, c)?,
         Action::Vectors(c) => graph::vector(&root, c)?,
         Action::Graph(c) => graph::graph(&root, c),
+        Action::Freshness(c) => freshness::plan(&format!("{root}/freshness"), c)?,
         Action::Relationships(c) => {
             let path = format!("{root}/relationships");
             match c {

@@ -4,6 +4,7 @@ mod directories;
 mod entities;
 mod entity_creation;
 mod environments;
+mod freshness;
 mod graph;
 mod relationships;
 mod vectors;
@@ -20,6 +21,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .merge(definitions::routes())
         .merge(directories::routes())
         .merge(entities::routes())
+        .merge(freshness::routes())
         .merge(graph::routes())
         .merge(relationships::routes())
         .merge(vectors::routes())

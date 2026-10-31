@@ -4,6 +4,7 @@ import { api } from "../../api";
 import type { AttributeDefinition, CatalogManagement, Entity, EntityType } from "../../types";
 import CapabilitySource from "./details/managed/CapabilitySource";
 import EntityActions from "../EntityActions";
+import LevelBadge from "../freshness/LevelBadge";
 import StructuredAttributeList from "./StructuredAttributeList";
 import TextAttributeSection from "./TextAttributeSection";
 import type { StructuredAttributeRow, TextAttribute } from "./details/types";
@@ -100,6 +101,7 @@ export default function EntityDetailDrawer({ env, entity, entityType, canManage,
           <CapabilitySource management={management} />
           <Descriptions column={1} size="small" items={[
             { key: "type", label: "类型", children: <Tag>{entityType.name}</Tag> },
+            { key: "level", label: "等级", children: <LevelBadge level={currentEntity.data_level} /> },
             { key: "description", label: "描述", children: currentEntity.description || "尚未填写描述" },
             { key: "actions", label: "支持的 Action", children: actions.length ? <Space wrap>{actions.map((action) =>
               <Tag key={action.id}>{action.operation_type}: {action.operation}</Tag>)}</Space> : "无" },

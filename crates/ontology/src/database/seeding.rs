@@ -1,6 +1,6 @@
 use super::Store;
 use crate::{
-    domain::{Entity, EntityType, RelationshipType},
+    domain::{DataLevel, Entity, EntityType, RelationshipType},
     error::AppError,
     system_catalog::*,
 };
@@ -37,6 +37,7 @@ impl Store {
             entity_type_id: kind.id,
             name: "根目录".into(),
             description: "".into(),
+            data_level: DataLevel::Draft,
             revision: 1,
             is_deleted: false,
         };

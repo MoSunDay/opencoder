@@ -27,14 +27,19 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 - [useStructuredDrafts.ts](../../crates/web/spa/src/ontology/pages/entityTypes/details/useStructuredDrafts.ts)、[useTextDrafts.ts](../../crates/web/spa/src/ontology/pages/entityTypes/details/useTextDrafts.ts) 分别维护结构化值和正文的原值、草稿、版本与保存状态；环境、实体和请求代次共同阻止旧结果覆盖当前内容。提交成功后采用回执中的新版本，刷新失败仍保留已提交内容。
 - [TextPreview.tsx](../../crates/web/spa/src/ontology/pages/entityTypes/details/TextPreview.tsx) 区分 Markdown 与 HTML；HTML 使用隔离 iframe 和 CSP，源码编辑保留原格式。NFS 路径输入与读取出的正文分别保存。
 
+## 数据保鲜
+
+- [FreshnessPage.tsx](../../crates/web/spa/src/ontology/pages/FreshnessPage.tsx) 为导航「数据保鲜」页面，内容区为 Tabs【策略 | 运行 | 评审】；触发运行后自动切到「运行」tab 并聚焦新运行，tab 切换走草稿保护。列表、详情抽屉均为只读展示。
+- [freshness/](../../crates/web/spa/src/ontology/pages/freshness/) 中 PolicyTable 列出策略（执行器、并发、回写属性，管理角色可创建、更新、软删除与触发运行），RunsTable 列出运行的状态与统计，ReviewQueue 按运行分组展示待评审候选与评审历史；[LevelBadge.tsx](../../crates/web/spa/src/ontology/pages/freshness/LevelBadge.tsx) 与 [levels.ts](../../crates/web/spa/src/ontology/pages/freshness/levels.ts) 提供级别阶梯的中文名称与配色。
+- 评审流程：对成功且带候选的运行项提交通过或拒绝与备注；通过后实体的数据级别上升一级（confident 封顶），配置回写属性的策略同时生成新的正文版本，级别徽标即时反映新级别。
+- 运行 tab 在存在排队中或运行中的运行时每 5 秒自动刷新，全部收敛后停止轮询。实体列表与详情抽屉均展示数据级别徽标。
+
 ## 验证与接缝
 
 - 单元及 DOM 测试与上述模块相邻；[testSetup.ts](../../crates/web/spa/src/ontology/testSetup.ts) 提供浏览器环境适配。
 - [Ontology 浏览器验收](../../scripts/acceptance/ontology/main.py)、[详情与图谱操作](../../scripts/acceptance/ontology/experience.mjs) 使用独立 Server 和真实只读 NFS，检查草稿、图谱控制、恢复及导航标签。[三维图谱验收](../../scripts/acceptance/ontology/graph.py) 单独验证图谱交互、屏宽、切面和 WebGL 故障回退，并比对 Server 实际提供的静态资源。
 - [Ontology 服务](../ontology/index.md) · [功能规则](../../features/ontology/index.md) · [Web 索引](index.md)
 
-实体目录页面通过目录成员关系计算所选目录及全部后代的实体集合，先去重，再进行搜索、类型和状态筛选及分页。普通关系不参与目录归属计算。目录选择器显示完整路径；移动目录排除自身和后代。实现与定向测试位于 `spa/src/ontology/pages/entities/directories.ts` 及相邻测试文件。
-
-目录树将 JSON 中的空父级归一化，首次进入只展开根目录，其他层级逐层展开。默认先选择目录再显示实体；桌面与窄屏均可显式点击“全部实体”，包括未归入目录的实体。切换范围重置分页，目录刷新保留用户的展开状态。
+实体页直接展示全部实体（含未归入目录的实体），搜索、类型与状态筛选和分页作用于全量列表；不提供目录树、目录筛选和目录管理入口，目录归属经 CLI 维护。实体的详情、关系与观测直达沿用既有导航与草稿保护。
 
 观测直达链接由 `ontology/navigation/observationLink.ts` 解析，`graph/session/linkedObservation.ts` 校验切面与中心，复用全局地址监听和草稿保护。链接条件优先于浏览器记忆，不写回切面；离开图谱时移除对应参数。

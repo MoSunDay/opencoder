@@ -26,7 +26,7 @@ class OntologySchemaTests(unittest.TestCase):
         self.files.mkdir()
         with sqlite3.connect(self.database) as db:
             for name, sql in schema.contract().items():
-                if not name.startswith('catalog_'):
+                if not (name.startswith('catalog_') or name.startswith('freshness_')):
                     db.execute(sql)
             db.execute('INSERT INTO ontology_schema_version VALUES(1,?)', (str(self.files),))
             db.execute("INSERT INTO environments VALUES(1,'debug','{}')")
@@ -37,7 +37,8 @@ class OntologySchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '--maintenance'):
             schema.check(self.settings, self.candidate)
         observed = schema.check(self.settings, self.candidate, maintenance=True)
-        self.assertEqual(observed['missing'], ['catalog_entries', 'catalog_objects', 'catalog_state'])
+        self.assertEqual(observed['missing'], ['catalog_entries', 'catalog_objects', 'catalog_state',
+                                               'freshness_policies', 'freshness_runs', 'freshness_reviews'])
         self.assertEqual(self.database.read_bytes(), before)
         with sqlite3.connect(self.database) as db:
             for name in observed['missing']:

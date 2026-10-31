@@ -18,6 +18,7 @@ import {
   ApartmentOutlined,
   DatabaseOutlined,
   LinkOutlined,
+  SafetyCertificateOutlined,
   TeamOutlined,
   TagsOutlined,
   ThunderboltOutlined,
@@ -57,6 +58,7 @@ export const NAV_CATEGORIES = [
       { page: 'ontologyEntities', menu: '实体', icon: DatabaseOutlined },
       { page: 'ontologyTypes', menu: '实体类型', icon: ProfileOutlined },
       { page: 'ontologyRelationships', menu: '关系类型', icon: LinkOutlined },
+      { page: 'ontologyFreshness', menu: '数据保鲜', icon: SafetyCertificateOutlined },
     ],
   },
   {
@@ -111,6 +113,7 @@ export const HEADERLESS_REASONS = {
   ontologyEntities: 'menu-only',
   ontologyTypes: 'menu-only',
   ontologyRelationships: 'menu-only',
+  ontologyFreshness: 'body-title',
 };
 
 /// Per-page header copy for the pages whose panel actually mounts PageShell

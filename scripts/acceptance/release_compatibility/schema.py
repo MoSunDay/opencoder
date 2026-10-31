@@ -38,6 +38,7 @@ def exercise(root, old, candidate):
         before = wait_http(old_server, old_url)
         sql = NativeSql(old / 'bin/opencoder-cli', data / 'ontology.db', root)
         assert not sql.query("SELECT name FROM sqlite_schema WHERE name='catalog_entries'"), 'old fixture must predate catalog schema'
+        assert not sql.query("SELECT name FROM sqlite_schema WHERE name='freshness_policies'"), 'old fixture must predate freshness schema'
         sql.query('BEGIN')
         sql.query('SELECT count(*) FROM entities')
         new_server = processes.server('rejected-candidate', candidate / 'bin/opencoder-server', work, data, new_port, release)
@@ -50,6 +51,7 @@ def exercise(root, old, candidate):
             sql.query('COMMIT')
             assert request(old_url, '/api/ontology/environments') == before
         assert not sql.query("SELECT name FROM sqlite_schema WHERE name='catalog_entries'")
+        assert not sql.query("SELECT name FROM sqlite_schema WHERE name='freshness_policies'")
         evidence['old_reads_after_rejection'] = 5
         sql.close()
         sql = None
@@ -67,12 +69,14 @@ def exercise(root, old, candidate):
         sql = NativeSql(candidate / 'bin/opencoder-cli', data / 'ontology.db', root)
         sql.query('BEGIN IMMEDIATE')
         sql.query(ontology_schema.contract()['catalog_entries'])
+        sql.query(ontology_schema.contract()['freshness_policies'])
         sql.child.kill()
         sql.child.wait(timeout=10)
         sql.close()
         sql = None
         with using(candidate / 'bin/opencoder-cli'):
             assert 'catalog_entries' in ontology_schema.inspect(data / 'ontology.db')['missing']
+            assert 'freshness_policies' in ontology_schema.inspect(data / 'ontology.db')['missing']
         evidence['ddl_process_crash_rolled_back'] = True
         resource = processes.server('resources', candidate / 'bin/opencoder-server', work,
                                      root / 'resources', resources_port, resources=True)

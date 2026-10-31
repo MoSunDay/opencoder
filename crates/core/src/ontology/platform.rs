@@ -98,7 +98,7 @@ const ENTRIES: &[(&str, &str, &str, &[&str])] = &[
     (
         "ontology",
         "Ontology",
-        "组织能力、实体、关系与图谱；托管发布仅当前 Server 实例可同步；旧库缺少结构须维护升级",
+        "组织能力、实体、关系、图谱与数据保鲜；托管发布仅当前 Server 实例可同步；旧库缺少结构须维护升级",
         &["/api/ontology"],
     ),
     (

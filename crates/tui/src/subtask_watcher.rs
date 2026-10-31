@@ -1,8 +1,10 @@
 //! Background subtask watcher: polls the server until every registered
-//! one-shot subtask reaches a terminal state, then reports each completion
-//! once on the TUI-internal UI channel. The watcher is independent of the
-//! session worker (workers are quit on `/task` switches) so writebacks keep
-//! flowing into the parent registry that owns the subtask.
+//! one-shot subtask finishes — a terminal status or the idle convergence of
+//! conversational kinds (mapped via `subtask_registry::settle_status`) — then
+//! reports each completion once on the TUI-internal UI channel. The watcher
+//! is independent of the session worker (workers are quit on `/task`
+//! switches) so writebacks keep flowing into the parent registry that owns
+//! the subtask.
 
 use crate::remote::client::ServerClient;
 use crate::worker::UiEvent;
@@ -43,7 +45,7 @@ async fn run(client: ServerClient, ui: mpsc::Sender<UiEvent>, mut targets: Vec<W
         for target in std::mem::take(&mut targets) {
             match crate::remote::subtasks::fetch_status(&client, &target.execution_id).await {
                 Ok(status) => {
-                    if status.terminal() {
+                    if let Some(final_status) = crate::subtask_registry::settle_status(status) {
                         // Summary/token fetch failures degrade to None/0 —
                         // they never fail the round (status is the truth).
                         let summary =
@@ -55,7 +57,7 @@ async fn run(client: ServerClient, ui: mpsc::Sender<UiEvent>, mut targets: Vec<W
                             crate::remote::subtasks::fetch_tokens(&client, &target.execution_id)
                                 .await
                                 .unwrap_or(0);
-                        if !send(&ui, &target, status.as_str().to_string(), summary, tokens).await {
+                        if !send(&ui, &target, final_status.to_string(), summary, tokens).await {
                             return; // UI channel closed: nothing left to update
                         }
                     } else {

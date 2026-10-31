@@ -2,7 +2,7 @@ Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
 # Ontology
 
-Web 导航提供独立 Ontology 分类：图谱、实体、实体类型、关系类型。页面使用所连接 OpenCoder Server 的默认数据空间，不提供环境选择或环境管理，浏览器保存的旧环境选择不参与请求。复用 OpenCoder 登录和权限，分类标签可横向滑动，内容区域不重复展示页面标题和说明。
+Web 导航提供独立 Ontology 分类：图谱、实体、实体类型、关系类型、数据保鲜。页面使用所连接 OpenCoder Server 的默认数据空间，不提供环境选择或环境管理，浏览器保存的旧环境选择不参与请求。复用 OpenCoder 登录和权限，分类标签可横向滑动，内容区域不重复展示页面标题和说明。
 
 ## 操作与权限
 
@@ -73,6 +73,19 @@ Web 导航提供独立 Ontology 分类：图谱、实体、实体类型、关系
 - Tabs：“实体” tab 展示全量实体表格（含未归入目录的实体）与「所属目录」列，普通实体的多个目录归属以多个 Tag 展示，点击某个 Tag 切换到“目录” tab 并选中该目录；“目录” tab 左侧为目录树，右侧为成员面板。
 - 树编辑：通过右键或更多菜单执行新增子目录、重命名、删除、移动到…，行内草稿输入并在同名时即时校验；节点支持拖拽移动；根目录仅可新增子目录，不可重命名、删除或移动。
 - 成员管理：添加实体支持多选并排除已有成员，移出成员即软删除对应目录归属；服务端拒绝的错误（如删除非空目录）在面板透出提示。
+
+## 数据保鲜
+
+数据保鲜为实体增加四级数据级别与复核流水线：按实体类型配置策略，由平台执行（agent 或 DAG）生成候选正文，人工评审通过后实体级别逐级上升。策略、运行与评审保存在 Ontology 数据库；运行派发由控制面唯一驱动，数据平面只提供读写接口。
+
+- 数据级别：实体携带 `data_level`，四级阶梯 draft < stable < verified < confident；旧实体读取时默认 draft，无需迁移。评审通过恰好提升一级，confident 保持不变；拒绝只记录评审历史，不改级别。
+- 策略：绑定一个实体类型与执行器（`kind` 为 `agent` 或 `dag`、`target`、`prompt_template`），并发上限 1–30，可选 `writeback_attribute_key` 指定回写的 Markdown 正文属性（如内置的 source）。提示词模板渲染 `{{entity.id}}`、`{{entity.name}}`、`{{entity.description}}`、`{{entity.data_level}}`，未知占位符替换为空。
+- 运行：控制面 `POST /api/ontology/envs/:env/freshness/policies/:id/runs` 触发（202）。运行快照至多 500 个该类型的未删除实体；派发使用确定性执行 ID（`agent-`/`dag-` 前缀 + 哈希）并走标准执行提交准入，按策略并发有界扇出，5 秒节奏轮询执行索引至终态、上限 1 小时；候选摘要至多 8000 字符，DAG 输入冻结实体快照。无可用节点时对应项记为失败，运行继续收敛。运行从 queued/running 收敛为 succeeded/partial/failed。
+- 重启回收：控制面重启后恢复挂起运行——已到终态的执行补齐候选，未派发项记为 interrupted before dispatch；每运行请求锁跳过仍由活跃驱动器持有的运行，避免双写。
+- 评审：`POST /api/ontology/envs/:env/freshness/reviews`（body 为 `run_id`、`entity_id`、`verdict`、可选 `comment`）单事务完成。重复评审返回 409；通过要求该项成功且带候选；能力目录托管的实体与属性不接受评审写回（409）；配置回写时生成不可变 Markdown 正文版本；`data_level` 提升一级并递增实体 revision，全程审计。`GET /api/ontology/envs/:env/freshness/reviews?run_id=` 查询评审记录。
+- 数据平面接口：`GET/POST /api/ontology/envs/:env/freshness/policies`、`GET/PATCH /api/ontology/envs/:env/freshness/policies/:id`（软删除用 PATCH 设置 `is_deleted` 并携带 `expected_revision`）、`GET /api/ontology/envs/:env/freshness/runs` 与 `/runs/:id`、评审接口同上。读取对 viewer 开放，写入需管理角色。CLI 用法见 [CLI 用法](../../rules/10-ontology-cli.md) 的 `freshness` 行。
+- 存量库升级：新增 `freshness_policies`、`freshness_runs`、`freshness_reviews` 三张 JSON 正文表，schema 版本保持 1；已有数据库经标准 `--maintenance` 维护窗口一次性补表，流程见 [平滑发布与维护](../../docs/smooth-release.md)。
+- 边界：不做定时调度、运行取消、模型预审、属性粒度级别与图谱子集圈定，留待后续阶段。变更记录见 [Ontology 数据保鲜](../changelog/2026-10-30/ontology-freshness.md)。
 
 ## 相关
 

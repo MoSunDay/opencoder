@@ -14,7 +14,14 @@ async fn fixture() -> (opencoder_database::Database, Connection) {
 }
 
 async fn legacy(connection: &Connection) {
-    for name in ["catalog_entries", "catalog_objects", "catalog_state"] {
+    for name in [
+        "catalog_entries",
+        "catalog_objects",
+        "catalog_state",
+        "freshness_policies",
+        "freshness_runs",
+        "freshness_reviews",
+    ] {
         connection
             .execute(&format!("DROP TABLE {name}"), ())
             .await

@@ -6,6 +6,7 @@ import GraphPage from "./pages/graph/GraphPage";
 import EntitiesPage from "./pages/EntitiesPage";
 import EntityTypesPage from "./pages/EntityTypesPage";
 import RelationshipTypesPage from "./pages/RelationshipTypesPage";
+import FreshnessPage from "./pages/FreshnessPage";
 import "./styles.css";
 
 function OntologyPanel({ page, Component }: { page: string; Component: ComponentType }) {
@@ -19,3 +20,4 @@ export const OntologyGraphPanel = () => <OntologyPanel page="ontologyGraph" Comp
 export const OntologyEntitiesPanel = () => <OntologyPanel page="ontologyEntities" Component={EntitiesPage} />;
 export const OntologyTypesPanel = () => <OntologyPanel page="ontologyTypes" Component={EntityTypesPage} />;
 export const OntologyRelationshipsPanel = () => <OntologyPanel page="ontologyRelationships" Component={RelationshipTypesPage} />;
+export const OntologyFreshnessPanel = () => <OntologyPanel page="ontologyFreshness" Component={FreshnessPage} />;

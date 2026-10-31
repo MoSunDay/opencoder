@@ -5,6 +5,7 @@ mod bootstrap;
 mod catalog_guard;
 mod ontology;
 mod ontology_catalog;
+mod ontology_freshness;
 pub mod release;
 mod resource_scope;
 pub mod role_gate;

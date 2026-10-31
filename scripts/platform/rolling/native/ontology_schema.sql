@@ -13,6 +13,9 @@ CREATE TABLE audit_events(env_num INTEGER NOT NULL,id TEXT NOT NULL,body TEXT NO
 CREATE TABLE catalog_entries(env_num INTEGER NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL CHECK(json_valid(body)),PRIMARY KEY(env_num,id));
 CREATE TABLE catalog_objects(env_num INTEGER NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL CHECK(json_valid(body)),PRIMARY KEY(env_num,id));
 CREATE TABLE catalog_state(env_num INTEGER NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL CHECK(json_valid(body)),PRIMARY KEY(env_num,id));
+CREATE TABLE freshness_policies(env_num INTEGER NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL CHECK(json_valid(body)),PRIMARY KEY(env_num,id));
+CREATE TABLE freshness_runs(env_num INTEGER NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL CHECK(json_valid(body)),PRIMARY KEY(env_num,id));
+CREATE TABLE freshness_reviews(env_num INTEGER NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL CHECK(json_valid(body)),PRIMARY KEY(env_num,id));
 CREATE UNIQUE INDEX entity_types_key ON entity_types(env_num,json_extract(body,'$.type_key'));
 CREATE UNIQUE INDEX relationship_types_key ON relationship_types(env_num,json_extract(body,'$.type_key'));
 CREATE UNIQUE INDEX graph_aspects_key ON graph_aspects(env_num,json_extract(body,'$.aspect_key'));

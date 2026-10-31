@@ -3,7 +3,7 @@ use super::{
     Store,
 };
 use crate::{
-    domain::{Entity, Environment},
+    domain::{DataLevel, Entity, Environment},
     error::AppError,
 };
 use turso::params;
@@ -187,6 +187,7 @@ impl Store {
             entity_type_id: kind,
             name: name(title)?,
             description: description.trim().into(),
+            data_level: DataLevel::Draft,
             revision: 0,
             is_deleted: false,
         };

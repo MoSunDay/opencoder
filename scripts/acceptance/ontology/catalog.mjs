@@ -42,7 +42,6 @@ try {
   await page.goto(base);
   await page.locator('.fleet-sidebar [role=tablist]').getByRole('tab', { name: 'Ontology', exact: true }).click();
   await page.getByRole('menuitem', { name: /实体$/ }).click();
-  await page.locator('.ant-tree').getByText('平台能力', { exact: true }).click();
   await page.getByRole('textbox', { name: '搜索名称或标识' }).fill('受理控制');
   await page.getByRole('button', { name: '受理控制', exact: true }).click();
   await drawer.getByText('此能力由平台同步维护', { exact: true }).waitFor();

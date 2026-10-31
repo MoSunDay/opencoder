@@ -20,7 +20,6 @@ const ONTOLOGY_FIXTURES = {
   [`${base}/nfs`]: { root: '/fixture/ontology', status: { running: true, host: '127.0.0.1', port: 2052, read_only: true, export_root: '/fixture/ontology' } },
   [`${env}/entity-types`]: { items: types },
   [`${env}/entities`]: { items: entities },
-  [`${env}/directories/tree`]: { root_id: 'directory-root', items: [{ ...metadata, id: 'directory-root', name: '根目录' }] },
   [`${env}/relationship-types`]: { items: relationshipTypes },
   [`${env}/relationships`]: { items: relationships },
   [`${env}/graph-aspects`]: { items: [{ ...metadata, id: 'aspect', aspect_key: 'calls', name: '服务调用',

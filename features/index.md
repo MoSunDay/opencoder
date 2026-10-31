@@ -1,4 +1,4 @@
-Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # OpenCoder 能力地图
 ## 平台与编排
@@ -16,6 +16,7 @@ Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
 - [Agent Harness](harness/index.md) — opencode/codex 执行器与资源快照。
 - [CLI](../agents/local/index.md)、[TUI](../agents/tui/index.md) — 无头运行与 Turn 阶梯交互。
 - [Web 会话](../agents/web/index.md) — 流式会话、SSE 与模型发现。
+- [Responses API](responses/index.md) — Responses 协议编码工作流：provider state 持久化，resume/fork/compaction 保持完整工具组。
 - [Computer use](computer-use/index.md) — 通过可选 CLI 调用 Cua Agent，操作已有远程桌面。
 ## 配置与基础能力
 - [配置和资源作用域](../agents/core/index.md) — 模型/压缩/命名环境与 Skill 注入。

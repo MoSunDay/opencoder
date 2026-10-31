@@ -1,9 +1,24 @@
-Commit: 9a8213e3dba80353fefcf7d20aa57bf7461f27c8
+Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 # 本地仓库记忆
 
-`/config` 的 `local-memory` 默认关闭。打开后，成功完成的主任务会继续运行内置记忆维护流程，更新受影响的仓库说明；更新完成后任务才进入结束状态。
+任务完成后的内置记忆维护流程，更新受影响的仓库说明；本卡只做指路。
 
-记忆维护使用主任务上下文的副本，具有独立会话与消息历史。它产生的内容不追加到主会话；用量计入该任务。中断或失败的任务不触发维护；技能缺失或维护执行失败会直接报告错误。
+## 索引
 
-只在原生 OpenCoder 的 act 主会话完成任务后维护，计划模式、工作流和子会话不触发。外部 Codex 自己管理任务生命周期及模型凭据，不再额外启动原生 Act 记忆会话。维护会话使用宿主命令工具：Linux/macOS 为 `bash`，Windows 为 `powershell`。见 [会话运行时](../../agents/session/index.md)、[配置](../../agents/core/index.md)、[TUI](../../agents/tui/index.md)。
+- [crates/core/src/config/merge.rs](../../crates/core/src/config/merge.rs) —
+  `local-memory` 配置开关
+- [repo-local-memory/](../../crates/core/assets/skills/repo-local-memory)
+  — 内置记忆维护技能（SKILL/EXAMPLES/TEMPLATES）
+- [repo-local-dreaming/](../../crates/core/assets/skills/repo-local-dreaming)
+  — 周期性全量整理技能
+- [crates/core/src/skill/seed.rs](../../crates/core/src/skill/seed.rs) — 内置
+  技能 seed
+- [runner/local_memory/](../../crates/session/src/runner/local_memory)
+  — 记忆维护会话流程
+
+## 相关
+
+- [session 域卡](../../agents/session/index.md)、
+  [core 域卡](../../agents/core/index.md)、
+  [tui 域卡](../../agents/tui/index.md)

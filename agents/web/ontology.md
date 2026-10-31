@@ -8,7 +8,7 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 
 - [panels.tsx](../../crates/web/spa/src/ontology/panels.tsx)、[env.tsx](../../crates/web/spa/src/ontology/env.tsx)、[api.ts](../../crates/web/spa/src/ontology/api.ts) 连接四个导航页面与平台身份。页面固定使用 Server 初始化的 `debug` 数据空间，由平台请求地址确定 Server；不读取旧环境选择、不查询环境列表，也不暴露环境管理。写权限来自登录身份的角色，正文保存回执提供新 revision。
 - [DraftGuard.tsx](../../crates/web/spa/src/ontology/navigation/DraftGuard.tsx) 在 Shell 内登记草稿和保存状态，供关闭、导航、退出及浏览器离开检查使用。[ModalForm.tsx](../../crates/web/spa/src/ontology/ui/ModalForm.tsx) 统一表单提交、错误保留与放弃确认。
-- [admin/](../../crates/web/spa/src/ontology/pages/admin/) 提供列表筛选、资源读取状态和危险操作菜单；[DirectoryActions.tsx](../../crates/web/spa/src/ontology/pages/DirectoryActions.tsx) 根据目录类型标记连接目录接口。
+- [admin/](../../crates/web/spa/src/ontology/pages/admin/) 提供列表筛选、资源读取状态和危险操作菜单。
 
 ## 图谱
 

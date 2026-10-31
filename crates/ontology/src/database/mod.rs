@@ -1,5 +1,7 @@
 mod catalog;
 mod entities;
+mod freshness;
+mod freshness_review;
 pub(crate) mod model;
 mod schema;
 pub use schema::{SchemaPolicy, CONTRACT as SCHEMA_CONTRACT};
@@ -9,6 +11,7 @@ pub(crate) mod text_revision;
 mod values;
 mod vectors;
 
+pub(crate) use freshness::FreshnessPolicyFields;
 pub(crate) use store::Store;
 pub(crate) use values::validate_structured_value;
 

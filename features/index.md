@@ -3,7 +3,7 @@ Commit: 060b4a241846772771e01bb6f002b9cf59ce1045
 # OpenCoder 能力地图
 ## 平台与编排
 - [Agent 调度平台](agent-platform/index.md) — Server/Node 调度与按 ID 查执行明细。
-- [Ontology](ontology/index.md) — 环境隔离的实体、属性、关系、图谱切面与只读正文共享。
+- [Ontology](ontology/index.md) — 环境隔离的实体、属性、关系、图谱切面、数据保鲜与只读正文共享。
 - [Windows 原生支持](windows/index.md) — Windows 11 x64 的 TUI、Operator 节点与 PowerShell 7.4 及以上的 7.x 稳定版。
 - [DAG 工作流](dag/index.md) — Linux 二进制与 Agent 步骤、单运行共享容器和写时复制工作区。
 - [持久化 TODO 工作流](todos/index.md) — 父会话调度验收、独立 TODO 执行。

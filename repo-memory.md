@@ -18,7 +18,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/tui](agents/tui/index.md) — ratatui 交互界面。
 - [agents/local](agents/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA。
-- [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面与不可变正文。
+- [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面、数据保鲜与不可变正文。
 - [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
 - [agents/dag-binary](agents/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。
 - [agents/dag-runtime](agents/dag-runtime/index.md) — 每次 DAG 运行归属单个节点、单个容器，共享写时复制工作区；Server 不链接。

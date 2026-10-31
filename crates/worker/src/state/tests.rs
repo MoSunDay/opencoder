@@ -255,3 +255,75 @@ async fn idle_scheduler_does_not_keep_runtime_awake() {
     worker.shutdown().await.unwrap();
     assert_eq!(worker.inner.background_tasks.active_count(), 0);
 }
+
+#[tokio::test]
+async fn terminal_release_collects_unused_gates_and_maintenance_registrations() {
+    let root = tempfile::tempdir().unwrap();
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    let id = "agent-release";
+    let held = worker.lifecycle_gate(id).await;
+    worker
+        .inner
+        .lifecycle_gates
+        .lock()
+        .await
+        .insert("agent-orphan".into(), Arc::new(Mutex::new(())));
+    worker
+        .inner
+        .preparation_gates
+        .lock()
+        .await
+        .insert(id.into(), Arc::new(Mutex::new(())));
+    crate::maintenance_tools::install(&worker, id);
+    assert!(worker.inner.maintenance.lock().unwrap().contains_key(id));
+
+    release_execution_state(&worker.inner, id).await;
+    // The held clone keeps the in-use gate alive; unreferenced entries are
+    // collected and the maintenance registration drops its global slot.
+    assert!(worker.inner.lifecycle_gates.lock().await.contains_key(id));
+    assert!(!worker
+        .inner
+        .lifecycle_gates
+        .lock()
+        .await
+        .contains_key("agent-orphan"));
+    assert!(!worker.inner.preparation_gates.lock().await.contains_key(id));
+    assert!(!worker.inner.maintenance.lock().unwrap().contains_key(id));
+
+    drop(held);
+    release_execution_state(&worker.inner, id).await;
+    assert!(!worker.inner.lifecycle_gates.lock().await.contains_key(id));
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn configuration_cache_reuses_the_load_until_input_files_change() {
+    let root = tempfile::tempdir().unwrap();
+    let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    let first = configuration_shared(&worker).unwrap();
+    let second = configuration_shared(&worker).unwrap();
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "unchanged inputs must reuse the cached config"
+    );
+
+    // Calls inside a harness scope keep loading fresh (core folds those
+    // call-site overrides into the loaded config).
+    let scoped = opencoder_core::harness::scope::with_execution(
+        None,
+        opencoder_core::harness::RuntimeSettings::default(),
+        async { configuration_shared(&worker).unwrap() },
+    )
+    .await;
+    assert!(!Arc::ptr_eq(&first, &scoped));
+
+    // Rewriting a covered project candidate invalidates the cache.
+    let config = root.path().join("work/.opencoder/config.json");
+    opencoder_core::atomic_write(&config, br#"{"model":"probe/cache-invalidation"}"#).unwrap();
+    let third = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&first, &third));
+    assert_eq!(third.model, "probe/cache-invalidation");
+    assert_eq!(third.model, worker.configuration().unwrap().model);
+    worker.shutdown().await.unwrap();
+}

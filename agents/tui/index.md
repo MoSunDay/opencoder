@@ -13,6 +13,9 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   桥接 `SessionEvent` 到聊天渲染
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射（模式切换门禁）
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染与渲染入口
+- [chat_step_live.rs](../../crates/tui/src/chat_step_live.rs) — Step 阶梯的
+  流式自动披露：运行位自动展开、Say/结束收起、用户点击优先（与 SPA
+  `steps/useLadderDisclosure.js` 同契约）
 - `src/model_menu/` — `/config` 表单（含 `local-memory` 开关）
 - [agent_menu.rs](../../crates/tui/src/agent_menu.rs)、
   [remote/selection.rs](../../crates/tui/src/remote/selection.rs) — `/agent` 菜单

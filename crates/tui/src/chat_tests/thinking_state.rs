@@ -288,8 +288,13 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
     assert!(matches!(v.blocks[1], ChatBlock::Assistant { .. }));
     assert!(matches!(v.blocks[2], ChatBlock::StepGroup { .. }));
 
-    // The trailing step is structurally present but hidden, so deltas only
-    // append raw source and the render loop may skip a delta-only frame.
+    // Turn 2's running step auto-opened on its first delta (live
+    // disclosure). The user folds it back: from then on the step is
+    // HIDDEN, so further deltas only append raw source and the render
+    // loop may skip a delta-only frame.
+    v.toggle_tool_call_at(2, 1); // Step(1) of the new group → folded (pinned).
+    v.toggle_tool_call_at(2, 0); // Group row → folded (pinned).
+    v.apply(&SessionEvent::ReasoningDelta(" more".into()));
     assert!(
         v.last_open_thinking_collapsed(),
         "collapsed step reasoning is not visible"
@@ -306,14 +311,17 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
     // and there (counted exactly once), so the closed turn carries the
     // rendered body already.
     assert_eq!(thinking_rendered, "first");
-    let (raw2, empty2) = match &v.blocks[2] {
-        ChatBlock::StepGroup { steps, .. } => {
-            (steps[0].thinking_raw.clone(), steps[0].thinking.is_empty())
-        }
+    let (raw2, rendered2) = match &v.blocks[2] {
+        ChatBlock::StepGroup { steps, .. } => (
+            steps[0].thinking_raw.clone(),
+            crate::chat::steps::span_text(&steps[0].thinking),
+        ),
         _ => unreachable!("third block must be the step group"),
     };
-    assert_eq!(raw2, "second");
-    assert!(empty2);
+    assert_eq!(raw2, "second more");
+    // The birth delta was rendered live; the delta that arrived while the
+    // step was folded stays raw — markdown materializes lazily on open.
+    assert_eq!(rendered2, "second");
 
     v.toggle_tool_call_at(2, 0);
     v.toggle_tool_call_at(2, 1);
@@ -321,7 +329,7 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
         ChatBlock::StepGroup { steps, .. } => crate::chat::steps::span_text(&steps[0].thinking),
         _ => unreachable!("third block must be the step group"),
     };
-    assert_eq!(thinking, "second");
+    assert_eq!(thinking, "second more");
 }
 
 #[test]

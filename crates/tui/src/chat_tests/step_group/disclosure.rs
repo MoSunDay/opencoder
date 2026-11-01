@@ -24,19 +24,29 @@ fn disclosure(view: &ChatView) -> (bool, Vec<(bool, bool, Vec<bool>)>) {
 
 #[test]
 fn new_output_never_closes_user_opened_ladder_levels() {
+    // Under live disclosure the ladder AUTO-opens at its running position;
+    // a click on an already-open level therefore folds/pins it instead of
+    // opening it. The user takes ownership of a level by cycling it
+    // (fold + reopen = same visible state, now `user_touched`), after which
+    // no streaming event may move that level again — new output never
+    // closes a user-opened level, and new output never reopens a
+    // user-closed one.
     let mut view = ChatView::default();
     view.apply(&SessionEvent::ReasoningDelta("first thought".into()));
-    view.toggle_tool_call_at(0, 0); // Turn.
-    view.toggle_tool_call_at(0, 1); // Step(1).
+    // Pin Turn + Step(1) in their auto-open state.
+    view.toggle_tool_call_at(0, 0); // Turn → folded (pinned).
+    view.toggle_tool_call_at(0, 0); // Turn → reopened (pinned).
+    view.toggle_tool_call_at(0, 1); // Step(1) → folded (pinned).
+    view.toggle_tool_call_at(0, 1); // Step(1) → reopened (pinned).
 
     view.apply(&SessionEvent::ReasoningDelta(" grows".into()));
-    assert_eq!(disclosure(&view), (true, vec![(true, false, vec![])]));
+    assert_eq!(disclosure(&view), (true, vec![(true, true, vec![])]));
 
     view.apply(&SessionEvent::LlmRoundEnd);
     assert_eq!(
         disclosure(&view),
-        (true, vec![(true, false, vec![])]),
-        "round finalization must not close the open turn or step"
+        (true, vec![(true, true, vec![])]),
+        "round finalization must not close the user-open turn or step"
     );
 
     view.apply(&SessionEvent::ToolStart {
@@ -44,8 +54,7 @@ fn new_output_never_closes_user_opened_ladder_levels() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
-    view.toggle_tool_call_at(0, 2); // Function-call aggregate.
-    view.toggle_tool_call_at(0, 3); // Exact call result.
+    view.toggle_tool_call_at(0, 3); // Exact call result → expanded (pins the step).
     view.apply(&SessionEvent::ToolEnd {
         id: "call-1".into(),
         name: "bash".into(),
@@ -56,24 +65,28 @@ fn new_output_never_closes_user_opened_ladder_levels() {
     assert_eq!(
         disclosure(&view),
         (true, vec![(true, true, vec![true])]),
-        "tool output must preserve all opened ancestors and its result fold"
+        "tool output must preserve all pinned ancestors and its result fold"
     );
 
     view.apply(&SessionEvent::ReasoningDelta("next round".into()));
     assert_eq!(
         disclosure(&view),
-        (true, vec![(true, true, vec![true]), (false, false, vec![])]),
-        "a new step may start closed but must not close previously opened content"
+        (true, vec![(true, true, vec![true]), (true, true, vec![])]),
+        "the fresh step takes over the open running position; the pinned \
+step above keeps its disclosure untouched"
     );
-    view.toggle_tool_call_at(0, 4); // Step(2).
     view.apply(&SessionEvent::LlmRoundEnd);
     assert_eq!(
         disclosure(&view),
-        (true, vec![(true, true, vec![true]), (true, false, vec![])]),
-        "settling a newly opened step must keep the entire ladder open"
+        (true, vec![(true, true, vec![true]), (true, true, vec![])]),
+        "round finalization must keep the entire ladder at its owned state"
     );
 
     view.toggle_tool_call_at(0, 0); // User explicitly closes the Turn.
     view.apply(&SessionEvent::TextDelta("later output".into()));
-    assert!(!disclosure(&view).0, "new output must respect a user close");
+    assert_eq!(
+        disclosure(&view),
+        (false, vec![(true, true, vec![true]), (false, false, vec![])]),
+        "new output must respect a user close: only auto-managed levels settle"
+    );
 }

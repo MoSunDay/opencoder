@@ -4,11 +4,12 @@
 //! text, image, marker, and subagent presentation do not split it. Within a
 //! group a step is one Thinking run plus every function call that follows;
 //! sequential and parallel calls both accumulate until new Thinking opens
-//! the next step. Default render is ONE
-//! clickable group row `▸ N Steps`; clicking it lists the step rows,
-//! clicking a step row reveals its thinking + `N Function calls`, opening
-//! that aggregate lists calls, and clicking a call row expands only that
-//! call's result; Ctrl+L collapses every level again.
+//! the next step. While the turn runs the ladder auto-opens at its running
+//! position (`step_group/live_disclosure.rs`); once it settles the default
+//! render is ONE clickable group row `▸ N Steps`; clicking it lists the
+//! step rows, clicking a step row reveals its thinking + `N Function
+//! calls`, opening that aggregate lists calls, and clicking a call row
+//! expands only that call's result; Ctrl+L collapses every level again.
 
 use super::super::*;
 
@@ -172,6 +173,9 @@ fn collapsed_by_default_renders_single_group_row() {
             images: Vec::new(),
         });
     }
+    // `Done` retires the live auto-open: the settled default is the folded
+    // single group row this test pins.
+    v.apply(&SessionEvent::Done);
     let lines = flatten_text(&v);
     // Group row + trailing blank: the whole ladder is one clickable row.
     assert_eq!(lines.len(), 2, "default render: group row + blank");
@@ -205,6 +209,7 @@ fn collapsed_by_default_renders_single_group_row() {
         is_error: false,
         images: Vec::new(),
     });
+    v1.apply(&SessionEvent::Done);
     let solo = flatten_text(&v1);
     assert_eq!(solo.len(), 2, "group row + blank");
     assert!(
@@ -330,6 +335,9 @@ fn toggling_the_ladder_reveals_each_level() {
             images: Vec::new(),
         });
     }
+    // Settle the turn first: the ladder auto-opens while it runs, and these
+    // row-by-row toggles walk the folded default.
+    v.apply(&SessionEvent::Done);
     let list = flatten_text(&v);
     assert_eq!(list.len(), 2, "default = group row + blank");
     assert!(

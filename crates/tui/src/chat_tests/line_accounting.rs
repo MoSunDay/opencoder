@@ -67,9 +67,11 @@ fn step_group_closed() -> ChatBlock {
             open: false,
             calls_open: false,
             sealed: false,
+            user_touched: false,
         }],
         open: false,
         progress_active: false,
+        user_touched: false,
     }
 }
 

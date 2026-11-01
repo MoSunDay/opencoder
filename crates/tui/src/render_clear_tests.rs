@@ -161,8 +161,8 @@ fn shorter_thinking_frame_never_reveals_old_lines() {
     old.apply(&SessionEvent::ReasoningDelta(
         "old-overlap-marker\nold-tail".into(),
     ));
-    old.toggle_tool_call_at(0, 0);
-    old.toggle_tool_call_at(0, 1);
+    // The live running step auto-opens and renders its thinking on the
+    // first delta — no ladder toggling needed to expose it.
     draw_frame(
         &mut terminal,
         &old,
@@ -176,8 +176,6 @@ fn shorter_thinking_frame_never_reveals_old_lines() {
 
     let mut new = ChatView::default();
     new.apply(&SessionEvent::ReasoningDelta("new".into()));
-    new.toggle_tool_call_at(0, 0);
-    new.toggle_tool_call_at(0, 1);
     for _ in 0..2 {
         draw_frame(
             &mut terminal,

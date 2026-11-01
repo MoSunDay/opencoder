@@ -15,9 +15,9 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 - [agents/store](agents/store/index.md) — `Store` trait、Turso WAL 与异步数据库执行。
 - [agents/session](agents/session/index.md) — 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
 - [agents/shellguard](agents/shellguard/index.md) — shell 安全分类器：rable AST 判定、释放集仅 `/tmp`+`/dev/null`、fail-closed。
-- [agents/tui](agents/tui/index.md) — ratatui 交互界面。
+- [agents/tui](agents/tui/index.md) — ratatui 交互界面（Step 阶梯流式自动披露：`chat_step_live`）。
 - [agents/local](agents/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
-- [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA。
+- [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯披露 hook 与 TUI 同契约）。
 - [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面、数据保鲜与不可变正文。
 - [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
 - [agents/dag-binary](agents/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。

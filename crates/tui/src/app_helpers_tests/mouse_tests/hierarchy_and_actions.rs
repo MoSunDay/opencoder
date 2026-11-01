@@ -158,6 +158,9 @@ async fn clicking_step_or_call_row_toggles_only_that_target() {
             images: Vec::new(),
         });
     }
+    // `Done` settles the live auto-open: the ladder starts folded, as the
+    // row-by-row click walk below expects.
+    chat.apply(&SessionEvent::Done);
     let state = |c: &ChatView| match c.blocks.first() {
         Some(ChatBlock::StepGroup { steps, open, .. }) => (
             *open,
@@ -351,7 +354,9 @@ async fn sidecar_step_row_click_toggles_the_panel_view_not_the_main_transcript()
 
     // Body hit map recorded against the RENDERED (panel) view: the group row
     // carries the panel-relative block index of the ladder (behind the echoed
-    // prompt) and visible-target 0 (the group row).
+    // prompt) and visible-target 0 (the group row). Both ladders auto-opened
+    // at their live running positions, so the click must fold the PANEL
+    // group — and only it.
     let panel_block_idx = chat
         .sidecar
         .as_ref()
@@ -411,15 +416,15 @@ async fn sidecar_step_row_click_toggles_the_panel_view_not_the_main_transcript()
         })
         .expect("panel ladder block");
     assert!(
-        panel_group_open,
-        "the click must open the PANEL view's ladder"
+        !panel_group_open,
+        "the click must toggle (here: fold) the PANEL view's ladder"
     );
     let main_group_open = matches!(
         chat.blocks.first(),
         Some(crate::chat::ChatBlock::StepGroup { open: true, .. })
     );
     assert!(
-        !main_group_open,
-        "the main transcript's same-index group must stay collapsed"
+        main_group_open,
+        "the main transcript's same-index group must stay untouched by the panel click"
     );
 }

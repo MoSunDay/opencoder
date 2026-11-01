@@ -24,6 +24,7 @@ fn step_group_ladder_depth_alignment() {
                         open: open_steps,
                         calls_open,
                         sealed: true,
+                        user_touched: false,
                     },
                     Step {
                         thinking_raw: String::new(),
@@ -33,10 +34,12 @@ fn step_group_ladder_depth_alignment() {
                         open: open_steps,
                         calls_open,
                         sealed: true,
+                        user_touched: false,
                     },
                 ],
                 open: group_open,
                 progress_active: false,
+                user_touched: false,
             },
             marker_n(1),
         ])
@@ -90,6 +93,7 @@ fn step_group_with_expanded_call_keeps_alignment() {
                     open: true,
                     calls_open: true,
                     sealed: true,
+                    user_touched: false,
                 },
                 Step {
                     thinking_raw: String::new(),
@@ -99,10 +103,12 @@ fn step_group_with_expanded_call_keeps_alignment() {
                     open: true,
                     calls_open: true,
                     sealed: true,
+                    user_touched: false,
                 },
             ],
             open: true,
             progress_active: false,
+            user_touched: false,
         },
         marker_n(1),
     ]);
@@ -173,9 +179,11 @@ fn step_group_running_call_keeps_alignment() {
                 open: false,
                 calls_open: false,
                 sealed: false,
+                user_touched: false,
             }],
             open: false,
             progress_active: true,
+            user_touched: false,
         },
         marker_n(1),
     ]);

@@ -22,12 +22,10 @@ fn two_step_turn() -> ChatView {
             images: Vec::new(),
         });
     }
-    if let Some(ChatBlock::StepGroup {
-        progress_active, ..
-    }) = view.blocks.first_mut()
-    {
-        *progress_active = false;
-    }
+    // Settle the turn: while it ran, the ladder auto-opened at its running
+    // position (live disclosure); `Done` retires it back into the folded
+    // `N Steps` summary these drill-down tests start from.
+    view.apply(&SessionEvent::Done);
     view
 }
 

@@ -331,7 +331,17 @@ pub(crate) fn flatten_step_group(
             continue;
         }
         for (ci, c) in step.calls.iter().enumerate() {
-            let header = call_header(c);
+            let mut header = call_header(c);
+            // A still-running call (`ToolEnd` not yet seen) carries the same
+            // motion glyph as the group row, so the running position is
+            // visible per call, not only per turn. Same line — the
+            // header-accounting mirror in `chat_headers.rs` is unaffected.
+            if c.elapsed_ms.is_none() {
+                header.spans.push(Span::styled(
+                    format!(" {}", SPINNER[(anim_tick as usize) % SPINNER.len()]),
+                    Style::default().fg(theme::warn_color()),
+                ));
+            }
             out.extend(super::types::indented(std::slice::from_ref(&header), 6));
             // Per-call expansion: only the toggled call shows its output.
             // Exactly one blank follows the result: for the group's final

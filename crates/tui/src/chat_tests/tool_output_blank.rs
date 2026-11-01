@@ -40,9 +40,11 @@ fn one_step_group(calls: Vec<ToolCall>) -> ChatBlock {
             open: true,
             calls_open: true,
             sealed: true,
+            user_touched: false,
         }],
         open: true,
         progress_active: false,
+        user_touched: false,
     }
 }
 
@@ -173,6 +175,9 @@ fn interior_blank_lines_are_preserved() {
         is_error: false,
         images: Vec::new(),
     });
+    // Retire the live auto-open so the drill-down starts from the folded
+    // default these index toggles walk.
+    v.apply(&SessionEvent::Done);
     for idx in 0..=3 {
         v.toggle_tool_call_at(0, idx);
     }
@@ -222,9 +227,11 @@ fn collapsed_group_shape_is_unchanged() {
                 open: false,
                 calls_open: false,
                 sealed: true,
+                user_touched: false,
             }],
             open: false,
             progress_active: false,
+            user_touched: false,
         }],
         ..Default::default()
     };

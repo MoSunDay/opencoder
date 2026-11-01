@@ -88,3 +88,15 @@ SPA（`crates/web/spa`，server Rust/SSE 零改动）：
   属可接受差异。
 - `TextDelta("")` 字面空块在生产解码层已被过滤（`crates/llm` 两处
   `!t.is_empty()` 门禁），不会触发「空 Say 不收起」路径。
+
+## 工程拆分（纯重构，行为不变）
+
+- 回放侧阶梯归一（`coalesce_steps` / `normalize_turn_groups` /
+  `take_rendered_thinking`）自 `chat_steps.rs` 移至
+  `chat_steps_replay.rs`，为后续迭代留出行数余量；调用路径经
+  `chat::coalesce_steps` 重导出保持不变。
+- 覆盖不变：沿用 `chat_tests/step_group/replay.rs` 既有用例（如
+  `replay_merges_adjacent_tool_rounds_into_one_group`、
+  `replay_pairs_each_ladder_with_its_own_say`、
+  `replay_folds_thinking_without_a_following_group_into_the_ladder`）——
+  原 `chat_steps.rs` 内联单测仅覆盖留在原处的函数，无需随迁。

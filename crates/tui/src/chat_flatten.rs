@@ -119,6 +119,7 @@ impl ChatView {
                     steps,
                     open,
                     progress_active,
+                    ..
                 } => {
                     // Adjacent-pair merge: when the block right below this
                     // group is the turn's Say (`Assistant`), the two render

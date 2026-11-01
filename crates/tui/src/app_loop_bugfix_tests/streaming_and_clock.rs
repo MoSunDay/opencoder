@@ -59,6 +59,11 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         "the first delta opens the streaming step and must render"
     );
 
+    // The running step auto-opened; fold the group row (a user pin) so the
+    // follow-up delta streams into a HIDDEN step again — delta-only frames
+    // can then be coalesced.
+    chat.toggle_tool_call_at(0, 0);
+
     let mut notepad: Option<crate::notepad::NotepadView> = None;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(

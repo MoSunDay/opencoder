@@ -2,7 +2,9 @@ use ratatui::text::{Line, Span};
 
 /// Braille spinner frames shown next to a running subagent header. Matches the
 /// status-bar spinner in `render.rs` so the UI has one consistent motion.
-pub(super) const SPINNER: [&str; 10] = [
+/// `pub(crate)`: copy-mode's cleaner strips the running call header's frame
+/// by matching these exact glyphs.
+pub(crate) const SPINNER: [&str; 10] = [
     "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
     "\u{2807}", "\u{280f}",
 ];
@@ -66,6 +68,14 @@ pub enum ChatBlock {
     /// individual calls. Opening a call reveals only that call's result.
     /// `progress_active` drives the group-row animation until Say begins and
     /// cannot be reactivated after non-empty Say output exists.
+    /// LIVE DISCLOSURE: while the turn runs (`progress_active`), the group
+    /// auto-opens at its running position (last step) so thinking deltas and
+    /// call rows stream visibly (`step_live::activate`); Say's first chunk,
+    /// turn end, and new-turn admission re-collapse every auto-managed level
+    /// (`step_live::settle`). Replay/snapshot groups stay fully collapsed.
+    /// `user_touched` pins the group row to the user's last click: once set
+    /// (row toggle or Ctrl+L), automatic disclosure never touches it again
+    /// for the rest of the turn.
     /// ADJACENT-pair merge: when this group's next block is its turn's Say,
     /// the standalone `N Steps` row is replaced by one merged header
     /// `{❯|▸} Say(n step{s}): <say first line>` that both toggles the
@@ -78,6 +88,7 @@ pub enum ChatBlock {
         steps: Vec<Step>,
         open: bool,
         progress_active: bool,
+        user_touched: bool,
     },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
@@ -286,6 +297,12 @@ pub struct Step {
     /// flag). Rendered on demand by `steps::render_step_thinking`, sealed once
     /// per step at round finalize.
     pub sealed: bool,
+    /// Whether the USER last touched this step's disclosure (`open` +
+    /// `calls_open`): a row click or Ctrl+L. Once set, the live
+    /// auto-disclosure logic (`step_live`) never opens or collapses this
+    /// step again for the rest of the turn — user action always wins over
+    /// the streaming auto-open/settle cycle.
+    pub user_touched: bool,
 }
 
 /// One tool call inside a step of a `ChatBlock::StepGroup`.

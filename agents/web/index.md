@@ -32,6 +32,10 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
   会话页与共享输入组件
 - [chat/useTranscriptStream.js](../../crates/web/spa/src/chat/useTranscriptStream.js) —
   流结束后合并执行结果与会话快照
+- [stepsBlock.jsx](../../crates/web/spa/src/stepsBlock.jsx)、
+  [steps/useLadderDisclosure.js](../../crates/web/spa/src/steps/useLadderDisclosure.js) —
+  Step 阶梯三级展开与流式自动披露（运行位自动展开、结束收起、用户点击优先；
+  与 TUI `chat_step_live.rs` 同契约）
 - [chat/inputAttempt.js](../../crates/web/spa/src/chat/inputAttempt.js) — 人工输入 ID
   的生成与重试规则
 - [nav.js](../../crates/web/spa/src/nav.js)、

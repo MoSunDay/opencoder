@@ -18,7 +18,7 @@ use ratatui::text::{Line, Span};
 
 use crate::chat::{
     GROUP_ROW_CLOSED_PREFIX, GROUP_ROW_OPEN_PREFIX, PLAN_HEADER, ROLE_SAY_HEADER, ROLE_USER_HEADER,
-    STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX, STEP_THINKING_HEADER,
+    SPINNER, STEP_ROW_CLOSED_PREFIX, STEP_ROW_OPEN_PREFIX, STEP_THINKING_HEADER,
 };
 use crate::markdown::{
     CODE_BOTTOM, CODE_ROW_EMPTY, CODE_ROW_PREFIX, CODE_TOP_PREFIX, QUOTE_PREFIX, RULE_LINE,
@@ -29,7 +29,9 @@ use crate::markdown::{
 /// content kinds keep their span payload minus the decoration slots.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum LineKind {
-    /// Ordinary content row: keep, minus any leading slot.
+    /// Ordinary content row: keep, minus any leading slot. Includes
+    /// function-call headers — a RUNNING one also loses its trailing
+    /// live-spinner span (the glyph is chrome, the label is content).
     Text,
     /// `❯ User:` / `❯ Say:` role header — dropped.
     RoleHeader,
@@ -204,6 +206,31 @@ fn is_calls_row(spans: &[Span<'_>]) -> bool {
     count_row_label(spans, " Function calls", " Function call").is_some()
 }
 
+/// A running function-call header's trailing live-spinner span:
+/// `chat_step_render` appends exactly `" {frame}"` (one leading space + a
+/// [`SPINNER`] frame) while the call runs (`elapsed_ms` unset). Same
+/// grammar idea as the group row's `"  {glyph} running "` tail above.
+fn is_call_spinner(span: &Span<'_>) -> bool {
+    span.content
+        .strip_prefix(' ')
+        .is_some_and(|frame| SPINNER.contains(&frame))
+}
+
+/// Drop a running call header's trailing spinner span. Guarded by the
+/// fold-glyph opening (`{❯|▸} name …`) so ordinary prose ending in a
+/// spinner frame span is never touched — a text row could only collide by
+/// literally being such a header (same caveat as the group/step rows).
+fn without_call_spinner<'s, 't>(spans: &'s [Span<'t>]) -> &'s [Span<'t>] {
+    let is_header = spans.first().is_some_and(|first| {
+        let t = first.content.as_ref();
+        t.starts_with(GROUP_ROW_OPEN_PREFIX) || t.starts_with(GROUP_ROW_CLOSED_PREFIX)
+    });
+    match spans.last() {
+        Some(last) if is_header && is_call_spinner(last) => &spans[..spans.len() - 1],
+        _ => spans,
+    }
+}
+
 /// Width of `s` when it is a pure ASCII-space gutter span of 1..=8 columns.
 fn gutter_width(s: &str) -> Option<usize> {
     let w = s.chars().count();
@@ -271,10 +298,15 @@ fn say_pair_payload(spans: &[Span<'_>]) -> Option<String> {
 /// structurally: one optional pure-space gutter span, then (for code rows)
 /// the `│ `/`│` prefix span, then — when `strip_quote_prefix` — a leading
 /// `▎ ` inside the first content span. Trailing padding is trimmed.
+/// Text rows (the only kind a running call header can be) additionally
+/// lose their trailing live-spinner span (see [`without_call_spinner`]) —
+/// the motion glyph is chrome, the header text is content.
 fn payload_text(line: &Line<'_>, strip_quote_prefix: bool) -> String {
     let mut spans = skip_gutter(line.spans.as_slice());
     if !strip_quote_prefix {
         spans = skip_code_prefix(spans);
+    } else {
+        spans = without_call_spinner(spans);
     }
     spans
         .iter()

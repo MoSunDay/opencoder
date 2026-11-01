@@ -14,6 +14,7 @@ fn push_bash_tool_starts_in_results_state() {
             steps,
             open,
             progress_active,
+            ..
         }) => {
             assert_eq!(steps.len(), 1);
             assert!(
@@ -35,6 +36,44 @@ fn push_bash_tool_starts_in_results_state() {
 }
 
 #[test]
+fn bash_tool_pin_survives_the_turn_end_settle() {
+    // The synthetic `!cmd` ladder is born fully expanded AND user-pinned at
+    // every level. The live disclosure settle (Say's first chunk + Done —
+    // the same events the streaming tests drive) targets this group as the
+    // turn's canonical ladder, but a user-touched level is never moved by
+    // the auto policy: only user clicks (or Ctrl+L) may close it.
+    let mut v = ChatView::default();
+    v.push_bash_tool("echo hi");
+    v.apply(&SessionEvent::TextDelta("the answer".into()));
+    v.apply(&SessionEvent::Done);
+
+    match v
+        .blocks
+        .iter()
+        .find(|b| matches!(b, ChatBlock::StepGroup { .. }))
+    {
+        Some(ChatBlock::StepGroup {
+            steps,
+            open,
+            user_touched,
+            ..
+        }) => {
+            let step = &steps[0];
+            let call = &step.calls[0];
+            assert!(
+                *open && step.open && step.calls_open && call.expanded,
+                "the user-pinned `!cmd` ladder must still be fully expanded after the settle"
+            );
+            assert!(
+                *user_touched && step.user_touched,
+                "both levels keep their user-pinned marker"
+            );
+        }
+        other => panic!("expected ChatBlock::StepGroup, got {other:?}"),
+    }
+}
+
+#[test]
 fn finish_bash_tool_fills_output_without_closing_the_ladder() {
     let mut v = ChatView::default();
     v.push_bash_tool("echo hi");
@@ -45,6 +84,7 @@ fn finish_bash_tool_fills_output_without_closing_the_ladder() {
             steps,
             open,
             progress_active,
+            ..
         }) => {
             let call = &steps[0].calls[0];
             assert!(

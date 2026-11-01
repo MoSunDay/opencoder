@@ -12,7 +12,7 @@
 // imported via subagentBlock.jsx; no drill-in is opened here).
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 const { openStreamMock } = vi.hoisted(() => ({ openStreamMock: vi.fn() }));
 vi.mock('./sse.js', () => ({ openStream: openStreamMock }));
@@ -103,6 +103,10 @@ describe('StepsContent three-level drill-down', () => {
 
   it('keeps user disclosure state when new output rerenders the turn', () => {
     const initial = stepsTurn();
+    // Settled turn: without `progressActive: false` the null-output
+    // fallback marks the turn running and the live auto-open would open
+    // levels without any click.
+    initial.progressActive = false;
     initial.steps[0].calls[0].output = null;
     const mounted = mount([initial]);
     fireEvent.click(screen.getByText('2 Steps'));
@@ -111,6 +115,7 @@ describe('StepsContent three-level drill-down', () => {
     fireEvent.click(screen.getByText(/🔧 bash/));
 
     const updated = stepsTurn();
+    updated.progressActive = false;
     updated.steps[0].calls[0].output = 'new streamed output';
     mounted.rerender(
       <TranscriptView turns={[updated]} usage={null} status="streaming" error={null} emptyText="无" />,
@@ -183,7 +188,7 @@ describe('StepsContent three-level drill-down', () => {
     expect(screen.queryByText(/Say\(/)).toBeNull();
   });
 
-  it('keeps the running tag ON the Say row while sayActive (12px gap)', () => {
+  it('keeps the running tag ON the Say row while sayActive — ladder FOLDED (12px gap)', () => {
     const streaming = stepsTurn();
     mount([
       { ...streaming, sayStreaming: true },
@@ -194,6 +199,10 @@ describe('StepsContent three-level drill-down', () => {
     expect(tag.style.marginLeft).toBe('12px');
     expect(screen.getByText('2 Steps: partial answer line one')).toBeTruthy();
     expect(screen.queryByText('error')).toBeNull();
+    // TUI parity: Say's first chunk settles the ladder — the running tag
+    // rides the Say row while the steps stay folded under it.
+    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
+    expect(screen.queryByText(/Function call/)).toBeNull();
   });
 
   it('shows the Say-row error tag once running settles and a call failed', () => {
@@ -205,7 +214,7 @@ describe('StepsContent three-level drill-down', () => {
     expect(screen.queryByText('running')).toBeNull();
   });
 
-  it('stays collapsed while streaming so the default remains one Turn summary', () => {
+  it('a hand-built turn with no progress flag and no open call stays folded (running is derived, not the stream status)', () => {
     const streaming = {
       kind: 'steps',
       role: 'assistant',
@@ -216,13 +225,6 @@ describe('StepsContent three-level drill-down', () => {
     expect(screen.queryByText(/Step\(1\)/)).toBeNull();
     expect(screen.queryByText('💭 Thinking')).toBeNull();
     expect(screen.queryByText('planning the next call')).toBeNull();
-    cleanup();
-    const openCall = stepsTurn();
-    openCall.steps[0].calls[0].output = null;
-    mount([openCall]);
-    expect(screen.getByText('2 Steps')).toBeTruthy();
-    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
-    expect(screen.queryByText('look at the repo first')).toBeNull();
   });
 
   it('starts collapsed after streaming settles as well', () => {
@@ -292,6 +294,150 @@ describe('StepsContent three-level drill-down', () => {
     const say = container.querySelector('.md-body');
     expect(say.textContent).toContain('and the details follow');
     expect(group.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('live ladder disclosure (auto-open + user override)', () => {
+  // antd keeps closed-after-open panels mounted (hidden), so folded state is
+  // asserted through the item's active class, exactly like the user-state
+  // test above — never through text absence.
+  const itemActive = (matcher) => screen.getByText(matcher)
+    .closest('.ant-collapse-item').classList.contains('ant-collapse-item-active');
+
+  it('auto-opens the running position while progressActive — older steps stay folded', () => {
+    const running = stepsTurn();
+    running.progressActive = true;
+    mount([running]);
+    // L0 + the LAST step + its calls aggregate are open WITHOUT clicks.
+    expect(itemActive('2 Steps')).toBe(true);
+    expect(screen.getByText(/Step\(1\)/)).toBeTruthy();
+    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
+    expect(itemActive(/Step\(2\)/)).toBe(true);
+    expect(itemActive('1 Function call')).toBe(true);
+    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+    // The older step keeps its fold: only its ROW is visible.
+    expect(itemActive(/Step\(1\)/)).toBe(false);
+    expect(screen.queryByText('look at the repo first')).toBeNull();
+    expect(screen.queryByText(/🔧 bash/)).toBeNull();
+  });
+
+  it('auto-opens the same running position via the open-call fallback (output: null)', () => {
+    const running = stepsTurn();
+    running.steps[1].calls[0].output = null;
+    mount([running]);
+    expect(itemActive('2 Steps')).toBe(true);
+    expect(itemActive(/Step\(2\)/)).toBe(true);
+    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+    expect(itemActive(/Step\(1\)/)).toBe(false);
+    expect(screen.queryByText('look at the repo first')).toBeNull();
+  });
+
+  it('auto-collapses everything back to the `2 Steps` summary when the turn settles', () => {
+    const running = stepsTurn();
+    running.progressActive = true;
+    const mounted = mount([running]);
+    expect(itemActive('2 Steps')).toBe(true);
+    mounted.rerender(
+      <TranscriptView turns={[stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
+    );
+    expect(itemActive('2 Steps')).toBe(false);
+    expect(itemActive(/Step\(2\)/)).toBe(false);
+    expect(itemActive('1 Function call')).toBe(false);
+  });
+
+  it('an expanded call row pins its step and calls open across the settle', () => {
+    const running = stepsTurn();
+    running.progressActive = true;
+    const mounted = mount([running]);
+    // The auto-opened running position puts the LAST step's call row in
+    // reach; drill into that call result (no explicit ladder clicks).
+    fireEvent.click(screen.getByText(/🔧 read/));
+    expect(screen.getByText('fn main() {}')).toBeTruthy();
+    mounted.rerender(
+      <TranscriptView turns={[stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
+    );
+    // The call row pinned its enclosing step + calls aggregate open, so the
+    // drilled result stays visible (user override beats the emptied auto).
+    expect(itemActive(/Step\(2\)/)).toBe(true);
+    expect(itemActive('1 Function call')).toBe(true);
+    expect(screen.getByText('fn main() {}')).toBeTruthy();
+    // Other levels collapse as usual: the turn row and the older step.
+    expect(itemActive('2 Steps')).toBe(false);
+    expect(itemActive(/Step\(1\)/)).toBe(false);
+  });
+
+  it('a step born while running moves the auto slot: the old step folds by itself', () => {
+    const running = stepsTurn();
+    running.progressActive = true;
+    const mounted = mount([running]);
+    expect(itemActive(/Step\(2\)/)).toBe(true);
+    const grown = stepsTurn();
+    grown.progressActive = true;
+    grown.steps.push({ thinking: 'fresh reasoning', calls: [] });
+    mounted.rerender(
+      <TranscriptView turns={[grown]} usage={null} status="streaming" error={null} emptyText="无" />,
+    );
+    expect(screen.getByText('3 Steps')).toBeTruthy();
+    expect(itemActive(/Step\(2\)/)).toBe(false);
+    expect(screen.getByText(/Step\(3\)/)).toBeTruthy();
+    expect(itemActive(/Step\(3\)/)).toBe(true);
+    expect(screen.getByText('fresh reasoning')).toBeTruthy();
+  });
+
+  it('a user-closed level wins over the auto state across streaming rerenders', () => {
+    const running = stepsTurn();
+    running.progressActive = true;
+    const mounted = mount([running]);
+    expect(itemActive('2 Steps')).toBe(true);
+    fireEvent.click(screen.getByText('2 Steps'));
+    expect(itemActive('2 Steps')).toBe(false);
+    const still = stepsTurn();
+    still.progressActive = true;
+    mounted.rerender(
+      <TranscriptView turns={[still]} usage={null} status="streaming" error={null} emptyText="无" />,
+    );
+    // The auto keys say open, but the user override keeps the turn folded.
+    expect(itemActive('2 Steps')).toBe(false);
+    expect(itemActive(/Step\(2\)/)).toBe(true);
+  });
+
+  it('a user-opened OLD step stays open when the auto slot moves on', () => {
+    const running = stepsTurn();
+    running.progressActive = true;
+    const mounted = mount([running]);
+    fireEvent.click(screen.getByText(/Step\(1\)/));
+    expect(screen.getByText('look at the repo first')).toBeTruthy();
+    const grown = stepsTurn();
+    grown.progressActive = true;
+    grown.steps.push({ thinking: 'fresh reasoning', calls: [] });
+    mounted.rerender(
+      <TranscriptView turns={[grown]} usage={null} status="streaming" error={null} emptyText="无" />,
+    );
+    expect(itemActive(/Step\(1\)/)).toBe(true);
+    expect(screen.getByText('look at the repo first')).toBeTruthy();
+    expect(itemActive(/Step\(3\)/)).toBe(true);
+  });
+
+  it('shows the running tag on a running call row, not on finished ones', () => {
+    const running = stepsTurn();
+    running.steps[1].calls.push({
+      kind: 'tool', role: 'assistant', id: 'c1', name: 'grep',
+      input: 'pattern', output: null, isError: false, durationMs: 0, startedAt: 0,
+    });
+    mount([running]);
+    const grepRow = screen.getByText(/🔧 grep/).closest('.ant-collapse-item');
+    expect(within(grepRow).getByText('running')).toBeTruthy();
+    const readRow = screen.getByText(/🔧 read/).closest('.ant-collapse-item');
+    expect(readRow.textContent).not.toContain('running');
+  });
+
+  it('flat `tool` turns share the same per-call running tag while open', () => {
+    mount([{
+      kind: 'tool', role: 'assistant', id: 't1', name: 'task',
+      input: '', output: null, isError: false, durationMs: 0, startedAt: 0,
+    }]);
+    expect(screen.getByText(/🔧 task/)).toBeTruthy();
+    expect(screen.getByText('running')).toBeTruthy();
   });
 });
 

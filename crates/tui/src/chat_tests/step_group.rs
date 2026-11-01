@@ -89,10 +89,12 @@ fn trailing_thinking_folds_into_the_step_not_the_flow() {
         .collect::<String>();
     assert!(body.contains("reading the layout"));
 
-    // Zero clicks: only the closed group row renders.
+    // Settled turn (Done retires the live auto-open): only the closed group
+    // row renders, with no running hint.
+    v.apply(&SessionEvent::Done);
     let flat = lines(&v);
     assert_eq!(flat.len(), 2, "closed group = group row + blank: {flat:?}");
-    assert_eq!(flat[0], "\u{25b8} 1 Step  \u{280b} running ");
+    assert_eq!(flat[0], "\u{25b8} 1 Step");
 
     // Group open, then step open: the step row renders, then its thinking
     // behind the Thinking header.
@@ -345,6 +347,8 @@ mod turn_boundary;
 #[path = "step_group/disclosure.rs"]
 mod disclosure;
 
+mod live_disclosure;
+
 /// Expanding a step mid-stream must not freeze its thinking: after the
 /// expand-time render cleared `thinking_dirty`, further deltas of the same
 /// reasoning run kept accumulating in `thinking_raw` but never re-rendered —
@@ -353,9 +357,11 @@ mod disclosure;
 fn expanded_step_keeps_streaming_new_thinking_deltas() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("first chunk ".into()));
-    // Expand the ladder: open the group row, then the step row.
-    v.toggle_tool_call_at(0, 0); // StepTarget::Group
-    v.toggle_tool_call_at(0, 1); // StepTarget::Step(0)
+    // The first delta auto-opened the running step; walk the USER expand
+    // path (fold + reopen the step row) so the expand-time render clears
+    // `thinking_dirty` — the state the freeze regression starts from.
+    v.toggle_tool_call_at(0, 1); // StepTarget::Step(0) → folded (pinned)
+    v.toggle_tool_call_at(0, 1); // StepTarget::Step(0) → reopened (pinned)
     let expanded = lines(&v).join("\n");
     assert!(
         expanded.contains("first chunk"),
@@ -382,8 +388,22 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "solo");
-    // Pre-Say: the standalone group row carries the live running hint.
-    assert_eq!(lines(&v), vec!["\u{25b8} 1 Step  \u{280b} running ", ""]);
+    // Pre-Say, while the turn runs: the ladder auto-opens at its running
+    // position (group row with the live hint, open step, its thinking, the
+    // calls aggregate and the call row) — still ending on exactly one blank.
+    assert_eq!(
+        lines(&v),
+        vec![
+            "\u{276f} 1 Step  \u{280b} running ",
+            "  \u{276f} Step(1)",
+            "    \u{1f4ad} Thinking",
+            "        think",
+            "    \u{276f} 1 Function call",
+            "      \u{25b8} bash echo x",
+            "",
+        ],
+        "live auto-open ladder: every streamed row visible, one trailing blank"
+    );
     v.apply(&SessionEvent::TextDelta("spoken".into()));
     assert_eq!(
         lines(&v),

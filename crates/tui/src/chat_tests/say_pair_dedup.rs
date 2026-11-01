@@ -124,7 +124,10 @@ fn merged_pair_empty_body_renders_header_plus_one_blank() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "t1");
-    v.apply(&SessionEvent::TextDelta(String::new()));
+    // A whitespace-only body chunk: non-empty for the live disclosure (it
+    // settles the auto-opened ladder like every first Say chunk) while the
+    // rendered body stays empty for the merge decision below.
+    v.apply(&SessionEvent::TextDelta("\n".into()));
     v.apply(&SessionEvent::Done);
 
     assert_eq!(

@@ -3,14 +3,15 @@
 // role:'assistant', steps:[{thinking, calls:[toolCall,…]}]} — the SPA port
 // of the TUI's ChatBlock::StepGroup ladder (crates/tui/src/chat_steps.rs).
 // Interaction model (collapsed content stays OUT of the DOM until drilled):
-//   L0  ❯ 2 Steps [running|error]  ← TURN Collapse (ghost, default CLOSED)
-//         — the ONLY thing a collapsed steps bubble renders; running from
+//   L0  ❯ 2 Steps [running|error]  ← TURN Collapse (ghost, auto/user
+//         managed — see LIVE disclosure below); the ONLY thing a collapsed
+//         steps bubble renders; running from
 //           reasoning/tool activity until Say begins, then red on any error.
 //         With the turn's own Say: the header becomes the Say row
 //           `❯ N Steps: {first-line preview}` and the running tag
 //           rides THERE (driven by sayActive, the sayStreaming ladder flag)
 //           until the sub-turn's ladder ends.
-//   L1    ❯ Step(1) [error]        ← per-step Collapse (default closed);
+//   L1    ❯ Step(1) [error]        ← per-step Collapse (auto/user managed);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
 //         paragraph + label line) — no ghost collapse inside a step
@@ -18,10 +19,22 @@
 //   L3        🔧 bash · 1.2s        ← per-call Collapse (input/result)
 // Clicking L0 reveals the step rows, clicking a step reveals its thinking
 // and calls aggregate, opening that aggregate reveals call rows, and clicking
-// one call reveals only that call's result. Every level starts closed,
-// including while streaming. Ctrl+L / ⤒ 收起 remount
-// the bubbles (epoch key), resetting them to the stable `N Steps + Say`
-// turn summary.
+// one call reveals only that call's result. LIVE disclosure
+// (steps/useLadderDisclosure.js — TUI chat_step_live.rs parity): while the
+// turn runs the ladder AUTO-OPENS at the running position (L0 + the LAST
+// step + its calls aggregate); when running retires (Say begins / the turn
+// settles) every auto level collapses back to the `N Steps` summary row,
+// and a step born while still running moves the auto slot so the finished
+// step above folds by itself. USER PRIORITY: clicking any level records an
+// open/closed override that wins over the auto state for the component's
+// lifetime (a user-closed level never reopens from streaming; a user-opened
+// old step stays open when the auto slot moves on). Per-call rows (L3) stay
+// uncontrolled, but expanding one PINS its enclosing `step:N` + `calls:N`
+// open via overrides (TUI Call-row `user_touched` parity). Ctrl+L / ⤒ 收起
+// remount the bubbles (epoch key), so the
+// overrides reset; if the turn is still running the auto-open re-applies
+// afterwards (accepted divergence from the TUI's per-turn `user_touched`
+// pinning).
 // Only the Say's single-line preview enters this component (inside the
 // header label above); the Say BODY never does: reduce.js keeps it as a
 // sibling segment and bubbleItems.js places both segments in the same visual
@@ -35,6 +48,7 @@
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
 import { sayPresentation } from './transcript/markdown.js';
+import { useLadderDisclosure } from './steps/useLadderDisclosure.js';
 import { MONO_VAR } from './ui/mono.js';
 
 const { Text, Paragraph } = Typography;
@@ -74,13 +88,21 @@ export function ThinkContent({ turn }) {
 /// Tool row: 🔧 name · duration, red error tag, input/output paragraphs
 /// inside the collapse (old ToolTurn, minus the outer margins the bubble
 /// padding now provides). Used both as the L3 row inside the ladder and for
-/// flat `tool` turns (task handles) — semantics unchanged.
-export function ToolContent({ turn }) {
+/// flat `tool` turns (task handles) — semantics unchanged. While the call
+/// is still running (`output === null`) a small processing `running` tag
+/// rides the label (TUI per-call spinner parity); it disappears once the
+/// output lands. The collapse stays UNCONTROLLED; an optional `onUserExpand`
+/// callback is merely NOTIFIED when the row opens — only the ladder L3 site
+/// passes it (to pin the enclosing levels), flat `tool` turns never do.
+export function ToolContent({ turn, onUserExpand }) {
   const dur = fmtDuration(turn.durationMs);
   return (
     <Collapse
       expandIcon={disclosureIcon}
       size="small"
+      onChange={onUserExpand
+        ? (keys) => { if (keys.includes('tool')) onUserExpand(); }
+        : undefined}
       items={[{
         key: 'tool',
         label: (
@@ -88,6 +110,7 @@ export function ToolContent({ turn }) {
             🔧 {turn.name || 'tool'}
             {dur ? <Text type="secondary"> · {dur}</Text> : null}
             {turn.isError ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
+            {turn.output === null ? <Tag color="processing" style={{ marginLeft: 8 }}>running</Tag> : null}
           </span>
         ),
         children: (
@@ -136,9 +159,16 @@ function StepThinking({ text }) {
 /// One step row (L1 → L2): label `❯ Step(k)` (+ red error tag when any of
 /// the step's calls failed). Children: the step's thinking rendered
 /// directly, followed by a calls aggregation whose children are the
-/// individually collapsible ToolContent rows.
-function StepCollapse({ step, index }) {
+/// individually collapsible ToolContent rows. Both the step and its calls
+/// aggregate are CONTROLLED through the shared disclosure controller
+/// (effective = user override ?? auto running position); only the call rows
+/// below stay uncontrolled — but expanding one notifies this component,
+/// which pins the enclosing `step:N` + `calls:N` open so the settle can
+/// never hide the drilled call.
+function StepCollapse({ step, index, ladder }) {
   const k = index + 1;
+  const stepKey = 'step:' + k;
+  const callsKey = 'calls:' + k;
   const list = (step && Array.isArray(step.calls)) ? step.calls : [];
   const failed = list.some((c) => c && c.isError);
   const thinking = step && typeof step.thinking === 'string' ? step.thinking : '';
@@ -147,8 +177,10 @@ function StepCollapse({ step, index }) {
       expandIcon={disclosureIcon}
       size="small"
       ghost
+      activeKey={ladder.isOpen(stepKey) ? [stepKey] : []}
+      onChange={(keys) => ladder.setOpen(stepKey, keys.includes(stepKey))}
       items={[{
-        key: 'step:' + k,
+        key: stepKey,
         label: (
           <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
             Step({k})
@@ -163,15 +195,28 @@ function StepCollapse({ step, index }) {
                 expandIcon={disclosureIcon}
                 size="small"
                 ghost
+                activeKey={ladder.isOpen(callsKey) ? [callsKey] : []}
+                onChange={(keys) => ladder.setOpen(callsKey, keys.includes(callsKey))}
                 items={[{
-                  key: 'calls:' + k,
+                  key: callsKey,
                   label: (
                     <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
                       {list.length} Function call{list.length === 1 ? '' : 's'}
                     </span>
                   ),
                   children: list.map((call, ci) => (
-                    <ToolContent key={(call && call.id) || 'call:' + ci} turn={call} />
+                    <ToolContent
+                      key={(call && call.id) || 'call:' + ci}
+                      turn={call}
+                      onUserExpand={() => {
+                        // A drilled call result pins its enclosing ladder
+                        // levels open (TUI Call-row `user_touched` parity):
+                        // the settle empties the auto keys, but these
+                        // overrides keep the step + calls aggregate up.
+                        ladder.setOpen(stepKey, true);
+                        ladder.setOpen(callsKey, true);
+                      }}
+                    />
                   )),
                 }]}
               />
@@ -200,11 +245,13 @@ function StepCollapse({ step, index }) {
 ///     running tag MOVES onto the Say row (driven by `sayActive`, the
 ///     sayStreaming ladder flag from the reducer) so the hint survives the
 ///     Say until the sub-turn's ladder really ends; `error` still shows once
-///     running settles. Clicking the Say row still drills the SAME Collapse
-///     (uncontrolled — no activeKey).
+///     running settles. Clicking the Say row still drills the SAME Collapse,
+///     now controlled through the ladder controller (user override wins).
 /// Say text: only the first non-blank line (preview) rides in the label —
 /// the full Say body renders outside, as this component's sibling (see the
-/// header comment). Disclosure state never jumps as frames arrive.
+/// header comment). Disclosure follows the live policy in the header
+/// comment: auto-open at the running position while `running`, auto-collapse
+/// on settle, user overrides win for the component's lifetime.
 export function StepsContent({ turn, preview }) {
   const steps = turn && Array.isArray(turn.steps) ? turn.steps : [];
   const calls = steps.flatMap((s) => ((s && Array.isArray(s.calls)) ? s.calls : []));
@@ -218,6 +265,14 @@ export function StepsContent({ turn, preview }) {
   const running = hasSay
     ? turn.sayActive === true
     : (typeof turn.progressActive === 'boolean' ? turn.progressActive : openCall);
+  // The ONLY disclosure brain: auto keys + user overrides. Disclosure keys
+  // off the ladder's OWN pre-Say activity (TUI parity: Say's first chunk
+  // settles the ladder even while the running tag rides the Say row), so
+  // `sayActive` must NOT reopen it.
+  const ladderRunning = !hasSay && (typeof turn.progressActive === 'boolean'
+    ? turn.progressActive === true
+    : openCall);
+  const ladder = useLadderDisclosure(ladderRunning, steps.length);
   const errored = calls.some((c) => c && c.isError);
   const headingPreview = preview ?? sayPresentation(say, turn.sayActive === true).preview;
   return (
@@ -225,6 +280,8 @@ export function StepsContent({ turn, preview }) {
       expandIcon={disclosureIcon}
       size="small"
       ghost
+      activeKey={ladder.isOpen('steps') ? ['steps'] : []}
+      onChange={(keys) => ladder.setOpen('steps', keys.includes('steps'))}
       items={[{
         key: 'steps',
         label: (
@@ -235,7 +292,7 @@ export function StepsContent({ turn, preview }) {
           </span>
         ),
         children: steps.map((step, i) => (
-          <StepCollapse key={'step:' + (i + 1)} step={step} index={i} />
+          <StepCollapse key={'step:' + (i + 1)} step={step} index={i} ladder={ladder} />
         )),
       }]}
     />

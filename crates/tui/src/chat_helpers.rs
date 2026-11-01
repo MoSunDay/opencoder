@@ -169,9 +169,11 @@ impl ChatView {
                 open: true,
                 calls_open: true,
                 sealed: true,
+                user_touched: true,
             }],
             open: true,
             progress_active: true,
+            user_touched: true,
         });
     }
 

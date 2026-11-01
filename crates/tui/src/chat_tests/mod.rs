@@ -72,27 +72,29 @@ fn text_delta_appends_to_assistant_block() {
 }
 
 #[test]
-fn reasoning_delta_streams_into_a_closed_step() {
-    // Thinking is a structural part of a step, but streaming never changes
-    // disclosure state: the default remains the Turn-level `N Steps` row.
+fn reasoning_delta_streams_into_an_auto_opened_step() {
+    // Thinking is a structural part of a step, never a top-level block.
+    // While the turn runs the step auto-opens at its running position, so
+    // the first delta materializes its markdown immediately (live
+    // disclosure) instead of staying hidden behind the group row.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("analyzing".into()));
     assert!(matches!(
         v.blocks[0],
-        ChatBlock::StepGroup { open: false, .. }
+        ChatBlock::StepGroup { open: true, .. }
     ));
     let step = &match &v.blocks[0] {
         ChatBlock::StepGroup { steps, .. } => &steps[0],
         _ => unreachable!(),
     };
-    assert!(!step.open, "streaming step starts closed");
+    assert!(step.open, "the live running step auto-opens");
     assert_eq!(step.thinking_raw, "analyzing");
     assert!(
-        step.thinking.is_empty(),
-        "hidden markdown is rendered lazily"
+        !crate::chat::steps::span_text(&step.thinking).is_empty(),
+        "the birth delta renders live"
     );
-    assert!(step.thinking_dirty);
-    assert!(!block_text(&v).contains("analyzing"));
+    assert!(!step.thinking_dirty);
+    assert!(block_text(&v).contains("analyzing"));
     assert!(
         !v.blocks
             .iter()

@@ -16,6 +16,9 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - [chat_step_live.rs](../../crates/tui/src/chat_step_live.rs) — Step 阶梯的
   流式自动披露：运行位自动展开、Say/结束收起、用户点击优先（与 SPA
   `steps/useLadderDisclosure.js` 同契约）
+- [chat_steps_replay.rs](../../crates/tui/src/chat_steps_replay.rs) — 回放侧
+  Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
+  `chat_steps.rs` 共用阶梯语义）
 - `src/model_menu/` — `/config` 表单（含 `local-memory` 开关）
 - [agent_menu.rs](../../crates/tui/src/agent_menu.rs)、
   [remote/selection.rs](../../crates/tui/src/remote/selection.rs) — `/agent` 菜单

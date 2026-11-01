@@ -56,6 +56,9 @@ mod steps;
 #[path = "chat_step_live.rs"]
 mod step_live;
 
+#[path = "chat_steps_replay.rs"]
+mod steps_replay;
+
 #[path = "compaction_block.rs"]
 mod compaction_block;
 #[path = "chat_context.rs"]
@@ -69,7 +72,8 @@ pub(crate) mod sidecar;
 #[path = "chat_stream.rs"]
 mod stream;
 pub(crate) use compaction_block::render_collapsible;
-pub(crate) use steps::{coalesce_steps, single_step_group, StepTarget};
+pub(crate) use steps::{single_step_group, StepTarget};
+pub(crate) use steps_replay::coalesce_steps;
 
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {

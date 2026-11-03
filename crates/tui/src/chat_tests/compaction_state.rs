@@ -175,10 +175,12 @@ fn compaction_header_and_text_are_uniform_purple() {
         collapsed[0].spans[0].style.fg,
         Some(theme::compaction_color())
     );
-    assert!(!collapsed[0].spans[0]
-        .style
-        .add_modifier
-        .contains(Modifier::BOLD));
+    assert!(
+        !collapsed[0].spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
 
     v.toggle_compaction_at(0);
     let expanded = v.flatten();
@@ -190,4 +192,64 @@ fn compaction_header_and_text_are_uniform_purple() {
         expanded[1].spans[0].style.fg,
         Some(theme::compaction_color())
     );
+}
+
+/// The final `Compaction(summary)` event after a `TranscriptReset` rebuild:
+/// replay already rendered the folded head as a twin block, so finalizing
+/// must keep exactly that block instead of stacking a duplicate.
+#[test]
+fn finalize_after_replay_twin_does_not_stack_duplicate() {
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Compaction {
+        text: "the folded history".into(),
+        collapsed: true,
+        streaming: false,
+    });
+    // The reset's echo re-push can land after the twin — not the last block.
+    v.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
+
+    v.apply(&SessionEvent::Compaction("the folded history".into()));
+
+    let count = v
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, ChatBlock::Compaction { .. }))
+        .count();
+    assert_eq!(count, 1, "replay twin + event must stay one block");
+}
+
+/// The twin's disclosure (e.g. the user expanded it) survives the final
+/// `Compaction` event — the event only finalizes text, never disclosure.
+#[test]
+fn finalize_after_replay_twin_keeps_user_disclosure() {
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Compaction {
+        text: "summary".into(),
+        collapsed: false,
+        streaming: false,
+    });
+    v.apply(&SessionEvent::Compaction("summary".into()));
+    assert!(
+        !v.last_compaction_collapsed(),
+        "user-expanded twin must stay expanded"
+    );
+}
+
+/// Different text means a genuinely new summary (no twin match): the event
+/// still creates its own block — the historical finalize behavior.
+#[test]
+fn finalize_with_different_text_still_pushes() {
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Compaction {
+        text: "old summary".into(),
+        collapsed: true,
+        streaming: false,
+    });
+    v.apply(&SessionEvent::Compaction("new summary".into()));
+    let count = v
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, ChatBlock::Compaction { .. }))
+        .count();
+    assert_eq!(count, 2);
 }

@@ -619,3 +619,7 @@ mod terminal_safety_tests;
 #[cfg(test)]
 #[path = "session_ui/handoff_card_tests.rs"]
 mod handoff_card_tests;
+
+#[cfg(test)]
+#[path = "session_ui/compaction_replay_tests.rs"]
+mod compaction_replay_tests;

@@ -64,6 +64,20 @@ fn flush_segment(
 /// (calls accumulate in the trailing step until new Thinking) for resumed/compacted
 /// sessions. Thinking folding into steps happens once, via `coalesce_steps`
 /// at the end of replay.
+/// Summary text of a synthetic compaction-summary message, if `msg` is one.
+/// Mirrors the session-side `SUMMARY_PREFIX` marker (single source of truth:
+/// `opencoder_session::compaction`), which the resume path also uses to
+/// rebuild the head of a compacted transcript.
+fn compaction_summary_of(msg: &Message) -> Option<String> {
+    if !msg.synthetic {
+        return None;
+    }
+    let text = msg.text();
+    text.strip_prefix(opencoder_session::compaction::SUMMARY_PREFIX)
+        .and_then(|rest| rest.strip_prefix('\n'))
+        .map(str::to_string)
+}
+
 pub(super) fn replay_one(
     chat: &mut ChatView,
     msg: &Message,
@@ -78,6 +92,19 @@ pub(super) fn replay_one(
             // rendered (via `display`, tokens included) so the user sees their
             // prompts verbatim after resume.
             if msg.synthetic && msg.display.is_none() {
+                // A compaction summary is synthetic but its content IS the
+                // folded conversation: render it as the same collapsible
+                // Compaction block the live path finalizes, so resume, task
+                // switch, remote re-attach and mid-run `TranscriptReset`
+                // rebuilds all keep the compressed history visible instead
+                // of silently dropping it.
+                if let Some(summary) = compaction_summary_of(msg) {
+                    chat.blocks.push(ChatBlock::Compaction {
+                        text: sanitize_multiline(&summary).into_owned(),
+                        collapsed: true,
+                        streaming: false,
+                    });
+                }
                 return;
             }
             // Echo contract: `display` is the verbatim input single source of

@@ -79,8 +79,14 @@ impl ChatView {
 
     /// Finalize the compaction block with the complete summary. If the last
     /// block is a streaming Compaction, overwrite its text while preserving
-    /// its current disclosure state; otherwise create a fresh collapsed block
-    /// (the streamed block was destroyed, e.g. by a `TranscriptReset` replay).
+    /// its current disclosure state. A `TranscriptReset` rebuild immediately
+    /// before this event may already have rendered the same summary as a
+    /// replay twin (the reset carries the folded transcript whose head IS
+    /// the summary message, and the in-flight echo re-push can land after
+    /// it, so the twin is not necessarily the last block): keep it as-is —
+    /// same text, disclosure preserved — instead of stacking a duplicate.
+    /// Otherwise create a fresh collapsed block (the streamed block was
+    /// destroyed, e.g. by a `TranscriptReset` replay).
     pub(crate) fn finalize_compaction(&mut self, summary: &str) {
         self.finalize_assistant();
         if let Some(ChatBlock::Compaction {
@@ -92,6 +98,19 @@ impl ChatView {
                 *streaming = false;
                 return;
             }
+        }
+        let twin_already_rendered = self.blocks.iter().any(|b| {
+            matches!(
+                b,
+                ChatBlock::Compaction {
+                    text,
+                    streaming: false,
+                    ..
+                } if text == summary
+            )
+        });
+        if twin_already_rendered {
+            return;
         }
         self.blocks.push(ChatBlock::Compaction {
             text: summary.to_string(),

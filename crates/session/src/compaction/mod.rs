@@ -9,6 +9,12 @@ use crate::prompt::{compaction_system_prompt, compaction_user_prompt};
 use crate::runner::{await_cancel, SessionEvent};
 use crate::SessionState;
 
+/// Header line of the synthetic in-memory-only message that replaces the
+/// compacted head of the transcript. Public so frontends can recognize the
+/// summary message on replay and render its content (the folded conversation)
+/// instead of discarding it as an opaque internal directive.
+pub const SUMMARY_PREFIX: &str = "[Conversation summary so far]";
+
 /// Decide whether to compact. Two signals are checked: the estimated tokens
 /// of the transcript (works on round 1, before any usage) and the model-reported
 /// usage from the last call (authoritative when present).
@@ -154,14 +160,11 @@ pub async fn compact(
     // the summarizer can incrementally update it rather than starting fresh.
     let previous_summary: Option<String> = head
         .iter()
-        .find(|m| {
-            m.synthetic
-                && m.role == Role::User
-                && m.text().starts_with("[Conversation summary so far]\n")
-        })
+        .find(|m| m.synthetic && m.role == Role::User && m.text().starts_with(SUMMARY_PREFIX))
         .map(|m| {
             let text = m.text();
-            text.strip_prefix("[Conversation summary so far]\n")
+            text.strip_prefix(SUMMARY_PREFIX)
+                .and_then(|t| t.strip_prefix('\n'))
                 .unwrap_or(&text)
                 .to_string()
         });
@@ -456,7 +459,7 @@ fn strip_images(messages: &[Message]) -> Vec<Message> {
 pub(crate) fn compaction_message(summary: String) -> Message {
     let mut m = Message::user(
         crate::runner::new_id(),
-        format!("[Conversation summary so far]\n{summary}"),
+        format!("{SUMMARY_PREFIX}\n{summary}"),
     );
     m.synthetic = true;
     m

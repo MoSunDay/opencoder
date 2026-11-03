@@ -27,7 +27,8 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
   后台任务
 - [src/bash_guard.rs](../../crates/session/src/bash_guard.rs) — plan/sidecar
   只读执行门，Bash 判定走 [shellguard](../shellguard/index.md)
-- [src/compaction/](../../crates/session/src/compaction) — 上下文压缩
+- [src/compaction/](../../crates/session/src/compaction) — 上下文压缩；
+  `SUMMARY_PREFIX` 是合成摘要消息的公开标记（前端回放据此渲染压缩内容）
 - [src/prompt.rs](../../crates/session/src/prompt.rs)、
   [prompt/operator.rs](../../crates/session/src/prompt/operator.rs) — 系统提示
   构建与 Operator 规则

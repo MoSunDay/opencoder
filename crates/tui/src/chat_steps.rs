@@ -40,9 +40,11 @@ pub(crate) enum StepTarget {
 }
 
 /// The group's currently rendered click targets, in visual order: the group
-/// row always; while the turn is open each step row; while a step is open,
-/// its calls aggregation row; while that list is open, each function-call
-/// row. Mirrors the `collect_headers` walk exactly, so
+/// row always; while the turn is open each VISIBLE step row (the auto-managed
+/// running position shows only the last step, see
+/// [`super::step_live::running_step_only`]; a user-opened ladder shows all);
+/// while a step is open, its calls aggregation row; while that list is open,
+/// each function-call row. Mirrors the `collect_headers` walk exactly, so
 /// `ToolCallHeader::call_idx` indexes this list and `toggle_tool_call_at`
 /// resolves the same row the renderer drew.
 pub(crate) fn visible_targets(open: bool, user_touched: bool, steps: &[Step]) -> Vec<StepTarget> {

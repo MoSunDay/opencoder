@@ -65,4 +65,4 @@ Ontology 是 OpenCoder 全部平台能力的统一查询和组织入口，用于
 - 目录相关修改必须验证新实体归属、已有实体挂载、解除与重新挂载、子目录移动、成员查询，以及实体对同一目录的重复归属、目录节点的第二个父目录、循环和非空目录删除的拒绝。
 - 将同步行为、错误情况及实际测试结果写入相关功能说明、模块记忆和当日变更记录。范围遵循 [定向回归规则](02-regression-gate.md)。
 
-操作命令和示例见 [规则 10：Ontology CLI](10-ontology-cli.md)。实现边界与页面行为见 [Ontology 功能说明](../features/ontology/index.md)。
+操作命令和示例见 [规则 10：Ontology CLI](10-ontology-cli.md)。实现边界与页面行为见 [Ontology 功能说明](../features/platform/ontology/index.md)。

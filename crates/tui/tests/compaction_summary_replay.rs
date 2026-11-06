@@ -134,3 +134,48 @@ async fn transcript_reset_then_compaction_event_renders_single_block() {
     assert!(echo_user > summary_idx, "continued run below the summary");
     let _ = dir;
 }
+
+/// Mid-run compaction records the in-flight prompt before folding, so the
+/// folded transcript's retained tail contains it. The reset rebuild must not
+/// keep that copy above the summary AND push the remembered echo again —
+/// exactly one user boundary remains, below the Compaction marker.
+#[tokio::test]
+async fn transcript_reset_defers_retained_in_flight_echo_below_summary() {
+    let (dir, store) = fresh().await;
+    store
+        .create_session(&SessionMeta {
+            id: "s-midrun-echo".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut chat = ChatView {
+        pending_turn_echo: Some("the running prompt".into()),
+        ..Default::default()
+    };
+
+    let msgs = vec![
+        summary_message("folded: earlier work"),
+        Message::user("u2", "the running prompt"),
+    ];
+    rebuild_after_reset(&mut chat, &msgs, &store, "s-midrun-echo").await;
+
+    let summary_idx = compaction_index(&chat).expect("summary block");
+    let user_idxs: Vec<usize> = chat
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| matches!(b, ChatBlock::User { .. }).then_some(i))
+        .collect();
+    assert_eq!(
+        user_idxs.len(),
+        1,
+        "the retained tail copy and the remembered echo must collapse to one"
+    );
+    assert!(
+        user_idxs[0] > summary_idx,
+        "the in-flight prompt belongs to the continued run below the summary"
+    );
+    assert_eq!(compaction_count(&chat), 1);
+    let _ = dir;
+}

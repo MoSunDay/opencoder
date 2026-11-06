@@ -24,8 +24,10 @@ use super::{
 /// drill-down): the clickable turn row `{▸|❯} N Steps` (col 0, accent
 /// bold) + a live progress hint until Say begins; while the group is closed
 /// that row (plus one trailing
-/// blank) is the whole block. While it is open, per step: the step row
-/// (indent 2); while the step is open its `💭 Thinking` block (header
+/// blank) is the whole block. While it is open, per VISIBLE step: the step
+/// row (indent 2) — the auto-managed running position draws only the last
+/// step (see [`super::step_live::running_step_only`]); while the step is
+/// open its `💭 Thinking` block (header
 /// indent 4, body indent 8) and a `N Function calls` aggregation row
 /// (indent 4); opening the aggregation shows call headers at indent 6, and
 /// an expanded call shows its result at indent 6. Exactly one trailing blank

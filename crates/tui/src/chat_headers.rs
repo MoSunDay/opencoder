@@ -114,8 +114,10 @@ impl ChatView {
                 } => {
                     // Mirrors `flatten_step_group` exactly (three-level
                     // ladder): the turn row always (a clickable target);
-                    // while the turn is open, per step the step row (target),
-                    // and while THAT step is open its `💭 Thinking` header +
+                    // while the turn is open, per VISIBLE step the step row
+                    // (target) — the auto running position hides all but the
+                    // last (see `step_live::running_step_only`) — and while
+                    // THAT step is open its `💭 Thinking` header +
                     // thinking lines plus the calls aggregation row (target),
                     // then each call header while that list is open (target;
                     // + result + blank when the call is expanded); one trailing

@@ -37,6 +37,20 @@ fn compaction_count(chat: &ChatView) -> usize {
         .count()
 }
 
+/// Index of the (single) Compaction block — for order assertions.
+fn compaction_index(chat: &ChatView) -> Option<usize> {
+    chat.blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::Compaction { .. }))
+}
+
+/// Index of the first plain `User` echo block.
+fn user_index(chat: &ChatView) -> Option<usize> {
+    chat.blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::User { .. }))
+}
+
 fn compaction_text(chat: &ChatView) -> String {
     chat.blocks
         .iter()
@@ -68,12 +82,17 @@ async fn resume_replay_renders_summary_head() {
     let _ = dir;
     assert_eq!(compaction_count(&chat), 1);
     assert!(compaction_text(&chat).contains("turn two fixed a bug"));
+    // UI order: retained tail turn first, folded-history marker after it.
+    assert!(
+        compaction_index(&chat) > user_index(&chat),
+        "summary block must render below the retained tail turns"
+    );
 }
 
-/// Mid-run compaction: `TranscriptReset` rebuild renders the twin, the
-/// trailing `Compaction(summary)` event finalizes onto it — exactly one
-/// block, summary text present, even with the in-flight echo re-pushed
-/// after the twin (so the twin is not the last block).
+/// Mid-run compaction: `TranscriptReset` rebuild renders the twin (after
+/// the retained tail), the trailing `Compaction(summary)` event finalizes
+/// onto it — exactly one block, summary text present, with the in-flight
+/// echo re-pushed below the twin (`tail + summary + continued execution`).
 #[tokio::test]
 async fn transcript_reset_then_compaction_event_renders_single_block() {
     let (dir, store) = fresh().await;
@@ -101,11 +120,17 @@ async fn transcript_reset_then_compaction_event_renders_single_block() {
         "final event must not stack a duplicate twin"
     );
     assert!(compaction_text(&chat).contains("folded"));
-    // The in-flight echo boundary is still below the rebuilt blocks.
-    assert!(
-        chat.blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::User { .. }))
-    );
+    // Order contract: retained tail turn < summary marker < in-flight echo
+    // (`tail + summary + continued execution`); the echo is re-pushed by
+    // `rebuild_after_reset` AFTER the replayed blocks.
+    let tail_user = user_index(&chat).expect("retained tail echo");
+    let summary_idx = compaction_index(&chat).expect("summary block");
+    let echo_user = chat
+        .blocks
+        .iter()
+        .rposition(|b| matches!(b, ChatBlock::User { .. }))
+        .expect("in-flight echo boundary");
+    assert!(summary_idx > tail_user, "summary below the retained tail");
+    assert!(echo_user > summary_idx, "continued run below the summary");
     let _ = dir;
 }

@@ -19,10 +19,11 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - [chat_steps_replay.rs](../../crates/tui/src/chat_steps_replay.rs) — 回放侧
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
   `chat_steps.rs` 共用阶梯语义）
-- `session_ui/replay.rs` 的 `replay_one` — 压缩摘要合成头消息回放为
-  `Compaction` 折叠块（标记来自 session `SUMMARY_PREFIX`），其余合成
-  消息仍跳过；`compaction_block.rs` 的 `finalize_compaction` 对回放
-  孪生块幂等去重
+- `session_ui/replay.rs` — 压缩摘要合成消息（标记来自 session
+  `SUMMARY_PREFIX`）由回放入口拦截并延迟渲染为 `Compaction` 折叠块：
+  排在保留的最近交互之后、继续执行之前（`tail + summary + 续跑`），
+  与发给 LLM 的 `[summary, tail...]` 列表顺序解耦；其余合成消息仍跳过；
+  `compaction_block.rs` 的 `finalize_compaction` 对回放孪生块幂等去重
 - `src/model_menu/` — `/config` 表单（含 `local-memory` 开关）
 - [agent_menu.rs](../../crates/tui/src/agent_menu.rs)、
   [remote/selection.rs](../../crates/tui/src/remote/selection.rs) — `/agent` 菜单

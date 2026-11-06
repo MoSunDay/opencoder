@@ -119,6 +119,7 @@ impl ChatView {
                     steps,
                     open,
                     progress_active,
+                    user_touched,
                     ..
                 } => {
                     // Adjacent-pair merge: when the block right below this
@@ -145,6 +146,7 @@ impl ChatView {
                         &mut out,
                         *open,
                         *progress_active,
+                        *user_touched,
                         steps,
                         anim_tick,
                         say,

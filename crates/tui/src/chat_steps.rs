@@ -45,12 +45,15 @@ pub(crate) enum StepTarget {
 /// row. Mirrors the `collect_headers` walk exactly, so
 /// `ToolCallHeader::call_idx` indexes this list and `toggle_tool_call_at`
 /// resolves the same row the renderer drew.
-pub(crate) fn visible_targets(open: bool, steps: &[Step]) -> Vec<StepTarget> {
+pub(crate) fn visible_targets(open: bool, user_touched: bool, steps: &[Step]) -> Vec<StepTarget> {
     let mut out = vec![StepTarget::Group];
     if !open {
         return out;
     }
-    for (si, step) in steps.iter().enumerate() {
+    // Same LIVE FOCUS as the renderer: the auto-managed running position
+    // shows only the running (last) step row, so only its targets exist.
+    let first_visible = super::step_live::first_visible_step(steps.len(), open, user_touched);
+    for (si, step) in steps.iter().enumerate().skip(first_visible) {
         out.push(StepTarget::Step(si));
         if !step.open || step.calls.is_empty() {
             continue;
@@ -482,11 +485,27 @@ mod tests {
             step(true, true, 1),
         ];
         // Group closed: only the group row.
-        assert_eq!(visible_targets(false, &steps), vec![StepTarget::Group]);
-        // Turn open: every step row is present; open steps add the calls
-        // aggregation row, and only a calls-open step adds its call rows.
         assert_eq!(
-            visible_targets(true, &steps),
+            visible_targets(false, false, &steps),
+            vec![StepTarget::Group]
+        );
+        // AUTO-managed running position (`user_touched == false`): only the
+        // running (last) step row exists — earlier steps are hidden by the
+        // live focus, so their rows must not be clickable.
+        assert_eq!(
+            visible_targets(true, false, &steps),
+            vec![
+                StepTarget::Group,
+                StepTarget::Step(2),
+                StepTarget::Calls(2),
+                StepTarget::Call(2, 0),
+            ]
+        );
+        // User-opened ladder: every step row is present; open steps add the
+        // calls aggregation row, and only a calls-open step adds its call
+        // rows.
+        assert_eq!(
+            visible_targets(true, true, &steps),
             vec![
                 StepTarget::Group,
                 StepTarget::Step(0),

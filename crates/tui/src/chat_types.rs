@@ -69,10 +69,12 @@ pub enum ChatBlock {
     /// `progress_active` drives the group-row animation until Say begins and
     /// cannot be reactivated after non-empty Say output exists.
     /// LIVE DISCLOSURE: while the turn runs (`progress_active`), the group
-    /// auto-opens at its running position (last step) so thinking deltas and
-    /// call rows stream visibly (`step_live::activate`); Say's first chunk,
-    /// turn end, and new-turn admission re-collapse every auto-managed level
-    /// (`step_live::settle`). Replay/snapshot groups stay fully collapsed.
+    /// auto-opens and renders the whole running turn's step rows — finished
+    /// steps stay collapsed one-line rows, only the running (last) step
+    /// streams its thinking + calls (`step_live::activate`); Say's first
+    /// chunk, turn end, and new-turn admission re-collapse every
+    /// auto-managed level (`step_live::settle`). Steps are collapsed by
+    /// default everywhere else; replay/snapshot groups stay fully collapsed.
     /// `user_touched` pins the group row to the user's last click: once set
     /// (row toggle or Ctrl+L), automatic disclosure never touches it again
     /// for the rest of the turn.

@@ -10,9 +10,6 @@ fn step_group_ladder_depth_alignment() {
     //   group open, steps open            = 1 + (1+1)*2 + 1
     //   calls lists open                  = 1 + (1+1+1)*2 + 1
     //   call "a" expanded                 = previous + output + separator
-    // The ladder depth test pins the USER-OPENED ladder (a click pins the
-    // group), so every step row renders here; the auto-managed live focus is
-    // covered by `auto_running_position_keeps_alignment`.
     let mk = |group_open: bool, open_steps: bool, calls_open: bool, expand: bool| {
         let mut a = tool_call("a", 1);
         a.expanded = expand;
@@ -42,7 +39,7 @@ fn step_group_ladder_depth_alignment() {
                 ],
                 open: group_open,
                 progress_active: false,
-                user_touched: true,
+                user_touched: false,
             },
             marker_n(1),
         ])
@@ -209,9 +206,11 @@ fn step_group_running_call_keeps_alignment() {
     );
 }
 
-/// LIVE FOCUS alignment: an auto-opened group with several steps renders
-/// only the running (last) step row, and `collect_headers` must skip the
-/// hidden rows by exactly the same amount.
+/// LIVE FOCUS alignment: while the turn runs, the auto-opened ladder
+/// renders EVERY step row of the running turn — each finished step one
+/// collapsed row, the running step streaming its thinking header/body plus
+/// the calls aggregation and call headers — and `collect_headers` must
+/// count the same rows so hit-rects stay aligned.
 #[test]
 fn auto_running_position_keeps_alignment() {
     let v = view_with(vec![
@@ -222,19 +221,19 @@ fn auto_running_position_keeps_alignment() {
                     thinking: Vec::new(),
                     thinking_dirty: false,
                     calls: vec![tool_call("a", 1)],
-                    open: true,
-                    calls_open: true,
+                    open: false,
+                    calls_open: false,
                     sealed: true,
                     user_touched: false,
                 },
                 Step {
                     thinking_raw: String::new(),
-                    thinking: Vec::new(),
+                    thinking: vec![Line::from("working")],
                     thinking_dirty: false,
                     calls: vec![tool_call("b", 2)],
                     open: true,
                     calls_open: true,
-                    sealed: true,
+                    sealed: false,
                     user_touched: false,
                 },
             ],
@@ -250,17 +249,29 @@ fn auto_running_position_keeps_alignment() {
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
+    // The whole turn renders: finished steps as collapsed rows, the running
+    // step streaming its thinking.
+    assert!(
+        flat.iter().any(|l| l.contains("Step(1)")),
+        "finished step row renders: {flat:?}"
+    );
     assert!(
         flat.iter().any(|l| l.contains("Step(2)")),
         "running step row renders: {flat:?}"
     );
     assert!(
-        !flat.iter().any(|l| l.contains("Step(1)")),
-        "finished step row stays hidden: {flat:?}"
+        flat.iter().any(|l| l.contains("working")),
+        "running thinking streams in place: {flat:?}"
     );
-    // Group row, running step row, calls row and the running step's call
-    // row — no clickable target for the hidden step.
+    // Group row, both step rows, the running step's thinking (header+body),
+    // its calls aggregation and its call header: group(1) + 1 + (1+2+1+1)
+    // + trailing blank(1) + marker(1) = 9.
+    assert_eq!(v.flatten().len(), 9);
+    // Every rendered row is a clickable target in visual order: group,
+    // Step(1), Step(2), Calls(2), call b.
     let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 4, "headers: {headers:?}");
+    assert_eq!(headers.len(), 5, "headers: {headers:?}");
     assert_eq!(headers[1].header_line_idx, headers[0].header_line_idx + 1);
+    assert_eq!(headers[2].header_line_idx, headers[0].header_line_idx + 2);
+    assert_eq!(headers[4].header_line_idx, headers[0].header_line_idx + 6);
 }

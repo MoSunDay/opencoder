@@ -106,18 +106,11 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::StepGroup {
-                    steps,
-                    open,
-                    user_touched,
-                    ..
-                } => {
+                ChatBlock::StepGroup { steps, open, .. } => {
                     // Mirrors `flatten_step_group` exactly (three-level
                     // ladder): the turn row always (a clickable target);
-                    // while the turn is open, per VISIBLE step the step row
-                    // (target) — the auto running position hides all but the
-                    // last (see `step_live::running_step_only`) — and while
-                    // THAT step is open its `💭 Thinking` header +
+                    // while the turn is open, per step the step row (target),
+                    // and while THAT step is open its `💭 Thinking` header +
                     // thinking lines plus the calls aggregation row (target),
                     // then each call header while that list is open (target;
                     // + result + blank when the call is expanded); one trailing
@@ -147,17 +140,7 @@ impl ChatView {
                         line_idx += 1;
                     }
                     if *open {
-                        // Mirror `flatten_step_group`'s LIVE FOCUS: the
-                        // auto-managed running position renders only the
-                        // running (last) step row; hide the earlier ones so
-                        // `call_idx` and line offsets stay aligned with the
-                        // drawn rows and the click targets.
-                        let first_visible = super::step_live::first_visible_step(
-                            steps.len(),
-                            *open,
-                            *user_touched,
-                        );
-                        for step in steps.iter().skip(first_visible) {
+                        for step in steps.iter() {
                             tool_calls.push(ToolCallHeader {
                                 block_idx,
                                 call_idx,

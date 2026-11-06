@@ -6,47 +6,26 @@
 //!
 //! * `activate` — while the turn runs, the group row and the LAST (running)
 //!   step auto-open, so reasoning deltas and call rows stream in place
-//!   instead of hiding behind the collapsed `▸ N Steps` row. Called from
+//!   instead of hiding behind the collapsed `▸ N Steps` row. The auto-opened
+//!   ladder renders EVERY step row of the running turn: finished steps stay
+//!   collapsed one-line rows (the current turn's trajectory), only the
+//!   running (last) step streams its thinking + calls. Called from
 //!   `steps::set_turn_progress(.., true)` (every live `ToolStart`) and the
 //!   fresh-step branch of `steps::append_step_thinking_delta`.
 //! * `settle` — the running position retires (Say's first chunk, `Done`,
-//!   `Error`, new-turn admission): every auto-managed level re-collapses to
-//!   the `N Steps + Say` summary. Called from
-//!   `steps::set_turn_progress(.., false)`.
+//!   `Error`, new-turn admission): the whole turn folds back into the
+//!   `N Steps + Say` summary — every auto-managed level re-collapses.
+//!   Called from `steps::set_turn_progress(.., false)`.
 //! * `settle_steps_before_last` — a new step was born: the finished steps
 //!   above collapse while the fresh running step takes over the open slot.
 //!
 //! USER PRIORITY: a level the user clicked (or Ctrl+L) carries
 //! `user_touched` and is never moved by this module again for the rest of
-//! the turn. Replay/snapshot groups never pass through here at all — they
-//! stay fully collapsed.
+//! the turn. Steps are collapsed by default everywhere else (replay,
+//! settled turns) — only a user click expands a level. Replay/snapshot
+//! groups never pass through here at all — they stay fully collapsed.
 
 use super::{ChatBlock, Step};
-
-/// Whether the open ladder is the AUTO-managed running position (opened by
-/// `activate`, never touched by the user). While true the renderer shows
-/// only the running (last) step's rows: earlier steps of the same turn are
-/// already summarized by the `N Steps` count, and rendering one header row
-/// per step floods the viewport on long tool loops. A user-opened ladder
-/// (`!cmd`, a click on the turn row) carries `user_touched` and keeps the
-/// full step list. `settle` collapses the group back to the `N Steps + Say`
-/// summary either way.
-pub(crate) fn running_step_only(open: bool, user_touched: bool) -> bool {
-    open && !user_touched
-}
-
-/// First step row index the renderer draws — and therefore the only rows the
-/// click targets may reference. `0` for a user-managed ladder (every step row
-/// renders); `n - 1` for the auto-managed running position (only the last).
-/// Renderer, header accounting and `visible_targets` all derive their skip
-/// from this one function so the three line-count mirrors cannot drift.
-pub(crate) fn first_visible_step(n: usize, open: bool, user_touched: bool) -> usize {
-    if running_step_only(open, user_touched) {
-        n.saturating_sub(1)
-    } else {
-        0
-    }
-}
 
 /// Index of the canonical `StepGroup` of the admitted turn: the FIRST group
 /// at/after the turn floor, ignoring presentation blocks — the same target
@@ -241,20 +220,6 @@ mod tests {
         let mut one = vec![step(true, true, false)];
         settle_steps_before_last(&mut one);
         assert!(one[0].open && one[0].calls_open);
-    }
-
-    #[test]
-    fn running_step_only_needs_an_untouched_open_ladder() {
-        assert!(!running_step_only(false, false), "closed group");
-        assert!(!running_step_only(false, true), "closed, user-touched");
-        assert!(running_step_only(true, false), "auto-opened running position");
-        assert!(!running_step_only(true, true), "user pinned the open ladder");
-        // The derived skip: auto focus starts at the last step, a user
-        // ladder starts at 0, and an empty turn cannot underflow.
-        assert_eq!(first_visible_step(3, true, false), 2);
-        assert_eq!(first_visible_step(3, true, true), 0);
-        assert_eq!(first_visible_step(3, false, false), 0);
-        assert_eq!(first_visible_step(0, true, false), 0);
     }
 
     #[test]

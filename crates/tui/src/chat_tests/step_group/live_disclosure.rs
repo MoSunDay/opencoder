@@ -1,10 +1,12 @@
 //! Live (streaming) disclosure contract: while the admitted turn runs, the
-//! ladder auto-opens at its running position so thinking deltas and call
-//! rows stream visibly; the position retires (Say's first chunk, run end,
-//! new turn) back into the folded `N Steps` summary. User clicks always
-//! win: a touched level is pinned (`user_touched`) and the automatic
-//! open/settle cycle never moves it again for the rest of the turn.
-//! Replay/snapshot ladders never auto-open (see `replay.rs`).
+//! ladder auto-opens at its running position and renders the WHOLE turn —
+//! every step row (finished steps stay collapsed one-line rows), with only
+//! the running (last) step streaming its thinking + calls; the position
+//! retires (Say's first chunk, run end, new turn) back into the folded
+//! `N Steps` summary. User clicks always win: a touched level is pinned
+//! (`user_touched`) and the automatic open/settle cycle never moves it again
+//! for the rest of the turn. Replay/snapshot ladders never auto-open (see
+//! `replay.rs`).
 
 use super::*;
 
@@ -105,13 +107,13 @@ fn a_new_step_folds_the_finished_one_and_takes_over() {
     assert!(flat_first(&v).starts_with("\u{276f} 2 Steps"), "got {:?}", flat_first(&v));
 }
 
-/// LIVE FOCUS: the auto-managed running position renders ONLY the running
-/// (last) step — thinking + its calls — so a turn with many tool rounds does
-/// not flood the viewport with one `Step(i)` row each. The group row keeps
-/// the total count; a user click opens the full ladder (user priority); Say
+/// LIVE FOCUS: while the turn runs, the auto-opened ladder renders EVERY
+/// step row of the running turn — finished steps stay collapsed one-line
+/// rows (the current turn's trajectory), only the running (last) step
+/// streams its thinking + calls. The group row keeps the total count; Say
 /// settles the auto position back into the collapsed `Say(n steps)` pair.
 #[test]
-fn live_running_position_renders_only_the_last_step() {
+fn live_running_position_renders_the_whole_turn() {
     let mut v = ChatView::default();
     reasoning(&mut v, "round one");
     start_call(&mut v, "c1");
@@ -124,40 +126,41 @@ fn live_running_position_renders_only_the_last_step() {
     let flat = lines(&v).join("\n");
     assert!(flat.contains("3 Steps"), "group row keeps the count: {flat}");
     assert!(
+        flat.contains("Step(1)") && flat.contains("Step(2)") && flat.contains("Step(3)"),
+        "every step row of the running turn renders: {flat}"
+    );
+    assert!(
         flat.contains("round three"),
         "running thinking streams in place: {flat}"
     );
-    assert!(flat.contains("Step(3)"), "running step row renders: {flat}");
-    assert!(!flat.contains("Step(1)"), "finished steps stay folded: {flat}");
-    assert!(!flat.contains("Step(2)"), "finished steps stay folded: {flat}");
-    assert!(!flat.contains("round one"), "old thinking stays hidden: {flat}");
-    assert!(!flat.contains("out-a"), "finished call output hidden: {flat}");
-
-    // Header accounting mirrors the hidden rows: only the group row and the
-    // running step row are clickable, exactly one line apart.
-    let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 2, "group + running step only: {headers:?}");
-    assert_eq!(headers[1].header_line_idx, headers[0].header_line_idx + 1);
-
-    // User opens the turn row: every step row comes back (user priority).
-    v.toggle_tool_call_at(0, 0); // fold (pins)
-    v.toggle_tool_call_at(0, 0); // reopen (pinned)
-    let flat = lines(&v).join("\n");
     assert!(
-        flat.contains("Step(1)") && flat.contains("Step(2)") && flat.contains("Step(3)"),
-        "user-opened ladder renders every step row: {flat}"
+        !flat.contains("round one") && !flat.contains("round two"),
+        "finished steps stay collapsed: their thinking is folded away: {flat}"
     );
+
+    // Header accounting mirrors the drawn rows: the group row plus every
+    // step row are clickable targets in visual order.
+    let headers = v.tool_call_headers();
+    assert_eq!(headers.len(), 4, "group + all three step rows: {headers:?}");
+    assert_eq!(headers[1].header_line_idx, headers[0].header_line_idx + 1);
+    assert_eq!(headers[2].header_line_idx, headers[0].header_line_idx + 2);
 }
 
 /// Say settles the auto-managed running position back into the collapsed
-/// `Say(n steps)` pair — the pre-live-focus summary the TUI started from.
+/// `Say(n steps)` pair: the whole turn — every step row — folds behind the
+/// summary header.
 #[test]
-fn live_settle_folds_the_running_step_back_into_the_say_pair() {
+fn live_settle_folds_the_whole_turn_back_into_the_say_pair() {
     let mut v = ChatView::default();
     reasoning(&mut v, "round one");
     start_call(&mut v, "c1");
     end_call(&mut v, "c1", "out");
     reasoning(&mut v, "round two");
+    assert!(
+        lines(&v).join("\n").contains("Step(2)"),
+        "the running turn renders its step rows first"
+    );
+
     v.apply(&SessionEvent::TextDelta("the answer".into()));
 
     let flat = lines(&v).join("\n");
@@ -165,6 +168,30 @@ fn live_settle_folds_the_running_step_back_into_the_say_pair() {
     assert!(
         !flat.contains("Step("),
         "settled ladder hides every step row: {flat}"
+    );
+}
+
+/// A user-pinned open ladder renders the same full step list — the user's
+/// explicit disclosure never narrows to the running step.
+#[test]
+fn user_pinned_open_ladder_renders_every_step_row() {
+    let mut v = ChatView::default();
+    reasoning(&mut v, "round one");
+    start_call(&mut v, "c1");
+    end_call(&mut v, "c1", "out");
+    reasoning(&mut v, "round two");
+    start_call(&mut v, "c2");
+    end_call(&mut v, "c2", "out");
+    // Toggle the group row twice (close then reopen): the level is now
+    // USER-managed (`user_touched`), not the auto running position.
+    v.toggle_tool_call_at(0, 0); // fold (pins)
+    v.toggle_tool_call_at(0, 0); // reopen (pinned)
+    reasoning(&mut v, "round three");
+
+    let flat = lines(&v).join("\n");
+    assert!(
+        flat.contains("Step(1)") && flat.contains("Step(2)") && flat.contains("Step(3)"),
+        "user-opened ladder renders every step row: {flat}"
     );
 }
 

@@ -14,11 +14,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射（模式切换门禁）
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染与渲染入口
 - [chat_step_live.rs](../../crates/tui/src/chat_step_live.rs) — Step 阶梯的
-  流式自动披露：运行位自动展开、Say/结束收起、用户点击优先（与 SPA
-  `steps/useLadderDisclosure.js` 同契约）；`running_step_only` 规定自动
-  运行位只渲染最新 step（thinking + 本轮 calls），历史 step 折叠进
-  `N Steps`，用户点开后才全量展开——`chat_step_render` /
-  `chat_headers` / `chat_steps::visible_targets` 三处行号镜像共用该谓词
+  流式自动披露：运行位自动展开展示最新 turn 的全部 step 行（已完成
+  step 折叠为单行、运行位 streaming thinking + calls），Say/结束折回
+  `N Steps + Say` 摘要；steps 默认折叠（回放、已结算 turn 同样），用户
+  点击优先（与 SPA `steps/useLadderDisclosure.js` 同契约）
 - [chat_steps_replay.rs](../../crates/tui/src/chat_steps_replay.rs) — 回放侧
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
   `chat_steps.rs` 共用阶梯语义）

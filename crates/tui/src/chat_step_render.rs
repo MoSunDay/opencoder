@@ -24,10 +24,12 @@ use super::{
 /// drill-down): the clickable turn row `{▸|❯} N Steps` (col 0, accent
 /// bold) + a live progress hint until Say begins; while the group is closed
 /// that row (plus one trailing
-/// blank) is the whole block. While it is open, per VISIBLE step: the step
-/// row (indent 2) — the auto-managed running position draws only the last
-/// step (see [`super::step_live::running_step_only`]); while the step is
-/// open its `💭 Thinking` block (header
+/// blank) is the whole block. While it is open, per step: the step row
+/// (indent 2) — while the turn runs, the auto-opened ladder renders EVERY
+/// step row of the running turn (finished steps stay collapsed one-line
+/// rows, so the current turn's trajectory stays visible); a user-opened
+/// ladder renders the same full list — while the step is open its `💭
+/// Thinking` block (header
 /// indent 4, body indent 8) and a `N Function calls` aggregation row
 /// (indent 4); opening the aggregation shows call headers at indent 6, and
 /// an expanded call shows its result at indent 6. Exactly one trailing blank
@@ -212,12 +214,10 @@ fn say_header_line(open: bool, n: usize, say: &SayHeader, anim_tick: u32) -> Lin
     Line::from(spans)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn flatten_step_group(
     out: &mut Vec<Line<'static>>,
     open: bool,
     progress_active: bool,
-    user_touched: bool,
     steps: &[Step],
     anim_tick: u32,
     say: Option<SayHeader>,
@@ -276,13 +276,11 @@ pub(crate) fn flatten_step_group(
             }
         }
     }
-    // LIVE FOCUS: the auto-managed running position renders ONLY the
-    // running (last) step — thinking + its calls — so a turn with many tool
-    // rounds does not flood the viewport with one `Step(i)` row each. The
-    // group row still carries the count; a user-opened ladder (user_touched)
-    // renders every step row as before.
-    let first_visible = super::step_live::first_visible_step(n, open, user_touched);
-    for (si, step) in steps.iter().enumerate().skip(first_visible) {
+    // LIVE FOCUS: while the turn runs, the auto-opened ladder renders every
+    // step row of the running turn — finished steps as collapsed one-line
+    // rows, so the current turn's trajectory stays visible; a user-opened
+    // ladder renders the same full list.
+    for (si, step) in steps.iter().enumerate() {
         let step_open = step.open;
         out.push(Line::from(vec![
             Span::raw("  "),

@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
 
 # ontology 模块
 
@@ -15,8 +15,19 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
   属性、Action 配置、关系、切面与 revision 校验
 - `crates/ontology/src/text_store.rs`、`database/text_revision.rs` —
   UUID+revision 不可变正文路径
-- `crates/ontology/src/api/graph/`、`api/directories.rs` — 有向范围、
-  多跳中心、邻居与系统目录
+- `crates/ontology/src/api/graph/` — 有向范围、多跳中心与邻居
+- `crates/ontology/src/api/directories.rs` — 目录树与目录创建/移动/更新；
+  `validate_membership` 归属校验：目标须为活跃目录，目录节点保持单一
+  父级（移动换父传 `allow_existing` 并查环），普通实体可归属多个目录、
+  仅拒绝重复归属同一目录
+- `crates/ontology/src/api/relationships.rs` — 关系读写；类型带
+  `is_directory_membership` 时创建关系先经 `validate_membership` 校验
+- `crates/ontology/src/api/entity_creation.rs` — 实体创建
+  （`claim_creation` 按 request_id+指纹幂等）；携带 `directory_id` 时
+  校验活跃目录并在同一事务补建「目录归属」关系，创建实体即自动入目录
+- `crates/ontology/src/database/seeding.rs` — 环境种子：系统「目录」
+  实体类型、根目录实体与 `belongs_to` 等系统关系类型（`belongs_to`
+  标记 `is_directory_membership`）
 - `crates/ontology/src/database/vectors.rs`、`api/vectors.rs` — 向量读写
   非零向量与余弦搜索
 - `crates/ontology/src/catalog.rs`、`database/catalog/` — 控制面能力
@@ -30,11 +41,11 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 - `crates/control/tests/ontology.rs` — 控制面与 NFS 导出回归
 
 ## 接缝
-- [control](../control/index.md) 初始化与角色门禁、就绪和退休生命周期；
-  [core](../core/index.md) 提供配置与平台身份
+- [control](../platform/control/index.md) 初始化与角色门禁、就绪和退休生命周期；
+  [core](../foundation/core/index.md) 提供配置与平台身份
 - `crates/control/src/ontology.rs` — 正文根校验与 `ontology` 只读 NFS 导出
-- [Web 页面](../web/index.md) — 类型与表单位于 `spa/src/ontology/`，图谱用 G6
-- [Server 与备份](../server/index.md) 同时保存数据库和正文；维护升级见
+- [Web 页面](../frontend/web/index.md) — 类型与表单位于 `spa/src/ontology/`，图谱用 G6
+- [Server 与备份](../platform/server/index.md) 同时保存数据库和正文；维护升级见
   [发布约定](../../docs/smooth-release.md)
 - `crates/database/src/lib.rs` — `opencoder-database` 独立读写执行器
 
@@ -44,8 +55,10 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 - `crates/ontology/src/database/freshness.rs`、`database/freshness_review.rs` — 三张 JSON 正文表（policies/runs/reviews）读写与单事务评审（重复 409、目录托管保护、回写正文版本、级别 +1）
 - `crates/ontology/src/api/freshness.rs` — `/api/ontology/envs/:env/freshness/*` 数据平面路由；写入 `require_manage`
 - `crates/ontology/src/freshness.rs` — `AppState::freshness` 操作面；运行仅经此创建与更新
-- 不变量：运行快照创建后不可变（scope 锁定）；运行写入单写者（控制面）；结算规则与数据平面 `settle` 一致；候选摘要 ≤ 8000 字符、运行项 ≤ 500、并发 1..30
+- 不变量与限额（快照不可变、运行单写者、结算一致、摘要/运行项/并发
+  上限）以 [功能规则](../../features/platform/ontology/index.md) 的
+  「数据保鲜」为准
 - 测试：`crates/ontology/tests/freshness.rs`；控制面对应实现在 `crates/control/src/ontology_freshness/`（触发路由、派发编排、重启回收）
 
 ## 相关
-- [Ontology 能力](../../features/ontology/index.md)
+- [Ontology 能力](../../features/platform/ontology/index.md)

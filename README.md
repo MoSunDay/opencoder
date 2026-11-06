@@ -40,21 +40,21 @@
 
 ---
 
-OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它以单一二进制 `opencoder` 提供 **交互式 TUI**、**无头一次性运行**、**集中式 HTTP/SSE 服务端** 与 **远程瘦客户端** 四种工作形态。所有上层逻辑只依赖两个抽象口子 —— `Arc<dyn Store>` 与 `Arc<dyn ChatStream>` —— 因此持久化层（Turso）与 LLM 后端（OpenAI 兼容）均可替换。
+OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它以单一二进制 `opencoder` 提供 **交互式 TUI**、**无头一次性运行**、**集中式 HTTP/SSE 服务端** 与 **远程瘦客户端** 四种工作形态。所有上层逻辑只依赖两个抽象口子 —— `Arc<dyn Store>` 与 `Arc<dyn ChatStream>` —— 因此持久化层（RocksDB，`rdb`）与 LLM 后端（OpenAI 兼容）均可替换。
 
 多节点平台由 `opencoder-server` 管理调度、`opencoder-agent` 执行任务，复用 Web 控制台；运行明细保存在所属节点。部署、NFS 资源共享与恢复语义见 [Agent 调度平台](docs/agent-platform.md)。
 
 ## ✨ 特性
 
 - **🧠 多形态运行时** — 本地 TUI 与 headless `run` 共享会话运行时；独立的 `opencoder-server` 和 `opencoder-agent` 提供 Fleet 控制面与节点执行。
-- **🔄 会话恢复与分叉** — `--session <id>` / `--continue` / `--fork` 跨进程从 Turso 重建历史；title 由 small model 异步生成。
+- **🔄 会话恢复与分叉** — `--session <id>` / `--continue` / `--fork` 跨进程从本地 rdb store 重建历史；title 由 small model 异步生成。
 - **📦 Session 二进制导出/导入** — `session export/import` 以 `.opencoder` 二进制（`OPENCODR` magic）携带完整 subagent 树迁移会话，幂等且不导出 Config（API key 安全）。
 - **🛠️ Subagent 调度** — `explore`（只读探查）与 `build`（实现执行）两类子代理，DB 追踪生命周期、可折叠查看。
 - **📋 Plan / Act 双模式** — Plan 模式只读（bash 写操作被 `bash_guard` 拦截），切换到 Act 时清空上下文只保留最终计划。
 - **🗜️ 自动压缩** — token 估算驱动的上下文压缩，`compaction.{auto,context_threshold,reserved,tail_turns,buffer}` 全可配置。
 - **🎮 steer / followup 两段式投递** — 运行中可在 turn 边界即时插入 steer，idle 时消费恰好一条 queue。
 - **🌐 无损事件回放** — SSE 事件 schema v2 迁移，`SessionEvent` 作为单一真相源，replay 完整重建工具块。
-- **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；Turso WAL 并发读写，千条消息追加 30 ms。
+- **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；存储走原子批量提交（WriteBatch），阈值测试见 [docs/perf.md](docs/perf.md)，迁移到 rdb 后存储性能数值需重新采样。
 
 ## 🚀 快速开始
 
@@ -76,7 +76,7 @@ cargo build --release
 平台前置（源码构建）：
 
 - **Linux**：直接 `cargo build --release`，全量功能可用（含 `opencoder-agent` 节点）。
-- **macOS**：可构建并使用 `opencoder`（CLI/TUI）与 `opencoder-server`；存储引擎为纯 Rust 实现，无需 libclang 或 cmake。macOS 上会话子进程以直接子进程方式运行（无 Linux pidfd 进程监管），`opencoder-agent` 节点（runc 沙箱、进程监管）仅支持 Linux。
+- **macOS**：可构建并使用 `opencoder`（CLI/TUI）与 `opencoder-server`；存储引擎（RocksDB/rdb）需要系统 C++ 工具链。macOS 上会话子进程以直接子进程方式运行（无 Linux pidfd 进程监管），`opencoder-agent` 节点（runc 沙箱、进程监管）仅支持 Linux。
 
 或使用安装脚本：
 
@@ -120,7 +120,7 @@ TUI 事件命令可写在 `~/.opencoder/hooks.json`：`turn_done` 在最终回�
 
 `model` 格式为 `"{provider}/{model_id}"`，provider 名匹配 `providers` map 的 key（未匹配则回退到默认 `provider`）。`api_key` / header `value` 支持 `{ENV_VAR}` 环境变量间接引用。
 
-接入 GPT-5/6 时，在对应 provider 中设置 `"protocol": "responses"`，并填写服务端提供的模型 ID。未设置协议的旧配置默认使用 `chat_completions`。两种协议可以混用，支持流式推理、工具/MCP、图片、子代理和会话恢复。配置示例与验收范围见 [Responses API](features/responses/index.md)。
+接入 GPT-5/6 时，在对应 provider 中设置 `"protocol": "responses"`，并填写服务端提供的模型 ID。未设置协议的旧配置默认使用 `chat_completions`。两种协议可以混用，支持流式推理、工具/MCP、图片、子代理和会话恢复。配置示例与验收范围见 [Responses API](features/interaction/responses/index.md)。
 
 需要操作桌面应用或浏览器时，可安装可选的 [`opencoder-computer`](tools/computer-use/README.md)，通过 `/cli` 注册接入。它使用独立配置的桌面模型，由 Cua 的 Agent 操作已有远程桌面；平台能力沿用 Cua。
 
@@ -151,7 +151,7 @@ OpenCoder 是一个依赖分层的 Cargo workspace。主要 crate 包括：
 | --- | --- |
 | `core` | 共享类型与 `Config`（模型 / 压缩 / 上下文窗口 / small_model 全配置化） |
 | `llm` | OpenAI 兼容流式客户端 + `ChatStream` trait + `MockChatClient` + token 估算器 |
-| `store` | `Store` trait + Turso 实现（纯 Rust SQLite 兼容，WAL，本地嵌入），所有持久化的唯一出口 |
+| `store` | `Store` trait + RocksDB（rdb）实现（本地嵌入，原子批量提交），所有持久化的唯一出口 |
 | `session` | 运行时核心：drain 主循环、工具注册、subagent 调度、plan bash 守卫、压缩、resume |
 | `tui` | ratatui 交互界面（3 区域布局、subagent 折叠、steer/followup、plan/act 切换） |
 | `web` | axum HTTP + SSE 会话管理（prompt admit / 事件流 / 运行时切换 / interrupt） |
@@ -162,7 +162,7 @@ OpenCoder 是一个依赖分层的 Cargo workspace。主要 crate 包括：
 
 **关键抽象：**
 
-- **`Store` trait**（`crates/store/src/store.rs`）— sessions / messages / inputs / events / subagent_tasks 的统一 CRUD，切换 SQLite 实现的唯一接缝。
+- **`Store` trait**（`crates/store/src/store.rs`）— sessions / messages / inputs / events / subagent_tasks 的统一 CRUD，切换存储实现的唯一接缝。
 - **`ChatStream` trait**（`crates/llm/src/stream.rs`）— `ChatClient` 与 `MockChatClient` 共同实现，使 session 运行时可零 token 确定性测试。
 - **drain 语义**（`crates/session/src/runner.rs::run_loop`）— 每个 turn 边界提升 steer；idle 时消费恰好一条 queue；doom-loop 守卫（`DOOM_THRESHOLD=20`）打破连续空 turn。
 
@@ -229,25 +229,25 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 | 冷启动耗时 | **~0.78 s** | **~6 ms** | opencode 慢 **~125×** |
 | 冷启 token 开销 | **~13 k tok** | **~0.4 k tok** | opencode 高 **~32×** |
 | 协议 | OpenAI 兼容 + ACP + MCP | OpenAI 兼容 + 子代理（explore/build） | — |
-| 会话存储 | SQLite（WAL）+ Drizzle ORM | Turso（纯 Rust SQLite 兼容，WAL）+ 自写 `Store` trait | 同为 SQLite 系；见下方[存储对比](#-存储) |
+| 会话存储 | SQLite（WAL）+ Drizzle ORM | RocksDB（rdb）+ 自写 `Store` trait | 存储模型不同；见下方[存储对比](#-存储) |
 
 > **冷启 token 开销**口径：取各 agent 首次发给 LLM 的请求体，计数其中的 `system` 消息 + `tools` 数组（首轮固定开销，发生在任何用户输入之前），用 `cl100k_base` BPE 计 token；与上表其余 `--help` 运行时基线指标独立测量。这一项是每一轮对话都会产生的固定成本。
 
 ### 🗄️ 存储
 
-两者**底层都是 SQLite**，落盘均为标准 `.db` + `.db-wal` + `.db-shm`（WAL 模式），差异在驱动层与表模型：
+存储模型不同：opencode 内嵌 SQLite 单文件（WAL 模式），OpenCoder 主存储为 RocksDB（`rdb`）目录：
 
 | 维度 | opencode `1.17.8` | opencoder `0.1.0` |
 | --- | --- | --- |
-| 数据库 | SQLite（bun 内嵌） | Turso `0.8.3`（纯 Rust SQLite 兼容引擎） |
-| 访问层 | Drizzle ORM（JS，运行时迁移 `migration` 表） | 手写 SQL + `Store` trait（`crates/store/src/store.rs`） |
-| 驱动语言 | JS/V8 ↔ SQLite C ABI | 纯 Rust 进程内执行（无 C ABI、无 FFI） |
-| WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL`（同样的并发模型） |
-| 表（核心） | `session` / `message` / `step` / `agent` / `tool_use` / `snapshot` / `checkpoint` / `event` / `subagent` | `sessions` / `messages` / `session_inputs` / `session_events` / `subagent_tasks` / `schema_version` |
-| 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | `schema_version` 单值 + `CREATE TABLE IF NOT EXISTS` 幂等建表 |
-| 库文件命名 | `opencode.db`（按 channel 可变，如 `opencode-dev.db`） | 由 workdir 决定（每 workdir 一个库） |
+| 数据库 | SQLite（bun 内嵌） | RocksDB（`rdb`，本地嵌入目录） |
+| 落盘形态 | `opencode.db` + `.db-wal` + `.db-shm` 单文件族 | `<stem>.rdb` 目录（如 `opencode.db.rdb`），LSM 分层文件 |
+| 写入模型 | WAL 事务（`journal_mode=WAL` 等 PRAGMA） | 单次修改一个 `WriteBatch` 原子提交，失败不留半批数据 |
+| 并发模型 | 多读一写（WAL） | 单 owner/write lease（进程内共享句柄 + 跨进程 `.owner.lock`）+ snapshot reads |
+| 访问层 | Drizzle ORM（JS，运行时迁移 `migration` 表） | KV 数据模型 + `Store` trait（`crates/store/src/store.rs`） |
+| 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | KV key 家族版本化；旧 SQLite 会话库走显式迁移命令 |
+| 库文件命名 | `opencode.db`（按 channel 可变，如 `opencode-dev.db`） | `<data_dir>/<stem>.rdb`（每 workdir 一个目录） |
 
-> 两者的 WAL 并发模型等价（多读一写、读不阻塞写），存储吞吐差异主要来自驱动层 —— opencode 经 Drizzle ORM + V8 跨语言，opencoder 在进程内直接运行纯 Rust 数据库引擎且无 ORM 转换层。
+> Ontology 使用独立的 SQLite 后端，不随主存储的 rdb 迁移。
 
 > 说明：端到端任务表现受 LLM 主导（首轮 token 延迟为 provider RTT），同一模型下两者任务能力等价；**差异集中在运行时基线** —— 内存占用、启动延迟、分发体积。对受约束环境（CI runner、容器、弱机）与多实例部署（按进程计的 RSS 直接决定并发密度），opencoder 的低开销优势可被直接摊销。
 
@@ -256,7 +256,7 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 
 ## 🧪 开发与测试
 
-本项目强制遵循 [`rules/`](rules/) 下的开发规则：每个功能必须有对应测试，每轮迭代结束前跑全量回归并附 changelog + 测试清单。
+本项目强制遵循 [`rules/`](rules) 下的开发规则：每个功能必须有对应测试，每轮迭代结束前跑全量回归并附 changelog + 测试清单。
 
 ```bash
 # 单元 + 集成测试（确定性，零网络）
@@ -271,7 +271,7 @@ scripts/e2e-glm.sh --only cli
 ```
 
 todos 领域套件清单（validate 诊断 / 运行时事件目录 / 中断恢复 / web 生命周期）见
-[`agents/todos/index.md`](agents/todos/index.md)；测试分层规范见
+[`agents/todos/index.md`](agents/workbench/todos/index.md)；测试分层规范见
 [`rules/03-test-pyramid.md`](rules/03-test-pyramid.md)。
 
 ## 📁 项目结构
@@ -281,7 +281,7 @@ opencoder/
 ├── crates/
 │   ├── core/      # 共享类型与 Config
 │   ├── llm/       # LLM 客户端 + ChatStream trait
-│   ├── store/     # Store trait + Turso 实现
+│   ├── store/     # Store trait + RocksDB（rdb）实现
 │   ├── session/   # 会话运行时核心
 │   ├── tui/       # ratatui 交互界面
 │   ├── web/       # HTTP/SSE 与 SPA 模块

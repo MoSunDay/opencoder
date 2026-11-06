@@ -4,7 +4,7 @@ Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
 修改项目、专项、TODO 的数据关系、看板、标签、执行关联、结果读取或进度计算之前，先读本规则。核心职责是：**项目承载整体目标，专项组织某一方向的工作，TODO 记录具体要完成的事情，执行记录保存实际执行过程和结果。**
 
-功能入口见 [项目工作台](../features/project/index.md)，实现索引见 [project 模块](../agents/project/index.md)。涉及大脑调度时同时遵守 [规则 06](06-brain-scheduling-contract.md)，涉及 DAG 执行时同时遵守 [规则 04](04-dag-execution-contract.md)。
+功能入口见 [项目工作台](../features/platform/project/index.md)，实现索引见 [project 模块](../agents/workbench/project/index.md)。涉及大脑调度时同时遵守 [规则 06](06-brain-scheduling-contract.md)，涉及 DAG 执行时同时遵守 [规则 04](04-dag-execution-contract.md)。
 
 网页将专项显示为“子项”，项目与子项的“说明”显示为“目标”，“当前概述”显示为“现状”。对应字段仍为 `initiative`、`detail_md`、`current_summary`；目标和现状在详情中独立折叠，默认收起正文，现状时间和版本入口保持可见。
 

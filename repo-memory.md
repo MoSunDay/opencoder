@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
 
 # OpenCoder 逻辑地图
 
@@ -10,30 +10,57 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 ## 模块索引
 
-- [agents/core](agents/core/index.md) — 共享类型与 Config。
-- [agents/llm](agents/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
-- [agents/store](agents/store/index.md) — `Store` trait、Turso WAL 与异步数据库执行。
-- [agents/session](agents/session/index.md) — 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
-- [agents/shellguard](agents/shellguard/index.md) — shell 安全分类器：rable AST 判定、释放集仅 `/tmp`+`/dev/null`、fail-closed。
-- [agents/tui](agents/tui/index.md) — ratatui 交互界面（Step 阶梯流式自动披露：`chat_step_live`）。
-- [agents/local](agents/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
-- [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯披露 hook 与 TUI 同契约）。
-- [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面、数据保鲜与不可变正文。
-- [agents/dag](agents/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
-- [agents/dag-binary](agents/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。
-- [agents/dag-runtime](agents/dag-runtime/index.md) — 每次 DAG 运行归属单个节点、单个容器，共享写时复制工作区；Server 不链接。
-- [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
-- [agents/project](agents/project/index.md) — 项目、专项、TODO 与 Tag 数据；旧执行链独立保留。
-- [agents/brain](agents/brain/index.md) — 能力库、分层调度与嵌套计划。
-- [agents/agents](agents/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
-- [agents/team](agents/team/index.md) — 团队目录与消息扇出运行时。
-- [agents/control](agents/control/index.md) — 平台控制面：节点调度、五字段执行索引。
-- [agents/worker](agents/worker/index.md) — 节点执行面：接受/恢复、资源快照、操作适配。
-- [agents/node](agents/node/index.md) — 出站 WebSocket：注册、心跳、RPC。
-- [agents/server](agents/server/index.md) — 版本 Server 与独立只读资源服务入口。
-- [agents/agent](agents/agent/index.md) — 稳定 Host、独立版本 Runtime 与兼容节点入口。
-- [agents/ctl](agents/ctl/index.md) — `opencoder-cli`：Server API + Bearer + 退出码约定。
-- [agents/computer-use](agents/computer-use/index.md) — 可选 `opencoder-computer`：Cua 桌面任务 CLI、独立模型与运行产物。
+**foundation**
+
+- [agents/core](agents/foundation/core/index.md) — 共享类型与 Config。
+- [agents/llm](agents/foundation/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
+- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的 SQLite 基建。
+- [agents/event](agents/foundation/event/index.md) — `opencoder-event`：事件日志、监听器、广播总线、触发执行与全局暂停门；默认纯内存，`rdb` feature 提供 RocksDB 持久队列账本；通用基建，未接生产 dispatcher。
+
+**runtime**
+
+- [agents/session](agents/runtime/session/index.md) — 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
+- [agents/shellguard](agents/runtime/shellguard/index.md) — shell 安全分类器：rable AST 判定、释放集仅 `/tmp`+`/dev/null`、fail-closed。
+
+**frontend**
+
+- [agents/local](agents/frontend/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
+- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯流式自动披露：`chat_step_live`；一次性 `@capability` 子任务派发）。
+- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯披露 hook 与 TUI 同契约）。
+
+**ontology**
+
+- [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面、目录多归属、数据保鲜与不可变正文。
+
+**workflow**
+
+- [agents/dag](agents/workflow/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
+- [agents/dag-binary](agents/workflow/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。
+- [agents/dag-runtime](agents/workflow/dag-runtime/index.md) — 每次 DAG 运行归属单个节点、单个容器，共享写时复制工作区；Server 不链接。
+
+**orchestration**
+
+- [agents/brain](agents/orchestration/brain/index.md) — 能力库、分层调度与嵌套计划。
+- [agents/team](agents/orchestration/team/index.md) — 团队目录与消息扇出运行时。
+
+**workbench**
+
+- [agents/project](agents/workbench/project/index.md) — 项目、专项、TODO 与 Tag 数据；旧执行链独立保留。
+- [agents/todos](agents/workbench/todos/index.md) — 持久化 TODO 工作流：每 TODO 独立 Primary Session。
+
+**platform**
+
+- [agents/control](agents/platform/control/index.md) — 平台控制面：节点调度、五字段执行索引。
+- [agents/server](agents/platform/server/index.md) — 版本 Server 与独立只读资源服务入口。
+- [agents/node](agents/platform/node/index.md) — 出站 WebSocket：注册、心跳、RPC。
+- [agents/agent](agents/platform/agent/index.md) — 稳定 Host、独立版本 Runtime 与兼容节点入口。
+- [agents/agents](agents/platform/agents/index.md) — 版本化自定义 Agent：共享池 `v{n}` + meta.json 引用卡 + NFS 只读导出。
+- [agents/ctl](agents/platform/ctl/index.md) — `opencoder-cli`：Server API + Bearer + 退出码约定；本机 Turso Storage 维护命令。
+
+**execution**
+
+- [agents/worker](agents/execution/worker/index.md) — 节点执行面：接受/恢复、资源快照、操作适配。
+- [agents/computer-use](agents/execution/computer-use/index.md) — 可选 `opencoder-computer`：Cua 桌面任务 CLI、独立模型与运行产物。
 
 OpenCoder 能力入口见 [features/index.md](features/index.md)。
 

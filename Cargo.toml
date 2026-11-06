@@ -25,6 +25,7 @@ members = [
     "crates/brain",
     "crates/team",
     "crates/ctl",
+    "crates/event",
 ]
 
 [package]
@@ -82,6 +83,7 @@ opencoder-agents  = { path = "crates/agents" }
 opencoder-brain  = { path = "crates/brain" }
 opencoder-team   = { path = "crates/team" }
 opencoder-cli    = { path = "crates/ctl" }
+opencoder-event  = { path = "crates/event" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
@@ -90,6 +92,10 @@ futures = "0.3"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["json", "ws"] }
 turso = { version = "=0.8.3", default-features = false }
+# Base storage stays on turso; rdb/rocksdb serve the opencoder-event queue only.
+# `store` feature = embedder-only RocksDB slice; avoids the full server stack.
+rdb = { path = "/root/rdb", default-features = false, features = ["store"] }
+rocksdb = "0.24"
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "gzip", "socks"] }
 serde = { version = "1", features = ["derive"] }

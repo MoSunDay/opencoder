@@ -25,7 +25,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   `SUMMARY_PREFIX`）由回放入口拦截并延迟渲染为 `Compaction` 折叠块：
   排在保留的最近交互之后、继续执行之前（`tail + summary + 续跑`），
   与发给 LLM 的 `[summary, tail...]` 列表顺序解耦；其余合成消息仍跳过；
-  `compaction_block.rs` 的 `finalize_compaction` 对回放孪生块幂等去重
+  `compaction_block.rs` 的 `finalize_compaction` 对回放孪生块幂等去重。
+  mid-run 重建时，若保留尾部已含在途 prompt，该 `User` 回显延后到
+  `Compaction` 块之后重放，避免摘要上方旧副本与末尾补推回显重复；
+  转录未记录 prompt 的 clear-context 重建仍补回显边界
 - `src/model_menu/` — `/config` 表单（含 `local-memory` 开关）
 - [agent_menu.rs](../../../crates/tui/src/agent_menu.rs)、
   [remote/selection.rs](../../../crates/tui/src/remote/selection.rs) — `/agent` 菜单

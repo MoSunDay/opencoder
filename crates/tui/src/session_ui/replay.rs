@@ -97,6 +97,29 @@ fn push_compaction_summary_block(chat: &mut ChatView, summary: &str) {
     });
 }
 
+/// Verbatim echo text a user message replays as: `display` is the single
+/// source of truth; recorded blocks are the legacy fallback. Synthetic
+/// messages without a display are internal markers and never echo.
+fn user_echo_text(msg: &Message) -> Option<String> {
+    if msg.role != Role::User || (msg.synthetic && msg.display.is_none()) {
+        return None;
+    }
+    let text = match &msg.display {
+        Some(d) => d.clone(),
+        None => msg
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+    };
+    let text = sanitize_multiline(&text).into_owned();
+    (!text.is_empty()).then_some(text)
+}
+
 pub(super) fn replay_one(
     chat: &mut ChatView,
     msg: &Message,
@@ -309,6 +332,31 @@ pub async fn replay_into_chat(
     session_id: &str,
     preserve_tokens_total: u64,
 ) -> ChatView {
+    replay_into_chat_inner(
+        agent_name,
+        messages,
+        store,
+        session_id,
+        preserve_tokens_total,
+        None,
+    )
+    .await
+}
+
+/// Replay with the in-flight turn's verbatim echo. When the folded transcript
+/// already contains that prompt (mid-run compaction records the user message
+/// before the runner folds the head), the replayed copy is deferred and lands
+/// AFTER the Compaction marker instead of being retained in the tail AND
+/// pushed again by the reset rebuild. Clear-context resets do not contain the
+/// prompt yet, so the echo is simply appended below the rebuilt blocks.
+async fn replay_into_chat_inner(
+    agent_name: &str,
+    messages: &[Message],
+    store: &Arc<dyn Store>,
+    session_id: &str,
+    preserve_tokens_total: u64,
+    deferred_echo: Option<&str>,
+) -> ChatView {
     let mut chat = ChatView {
         agent: sanitize_single_line(agent_name).into_owned(),
         ..Default::default()
@@ -368,8 +416,24 @@ pub async fn replay_into_chat(
     // replay. Data URIs are handled inline by `render_image_from_url`.
     let prefetched = prefetch_image_bytes(messages).await;
 
+    // The in-flight prompt must be the LAST visible user message; anything
+    // earlier with the same text is ordinary history and stays where it was.
+    let deferred_user_idx = deferred_echo
+        .filter(|echo| !echo.trim().is_empty())
+        .and_then(|echo| {
+            let (idx, text) = messages
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(idx, msg)| user_echo_text(msg).map(|text| (idx, text)))?;
+            (text.trim() == echo.trim()).then_some(idx)
+        });
+
     let mut deferred_summaries: Vec<String> = Vec::new();
-    for msg in messages {
+    for (idx, msg) in messages.iter().enumerate() {
+        if Some(idx) == deferred_user_idx {
+            continue;
+        }
         if let Some(summary) = compaction_summary_of(msg) {
             deferred_summaries.push(summary);
             continue;
@@ -399,6 +463,18 @@ pub async fn replay_into_chat(
     // untouched by them); the continued run appends below.
     for summary in &deferred_summaries {
         push_compaction_summary_block(&mut chat, summary);
+    }
+    // The running turn's boundary belongs below the folded-history marker
+    // (tail + summary + continued execution). If the prompt was part of the
+    // retained tail, render it here from its persisted message (images
+    // included) so it is not both retained above the marker and pushed again;
+    // otherwise re-push the remembered echo for a clear-context rebuild.
+    if let Some(idx) = deferred_user_idx {
+        replay_one(&mut chat, &messages[idx], &prefetched);
+    } else if let Some(echo) = deferred_echo.filter(|echo| !echo.trim().is_empty()) {
+        let rendered = crate::markdown::render(echo);
+        chat.blocks.push(ChatBlock::User { rendered });
+        chat.push_marker(Line::from(""));
     }
     // Full transcript token count for ctx% (system prompt added at render).
     chat.context_used = estimate_messages_for_display(messages) as u64;
@@ -436,30 +512,26 @@ pub async fn rebuild_after_reset(
     let saved_first_prompt = chat.first_prompt.clone();
     let saved_tokens_total = chat.tokens_total;
     let saved_turn_echo = chat.pending_turn_echo.clone();
-    *chat = replay_into_chat(&agent, msgs, store, session_id, saved_tokens_total).await;
+    *chat = replay_into_chat_inner(
+        &agent,
+        msgs,
+        store,
+        session_id,
+        saved_tokens_total,
+        saved_turn_echo.as_deref(),
+    )
+    .await;
     chat.annotation_text = saved_annotation_text;
     chat.submitted = saved_submitted;
     chat.first_prompt = saved_first_prompt;
     chat.pending_turn_echo = saved_turn_echo;
     // The reset happened inside the admitted turn (e.g. the compound
     // `/act_clear_context <tail>` that triggered it), and the folded
-    // transcript cannot contain that turn's prompt yet — it is recorded
-    // after the reset fires. Without re-pushing the echo, the running
-    // turn's ladder and Say would render with NO user boundary below the
-    // rebuilt blocks, reading as steps accumulated into the previous turn
-    // and Says glued together. Restore the boundary, then anchor the
-    // ladder below it.
-    if let Some(echo) = chat
-        .pending_turn_echo
-        .as_ref()
-        .filter(|e| !e.trim().is_empty())
-    {
-        let rendered = crate::markdown::render(echo);
-        chat.blocks.push(crate::chat::ChatBlock::User { rendered });
-        chat.blocks.push(crate::chat::ChatBlock::Marker(vec![
-            ratatui::text::Line::from(""),
-        ]));
-    }
+    // transcript may not contain that turn's prompt yet — it can be recorded
+    // after the reset fires. `replay_into_chat_inner` puts the remembered
+    // echo below the rebuilt blocks (and de-duplicates it when the folded
+    // transcript already retained it), so the running ladder keeps its user
+    // boundary and is never merged into the pre-reset turn.
     // Reliable completion repair must never target pre-reset blocks.
     chat.turn_block_start = chat.blocks.len();
 }

@@ -1,0 +1,27 @@
+[package]
+name = "opencoder-event"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Durable RocksDB queue ledger (see src/queue.rs). The default build stays
+# dependency-light and backend-agnostic; nothing else in the workspace
+# activates this feature.
+rdb = ["dep:rdb", "dep:rocksdb"]
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+ulid.workspace = true
+chrono.workspace = true
+rdb = { workspace = true, optional = true }
+rocksdb = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

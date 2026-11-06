@@ -210,10 +210,12 @@ fn say_header_line(open: bool, n: usize, say: &SayHeader, anim_tick: u32) -> Lin
     Line::from(spans)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn flatten_step_group(
     out: &mut Vec<Line<'static>>,
     open: bool,
     progress_active: bool,
+    user_touched: bool,
     steps: &[Step],
     anim_tick: u32,
     say: Option<SayHeader>,
@@ -272,7 +274,13 @@ pub(crate) fn flatten_step_group(
             }
         }
     }
-    for (si, step) in steps.iter().enumerate() {
+    // LIVE FOCUS: the auto-managed running position renders ONLY the
+    // running (last) step — thinking + its calls — so a turn with many tool
+    // rounds does not flood the viewport with one `Step(i)` row each. The
+    // group row still carries the count; a user-opened ladder (user_touched)
+    // renders every step row as before.
+    let first_visible = super::step_live::first_visible_step(n, open, user_touched);
+    for (si, step) in steps.iter().enumerate().skip(first_visible) {
         let step_open = step.open;
         out.push(Line::from(vec![
             Span::raw("  "),

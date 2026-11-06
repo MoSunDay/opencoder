@@ -526,7 +526,10 @@ impl ChatView {
         else {
             return;
         };
-        let Some(target) = steps::visible_targets(*open, steps).get(call_idx).copied() else {
+        let Some(target) = steps::visible_targets(*open, *user_touched, steps)
+            .get(call_idx)
+            .copied()
+        else {
             return;
         };
         // Every manual toggle pins the touched level(s): the live

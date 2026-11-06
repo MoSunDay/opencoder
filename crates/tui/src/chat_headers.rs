@@ -106,7 +106,12 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::StepGroup { steps, open, .. } => {
+                ChatBlock::StepGroup {
+                    steps,
+                    open,
+                    user_touched,
+                    ..
+                } => {
                     // Mirrors `flatten_step_group` exactly (three-level
                     // ladder): the turn row always (a clickable target);
                     // while the turn is open, per step the step row (target),
@@ -140,7 +145,17 @@ impl ChatView {
                         line_idx += 1;
                     }
                     if *open {
-                        for step in steps.iter() {
+                        // Mirror `flatten_step_group`'s LIVE FOCUS: the
+                        // auto-managed running position renders only the
+                        // running (last) step row; hide the earlier ones so
+                        // `call_idx` and line offsets stay aligned with the
+                        // drawn rows and the click targets.
+                        let first_visible = super::step_live::first_visible_step(
+                            steps.len(),
+                            *open,
+                            *user_touched,
+                        );
+                        for step in steps.iter().skip(first_visible) {
                             tool_calls.push(ToolCallHeader {
                                 block_idx,
                                 call_idx,

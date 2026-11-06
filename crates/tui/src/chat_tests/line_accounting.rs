@@ -138,7 +138,12 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                     expected += text.lines().count();
                 }
             }
-            ChatBlock::StepGroup { steps, open, .. } => {
+            ChatBlock::StepGroup {
+                steps,
+                open,
+                user_touched,
+                ..
+            } => {
                 // Mirrors the StepGroup arm in collect_headers: group row
                 // (or merged Say header when the next block is the Say) plus
                 // its separator blank, then the three-level ladder while
@@ -153,7 +158,15 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                 if !*open && say_merged_after_group {
                     // merged closed pair: no trailing blank
                 } else if *open {
-                    for s in steps {
+                    // LIVE FOCUS: the auto-managed running position renders
+                    // only the running (last) step; a user-opened ladder
+                    // renders every step row.
+                    let first_visible = super::super::step_live::first_visible_step(
+                        steps.len(),
+                        *open,
+                        *user_touched,
+                    );
+                    for s in steps.iter().skip(first_visible) {
                         expected += 1; // step row
                         if s.open {
                             if !s.thinking.is_empty() {

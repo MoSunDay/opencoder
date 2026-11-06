@@ -10,6 +10,9 @@ fn step_group_ladder_depth_alignment() {
     //   group open, steps open            = 1 + (1+1)*2 + 1
     //   calls lists open                  = 1 + (1+1+1)*2 + 1
     //   call "a" expanded                 = previous + output + separator
+    // The ladder depth test pins the USER-OPENED ladder (a click pins the
+    // group), so every step row renders here; the auto-managed live focus is
+    // covered by `auto_running_position_keeps_alignment`.
     let mk = |group_open: bool, open_steps: bool, calls_open: bool, expand: bool| {
         let mut a = tool_call("a", 1);
         a.expanded = expand;
@@ -39,7 +42,7 @@ fn step_group_ladder_depth_alignment() {
                 ],
                 open: group_open,
                 progress_active: false,
-                user_touched: false,
+                user_touched: true,
             },
             marker_n(1),
         ])
@@ -108,7 +111,7 @@ fn step_group_with_expanded_call_keeps_alignment() {
             ],
             open: true,
             progress_active: false,
-            user_touched: false,
+            user_touched: true,
         },
         marker_n(1),
     ]);
@@ -204,4 +207,60 @@ fn step_group_running_call_keeps_alignment() {
         row.contains("Step  \u{280b} running"),
         "group row should keep two spaces before the animation: {row:?}"
     );
+}
+
+/// LIVE FOCUS alignment: an auto-opened group with several steps renders
+/// only the running (last) step row, and `collect_headers` must skip the
+/// hidden rows by exactly the same amount.
+#[test]
+fn auto_running_position_keeps_alignment() {
+    let v = view_with(vec![
+        ChatBlock::StepGroup {
+            steps: vec![
+                Step {
+                    thinking_raw: String::new(),
+                    thinking: Vec::new(),
+                    thinking_dirty: false,
+                    calls: vec![tool_call("a", 1)],
+                    open: true,
+                    calls_open: true,
+                    sealed: true,
+                    user_touched: false,
+                },
+                Step {
+                    thinking_raw: String::new(),
+                    thinking: Vec::new(),
+                    thinking_dirty: false,
+                    calls: vec![tool_call("b", 2)],
+                    open: true,
+                    calls_open: true,
+                    sealed: true,
+                    user_touched: false,
+                },
+            ],
+            open: true,
+            progress_active: true,
+            user_touched: false,
+        },
+        marker_n(1),
+    ]);
+    assert_line_accounting_matches(&v);
+    let flat: Vec<String> = v
+        .flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
+    assert!(
+        flat.iter().any(|l| l.contains("Step(2)")),
+        "running step row renders: {flat:?}"
+    );
+    assert!(
+        !flat.iter().any(|l| l.contains("Step(1)")),
+        "finished step row stays hidden: {flat:?}"
+    );
+    // Group row, running step row, calls row and the running step's call
+    // row — no clickable target for the hidden step.
+    let headers = v.tool_call_headers();
+    assert_eq!(headers.len(), 4, "headers: {headers:?}");
+    assert_eq!(headers[1].header_line_idx, headers[0].header_line_idx + 1);
 }

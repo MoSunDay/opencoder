@@ -15,7 +15,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染与渲染入口
 - [chat_step_live.rs](../../crates/tui/src/chat_step_live.rs) — Step 阶梯的
   流式自动披露：运行位自动展开、Say/结束收起、用户点击优先（与 SPA
-  `steps/useLadderDisclosure.js` 同契约）
+  `steps/useLadderDisclosure.js` 同契约）；`running_step_only` 规定自动
+  运行位只渲染最新 step（thinking + 本轮 calls），历史 step 折叠进
+  `N Steps`，用户点开后才全量展开——`chat_step_render` /
+  `chat_headers` / `chat_steps::visible_targets` 三处行号镜像共用该谓词
 - [chat_steps_replay.rs](../../crates/tui/src/chat_steps_replay.rs) — 回放侧
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
   `chat_steps.rs` 共用阶梯语义）

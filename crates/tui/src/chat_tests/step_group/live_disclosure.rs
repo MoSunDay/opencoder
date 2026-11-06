@@ -105,6 +105,69 @@ fn a_new_step_folds_the_finished_one_and_takes_over() {
     assert!(flat_first(&v).starts_with("\u{276f} 2 Steps"), "got {:?}", flat_first(&v));
 }
 
+/// LIVE FOCUS: the auto-managed running position renders ONLY the running
+/// (last) step — thinking + its calls — so a turn with many tool rounds does
+/// not flood the viewport with one `Step(i)` row each. The group row keeps
+/// the total count; a user click opens the full ladder (user priority); Say
+/// settles the auto position back into the collapsed `Say(n steps)` pair.
+#[test]
+fn live_running_position_renders_only_the_last_step() {
+    let mut v = ChatView::default();
+    reasoning(&mut v, "round one");
+    start_call(&mut v, "c1");
+    end_call(&mut v, "c1", "out-a");
+    reasoning(&mut v, "round two");
+    start_call(&mut v, "c2");
+    end_call(&mut v, "c2", "out-b");
+    reasoning(&mut v, "round three");
+
+    let flat = lines(&v).join("\n");
+    assert!(flat.contains("3 Steps"), "group row keeps the count: {flat}");
+    assert!(
+        flat.contains("round three"),
+        "running thinking streams in place: {flat}"
+    );
+    assert!(flat.contains("Step(3)"), "running step row renders: {flat}");
+    assert!(!flat.contains("Step(1)"), "finished steps stay folded: {flat}");
+    assert!(!flat.contains("Step(2)"), "finished steps stay folded: {flat}");
+    assert!(!flat.contains("round one"), "old thinking stays hidden: {flat}");
+    assert!(!flat.contains("out-a"), "finished call output hidden: {flat}");
+
+    // Header accounting mirrors the hidden rows: only the group row and the
+    // running step row are clickable, exactly one line apart.
+    let headers = v.tool_call_headers();
+    assert_eq!(headers.len(), 2, "group + running step only: {headers:?}");
+    assert_eq!(headers[1].header_line_idx, headers[0].header_line_idx + 1);
+
+    // User opens the turn row: every step row comes back (user priority).
+    v.toggle_tool_call_at(0, 0); // fold (pins)
+    v.toggle_tool_call_at(0, 0); // reopen (pinned)
+    let flat = lines(&v).join("\n");
+    assert!(
+        flat.contains("Step(1)") && flat.contains("Step(2)") && flat.contains("Step(3)"),
+        "user-opened ladder renders every step row: {flat}"
+    );
+}
+
+/// Say settles the auto-managed running position back into the collapsed
+/// `Say(n steps)` pair — the pre-live-focus summary the TUI started from.
+#[test]
+fn live_settle_folds_the_running_step_back_into_the_say_pair() {
+    let mut v = ChatView::default();
+    reasoning(&mut v, "round one");
+    start_call(&mut v, "c1");
+    end_call(&mut v, "c1", "out");
+    reasoning(&mut v, "round two");
+    v.apply(&SessionEvent::TextDelta("the answer".into()));
+
+    let flat = lines(&v).join("\n");
+    assert!(flat.contains("Say(2 steps)"), "folded pair header: {flat}");
+    assert!(
+        !flat.contains("Step("),
+        "settled ladder hides every step row: {flat}"
+    );
+}
+
 fn flat_first(v: &ChatView) -> String {
     lines(v).first().cloned().unwrap_or_default()
 }

@@ -1,7 +1,9 @@
 //! Replay-side compaction-summary rendering: the synthetic summary message
-//! that heads a folded transcript must survive replay as the same collapsible
+//! of a folded transcript must survive replay as the same collapsible
 //! Compaction block the live path finalizes — resume, task switch, remote
 //! re-attach and mid-run `TranscriptReset` rebuilds all pass through here.
+//! UI order: retained tail turns FIRST, summary block AFTER them (the
+//! summary-first message list is an LLM-context concern only).
 
 use super::replay::replay_messages;
 use crate::chat::ChatBlock;
@@ -27,10 +29,12 @@ fn compaction_blocks(chat: &crate::chat::ChatView) -> Vec<&ChatBlock> {
         .collect()
 }
 
-/// The summary head renders as ONE collapsed Compaction block with the
-/// marker prefix stripped — not as a `user:` echo, not dropped.
+/// The summary renders as ONE collapsed Compaction block with the marker
+/// prefix stripped — not as a `user:` echo, not dropped — and it renders
+/// AFTER the retained tail turn: the folded-history marker sits between
+/// the kept turns and whatever continues below them.
 #[test]
-fn replay_renders_summary_head_as_collapsed_compaction_block() {
+fn replay_defers_summary_block_below_retained_tail() {
     let msgs = vec![
         summary_message("folded turn one\nfolded turn two"),
         Message::user("u2", "next question"),
@@ -53,12 +57,15 @@ fn replay_renders_summary_head_as_collapsed_compaction_block() {
         }
         _ => unreachable!("filtered above"),
     }
-    // The tail user turn still echoes normally below the summary block.
+    // Retained tail first, folded-history marker after it.
     assert!(matches!(
         chat.blocks.first(),
+        Some(ChatBlock::User { .. })
+    ));
+    assert!(matches!(
+        chat.blocks.last(),
         Some(ChatBlock::Compaction { .. })
     ));
-    assert!(matches!(chat.blocks.get(1), Some(ChatBlock::User { .. })));
 }
 
 /// The synthetic summary is internal: it must not become `first_prompt`

@@ -78,6 +78,25 @@ fn compaction_summary_of(msg: &Message) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Render a compaction summary as the same collapsible Compaction block the
+/// live path finalizes (collapsed, not streaming).
+///
+/// The folded transcript is `[summary, tail...]` — summary first, the
+/// chronologically correct order for the LLM context (`runner/llm_call.rs`
+/// sends the list as-is). The UI order is deliberately different: the block
+/// marks WHERE the history was folded, so it renders AFTER the retained tail
+/// turns and BEFORE the run that continues below it (`tail + summary +
+/// continued execution`). Replay entry points therefore collect summaries
+/// during the message loop and push them once the regular blocks (and the
+/// step fold) are complete.
+fn push_compaction_summary_block(chat: &mut ChatView, summary: &str) {
+    chat.blocks.push(ChatBlock::Compaction {
+        text: sanitize_multiline(summary).into_owned(),
+        collapsed: true,
+        streaming: false,
+    });
+}
+
 pub(super) fn replay_one(
     chat: &mut ChatView,
     msg: &Message,
@@ -90,21 +109,11 @@ pub(super) fn replay_one(
             // the exception: they carry the verbatim input as `display`, which
             // IS rendered. Steer/queue promotions are real user input and ARE
             // rendered (via `display`, tokens included) so the user sees their
-            // prompts verbatim after resume.
+            // prompts verbatim after resume. Compaction summaries are
+            // intercepted by the replay entry points BEFORE `replay_one`
+            // runs (see `push_compaction_summary_block`): they render as a
+            // deferred Compaction block, never in-place here.
             if msg.synthetic && msg.display.is_none() {
-                // A compaction summary is synthetic but its content IS the
-                // folded conversation: render it as the same collapsible
-                // Compaction block the live path finalizes, so resume, task
-                // switch, remote re-attach and mid-run `TranscriptReset`
-                // rebuilds all keep the compressed history visible instead
-                // of silently dropping it.
-                if let Some(summary) = compaction_summary_of(msg) {
-                    chat.blocks.push(ChatBlock::Compaction {
-                        text: sanitize_multiline(&summary).into_owned(),
-                        collapsed: true,
-                        streaming: false,
-                    });
-                }
                 return;
             }
             // Echo contract: `display` is the verbatim input single source of
@@ -359,7 +368,12 @@ pub async fn replay_into_chat(
     // replay. Data URIs are handled inline by `render_image_from_url`.
     let prefetched = prefetch_image_bytes(messages).await;
 
+    let mut deferred_summaries: Vec<String> = Vec::new();
     for msg in messages {
+        if let Some(summary) = compaction_summary_of(msg) {
+            deferred_summaries.push(summary);
+            continue;
+        }
         replay_one(&mut chat, msg, &prefetched);
         // Interleave child blocks under their parent assistant message.
         if msg.role == Role::Assistant {
@@ -381,6 +395,11 @@ pub async fn replay_into_chat(
     // merge into the following StepGroup's first step and adjacent groups
     // coalesce — the same shape the live streaming path produces.
     coalesce_steps(&mut chat.blocks);
+    // Folded-history markers land AFTER the retained turns (step folding is
+    // untouched by them); the continued run appends below.
+    for summary in &deferred_summaries {
+        push_compaction_summary_block(&mut chat, summary);
+    }
     // Full transcript token count for ctx% (system prompt added at render).
     chat.context_used = estimate_messages_for_display(messages) as u64;
     // Compaction truncates the message list, so the usage sum above can only
@@ -643,11 +662,19 @@ pub fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
         agent: sanitize_single_line(agent_name).into_owned(),
         ..Default::default()
     };
+    let mut deferred_summaries: Vec<String> = Vec::new();
     for msg in messages {
+        if let Some(summary) = compaction_summary_of(msg) {
+            deferred_summaries.push(summary);
+            continue;
+        }
         replay_one(&mut chat, msg, &empty);
     }
     // Same fold as `replay_into_chat` — one shared step-shape guarantee.
     coalesce_steps(&mut chat.blocks);
+    for summary in &deferred_summaries {
+        push_compaction_summary_block(&mut chat, summary);
+    }
     chat.context_used = estimate_messages_for_display(messages) as u64;
     chat
 }

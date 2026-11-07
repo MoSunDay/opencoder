@@ -2,7 +2,7 @@
 //! and handoff/skill field persistence.
 
 use crate::common::{conv, fresh, make_session};
-use opencoder_store::{SessionFilter, SessionMeta, SessionPatch, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionFilter, SessionMeta, SessionPatch, Store};
 
 #[tokio::test]
 async fn create_get_update_delete_session_contract() {
@@ -128,7 +128,7 @@ async fn clear_other_sessions_keeps_current_and_cascades() {
         .collect();
     assert_eq!(remaining, vec!["keep".to_string()]);
 
-    // FK ON DELETE CASCADE removed the child message rows too.
+    // The session delete cascade removed the child message rows too.
     assert!(
         store.load_messages("old-a").await.unwrap().is_empty(),
         "old-a messages must cascade-delete"
@@ -158,7 +158,7 @@ async fn clear_other_sessions_keeps_current_and_cascades() {
 
 #[tokio::test]
 async fn session_handoff_and_skill_fields_round_trip() {
-    let store = TursoStore::open_memory().await.unwrap();
+    let store = RdbStore::open_memory().await.unwrap();
     let id = "rt-session";
     store
         .create_session(&SessionMeta {

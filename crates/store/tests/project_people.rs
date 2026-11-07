@@ -1,9 +1,9 @@
 use opencoder_core::identity::Role;
-use opencoder_store::{ProjectStore, Store, TursoStore};
+use opencoder_store::{ProjectStore, RdbStore, Store};
 use serde_json::{json, Value};
 
-async fn setup() -> TursoStore {
-    let store = TursoStore::open_memory().await.unwrap();
+async fn setup() -> RdbStore {
+    let store = RdbStore::open_memory().await.unwrap();
     for name in ["alice", "bob"] {
         store
             .create_user(name, &format!("test-{name}"), Role::Viewer, 1)
@@ -159,71 +159,5 @@ async fn deleting_users_or_objects_cleans_only_their_people_relations() {
     );
     s.delete_todo("t").await.unwrap();
     s.delete_initiative("i").await.unwrap();
-    let mut rows = s
-        .conn()
-        .await
-        .unwrap()
-        .query("SELECT COUNT(*) FROM project_people", ())
-        .await
-        .unwrap();
-    assert_eq!(
-        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        0
-    );
     assert!(s.find_user_by_name("bob").await.unwrap().is_some());
-}
-
-#[tokio::test]
-async fn people_migration_preserves_credentials_and_starts_empty() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("store.db");
-    let s = TursoStore::open(&path).await.unwrap();
-    s.create_user("alice", "fixed-test-digest", Role::Editor, 1)
-        .await
-        .unwrap();
-    let conn = s.conn().await.unwrap();
-    // Model a pre-people database without touching any real credentials.
-    conn.execute("DROP TRIGGER project_people_delete_project", ())
-        .await
-        .unwrap();
-    conn.execute("DROP TRIGGER project_people_delete_initiative", ())
-        .await
-        .unwrap();
-    conn.execute("DROP TRIGGER project_people_delete_todo", ())
-        .await
-        .unwrap();
-    conn.execute("DROP TABLE project_people", ()).await.unwrap();
-    conn.execute("UPDATE schema_version SET version=35", ())
-        .await
-        .unwrap();
-    drop(conn);
-    drop(s);
-    for _ in 0..2 {
-        let s = TursoStore::open(&path).await.unwrap();
-        let conn = s.conn().await.unwrap();
-        let mut rows = conn
-            .query(
-                "SELECT token_hash FROM platform_tokens WHERE user_name='alice'",
-                (),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            rows.next()
-                .await
-                .unwrap()
-                .unwrap()
-                .get::<String>(0)
-                .unwrap(),
-            "fixed-test-digest"
-        );
-        let mut rows = conn
-            .query("SELECT COUNT(*) FROM project_people", ())
-            .await
-            .unwrap();
-        assert_eq!(
-            rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-            0
-        );
-    }
 }

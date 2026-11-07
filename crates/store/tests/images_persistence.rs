@@ -1,17 +1,17 @@
 //! Multimodal input persistence: image data URIs attached to a `SessionInput`
-//! survive admit / pending / claim at the turso layer (the `images_json`
-//! column added in schema v4).
+//! survive admit / pending / claim at the rdb layer (the `images` payload
+//! added in schema v4).
 
-use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
+use opencoder_store::{Delivery, RdbStore, SessionInput, SessionMeta, Store};
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, TursoStore) {
+async fn fresh() -> (TempDir, RdbStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn make_session(store: &TursoStore, id: &str) {
+async fn make_session(store: &RdbStore, id: &str) {
     let now = 1;
     let meta = SessionMeta {
         id: id.to_string(),

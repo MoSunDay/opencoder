@@ -268,7 +268,7 @@ macro_rules! store_contract_1 {
     /// Enqueue a node task bound to an EXISTING session (the console's
     /// "continue this dialog" flow): only the `node_tasks` row is created, the
     /// session row is reused as-is. Errors when the session does not exist so
-    /// the HTTP layer can answer 400 instead of dangling the FK.
+    /// the HTTP layer can answer 400 instead of dangling the reference.
     #[allow(clippy::too_many_arguments)]
     async fn dispatch_node_task_for_session(
         &self,

@@ -1,15 +1,13 @@
-//! Bug #14: `append_messages` persists messages in batches of `BATCH_CHUNK`
-//! (200) per transaction. This is **non-atomic**: if a later batch fails, the
-//! earlier batches remain committed (see the doc comment on `append_many`).
+//! Bug #14 regression home: `append_messages` persists the whole batch in
+//! ONE atomic rdb WriteBatch (see the doc comment on `append_many`).
 //!
-//! These tests verify the documented multi-batch behavior: a payload larger
-//! than one chunk is split across multiple transactions yet still lands
+//! These tests verify the documented batch behavior: a large payload lands
 //! entirely, with strictly increasing sequence numbers and preserved order.
-//! `BATCH_CHUNK` is a store-internal constant (200); we append more than that
-//! to cross the chunk boundary.
+//! We append well past the historical 200-message chunk boundary to keep the
+//! old multi-batch regression covered.
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_store::{SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, Store};
 use tempfile::TempDir;
 
 fn msg(id: &str) -> Message {
@@ -27,9 +25,9 @@ fn msg(id: &str) -> Message {
     }
 }
 
-async fn fresh() -> (TempDir, TursoStore) {
+async fn fresh() -> (TempDir, RdbStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     store
         .create_session(&SessionMeta {
             id: "s1".into(),
@@ -63,7 +61,7 @@ async fn multi_batch_append_persists_all_in_order() {
     assert_eq!(
         loaded.len(),
         250,
-        "all messages persisted across chunk boundary"
+        "all messages persisted in the single batch"
     );
     for (i, m) in loaded.iter().enumerate() {
         assert_eq!(m.id, format!("m{i}"), "order preserved at index {i}");

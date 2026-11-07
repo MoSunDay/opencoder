@@ -5,11 +5,11 @@
 //!   without creating a synthetic one, and refuses unknown sessions.
 
 use opencoder_core::{Message, Role};
-use opencoder_store::{SessionFilter, SessionMeta, Store, TursoStore, TASK_TYPE_NODE};
+use opencoder_store::{RdbStore, SessionFilter, SessionMeta, Store, TASK_TYPE_NODE};
 
-async fn fresh() -> (tempfile::TempDir, TursoStore) {
+async fn fresh() -> (tempfile::TempDir, RdbStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 

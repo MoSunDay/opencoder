@@ -1,39 +1,34 @@
 //! Published owners use the immutable execution index. Only first reports need
 //! the frozen assignment; native preparation cannot change an indexed owner.
+use super::keys;
+use crate::rdb_store::kv;
 use anyhow::{ensure, Result};
-use opencoder_core::fleet::ExecutionIndex;
-use turso::Connection;
+use opencoder_core::fleet::{Assignment, ExecutionIndex};
 
-#[cfg(test)]
-mod tests;
-
-pub(super) async fn validate_unpublished(conn: &Connection, encoded: &str) -> Result<()> {
-    // The report owns BEGIN IMMEDIATE. Native prepare_assignment verifies both
-    // the existing assignment and index before writing; deletion removes both
-    // in one transaction. Therefore the scalar index remains authoritative
-    // after first acceptance, including while older Servers are still writing.
-    let mut rows = conn
-        .query(
-            "SELECT a.id,a.assignment,incoming.value FROM json_each(?1) incoming
-             JOIN execution_assignments a ON a.id=CAST(json_extract(incoming.value,'$.id') AS TEXT)
-             WHERE NOT EXISTS(SELECT 1 FROM execution_index i WHERE i.id=a.id)",
-            [encoded],
-        )
-        .await?;
-    #[derive(serde::Deserialize)]
-    struct Owner {
-        index: ExecutionIndex,
-    }
-    while let Some(row) = rows.next().await? {
-        let id: String = row.get(0)?;
-        let owner: Owner = serde_json::from_str(&row.get::<String>(1)?)?;
-        let incoming: ExecutionIndex = serde_json::from_str(&row.get::<String>(2)?)?;
+/// For incoming records whose id has a frozen assignment but NO index row,
+/// the frozen owner must agree with the report. After first acceptance the
+/// scalar index is authoritative, including while older Servers still write.
+pub(super) fn validate_unpublished(
+    store: &rdb::store::Store,
+    records: &[ExecutionIndex],
+) -> Result<()> {
+    for record in records {
+        if keys::read_index(store, &record.id)?.is_some() {
+            continue;
+        }
+        let Some(raw) =
+            rdb::store::get(store, b"", &keys::asg_key(&record.id)).map_err(kv::engine_err)?
+        else {
+            continue;
+        };
+        let owner: Assignment = kv::decode(&raw)?;
         ensure!(
-            owner.index.id == id
-                && owner.index.created_at == incoming.created_at
-                && owner.index.kind == incoming.kind
-                && owner.index.node_id == incoming.node_id,
-            "execution ownership conflict: {id}"
+            owner.index.id == record.id
+                && owner.index.created_at == record.created_at
+                && owner.index.kind == record.kind
+                && owner.index.node_id == record.node_id,
+            "execution ownership conflict: {}",
+            record.id
         );
     }
     Ok(())

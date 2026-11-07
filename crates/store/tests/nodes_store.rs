@@ -7,28 +7,29 @@
 //! - delete_node_cascades_to_tasks_and_synthetic_sessions: double-FK cascade
 //! - dispatch_creates_synthetic_session_with_task_type_node
 //! - claim_is_fifo_single_active_and_per_node_isolated (+ concurrency:
-//!   8 racing claimers never double-dispatch thanks to BEGIN IMMEDIATE + CAS)
+//!   8 racing claimers never double-dispatch thanks to the write lease +
+//!   one atomic batch per claim)
 //! - status_transition_grid_rejects_illegal_moves: state-machine enforcement,
 //!   terminal freeze, finished_at stamping, node slot release
 //!
-//! These run against a real on-disk turso file (tempdir) so WAL semantics
-//! are exercised truthfully.
+//! These run against a real on-disk rdb database (tempdir) so atomic write
+//! semantics are exercised truthfully.
 
 use std::sync::Arc;
 
-use opencoder_store::{NodeTaskStatus, Store, TursoStore, TASK_TYPE_NODE};
+use opencoder_store::{NodeTaskStatus, RdbStore, Store, TASK_TYPE_NODE};
 use tempfile::TempDir;
 
 const NODE_A: &str = "node-alpha";
 const NODE_B: &str = "node-beta";
 
-async fn fresh() -> (TempDir, TursoStore) {
+async fn fresh() -> (TempDir, RdbStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
-async fn register(store: &TursoStore, name: &str, now_ms: i64) -> opencoder_store::NodeRecord {
+async fn register(store: &RdbStore, name: &str, now_ms: i64) -> opencoder_store::NodeRecord {
     store
         .register_node(name, Some("v1"), Some("/tmp/wd"), None, now_ms)
         .await
@@ -36,7 +37,7 @@ async fn register(store: &TursoStore, name: &str, now_ms: i64) -> opencoder_stor
 }
 
 async fn dispatch(
-    store: &TursoStore,
+    store: &RdbStore,
     task_id: &str,
     session_seq: usize,
     node_id: &str,
@@ -207,13 +208,13 @@ async fn claim_is_fifo_single_active_and_per_node_isolated() {
     assert_eq!(node_a.last_status, "busy");
 }
 
-async fn claim_nothing(store: &TursoStore, node_id: &str) -> bool {
+async fn claim_nothing(store: &RdbStore, node_id: &str) -> bool {
     matches!(store.claim_next_node_task(node_id, 2050).await, Ok(None))
 }
 
 /// 8 concurrent claimers over one node's queue: every task handed out exactly
-/// once, no duplicates — guaranteed by BEGIN IMMEDIATE serialization plus the
-/// `UPDATE ... WHERE status='pending'` CAS.
+/// once, no duplicates — guaranteed by the engine's write-lease serialization
+/// plus the atomic conditional claim batch.
 #[tokio::test]
 async fn concurrent_claims_never_double_dispatch() {
     const CLAIMERS: usize = 8;

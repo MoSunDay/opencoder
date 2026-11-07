@@ -2,21 +2,23 @@
 //! (fleet-wide listing with node/status filters, FIFO order, limit) and
 //! `get_node_task_by_session` (synthetic-session reverse lookup).
 //!
-//! FIFO contract: `created_at ASC, rowid ASC` — the same deterministic drain
-//! order as `claim_next_node_task`, including the same-millisecond `rowid`
-//! tiebreak (ULIDs are NOT monotonic and must never be used to order).
+//! FIFO contract: `created_at ASC`, insertion ordinal ASC — the same
+//! deterministic drain order as `claim_next_node_task`, including the
+//! same-millisecond insertion-ordinal tiebreak (ULIDs are NOT monotonic and
+//! must never be used to order).
 //!
-//! Runs on `open_memory` — these are pure query semantics, no WAL involved.
+//! Runs on `open_memory` — these are pure query semantics, no write
+//! contention involved.
 
 use opencoder_store::{
-    NodeTaskRecord, NodeTaskStatus, SessionMeta, Store, TursoStore, TASK_TYPE_NODE,
+    NodeTaskRecord, NodeTaskStatus, RdbStore, SessionMeta, Store, TASK_TYPE_NODE,
 };
 
-async fn fresh() -> TursoStore {
-    TursoStore::open_memory().await.unwrap()
+async fn fresh() -> RdbStore {
+    RdbStore::open_memory().await.unwrap()
 }
 
-async fn register(store: &TursoStore, name: &str) -> String {
+async fn register(store: &RdbStore, name: &str) -> String {
     store
         .register_node(name, None, None, None, 1_000)
         .await
@@ -24,7 +26,7 @@ async fn register(store: &TursoStore, name: &str) -> String {
         .id
 }
 
-async fn dispatch(store: &TursoStore, id: &str, node: &str, created_at: i64) -> NodeTaskRecord {
+async fn dispatch(store: &RdbStore, id: &str, node: &str, created_at: i64) -> NodeTaskRecord {
     store
         .dispatch_node_task(
             id,

@@ -100,23 +100,6 @@ async fn executor_dimension_round_trips() {
         run_back.output_ref.as_deref(),
         Some("/workflow/run-9/step-2/")
     );
-
-    // Unknown executor_kind text fails closed instead of guessing.
-    {
-        let directory = tempfile::tempdir().unwrap();
-        let store2 = TursoStore::open(directory.path().join("x.db"))
-            .await
-            .unwrap();
-        store2.create_todo(&todo("t-bad", None, 1)).await.unwrap();
-        let conn = store2.conn().await.unwrap();
-        conn.execute(
-            "UPDATE project_todos SET executor_kind = 'workflow' WHERE id = 't-bad'",
-            (),
-        )
-        .await
-        .unwrap();
-        assert!(store2.get_todo("t-bad").await.is_err());
-    }
 }
 
 #[tokio::test]

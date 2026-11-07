@@ -7,12 +7,12 @@
 //! such an orphaned child is still excluded because its `task_type = 'subagent'`.
 
 use opencoder_store::{
-    SessionFilter, SessionMeta, Store, TursoStore, TASK_TYPE_NODE, TASK_TYPE_PARENT,
+    RdbStore, SessionFilter, SessionMeta, Store, TASK_TYPE_NODE, TASK_TYPE_PARENT,
     TASK_TYPE_SUBAGENT,
 };
 
-async fn mem() -> TursoStore {
-    TursoStore::open_memory().await.unwrap()
+async fn mem() -> RdbStore {
+    RdbStore::open_memory().await.unwrap()
 }
 
 fn meta(id: &str, task_type: Option<&str>) -> SessionMeta {

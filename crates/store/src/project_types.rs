@@ -409,29 +409,6 @@ pub struct ProjectTodoRunPatch {
     pub finished_at: Option<i64>,
 }
 
-/// Bound the combined page, including fields individually below the chunk limit.
-pub(crate) fn project_run_page(
-    mut runs: Vec<ProjectTodoRunSummary>,
-    limit: usize,
-) -> anyhow::Result<ProjectTodoRunPage> {
-    let mut bytes = 0usize;
-    let mut count = 0;
-    for run in runs.iter().take(limit) {
-        let size = serde_json::to_vec(run)?.len();
-        if bytes + size > 512 * 1024 && count > 0 {
-            break;
-        }
-        bytes += size;
-        count += 1;
-    }
-    let more = runs.len() > count;
-    runs.truncate(count);
-    Ok(ProjectTodoRunPage {
-        next_version: more.then(|| runs.last().unwrap().version),
-        runs,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

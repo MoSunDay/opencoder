@@ -12,13 +12,12 @@ pub const TEAM_RUN_FINISHED: &str = "finished";
 /// and flips to `finished` (per-row upsert or topic-wide `finish`), while
 /// `created_at` is frozen at first insert so a refresh never restarts the
 /// run's clock. Pure data: the team runtime lives above the Store, which
-/// only persists it (see `rdb_store/execution/team_runs.rs`).
+/// only persists it (see `turso_store/team_runs.rs`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamTopicRunRecord {
     /// ULID of the team topic (one fan-out unit).
     pub topic_id: String,
-    /// `nodes.id` of the worker this row is paired with (cascades on node
-    /// delete).
+    /// `nodes.id` of the worker this row is paired with (FK, cascade).
     pub node_id: String,
     /// [`TEAM_RUN_EXECUTING`] | [`TEAM_RUN_FINISHED`].
     pub status: String,

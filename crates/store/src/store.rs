@@ -16,11 +16,11 @@ use crate::{
     TodoItemRecord, TodoWorkflowDetail, TodoWorkflowRecord, TodoWorkflowSummary,
 };
 
-/// Storage abstraction — the single seam that isolates upper layers from the
-/// concrete engine (currently RocksDB via `rdb_store`).
+/// Storage abstraction — the single seam that lets us swap turso for another
+/// Rust SQLite implementation later without touching upper layers.
 ///
-/// Upper-layer code depends on `Arc<dyn Store>`; the concrete impl lives in
-/// `rdb_store`.
+/// Upper-layer code depends on `Arc<dyn Store>`; concrete impls live in
+/// `turso_store` (primary) and any future backend.
 // Rust traits and trait implementations cannot be split into partial items.
 // Assemble method groups first so async_trait sees one complete declaration.
 macro_rules! store_contract_finish {
@@ -34,5 +34,4 @@ macro_rules! store_contract_finish {
 include!("store/contract/part_3.rs");
 include!("store/contract/part_2.rs");
 include!("store/contract/part_1.rs");
-include!("store/contract/part_4.rs");
 store_contract_0! {}

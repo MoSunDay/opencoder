@@ -1,29 +1,28 @@
 //! Durable global registry for tmux-owned sessions.
 //!
-//! All ts commands read one central index, `<data_root>/ts.db.rdb`
-//! (`TsRegistry`), instead of scanning every per-workdir store. The first
-//! open performs a one-time bootstrap: every rdb store under the data root
-//! is scanned and its `model IS NULL` sessions (the durable ts marker rows
-//! written before the central registry existed) are imported. The import is
-//! idempotent (an idempotent row upsert plus a trailing `migrated=1` meta
-//! marker), so a crash mid-way simply restarts on the next command. Only
-//! RocksDB store directories are scanned; plain files are never opened.
+//! All ts commands read one central index, `<data_root>/ts.db` (`TsRegistry`),
+//! instead of scanning every per-workdir store. The first open performs a
+//! one-time migration: every legacy store under the data root is scanned and
+//! its `model IS NULL` sessions (the old durable ts marker) are imported.
+//! Migration is idempotent (`INSERT OR REPLACE` + a trailing `migrated=1`
+//! meta marker), so a crash mid-way simply restarts on the next command.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use opencoder_store::{RdbStore, SessionFilter, SessionListItem, Store, TsRecord, TsRegistry};
+use opencoder_store::{SessionFilter, SessionListItem, Store, TsRecord, TsRegistry, TursoStore};
 
 const STORE_PAGE_SIZE: u32 = 500;
+const WORKDIR_MARKER: &str = "workdir";
 
-/// Open the central registry, running the one-time bootstrap import when the
+/// Open the central registry, running the one-time legacy migration when the
 /// `migrated` meta marker is absent.
 pub(crate) async fn open_registry() -> Result<TsRegistry> {
     let root = opencoder_core::data_root();
     let path = root.join("ts.db");
     let registry = TsRegistry::open(&path).await?;
     if !registry.is_migrated().await? {
-        import_pre_registry_markers(&registry, &root).await?;
+        migrate_legacy(&registry, &root).await?;
         registry.mark_migrated().await?;
     }
     Ok(registry)
@@ -50,9 +49,9 @@ pub(crate) async fn register(registry: &TsRegistry, id: &str, workdir: &Path) ->
         .await
 }
 
-/// One-time import of per-store ts sessions. Idempotent: re-running after a
-/// crash re-imports the same rows and later upserts converge duplicate ids.
-async fn import_pre_registry_markers(registry: &TsRegistry, root: &Path) -> Result<()> {
+/// One-time import of legacy per-store sessions. Idempotent: re-running after
+/// a crash re-imports the same rows and later upserts converge duplicate ids.
+async fn migrate_legacy(registry: &TsRegistry, root: &Path) -> Result<()> {
     for stored in scan(root, true).await? {
         if stored.item.model.is_some() {
             continue; // plain tui/run session — never ts-owned
@@ -60,7 +59,7 @@ async fn import_pre_registry_markers(registry: &TsRegistry, root: &Path) -> Resu
         registry
             .upsert(&TsRecord {
                 id: stored.item.id,
-                workdir: None,
+                workdir: stored.workdir,
                 store_dir: Some(stored.store_dir),
                 created_at: stored.item.created_at,
                 updated_at: stored.item.updated_at,
@@ -72,14 +71,10 @@ async fn import_pre_registry_markers(registry: &TsRegistry, root: &Path) -> Resu
     Ok(())
 }
 
-/// Scan every per-workdir store under `root`. A child counts as a store
-/// when the canonical session-store path policy resolves to a RocksDB
-/// *directory* (`opencoder.db.rdb`). A plain `opencoder.db` file is never
-/// opened as a store (RocksDB needs a directory); such children are skipped —
-/// this migration step does
-/// not import SQLite content. `strict` controls whether an unreadable store
-/// aborts the scan (migration wants strict; the old display path tolerated
-/// bad stores).
+/// Scan every per-workdir store under `root` for legacy migration. A child
+/// counts as a store only if it is a directory containing `opencoder.db`.
+/// `strict` controls whether an unreadable store aborts the scan (migration
+/// wants strict; the old display path tolerated bad stores).
 async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
     let mut rd = match tokio::fs::read_dir(root).await {
         Ok(rd) => rd,
@@ -91,11 +86,8 @@ async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
     let mut out = Vec::new();
     while let Some(entry) = rd.next_entry().await? {
         let store_dir = entry.path();
-        if !store_dir.is_dir() {
-            continue;
-        }
-        let db = opencoder_core::session_store_rdb_dir(&store_dir);
-        if !db.is_dir() {
+        let db = store_dir.join("opencoder.db");
+        if !store_dir.is_dir() || !db.is_file() {
             continue;
         }
         let loaded = load_store(&store_dir, &db).await;
@@ -111,21 +103,31 @@ async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
 }
 
 async fn load_store(store_dir: &Path, db: &Path) -> Result<Vec<StoredSession>> {
-    let store = RdbStore::open(db)
+    let store = TursoStore::open(db)
         .await
         .with_context(|| format!("open session store: {}", db.display()))?;
+    let workdir = read_workdir(store_dir).await;
     Ok(list_all_sessions(&store)
         .await
         .with_context(|| format!("list sessions: {}", db.display()))?
         .into_iter()
         .map(|item| StoredSession {
             store_dir: store_dir.to_path_buf(),
+            workdir: workdir.clone(),
             item,
         })
         .collect())
 }
 
-async fn list_all_sessions(store: &RdbStore) -> Result<Vec<SessionListItem>> {
+/// Legacy per-store `workdir` marker reader (migration only; new registrations
+/// live in the registry and never write markers).
+async fn read_workdir(store_dir: &Path) -> Option<PathBuf> {
+    let bytes = tokio::fs::read(store_dir.join(WORKDIR_MARKER)).await.ok()?;
+    let path = PathBuf::from(String::from_utf8(bytes).ok()?);
+    path.is_absolute().then_some(path)
+}
+
+async fn list_all_sessions(store: &TursoStore) -> Result<Vec<SessionListItem>> {
     let mut out = Vec::new();
     let mut cursor = None;
     loop {
@@ -150,6 +152,7 @@ async fn list_all_sessions(store: &RdbStore) -> Result<Vec<SessionListItem>> {
 #[derive(Debug, Clone)]
 struct StoredSession {
     store_dir: PathBuf,
+    workdir: Option<PathBuf>,
     item: SessionListItem,
 }
 
@@ -214,109 +217,79 @@ mod tests {
     async fn migration_imports_ts_owned_sessions_only() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        // Store A: ts-owned session (model NULL).
+        let workdir_a = tmp.path().join("workdirA");
+        tokio::fs::create_dir_all(&workdir_a).await.unwrap();
+
+        // Store A: ts-owned session (model NULL) + legacy workdir marker.
         let h1 = root.join("aaaa");
         tokio::fs::create_dir_all(&h1).await.unwrap();
         {
-            let store = RdbStore::open(opencoder_core::session_store_rdb_dir(&h1))
-                .await
-                .unwrap();
+            let store = TursoStore::open(h1.join("opencoder.db")).await.unwrap();
             store.create_session(&meta("TSA1", None, 1)).await.unwrap();
             store
                 .create_session(&meta("PLAIN1", Some("m"), 2))
                 .await
                 .unwrap();
         }
-        // Store B: another ts-owned session.
+        tokio::fs::write(h1.join("workdir"), workdir_a.to_string_lossy().as_bytes())
+            .await
+            .unwrap();
+
+        // Store B: ts-owned session but no marker -> workdir stays None.
         let h2 = root.join("bbbb");
         tokio::fs::create_dir_all(&h2).await.unwrap();
         {
-            let store = RdbStore::open(opencoder_core::session_store_rdb_dir(&h2))
-                .await
-                .unwrap();
+            let store = TursoStore::open(h2.join("opencoder.db")).await.unwrap();
             store.create_session(&meta("TSB1", None, 3)).await.unwrap();
         }
 
-        // A directory without a store, a plain file, and a directory whose
-        // only store candidate is a plain FILE: all skipped — a plain file
-        // is never opened as an rdb store.
+        // A directory without a db file and a plain file: both skipped.
         tokio::fs::create_dir_all(root.join("cccc")).await.unwrap();
         tokio::fs::write(root.join("not-a-store"), "x")
             .await
             .unwrap();
-        let plain = root.join("dddd");
-        tokio::fs::create_dir_all(&plain).await.unwrap();
-        tokio::fs::write(plain.join("opencoder.db"), b"plain sqlite bytes")
-            .await
-            .unwrap();
 
         let registry = TsRegistry::open_memory().await.unwrap();
-        import_pre_registry_markers(&registry, root).await.unwrap();
+        migrate_legacy(&registry, root).await.unwrap();
 
         let rows = registry.list().await.unwrap();
         assert_eq!(rows.len(), 2, "TSA1 + TSB1 imported; PLAIN1 skipped");
         let a = registry.get("TSA1").await.unwrap().expect("ts session");
-        assert_eq!(a.workdir, None, "scan imports carry no workdir");
+        assert_eq!(
+            a.workdir.as_deref(),
+            Some(workdir_a.as_path()),
+            "marker read"
+        );
         assert_eq!(a.store_dir.as_deref(), Some(h1.as_path()));
         let b = registry.get("TSB1").await.unwrap().expect("ts session");
-        assert_eq!(b.workdir, None);
+        assert_eq!(b.workdir, None, "missing marker keeps (unknown) semantics");
         assert_eq!(b.store_dir.as_deref(), Some(h2.as_path()));
         assert!(registry.get("PLAIN1").await.unwrap().is_none());
     }
 
     #[tokio::test]
-    async fn bootstrap_import_is_idempotent_and_crash_safe() {
+    async fn migration_is_idempotent_and_crash_safe() {
         let tmp = tempfile::tempdir().unwrap();
         let h1 = tmp.path().join("aaaa");
         tokio::fs::create_dir_all(&h1).await.unwrap();
-        let store = RdbStore::open(opencoder_core::session_store_rdb_dir(&h1))
-            .await
-            .unwrap();
+        let store = TursoStore::open(h1.join("opencoder.db")).await.unwrap();
         store.create_session(&meta("TSA1", None, 1)).await.unwrap();
         drop(store);
 
         let registry = TsRegistry::open_memory().await.unwrap();
-        import_pre_registry_markers(&registry, tmp.path())
-            .await
-            .unwrap();
+        migrate_legacy(&registry, tmp.path()).await.unwrap();
         // A crash between scan and mark_migrated re-runs the whole import;
-        // the idempotent row upsert keeps it duplicate-free.
-        import_pre_registry_markers(&registry, tmp.path())
-            .await
-            .unwrap();
+        // INSERT OR REPLACE keeps it idempotent.
+        migrate_legacy(&registry, tmp.path()).await.unwrap();
         assert_eq!(registry.list().await.unwrap().len(), 1, "no duplicates");
         registry.mark_migrated().await.unwrap();
-        import_pre_registry_markers(&registry, tmp.path())
-            .await
-            .unwrap();
+        migrate_legacy(&registry, tmp.path()).await.unwrap();
         assert_eq!(registry.list().await.unwrap().len(), 1);
-    }
-
-    /// A store dir holding only a plain `opencoder.db` file is distinguished
-    /// from rdb store directories and never opened — the file must survive
-    /// the scan byte-for-byte.
-    #[tokio::test]
-    async fn scan_never_opens_a_plain_file_stem() {
-        let tmp = tempfile::tempdir().unwrap();
-        let h1 = tmp.path().join("aaaa");
-        tokio::fs::create_dir_all(&h1).await.unwrap();
-        tokio::fs::write(h1.join("opencoder.db"), b"plain sqlite bytes")
-            .await
-            .unwrap();
-
-        let scanned = scan(tmp.path(), true).await.unwrap();
-        assert!(scanned.is_empty(), "a plain file is not a store");
-        let bytes = tokio::fs::read(h1.join("opencoder.db")).await.unwrap();
-        assert_eq!(bytes, b"plain sqlite bytes", "file untouched");
-        assert!(
-            !h1.join("opencoder.db.rdb").exists(),
-            "scan must not create an rdb store beside the plain file"
-        );
     }
 
     #[tokio::test]
     async fn list_all_sessions_paginates_past_store_limit() {
-        let store = RdbStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         for n in 0..=STORE_PAGE_SIZE {
             let mut session = meta(&format!("PAGE{n:04}"), None, i64::from(n));
             session.updated_at = 10_000;

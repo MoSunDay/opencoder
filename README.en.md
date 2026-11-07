@@ -40,19 +40,19 @@
 
 ---
 
-OpenCoder is a fully independent, Rust-native coding agent implemented from scratch. It ships a single binary `opencoder` that offers **four working modes**: an **interactive TUI**, **headless one-shot execution**, a **centralized HTTP/SSE server**, and a **remote thin client**. All upper-layer logic depends on only two abstraction seams — `Arc<dyn Store>` and `Arc<dyn ChatStream>` — so both the persistence layer (RocksDB, `rdb`) and the LLM backend (OpenAI-compatible) are swappable.
+OpenCoder is a fully independent, Rust-native coding agent implemented from scratch. It ships a single binary `opencoder` that offers **four working modes**: an **interactive TUI**, **headless one-shot execution**, a **centralized HTTP/SSE server**, and a **remote thin client**. All upper-layer logic depends on only two abstraction seams — `Arc<dyn Store>` and `Arc<dyn ChatStream>` — so both the persistence layer (Turso) and the LLM backend (OpenAI-compatible) are swappable.
 
 ## ✨ Features
 
 - **🧠 Multi-mode runtime** — Local TUI and headless `run` share the session runtime; dedicated `opencoder-server` and `opencoder-agent` binaries provide Fleet control and node execution.
-- **🔄 Session resume & fork** — `--session <id>` / `--continue` / `--fork` rebuild history from the local `rdb` store across processes; titles are generated asynchronously by the small model.
+- **🔄 Session resume & fork** — `--session <id>` / `--continue` / `--fork` rebuild history from Turso across processes; titles are generated asynchronously by the small model.
 - **📦 Session binary export/import** — `session export/import` carries the full subagent tree in a `.opencoder` binary (`OPENCODR` magic) for migration; idempotent and never exports Config (API key safe).
 - **🛠️ Subagent scheduling** — two subagent kinds, `explore` (read-only investigation) and `build` (implementation execution), with DB-tracked lifecycles and collapsible views.
 - **📋 Plan / Act dual mode** — Plan mode is read-only (bash writes are blocked by `bash_guard`); switching to Act clears the context and keeps only the final plan.
 - **🗜️ Auto-compaction** — token-estimate-driven context compression; `compaction.{auto,context_threshold,reserved,tail_turns,buffer}` is fully configurable.
 - **🎮 Steer / follow-up two-phase delivery** — inject steer instantly at turn boundaries while running; consume exactly one queued follow-up when idle.
 - **🌐 Lossless event replay** — SSE event schema v2 migration; `SessionEvent` is the single source of truth, and replay fully rebuilds tool blocks.
-- **⚡ High performance** — cold start ~9 ms; storage commits through atomic write batches (`WriteBatch`); rdb single-shot measured: append 1000 msgs 5.6 ms (0.006 ms/msg), load 1000 msgs 1.7 ms, list 200 sessions 4.1 ms, threshold contracts in [store_perf.rs](crates/store/tests/store_perf.rs); binary ~42 MB (thin-LTO + strip, RocksDB statically linked).
+- **⚡ High performance** — cold start ~6 ms, binary 9.3 MB (thin-LTO + strip); Turso WAL concurrent read/write, appending 1k messages in 30 ms.
 
 ## 🚀 Quick Start
 
@@ -131,7 +131,7 @@ OpenCoder is a Cargo workspace with layered dependencies. Its main crates includ
 | --- | --- |
 | `core` | Shared types and `Config` (model / compaction / context window / small_model, all configurable) |
 | `llm` | OpenAI-compatible streaming client + `ChatStream` trait + `MockChatClient` + token estimator |
-| `store` | `Store` trait + RocksDB (`rdb`) implementation (embedded, atomic write batches, single-owner write lease), the sole outlet for all persistence |
+| `store` | `Store` trait + Turso implementation (pure-Rust SQLite-compatible, WAL, embedded), the sole outlet for all persistence |
 | `session` | Runtime core: drain main loop, tool registration, subagent scheduling, plan bash guard, compaction, resume |
 | `tui` | ratatui interactive UI (3-pane layout, subagent folding, steer/follow-up, plan/act switch) |
 | `web` | axum HTTP + SSE session management (prompt admit / event stream / runtime switch / interrupt) |
@@ -142,7 +142,7 @@ OpenCoder is a Cargo workspace with layered dependencies. Its main crates includ
 
 **Key abstractions:**
 
-- **`Store` trait** (`crates/store/src/store.rs`) — unified CRUD for sessions / messages / inputs / events / subagent_tasks; the only seam for swapping storage backends.
+- **`Store` trait** (`crates/store/src/store.rs`) — unified CRUD for sessions / messages / inputs / events / subagent_tasks; the only seam for swapping SQLite implementations.
 - **`ChatStream` trait** (`crates/llm/src/stream.rs`) — implemented by both `ChatClient` (real) and `MockChatClient`, enabling zero-token deterministic testing of the session runtime.
 - **drain semantics** (`crates/session/src/runner.rs::run_loop`) — promotes steer at every turn boundary; when idle it consumes exactly one queued item; a doom-loop guard (`DOOM_THRESHOLD=20`) breaks consecutive empty turns.
 
@@ -172,13 +172,14 @@ Global options:
 
 | Metric | Measured | Target |
 | --- | --- | --- |
-| Cold start (`--help`, 5 samples) | **~9 ms** | < 50 ms |
-| Binary size | **~42 MB** (41,662,904 B, thin-LTO + strip, RocksDB statically linked) | — |
-| Append 1000 messages (WriteBatch) | 5.6 ms → **0.006 ms/msg** | < 2 ms/msg |
-| Load 1000 messages | **1.7 ms** | < 50 ms |
-| List 200 sessions | **4.1 ms** | < 100 ms |
+| Cold start (`--help`) | **~6 ms** | < 50 ms |
+| Binary size | **9.3 MB** | — |
+| Append 1000 messages (transaction) | 30.5 ms → **0.031 ms/msg** | < 2 ms/msg |
+| Load 1000 messages | **2.4 ms** | < 50 ms |
+| List 200 sessions | **0.95 ms** | < 100 ms |
+| Full deterministic test suite | **~3 s / 1076 tests** | — |
 
-Threshold-contract tests live in [`store_perf.rs`](crates/store/tests/store_perf.rs) (run with `--release` for the measured figures); cold start is a 5-sample `--help` timing.
+See [`docs/perf.md`](docs/perf.md) for details.
 
 ## 📊 Comparison with opencode
 
@@ -196,25 +197,25 @@ OpenCoder and [sst/opencode](https://github.com/sst/opencode) (a TypeScript / No
 | Cold-start time | **~0.78 s** | **~6 ms** | opencode is **~125×** slower |
 | Cold-start token overhead | **~13k tok** | **~0.4k tok** | opencode **~32×** higher |
 | Protocol | OpenAI-compatible + ACP + MCP | OpenAI-compatible + subagents (explore/build) | — |
-| Session storage | SQLite (WAL) + Drizzle ORM | RocksDB (`rdb`) + hand-written `Store` trait | Different storage models; see [storage comparison](#-storage) below |
+| Session storage | SQLite (WAL) + Drizzle ORM | Turso (pure-Rust SQLite-compatible, WAL) + hand-written `Store` trait | Both SQLite-family; see [storage comparison](#-storage) below |
 
 > **Cold-start token overhead** methodology: take each agent's first request body sent to the LLM, count tokens in the `system` message + the `tools` array (the fixed first-turn cost, incurred before any user input) with the `cl100k_base` BPE. Measured independently from the other `--help` runtime-baseline rows above. This is a fixed cost re-paid on every conversation turn.
 
 ### 🗄️ Storage
 
-The storage models differ: opencode embeds a single SQLite file (WAL mode), while OpenCoder's main store is a RocksDB (`rdb`) directory:
+Both are **SQLite under the hood**, persisting as standard `.db` + `.db-wal` + `.db-shm` (WAL mode); the differences are at the driver layer and table model:
 
 | Dimension | opencode `1.17.8` | opencoder `0.1.0` |
 | --- | --- | --- |
-| Database | SQLite (embedded in bun) | RocksDB (`rdb`, embedded local directory) |
-| On-disk shape | `opencode.db` + `.db-wal` + `.db-shm` single-file family | `<stem>.rdb` directory (e.g. `opencode.db.rdb`) with LSM-level files |
-| Write model | WAL transactions (`journal_mode=WAL` and other PRAGMAs) | One atomic `WriteBatch` commit per mutation; a failure leaves no half-written batch |
-| Concurrency model | Many readers / one writer (WAL) | Single owner / write lease (shared handle in-process + cross-process `.owner.lock`) + snapshot reads |
-| Access layer | Drizzle ORM (JS, runtime migrations via `migration` table) | KV data model + `Store` trait (`crates/store/src/store.rs`) |
-| Migration | Drizzle migration (runtime diff against `migration` table + `meta/_journal.json`) | Versioned KV key families |
-| DB file naming | `opencode.db` (varies by channel, e.g. `opencode-dev.db`) | `<data_dir>/<stem>.rdb` (one directory per workdir) |
+| Database | SQLite (embedded in bun) | Turso `0.8.3` (pure-Rust SQLite-compatible engine) |
+| Access layer | Drizzle ORM (JS, runtime migrations via `migration` table) | Hand-written SQL + `Store` trait (`crates/store/src/store.rs`) |
+| Driver language | JS/V8 ↔ SQLite C ABI | Pure Rust, in-process (no C ABI, no FFI) |
+| WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL` (same concurrency model) |
+| Tables (core) | `session` / `message` / `step` / `agent` / `tool_use` / `snapshot` / `checkpoint` / `event` / `subagent` | `sessions` / `messages` / `session_inputs` / `session_events` / `subagent_tasks` / `schema_version` |
+| Migration | Drizzle migration (runtime diff against `migration` table + `meta/_journal.json`) | Single `schema_version` value + idempotent `CREATE TABLE IF NOT EXISTS` |
+| DB file naming | `opencode.db` (varies by channel, e.g. `opencode-dev.db`) | Determined by workdir (one DB per workdir) |
 
-> Ontology uses an independent SQLite backend and does not follow the main store's move to `rdb`.
+> Both share an equivalent WAL concurrency model (many readers / one writer; reads never block writes). Storage throughput differences mainly come from the driver layer — opencode goes through Drizzle ORM + V8 cross-language hops, while opencoder runs the pure-Rust database engine in-process with no ORM translation layer.
 
 > Note: end-to-end task performance is LLM-dominated (first-token latency is the provider RTT); under the same model both projects are essentially neck-and-neck in actual task throughput. The comparison above isolates the **runtime baseline** — the cost the runtime itself imposes regardless of the LLM.
 
@@ -242,7 +243,7 @@ opencoder/
 ├── crates/
 │   ├── core/      # Shared types & Config
 │   ├── llm/       # LLM client + ChatStream trait
-│   ├── store/     # Store trait + RocksDB (`rdb`) implementation
+│   ├── store/     # Store trait + Turso implementation
 │   ├── session/   # Session runtime core
 │   ├── tui/       # ratatui interactive UI
 │   ├── web/       # axum HTTP + SSE

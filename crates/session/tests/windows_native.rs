@@ -127,11 +127,10 @@ async fn cancelling_shell_and_natural_exit_stop_all_descendants() {
     for suffix in ["; Start-Sleep 60", ""] {
         let script = format!("$p = Start-Process pwsh -ArgumentList '-NoLogo','-NoProfile','-NonInteractive','-Command','Start-Sleep 60' -PassThru -WindowStyle Hidden; Set-Content child.txt $p.Id{suffix}");
         let context = context(root.path());
-        let task = tokio::spawn(async move {
-            ShellTool::default()
-                .execute(json!({"command":script}), &context)
-                .await
-        });
+        let task =
+            tokio::spawn(
+                async move { ShellTool::default().execute(json!({"command":script}), &context).await },
+            );
         let pid = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if let Ok(value) = std::fs::read_to_string(root.path().join("child.txt")) {
@@ -176,8 +175,8 @@ async fn native_codex_streams_and_resumes_the_persisted_thread() {
     configure();
     let root = tempfile::tempdir().unwrap();
     let _home = opencoder_core::scoped_config_home(root.path().join("config-home"));
-    use opencoder_store::{RdbStore, Store};
-    let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
+    use opencoder_store::{Store, TursoStore};
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let config = Config::default();
     let mut session = SessionState::new(
         "windows-codex",

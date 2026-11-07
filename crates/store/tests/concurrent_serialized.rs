@@ -7,7 +7,7 @@
 //!
 //! This test fires 16 concurrent tasks that each interleave `append_events`
 //! (which opens a transaction), `append_message`, and `claim_next_queue`
-//! (IMMEDIATE transaction) against a single shared `RdbStore`. With the
+//! (IMMEDIATE transaction) against a single shared `TursoStore`. With the
 //! writer lane in place, zero operations should error and all
 //! data must be present and correct afterwards.
 
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use opencoder_core::Message;
 use opencoder_store::{
-    Delivery, EventKind, RdbStore, SessionEventRecord, SessionInput, SessionMeta, Store,
+    Delivery, EventKind, SessionEventRecord, SessionInput, SessionMeta, Store, TursoStore,
 };
 use tempfile::TempDir;
 
@@ -45,7 +45,7 @@ fn meta_for(id: &str) -> SessionMeta {
 async fn concurrent_store_ops_serialized() {
     let dir = TempDir::new().unwrap();
     let store = Arc::new(
-        RdbStore::open(dir.path().join("serialized.db"))
+        TursoStore::open(dir.path().join("serialized.db"))
             .await
             .unwrap(),
     );

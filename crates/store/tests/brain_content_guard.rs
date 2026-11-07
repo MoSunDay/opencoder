@@ -1,11 +1,11 @@
 use opencoder_store::{
-    BrainCapabilityRecord, BrainContentConflict, BrainEngInputRecord, BrainVectorWrite, RdbStore,
-    Store,
+    BrainCapabilityRecord, BrainContentConflict, BrainEngInputRecord, BrainVectorWrite, Store,
+    TursoStore,
 };
 
 #[tokio::test]
 async fn stale_content_cannot_replace_examples_or_vector_even_with_same_timestamp() {
-    let store = RdbStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     let mut record = BrainCapabilityRecord {
         id: "cap".into(),
         capability_type: "tool".into(),

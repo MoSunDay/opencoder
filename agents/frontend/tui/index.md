@@ -8,7 +8,6 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 
 - `src/app.rs`、`src/app_loop.rs` — App 状态与主事件循环
 - [app_bootstrap.rs](../../../crates/tui/src/app_bootstrap.rs) — 恢复运行态或远端绑定
-- [app_helpers.rs](../../../crates/tui/src/app_helpers.rs) — 启动辅助集合；会话库经 `opencoder-local` 的共享序列打开（规范 `.rdb` 路径），前端不再各自拼接存储路径
 - [app_task.rs](../../../crates/tui/src/app_task.rs) — 独立任务管理与本地新任务运行设置
 - [worker.rs](../../../crates/tui/src/worker.rs) — 分派 Server 或本地会话 actor，
   桥接 `SessionEvent` 到聊天渲染

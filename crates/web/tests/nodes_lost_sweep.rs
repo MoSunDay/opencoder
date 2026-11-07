@@ -5,8 +5,9 @@
 //! persisted + fanned out on the NodeHub), node busy bit released, so a live
 //! worker (or this test playing one) can claim again with zero code changes.
 //!
-//! The stale heartbeat is backfilled through the public `heartbeat_node`
-//! contract with an old timestamp, so the sweep sees an aged row.
+//! The stale heartbeat is backfilled through a SECOND connection to a
+//! file-backed db (`TursoStore::conn()` clones share the same underlying
+//! database) because in-memory dbs cannot be reached cross-connection.
 //! Server harness mirrors `node_e2e_support::spawn_server`, reusing its HTTP /
 //! SSE helpers against the SAME signature token.
 
@@ -17,7 +18,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use opencoder_llm::MockChatClient;
-use opencoder_store::{RdbStore, Store};
+use opencoder_store::{Store, TursoStore};
+use turso::params;
 
 use node_e2e_support::{collect_until, get_json, open_sse, post_json, wait_for, TOKEN};
 
@@ -28,6 +30,8 @@ const AGE_MS: i64 = 4 * opencoder_web::nodes_state::STALE_AFTER_MS;
 struct Srv {
     base: String,
     store: Arc<dyn Store>,
+    /// Second connection into the SAME file-backed database (backfill path).
+    raw: turso::Connection,
     shutdown: tokio::sync::watch::Sender<bool>,
     _dir: tempfile::TempDir,
 }
@@ -38,11 +42,13 @@ impl Drop for Srv {
     }
 }
 
-/// `node_e2e_support::spawn_server`, but backed by an on-disk database so the
-/// test exercises the durable (file-backed) path.
+/// `node_e2e_support::spawn_server`, but backed by an on-disk turso file so
+/// the test can reach the rows from a second connection.
 async fn spawn_file_server() -> Srv {
     let dir = tempfile::tempdir().unwrap();
-    let ls = RdbStore::open(dir.path().join("sweep.db")).await.unwrap();
+    let ls = TursoStore::open(dir.path().join("sweep.db")).await.unwrap();
+    let raw = ls.conn().await.unwrap();
+    let _ = raw.busy_timeout(Duration::from_secs(5));
     let store: Arc<dyn Store> = Arc::new(ls);
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
@@ -74,6 +80,7 @@ async fn spawn_file_server() -> Srv {
     Srv {
         base: format!("http://{addr}"),
         store,
+        raw,
         shutdown: tx,
         _dir: dir,
     }
@@ -119,8 +126,14 @@ fn serial(name: &str) -> serde_json::Value {
     serde_json::json!({ "name": name })
 }
 
-async fn backfill_last_seen(srv: &Srv, node_id: &str, ts: i64) {
-    srv.store.heartbeat_node(node_id, ts).await.unwrap();
+async fn backfill_last_seen(srv: &Srv, name: &str, ts: i64) {
+    srv.raw
+        .execute(
+            "UPDATE nodes SET last_seen_at = ?1 WHERE name = ?2",
+            params![ts, name],
+        )
+        .await
+        .unwrap();
 }
 
 async fn error_frames(srv: &Srv, sid: &str) -> Vec<opencoder_store::SessionEventRecord> {
@@ -150,7 +163,7 @@ async fn sweep_converges_running_task_and_unblocks_queue() {
     assert_eq!(pre.status.as_str(), "running", "precondition");
 
     // 2. Backfill a stale heartbeat, then GET /api/nodes triggers the sweep.
-    backfill_last_seen(&srv, &node_id, now_ms() - AGE_MS).await;
+    backfill_last_seen(&srv, "swept-node", now_ms() - AGE_MS).await;
     let (_, fleet) = get_json(&srv.base, "/api/nodes").await;
     let row = fleet["nodes"]
         .as_array()
@@ -213,7 +226,7 @@ async fn live_sse_view_receives_error_closure_during_sweep() {
     tokio::time::sleep(Duration::from_millis(300)).await; // let the hub attach
 
     let reader = tokio::spawn(async move { collect_until(&mut sse, |f| f.kind == "error").await });
-    backfill_last_seen(&srv, &node_id, now_ms() - AGE_MS).await;
+    backfill_last_seen(&srv, "swept-live", now_ms() - AGE_MS).await;
     let (st, _) = get_json(&srv.base, "/api/nodes").await;
     assert_eq!(st.as_u16(), 200);
     let frames = reader.await.unwrap();

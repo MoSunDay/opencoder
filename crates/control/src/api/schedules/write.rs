@@ -58,7 +58,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>)
             return error_409(&format!(
                 "schedule {} already exists (use PUT to update)",
                 job.id
-            ));
+            ))
         }
         Ok(None) => {}
         Err(e) => return error_500(e.to_string()),
@@ -90,7 +90,7 @@ pub async fn update(
     }
     match state.store.get_schedule(&id).await {
         Ok(Some(def)) if def.job == job => {
-            return response(super::RpcReply::ok(json!({"ok": true, "id": id})));
+            return response(super::RpcReply::ok(json!({"ok": true, "id": id})))
         }
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("schedule {id} not found")),

@@ -2,11 +2,8 @@
 
 一句话：`opencoder-event` 新增 `rdb` feature，在 `src/queue.rs` 提供
 RocksDB 持久化 `EventLedger`（事件日志、监听器、分发等待、消费游标）；
-默认构建保持纯内存/零存储引擎依赖。撰写时基础存储仍为 turso；主存储
-现已切换 rdb（见
-[rdb-store-and-event-framework.md](rdb-store-and-event-framework.md)），
-`rdb` feature 仍仅服务本 crate 的事件队列，workspace 其余 crate 不因此
-激活该 feature。
+默认构建保持纯内存/零存储引擎依赖。基础存储保持 turso 不变，rdb 仅服务
+本 crate 的事件队列，workspace 其余 crate 不激活该 feature。
 
 ## 行为口径
 

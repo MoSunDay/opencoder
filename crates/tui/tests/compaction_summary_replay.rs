@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use opencoder_core::Message;
 use opencoder_session::SessionEvent;
-use opencoder_store::{RdbStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::chat::{ChatBlock, ChatView};
 use opencoder_tui::session_ui::{rebuild_after_reset, replay_into_chat};
 
 async fn fresh() -> (tempfile::TempDir, Arc<dyn Store>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, Arc::from(store) as Arc<dyn Store>)
 }
 

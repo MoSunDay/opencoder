@@ -11,14 +11,14 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{fire_turn_cancel, run, SessionEvent, SessionState};
-use opencoder_store::{Delivery, RdbStore, SessionInput, Store};
+use opencoder_store::{Delivery, SessionInput, Store, TursoStore};
 
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(RdbStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

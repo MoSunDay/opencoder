@@ -6,7 +6,7 @@ use opencoder_core::fleet::{
     ExecutionCommand, ExecutionKind, ExecutionRef, ExecutionStatus, NodeOperation,
 };
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{RdbStore, SessionMeta, Store};
+use opencoder_store::{SessionMeta, Store, TursoStore};
 use serde_json::json;
 
 #[tokio::test]
@@ -14,11 +14,9 @@ async fn index_replays_top_level_session_pages_with_activity_order_and_ties() {
     let (_guard, _home) = support::isolated_config();
     let dir = tempfile::tempdir().unwrap();
     let worker = support::worker(dir.path(), support::mock()).await;
-    let store = RdbStore::open(opencoder_core::runtime_store_rdb_dir(
-        &dir.path().join("node"),
-    ))
-    .await
-    .unwrap();
+    let store = TursoStore::open(dir.path().join("node/runtime.db"))
+        .await
+        .unwrap();
     let mut expected = std::collections::HashSet::new();
     for index in 0..1001 {
         let id = format!("agent-paged-{index:04}");
@@ -90,11 +88,9 @@ async fn internal_session_is_running_only_while_its_loop_is_live() {
         "idle"
     );
     let id = "session-owned-child";
-    let store = RdbStore::open(opencoder_core::runtime_store_rdb_dir(
-        &dir.path().join("node"),
-    ))
-    .await
-    .unwrap();
+    let store = TursoStore::open(dir.path().join("node/runtime.db"))
+        .await
+        .unwrap();
     store
         .create_session(&SessionMeta {
             id: id.into(),

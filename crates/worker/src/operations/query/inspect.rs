@@ -185,7 +185,6 @@ pub(super) fn pre_store_todo_workflow_view(
     }
 }
 
-#[allow(clippy::large_enum_variant)] // the ready detail dominates and is constructed only on hit
 pub(super) enum TodoWorkflowView {
     Ready(opencoder_store::TodoWorkflowDetail),
     Missing {
@@ -218,10 +217,6 @@ pub(super) fn classify_todo_workflow(
         },
         ExecutionStatus::Interrupted | ExecutionStatus::Cancelled => TodoWorkflowView::Missing {
             state: "stopped",
-            initializing: false,
-        },
-        ExecutionStatus::Paused => TodoWorkflowView::Missing {
-            state: "paused",
             initializing: false,
         },
         ExecutionStatus::Error if error.is_some() => TodoWorkflowView::Missing {

@@ -8,7 +8,7 @@ mod support;
 use opencoder_core::fleet::*;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{RdbStore, SessionFilter, Store};
+use opencoder_store::{SessionFilter, Store, TursoStore};
 use opencoder_worker::Worker;
 use serde_json::json;
 use std::sync::Arc;
@@ -141,11 +141,9 @@ async fn dialogs_clear_deletes_sessions_and_journal_records() {
 
     // Session rows follow the journal: drop deleted, keep untouched.
     node.shutdown().await.unwrap();
-    let store = RdbStore::open(opencoder_core::runtime_store_rdb_dir(
-        &dir.path().join("node"),
-    ))
-    .await
-    .unwrap();
+    let store = TursoStore::open(dir.path().join("node/runtime.db"))
+        .await
+        .unwrap();
     let sessions = store
         .list_sessions(&SessionFilter {
             limit: 100,
@@ -242,11 +240,9 @@ async fn dialogs_clear_rejects_cross_lane_ids_and_protects_internal_sessions() {
         .join("node/operator/operator-lane/execution.json")
         .is_file());
 
-    let store = RdbStore::open(opencoder_core::runtime_store_rdb_dir(
-        &dir.path().join("node"),
-    ))
-    .await
-    .unwrap();
+    let store = TursoStore::open(dir.path().join("node/runtime.db"))
+        .await
+        .unwrap();
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "internal-child".into(),

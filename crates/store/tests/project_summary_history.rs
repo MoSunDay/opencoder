@@ -1,4 +1,4 @@
-use opencoder_store::{project::summary::SummaryScope, ProjectStore, RdbStore};
+use opencoder_store::{project::summary::SummaryScope, ProjectStore, TursoStore};
 use serde_json::json;
 #[path = "project_summary/support.rs"]
 mod support;
@@ -8,7 +8,7 @@ use support::seed;
 async fn summary_history_retains_ten_versions_and_restore_appends_without_touching_other_fields() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("history.db");
-    let store = RdbStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     seed(&store).await;
     for n in 1..=12 {
         store
@@ -113,7 +113,7 @@ async fn summary_history_retains_ten_versions_and_restore_appends_without_touchi
         .await
         .unwrap();
     drop(store);
-    let store = RdbStore::open(&path).await.unwrap();
+    let store = TursoStore::open(&path).await.unwrap();
     let history = store
         .summary_versions(SummaryScope::Project, "p")
         .await
@@ -154,4 +154,51 @@ async fn summary_history_retains_ten_versions_and_restore_appends_without_touchi
         assert_eq!(history[0].version, 1);
         assert_eq!(history[0].current_summary, "");
     }
+}
+
+#[tokio::test]
+async fn history_write_failure_rolls_back_summary_and_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("atomic.db");
+    let store = TursoStore::open(&path).await.unwrap();
+    seed(&store).await;
+    store
+        .patch_goal(
+            "p",
+            &serde_json::from_value(json!({"current_summary":"saved"})).unwrap(),
+            10,
+        )
+        .await
+        .unwrap();
+    let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
+    db.connect().unwrap().execute("CREATE TRIGGER fail_history BEFORE INSERT ON project_summary_versions BEGIN SELECT RAISE(ABORT, 'history failed'); END", ()).await.unwrap();
+    assert!(store
+        .patch_goal(
+            "p",
+            &serde_json::from_value(json!({"title":"bad","current_summary":"bad"})).unwrap(),
+            20
+        )
+        .await
+        .is_err());
+    assert!(store
+        .restore_summary(SummaryScope::Project, "p", 1, 30)
+        .await
+        .is_err());
+    let goal = store.list_goals().await.unwrap().remove(0);
+    assert_eq!(goal.title, "Project");
+    assert_eq!(goal.summary.current_summary, "saved");
+    assert_eq!(goal.summary.summary_updated_at, Some(10));
+    assert_eq!(
+        store
+            .summary_versions(SummaryScope::Project, "p")
+            .await
+            .unwrap()
+            .unwrap()
+            .len(),
+        2
+    );
 }

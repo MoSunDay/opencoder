@@ -137,7 +137,7 @@ pub(super) fn count_events(c: &Captured, kind: &str, step: &str) -> usize {
         .count()
 }
 
-/// Per-test runtime inputs: uplink against the stub, a real RdbStore in
+/// Per-test runtime inputs: uplink against the stub, a real TursoStore in
 /// the temp dir, and the default Config for that workdir.
 pub(super) struct Fixture {
     pub(super) container: container::ContainerFixture,
@@ -156,7 +156,7 @@ pub(super) async fn fixture(
 ) -> Fixture {
     let workdir = tmp.path().to_path_buf();
     let store: Arc<dyn opencoder_store::Store> =
-        Arc::new(RdbStore::open(workdir.join("store.db")).await.unwrap());
+        Arc::new(TursoStore::open(workdir.join("store.db")).await.unwrap());
     let mut config = opencoder_core::Config::default();
     let container = container::ContainerFixture::open(tmp.path());
     container.configure(&mut config);

@@ -99,7 +99,7 @@ fn stopped_shared_run_recovers_same_execution_without_spending_a_round() {
                 .collect::<Vec<_>>(),
             identities
         );
-        let resumed = snap(command(&stopped, &req.plan, "resume", None, 5).unwrap());
+        let resumed = snap(command(&stopped, &req.plan, "resume", 5).unwrap());
         assert_eq!(resumed.run.phase, LayeredPhase::Ready);
         assert!(resumed.operations.iter().all(|o| o.status.successful()));
         assert_eq!(resumed.run.round, 1);

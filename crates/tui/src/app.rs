@@ -31,12 +31,12 @@ mod app_display;
 pub(crate) mod app_loop;
 #[path = "app_notepad.rs"]
 mod app_notepad;
+#[path = "app_subtask.rs"]
+mod app_subtask;
 #[path = "app_popups.rs"]
 mod app_popups;
 #[path = "app_submit.rs"]
 mod app_submit;
-#[path = "app_subtask.rs"]
-mod app_subtask;
 #[path = "app_task.rs"]
 mod app_task;
 #[path = "steer_dispatch.rs"]

@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 opencoder-core.workspace = true
-opencoder-database.workspace = true
 opencoder-llm.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
@@ -17,7 +16,6 @@ clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
 ulid.workspace = true

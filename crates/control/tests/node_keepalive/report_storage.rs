@@ -3,9 +3,8 @@ use futures::{SinkExt, StreamExt};
 use opencoder_core::fleet::*;
 use std::{sync::Arc, time::Duration};
 use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{client::IntoClientRequest, Message},
-    MaybeTlsStream, WebSocketStream,
+    MaybeTlsStream, WebSocketStream, connect_async,
+    tungstenite::{Message, client::IntoClientRequest},
 };
 
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -108,12 +107,19 @@ impl Fixture {
         until(async || !self.state.fleet.nodes().await.unwrap().is_empty()).await;
         socket
     }
-    /// Hold the fleet database's exclusive write lease until
-    /// [`commit_writer`] releases it: the rdb replacement for the retired
-    /// SQL `BEGIN IMMEDIATE` barrier, taken on the very engine handle
-    /// production fleet writes serialize behind.
-    pub(super) async fn writer(&self) -> WriterLease {
-        hold_writer(&self.root.path().join("data/control.db.rdb")).await
+    pub(super) async fn writer(&self) -> turso::Connection {
+        let db = turso::Builder::new_local(
+            (self.root.path().join("data/control.db"))
+                .to_str()
+                .expect("UTF-8 database path"),
+        )
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
+        let writer = db.connect().unwrap();
+        writer.execute("BEGIN IMMEDIATE", ()).await.unwrap();
+        writer
     }
     pub(super) async fn blocked(&self) {
         let body = serde_json::json!({"waiting": true});
@@ -138,44 +144,6 @@ impl Fixture {
                 .is_empty()
         );
     }
-}
-
-/// A fleet write lease parked mid-write: `release` unblocks the holding
-/// writer and `join` covers the hand-back of the lease. Plain data carrier;
-/// use [`commit_writer`] to unwind it.
-pub(super) struct WriterLease {
-    release: std::sync::mpsc::Sender<()>,
-    join: tokio::task::JoinHandle<()>,
-}
-
-/// Open the fleet database through the shared in-process engine handle and
-/// park its exclusive write lease. Fleet writes queue behind the lease
-/// while lease-free reads keep serving snapshots.
-pub(super) async fn hold_writer(path: &std::path::Path) -> WriterLease {
-    let db = opencoder_store::rdb_store::RdbDb::open(path).expect("shared fleet database");
-    let (engaged, engaged_wait) = tokio::sync::oneshot::channel::<()>();
-    let (release, release_wait) = std::sync::mpsc::channel::<()>();
-    let join = tokio::spawn(async move {
-        let _held = db
-            .write(move |_store| {
-                let _ = engaged.send(());
-                // Park the blocking writer the way an open SQL transaction
-                // waited for its COMMIT.
-                let _ = release_wait.recv();
-                Ok(())
-            })
-            .await;
-    });
-    engaged_wait.await.expect("writer lease never engaged");
-    WriterLease { release, join }
-}
-
-/// Release a held write lease and wait for the parked write to finish —
-/// the rdb equivalent of the retired `COMMIT`.
-pub(super) async fn commit_writer(writer: WriterLease) {
-    let WriterLease { release, join } = writer;
-    let _ = release.send(());
-    let _ = join.await;
 }
 pub(super) fn snapshot(sequence: u64) -> NodeSnapshot {
     NodeSnapshot {
@@ -275,7 +243,7 @@ async fn locked_report_storage_keeps_ping_live_without_marking_index_synced() {
     socket.send(Message::Ping(vec![7])).await.unwrap();
     let pong = tokio::time::timeout(Duration::from_secs(1), socket.next()).await;
     let before_commit = fixture.state.hub.views().await.remove(0);
-    commit_writer(writer).await;
+    writer.execute("COMMIT", ()).await.unwrap();
     let acknowledged = handoff(&mut socket).await;
     assert!(
         matches!(pong, Ok(Some(Ok(Message::Pong(data)))) if data == [7]),
@@ -336,7 +304,7 @@ async fn disconnected_report_cannot_mark_a_reconnected_generation_ready() {
             .unwrap()
             .ready
     );
-    commit_writer(writer).await;
+    writer.execute("COMMIT", ()).await.unwrap();
     // Register follows the old transaction through the same writer gate.
     fixture
         .state
@@ -382,13 +350,15 @@ async fn invalid_report_closes_without_handoff_or_ready_promotion() {
             .unwrap()
             .ready
     );
-    assert!(fixture
-        .state
-        .fleet
-        .index("dag-storage")
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        fixture
+            .state
+            .fleet
+            .index("dag-storage")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -1,0 +1,397 @@
+use crate::types::{Delivery, InputAdmission, InputConflict, SessionInput};
+use anyhow::{bail, Context, Result};
+use tracing::warn;
+use turso::{params, Connection};
+const INSERT_INPUT: &str = "\
+INSERT INTO session_inputs (id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text)
+VALUES (?, ?, ?, ?, ?, ?, NULL, ?)";
+/// Admit an input and return its row seq. The immediate transaction
+/// serializes independent store instances as well as this store's own
+/// connection, so a concurrent cross-process commit between the seq SELECT
+/// and the INSERT cannot fail the upgrade with SQLITE_BUSY_SNAPSHOT —
+/// busy_timeout turns cross-process contention into waiting instead.
+pub async fn admit(conn: &Connection, input: &SessionInput) -> Result<i64> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let admitted_seq = next_admitted_seq(conn, &input.session_id).await?;
+        let images_json = serde_json::to_string(&input.images).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            INSERT_INPUT,
+            params![
+                input.id.as_str(),
+                input.session_id.as_str(),
+                input.delivery.as_str(),
+                input.prompt.as_str(),
+                images_json.as_str(),
+                admitted_seq,
+                input.display_text.as_deref(),
+            ],
+        )
+        .await
+        .context("insert input")?;
+        last_input_seq_in_tx(conn, &input.session_id).await
+    })
+    .await
+}
+
+/// Admit exactly one semantic payload for `(session_id, id)`. The immediate
+/// transaction serializes independent store instances as well as this store's
+/// own connection, so retries across processes cannot pass a read/insert gap.
+pub async fn admit_once(conn: &Connection, input: &SessionInput) -> Result<InputAdmission> {
+    let images_json = serde_json::to_string(&input.images).context("serialize input images")?;
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let admitted_seq = next_admitted_seq(conn, &input.session_id).await?;
+        let inserted = conn
+            .execute(
+                "INSERT INTO session_inputs (id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?) \
+                 ON CONFLICT(session_id, id) DO NOTHING",
+                params![
+                    input.id.as_str(),
+                    input.session_id.as_str(),
+                    input.delivery.as_str(),
+                    input.prompt.as_str(),
+                    images_json.as_str(),
+                    admitted_seq,
+                    input.display_text.as_deref(),
+                ],
+            )
+            .await
+            .context("insert idempotent input")?
+            == 1;
+        let mut stmt = conn
+            .prepare_cached("SELECT seq, delivery, prompt, images_json, display_text FROM session_inputs WHERE session_id = ? AND id = ?")
+            .await?;
+        let mut rows = stmt
+            .query(params![input.session_id.as_str(), input.id.as_str()])
+            .await?;
+        let row = rows.next().await?.context("idempotent input row missing")?;
+        let seq = row.get::<i64>(0)?;
+        let delivery = row.get::<String>(1)?;
+        let prompt = row.get::<String>(2)?;
+        let images: Vec<String> = serde_json::from_str(&row.get::<String>(3)?)
+            .context("decode stored input images")?;
+        let display_text = row.get::<Option<String>>(4)?;
+        if !same_semantic_payload(&delivery, &prompt, &images, display_text.as_deref(), input) {
+            bail!(InputConflict {
+                session_id: input.session_id.clone(),
+                input_id: input.id.clone(),
+            });
+        }
+        Ok(InputAdmission { seq, inserted })
+    })
+    .await
+}
+
+fn same_semantic_payload(
+    delivery: &str,
+    prompt: &str,
+    images: &[String],
+    display_text: Option<&str>,
+    input: &SessionInput,
+) -> bool {
+    delivery == input.delivery.as_str()
+        && prompt == input.prompt
+        && images == input.images
+        && display_text == input.display_text.as_deref()
+}
+
+pub async fn pending(
+    conn: &Connection,
+    session_id: &str,
+    delivery: Delivery,
+) -> Result<Vec<SessionInput>> {
+    let mut stmt = conn
+        .prepare_cached("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL ORDER BY admitted_seq ASC")
+        .await?;
+    let mut rows = stmt.query(params![session_id, delivery.as_str()]).await?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await? {
+        out.push(row_to_input(&r)?);
+    }
+    Ok(out)
+}
+
+/// Promote all pending inputs of `delivery` whose `admitted_seq <= up_to_admitted_seq`.
+/// Returns the seqs of promoted inputs. Idempotent (only touches NULL promoted_seq).
+pub async fn promote(
+    conn: &Connection,
+    session_id: &str,
+    up_to_admitted_seq: i64,
+    delivery: Delivery,
+) -> Result<Vec<i64>> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let mut stmt = conn
+            .prepare_cached("SELECT seq FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL AND admitted_seq <= ? ORDER BY admitted_seq ASC")
+            .await?;
+        let mut rows = stmt
+            .query(params![session_id, delivery.as_str(), up_to_admitted_seq])
+            .await?;
+        let mut seqs: Vec<i64> = Vec::new();
+        while let Some(r) = rows.next().await? {
+            seqs.push(r.get::<i64>(0)?);
+        }
+        drop(stmt);
+        drop(rows);
+        let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
+        for s in &seqs {
+            // recorded is reset on (re)promotion: a row recovering from an
+            // orphaned promote (see recover_orphans) starts unconsumed again.
+            let n = conn
+                .execute(
+                    "UPDATE session_inputs SET promoted_seq = ?, recorded = 0 WHERE seq = ?",
+                    params![promoted_seq, s],
+                )
+                .await?;
+            if n == 0 {
+                warn!(seq = s, "input vanished during promote");
+            }
+        }
+        Ok(seqs)
+    })
+    .await
+}
+
+/// Reset promoted inputs back to pending. Idempotent: only touches rows where
+/// `promoted_seq IS NOT NULL`. Used by the runner's error-recovery path.
+pub async fn unpromote(conn: &Connection, session_id: &str, seqs: &[i64]) -> Result<()> {
+    if seqs.is_empty() {
+        return Ok(());
+    }
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        for s in seqs {
+            conn.execute(
+                "UPDATE session_inputs SET promoted_seq = NULL WHERE session_id = ? AND seq = ? AND promoted_seq IS NOT NULL",
+                params![session_id, s],
+            )
+            .await
+            .context("unpromote input")?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+}
+
+/// Mark promoted inputs as durably consumed (recorded into the transcript or
+/// applied as a control command). Idempotent. Best-effort callers may ignore
+/// errors: an unmarked row is recoverable by [`recover_orphans`].
+pub async fn mark_recorded(conn: &Connection, session_id: &str, seqs: &[i64]) -> Result<()> {
+    if seqs.is_empty() {
+        return Ok(());
+    }
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        for s in seqs {
+            conn.execute(
+                "UPDATE session_inputs SET recorded = 1 WHERE session_id = ? AND seq = ?",
+                params![session_id, s],
+            )
+            .await
+            .context("mark input recorded")?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+}
+
+/// Recover orphaned inputs: rows promoted but never recorded (crash or
+/// hard-cancel between promote and consume). Flip them back to pending so the
+/// next drain re-claims them. Idempotent. Returns the number of recovered rows.
+pub async fn recover_orphans(conn: &Connection, session_id: &str) -> Result<u64> {
+    conn.execute(
+        "UPDATE session_inputs SET promoted_seq = NULL, recorded = 0 \
+         WHERE session_id = ? AND promoted_seq IS NOT NULL AND recorded = 0",
+        params![session_id],
+    )
+    .await
+    .context("recover orphan inputs")
+}
+
+/// Promote exactly one (oldest) queued input. Returns its seq, or None if none
+/// pending. Invariant guard: rows already consumed into the transcript
+/// (`recorded = 1`) are never promoted — an error-recovery `unpromote` may
+/// have returned such a row to pending (it only clears `promoted_seq`), and
+/// re-promoting it would let the drain re-consume it and duplicate the prompt
+/// in the transcript. Both the SELECT and the UPDATE carry the guard: without
+/// it on the SELECT a recorded row would be picked, the guarded UPDATE would
+/// match 0 rows, and the function would still report the row as promoted.
+pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<Option<i64>> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let mut stmt = conn
+            .prepare_cached("SELECT seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL AND recorded = 0 ORDER BY admitted_seq ASC LIMIT 1")
+            .await?;
+        let mut rows = stmt.query(params![session_id]).await?;
+        let target = match rows.next().await? {
+            Some(r) => Some(r.get::<i64>(0)?),
+            None => None,
+        };
+        drop(stmt);
+        drop(rows);
+        if let Some(s) = target {
+            let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
+            conn.execute(
+                "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ? AND recorded = 0",
+                params![promoted_seq, s],
+            )
+            .await?;
+            Ok(Some(s))
+        } else {
+            Ok(None)
+        }
+    })
+    .await
+}
+
+/// Atomically return the oldest pending queued input WITH its prompt and mark it
+/// promoted. The runner drain uses this to consume one queued follow-up at idle.
+/// Returns the row seq alongside the input so callers (e.g. the TUI mirror) can
+/// reconcile by identity. Invariant guard (same as `promote_next_queued`): rows
+/// already consumed (`recorded = 1`) are skipped in the SELECT and excluded by
+/// the UPDATE, so a row flipped back to pending by an error-recovery unpromote
+/// can never be re-served into the transcript a second time.
+pub async fn claim_next_queue(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<(i64, SessionInput)>> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let mut stmt = conn
+            .prepare_cached("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL AND recorded = 0 ORDER BY admitted_seq ASC LIMIT 1")
+            .await?;
+        let mut rows = stmt.query(params![session_id]).await?;
+        let claimed = match rows.next().await? {
+            Some(r) => {
+                let seq: i64 = r.get(0)?;
+                let input = row_to_input_full(&r, seq)?;
+                Some((seq, input))
+            }
+            None => None,
+        };
+        drop(stmt);
+        drop(rows);
+        if let Some((seq, mut input)) = claimed {
+            let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
+            conn.prepare_cached("UPDATE session_inputs SET promoted_seq = ? WHERE seq = ? AND recorded = 0")
+                .await?.execute(params![promoted_seq, seq])
+            .await?;
+            input.promoted_seq = Some(promoted_seq);
+            Ok(Some((seq, input)))
+        } else {
+            Ok(None)
+        }
+    })
+    .await
+}
+
+/// Delete a pending input by its row seq. Only deletes rows that are still
+/// unpromoted (`promoted_seq IS NULL`), so consuming-then-deleting cannot wipe
+/// an already-drained audit row. Deleting a missing or already-promoted row
+/// matches 0 rows and is not an error (idempotent).
+pub async fn delete_input(conn: &Connection, seq: i64) -> Result<()> {
+    conn.execute(
+        "DELETE FROM session_inputs WHERE seq = ? AND promoted_seq IS NULL",
+        params![seq],
+    )
+    .await?;
+    Ok(())
+}
+
+/// Swap the drain order of two pending inputs by exchanging their
+/// `admitted_seq`. Both rows must belong to `session_id` and be still
+/// unpromoted. Used by the TUI queue panel to reorder follow-ups.
+pub async fn swap_input_order(
+    conn: &Connection,
+    session_id: &str,
+    seq_a: i64,
+    seq_b: i64,
+) -> Result<()> {
+    if seq_a == seq_b {
+        return Ok(());
+    }
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let mut stmt = conn
+            .prepare_cached("SELECT admitted_seq FROM session_inputs WHERE seq = ? AND session_id = ? AND promoted_seq IS NULL")
+            .await?;
+        let mut rows = stmt.query(params![seq_a, session_id]).await?;
+        let a_val: i64 = match rows.next().await? {
+            Some(r) => r.get(0)?,
+            None => bail!("input seq {seq_a} not found, not in session, or already promoted"),
+        };
+        drop(stmt);
+        drop(rows);
+        let mut stmt = conn
+            .prepare_cached("SELECT admitted_seq FROM session_inputs WHERE seq = ? AND session_id = ? AND promoted_seq IS NULL")
+            .await?;
+        let mut rows = stmt.query(params![seq_b, session_id]).await?;
+        let b_val: i64 = match rows.next().await? {
+            Some(r) => r.get(0)?,
+            None => bail!("input seq {seq_b} not found, not in session, or already promoted"),
+        };
+        drop(stmt);
+        drop(rows);
+        conn.execute(
+            "UPDATE session_inputs SET admitted_seq = CASE WHEN seq = ? THEN ? WHEN seq = ? THEN ? END WHERE seq IN (?, ?)",
+            params![seq_a, b_val, seq_b, a_val, seq_a, seq_b],
+        )
+        .await
+        .context("swap admitted_seq")?;
+        Ok(())
+    })
+    .await
+}
+
+async fn next_admitted_seq(conn: &Connection, session_id: &str) -> Result<i64> {
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT COALESCE(MAX(admitted_seq), 0) FROM session_inputs WHERE session_id = ?",
+        )
+        .await?;
+    let mut rows = stmt.query(params![session_id]).await?;
+    if let Some(r) = rows.next().await? {
+        Ok(r.get::<i64>(0)? + 1)
+    } else {
+        Ok(1)
+    }
+}
+
+async fn last_input_seq_in_tx(conn: &Connection, session_id: &str) -> Result<i64> {
+    let mut stmt = conn
+        .prepare_cached("SELECT MAX(seq) FROM session_inputs WHERE session_id = ?")
+        .await?;
+    let mut rows = stmt.query(params![session_id]).await?;
+    if let Some(r) = rows.next().await? {
+        Ok(r.get::<Option<i64>>(0)?.unwrap_or(0))
+    } else {
+        Ok(0)
+    }
+}
+
+fn row_to_input(r: &turso::Row) -> Result<SessionInput> {
+    let delivery_s: String = r.get(3)?;
+    let images: Vec<String> = serde_json::from_str(&r.get::<String>(5)?).unwrap_or_default();
+    Ok(SessionInput {
+        seq: Some(r.get(0)?),
+        id: r.get(1)?,
+        session_id: r.get(2)?,
+        delivery: Delivery::parse(&delivery_s).unwrap_or_default(),
+        prompt: r.get(4)?,
+        images,
+        admitted_seq: r.get(6)?,
+        promoted_seq: r.get::<Option<i64>>(7)?,
+        display_text: r.get(8)?,
+    })
+}
+
+/// Row layout for the claim query: seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text.
+fn row_to_input_full(r: &turso::Row, seq: i64) -> Result<SessionInput> {
+    let delivery_s: String = r.get(3)?;
+    let images: Vec<String> = serde_json::from_str(&r.get::<String>(5)?).unwrap_or_default();
+    Ok(SessionInput {
+        seq: Some(seq),
+        id: r.get(1)?,
+        session_id: r.get(2)?,
+        delivery: Delivery::parse(&delivery_s).unwrap_or_default(),
+        prompt: r.get(4)?,
+        images,
+        admitted_seq: r.get(6)?,
+        promoted_seq: r.get::<Option<i64>>(7)?,
+        display_text: r.get(8)?,
+    })
+}

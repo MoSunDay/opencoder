@@ -352,33 +352,12 @@ pub async fn handle(
             change
         }
         "pause" | "resume" | "cancel" => {
-            // Resume may carry one appended human input. It obeys the same
-            // 1..4096 byte admission rule as `human_input`, and the cumulative
-            // capacity check (saved inputs plus the new text) runs before
-            // anything is mutated, so an overflow leaves the run untouched.
-            let appended = if action == "resume" {
-                let text = match input.get("text") {
-                    None | Some(Value::Null) => None,
-                    Some(Value::String(raw)) => {
-                        let text = raw.trim();
-                        if text.is_empty() || text.len() > 4096 {
-                            return Ok(RpcReply::error(400, "text must contain 1..4096 bytes"));
-                        }
-                        Some(text)
-                    }
-                    Some(_) => {
-                        return Ok(RpcReply::error(400, "text must be a string"));
-                    }
-                };
-                if let Err(error) = super::budget::human(worker, &record, text.unwrap_or("")).await
-                {
+            if action == "resume" {
+                if let Err(error) = super::budget::human(worker, &record, "").await {
                     return Ok(RpcReply::error(413, error.to_string()));
                 }
-                text
-            } else {
-                None
-            };
-            layered::command(&snapshot, &request.plan, action, appended, now_ms())?
+            }
+            layered::command(&snapshot, &request.plan, action, now_ms())?
         }
         _ => return Ok(RpcReply::error(400, "unknown v4 layered operation")),
     };
@@ -388,26 +367,6 @@ pub async fn handle(
         .store
         .commit_brain_layered(&change)
         .await?;
-    // A committed pause/resume also moves the root journal status: pause
-    // freezes it at Paused (started children keep running), resume returns it
-    // to Idle so the normal wake flow re-enqueues the root. The change is
-    // idempotent and never touches result or error semantics.
-    if matches!(action, "pause" | "resume") {
-        worker
-            .inner
-            .journal
-            .lock()
-            .await
-            .brain_control(
-                id,
-                if action == "pause" {
-                    crate::lifecycle::BrainControl::Pause
-                } else {
-                    crate::lifecycle::BrainControl::Resume
-                },
-            )
-            .await?;
-    }
     // Notify committed transitions, never projection reads performed while
     // collecting an outbox report (which would trigger another report).
     opencoder_session::loop_registry::notify_change();

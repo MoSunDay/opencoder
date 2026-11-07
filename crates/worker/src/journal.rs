@@ -1,9 +1,9 @@
 use crate::{
     layout::ALL_KINDS,
-    lifecycle::{self, BrainControl, Lifecycle, StopIntent},
+    lifecycle::{self, Lifecycle, StopIntent},
     DirectoryLayout,
 };
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, Result};
 use opencoder_core::{fleet::*, SseEvt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -213,36 +213,6 @@ impl Journal {
         record.error = None;
         append_status_event(&mut record);
         self.save(record)
-    }
-
-    /// Persist a non-terminal Brain control status change (pause/resume) and
-    /// append a status event idempotently: the record and the event only move
-    /// when the status actually changes. The result, the error and the stop
-    /// intent are untouched, so a pause never reads as a stop or a finish and
-    /// started child executions are left alone. A terminal record is final and
-    /// never moves.
-    pub async fn brain_control(
-        &mut self,
-        id: &str,
-        action: BrainControl,
-    ) -> Result<ExecutionStatus> {
-        let mut record = self
-            .get(id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("execution not found"))?;
-        ensure!(
-            record.assignment.index.kind == ExecutionKind::Brain,
-            "only brain runs accept control status changes"
-        );
-        let current = record.assignment.index.status;
-        let transition = lifecycle::brain_control(current, record.lifecycle.stop_intent, action);
-        if transition.status == current {
-            return Ok(current);
-        }
-        record.assignment.index.status = transition.status;
-        append_status_event(&mut record);
-        self.save(record)?;
-        Ok(transition.status)
     }
 
     pub async fn mark_todo_initialized(&mut self, id: &str) -> Result<()> {

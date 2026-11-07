@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, skill_resolve::SKILL_TRIGGER, SessionEvent, SessionState};
-use opencoder_store::{Delivery, RdbStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(RdbStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

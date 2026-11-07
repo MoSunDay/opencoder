@@ -65,7 +65,6 @@ impl EventSink {
     /// fires for them). Returns [`TrySendError::Closed`] only if the flusher
     /// has already exited (channel closed) — i.e. after the run ended; such
     /// tail events are dropped.
-    #[allow(clippy::result_large_err)] // callers need the rejected record to classify the channel error
     pub fn push(
         &self,
         sev: &SessionEvent,
@@ -230,16 +229,16 @@ async fn flush(store: &Arc<dyn Store>, batch: &[SessionEventRecord]) {
 mod tests {
     use super::*;
     use opencoder_core::Message;
-    use opencoder_store::{Delivery, RdbStore, SessionMeta};
+    use opencoder_store::{Delivery, SessionMeta, TursoStore};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    async fn fresh() -> (tempfile::TempDir, Arc<RdbStore>) {
+    async fn fresh() -> (tempfile::TempDir, Arc<TursoStore>) {
         let dir = tempfile::TempDir::new().unwrap();
-        let store = Arc::new(RdbStore::open(dir.path().join("test.db")).await.unwrap());
+        let store = Arc::new(TursoStore::open(dir.path().join("test.db")).await.unwrap());
         (dir, store)
     }
 
-    async fn make_session(store: &Arc<RdbStore>, id: &str) {
+    async fn make_session(store: &Arc<TursoStore>, id: &str) {
         let meta = SessionMeta {
             id: id.into(),
             created_at: 1,
@@ -252,7 +251,7 @@ mod tests {
     /// Wraps a real store, counting `append_events` calls so we can assert the
     /// write count is O(turn) under a token storm while losing zero events.
     struct CountingStore {
-        inner: Arc<RdbStore>,
+        inner: Arc<TursoStore>,
         events_calls: Arc<AtomicUsize>,
     }
 
@@ -505,6 +504,13 @@ mod tests {
         assert_eq!(
             store.events_after("strict", 0).await.unwrap().len(),
             CAPACITY
+        );
+        store.conn().await.unwrap().execute("CREATE TRIGGER fail_trace BEFORE INSERT ON session_events BEGIN SELECT RAISE(FAIL, 'injected trace failure'); END", ()).await.unwrap();
+        let (sink, flusher) = spawn_checked_event_flusher(store.clone(), "strict".into());
+        sink.push(&SessionEvent::Done).unwrap();
+        drop(sink);
+        assert!(
+            format!("{:#}", flusher.await.unwrap().unwrap_err()).contains("injected trace failure")
         );
     }
 }

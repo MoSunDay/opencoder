@@ -175,10 +175,12 @@ fn compaction_header_and_text_are_uniform_purple() {
         collapsed[0].spans[0].style.fg,
         Some(theme::compaction_color())
     );
-    assert!(!collapsed[0].spans[0]
-        .style
-        .add_modifier
-        .contains(Modifier::BOLD));
+    assert!(
+        !collapsed[0].spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
 
     v.toggle_compaction_at(0);
     let expanded = v.flatten();

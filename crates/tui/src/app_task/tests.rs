@@ -2,7 +2,7 @@ use super::*;
 use opencoder_core::harness::Harness;
 use opencoder_core::Message;
 use opencoder_llm::MockChatClient;
-use opencoder_store::RdbStore;
+use opencoder_store::TursoStore;
 
 // ── pending_replay_hint (pure) ──────────────────────────────────────
 
@@ -106,8 +106,11 @@ fn assistant_task_use(id: &str, tool_use_id: &str) -> Message {
 #[tokio::test]
 async fn load_session_for_switch_is_pure_load_no_replay() {
     let dir = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> =
-        Arc::new(RdbStore::open(dir.path().join("switch.db")).await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(
+        TursoStore::open(dir.path().join("switch.db"))
+            .await
+            .unwrap(),
+    );
     let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
 
     // Parent session: user prompt + assistant dangling `task` tool_use.
@@ -213,8 +216,11 @@ async fn load_session_for_switch_is_pure_load_no_replay() {
 #[tokio::test]
 async fn load_session_for_switch_counts_only_pending_statuses() {
     let dir = tempfile::tempdir().unwrap();
-    let store: Arc<dyn Store> =
-        Arc::new(RdbStore::open(dir.path().join("counts.db")).await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(
+        TursoStore::open(dir.path().join("counts.db"))
+            .await
+            .unwrap(),
+    );
     let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
     store
         .create_session(&opencoder_store::SessionMeta {

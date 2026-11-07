@@ -19,12 +19,7 @@ const FOOTER_HINT: &str = "j/k \u{9009}\u{62e9} \u{00b7} r \u{5237}\u{65b0} \u{0
 /// Placeholder while the registry is empty.
 const EMPTY_HINT: &str = "\u{6ca1}\u{6709}\u{5df2}\u{6ce8}\u{518c}\u{7684} subtask\u{ff08}@<capability> <\u{95ee}\u{9898}> \u{63d0}\u{4ea4}\u{4e00}\u{4e2a}\u{ff09}";
 /// Section headers, in render order.
-const SECTIONS: [&str; 4] = [
-    "\u{95ee}\u{9898}",
-    "\u{8fc7}\u{7a0b}",
-    "\u{7ed3}\u{679c}",
-    "\u{6d88}\u{8017}",
-];
+const SECTIONS: [&str; 4] = ["\u{95ee}\u{9898}", "\u{8fc7}\u{7a0b}", "\u{7ed3}\u{679c}", "\u{6d88}\u{8017}"];
 
 /// Render the fullscreen view over `area`.
 pub(crate) fn render(f: &mut Frame, area: Rect, view: &SubtaskView) {
@@ -36,10 +31,7 @@ pub(crate) fn render(f: &mut Frame, area: Rect, view: &SubtaskView) {
                 Style::default().fg(theme::muted()),
             )),
             Line::raw(""),
-            Line::from(Span::styled(
-                FOOTER_HINT,
-                Style::default().fg(theme::muted()),
-            )),
+            Line::from(Span::styled(FOOTER_HINT, Style::default().fg(theme::muted()))),
         ])
         .block(block)
         .wrap(Wrap { trim: false });
@@ -212,7 +204,9 @@ mod tests {
     /// wide-char continuation cells skipped, the recorded detail line count).
     fn draw(view: &SubtaskView) -> (String, u32) {
         let mut terminal = ratatui::Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| render(f, f.area(), view)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), view))
+            .unwrap();
         let content = terminal
             .backend()
             .buffer()
@@ -258,3 +252,4 @@ mod tests {
         assert_eq!(wrap_lines("", 3).len(), 1);
     }
 }
+

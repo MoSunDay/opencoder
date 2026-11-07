@@ -1,5 +1,5 @@
-//! Platform user records (name + role + token digest). The storage lives in
-//! `rdb_store::identity`; this module owns the wire-shaped record type only.
+//! Platform user records (name + role + token digest). The SQL lives in
+//! `turso_store::users`; this module owns the wire-shaped record type only.
 
 use opencoder_core::identity::Role;
 use serde::{Deserialize, Serialize};

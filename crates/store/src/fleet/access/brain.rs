@@ -1,42 +1,46 @@
-use super::FleetStore;
-use anyhow::Result;
-use opencoder_core::brain::{PlanDefinition, PlanVersion};
-use serde_json::Value;
+use super::*;
 
 impl FleetStore {
     pub async fn delete_brain_plan(&self, id: &str) -> Result<bool> {
         let id = id.to_owned();
         self.db
-            .write(move |store| super::delete_brain_plan(store, &id))
+            .write(move |conn| async move {
+                let id = &id;
+                FleetConnection { conn }.delete_brain_plan(id).await
+            })
             .await
     }
     pub async fn save_brain_plan(&self, version: &PlanVersion) -> Result<PlanDefinition> {
-        let document = serde_json::from_value(serde_json::to_value(version)?)
-            .expect("plan version round-trips through JSON");
+        let version = version.to_owned();
         self.db
-            .write(move |store| super::save_brain_plan_document(store, &document))
+            .write(move |conn| async move {
+                let version = &version;
+                FleetConnection { conn }.save_brain_plan(version).await
+            })
             .await
     }
     pub async fn save_brain_plan_document(
         &self,
         version: &PlanVersion<Value>,
     ) -> Result<PlanDefinition> {
-        let document = version.clone();
+        let version = version.to_owned();
         self.db
-            .write(move |store| super::save_brain_plan_document(store, &document))
+            .write(move |conn| async move {
+                let version = &version;
+                FleetConnection { conn }
+                    .save_brain_plan_document(version)
+                    .await
+            })
             .await
     }
     pub async fn brain_plan_version(&self, id: &str, version: u64) -> Result<Option<PlanVersion>> {
         let id = id.to_owned();
         self.db
-            .read(move |store| {
-                let document = super::plan_document(store, &id, version)?;
-                match document {
-                    None => Ok(None),
-                    Some(document) => Ok(Some(serde_json::from_value(serde_json::to_value(
-                        document,
-                    )?)?)),
-                }
+            .read(move |conn| async move {
+                let id = &id;
+                FleetConnection { conn }
+                    .brain_plan_version(id, version)
+                    .await
             })
             .await
     }
@@ -47,7 +51,12 @@ impl FleetStore {
     ) -> Result<Option<PlanVersion<Value>>> {
         let id = id.to_owned();
         self.db
-            .read(move |store| super::plan_document(store, &id, version))
+            .read(move |conn| async move {
+                let id = &id;
+                FleetConnection { conn }
+                    .brain_plan_document(id, version)
+                    .await
+            })
             .await
     }
     pub async fn brain_plan_versions(
@@ -57,11 +66,11 @@ impl FleetStore {
     ) -> Result<Vec<PlanVersion>> {
         let id = id.to_owned();
         self.db
-            .read(move |store| {
-                super::plan_documents(store, &id, before)?
-                    .into_iter()
-                    .map(|value| Ok(serde_json::from_value(serde_json::to_value(value)?)?))
-                    .collect()
+            .read(move |conn| async move {
+                let id = &id;
+                FleetConnection { conn }
+                    .brain_plan_versions(id, before)
+                    .await
             })
             .await
     }
@@ -72,13 +81,23 @@ impl FleetStore {
     ) -> Result<Vec<PlanVersion<Value>>> {
         let id = id.to_owned();
         self.db
-            .read(move |store| super::plan_documents(store, &id, before))
+            .read(move |conn| async move {
+                let id = &id;
+                FleetConnection { conn }
+                    .brain_plan_documents(id, before)
+                    .await
+            })
             .await
     }
     pub async fn mark_brain_stable(&self, id: &str, version: u64) -> Result<PlanDefinition> {
         let id = id.to_owned();
         self.db
-            .write(move |store| super::mark_brain_stable(store, &id, version))
+            .write(move |conn| async move {
+                let id = &id;
+                FleetConnection { conn }
+                    .mark_brain_stable(id, version)
+                    .await
+            })
             .await
     }
 }

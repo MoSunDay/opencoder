@@ -1,8 +1,7 @@
 //! CLI dispatch for `config`, `models`, and `session` subcommands.
 //!
 //! `config show` / `models` are pure P1 (resolved-config display).
-//! `session list|show|delete` reads the rdb session store — shared with P3
-//! resume.
+//! `session list|show|delete` reads the turso store — shared with P3 resume.
 
 use std::path::{Path, PathBuf};
 
@@ -10,8 +9,8 @@ use anyhow::{anyhow, Context, Result};
 
 use opencoder_core::Config;
 use opencoder_store::{
-    export_bundle, import_bundle, read_bundle, write_bundle, RdbStore, SessionFilter, SessionMeta,
-    Store,
+    export_bundle, import_bundle, read_bundle, write_bundle, SessionFilter, SessionMeta, Store,
+    TursoStore,
 };
 
 use crate::{Cli, ConfigSub, SessionSub};
@@ -174,7 +173,7 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
 /// message blocks (Text/Reasoning/ToolUse/ToolResult) + subagent task records
 /// (status/result/ok). Extracted from `show_session_json` so the shape is
 /// unit-testable without capturing stdout.
-pub(crate) async fn build_session_json(store: &RdbStore, id: &str) -> Result<serde_json::Value> {
+pub(crate) async fn build_session_json(store: &TursoStore, id: &str) -> Result<serde_json::Value> {
     let meta = store
         .get_session(id)
         .await?
@@ -205,7 +204,7 @@ pub(crate) async fn build_session_json(store: &RdbStore, id: &str) -> Result<ser
 
 /// Emit full session state as JSON (see `build_session_json`). Machine-readable
 /// surface for deep e2e assertions, decoupled from storage internals.
-async fn show_session_json(store: &RdbStore, id: &str) -> Result<()> {
+async fn show_session_json(store: &TursoStore, id: &str) -> Result<()> {
     let body = build_session_json(store, id).await?;
     println!("{}", serde_json::to_string_pretty(&body)?);
     Ok(())
@@ -218,23 +217,10 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
     std::env::current_dir().context("get current dir")
 }
 
-/// Open the session store for `workdir`'s hashed data dir: the shared
-/// CLI/TUI boot sequence of [`open_store_at`].
-pub async fn open_store(workdir: &Path) -> Result<RdbStore> {
-    open_store_at(&opencoder_core::data_dir_for(workdir)).await
-}
-
-/// Data-dir core of [`open_store`]: best-effort dir creation, then open
-/// `session_store_rdb_dir(&data_dir)`. Shared by the CLI and the TUI boot
-/// path so the sequence cannot drift — the TUI once opened the plain-file
-/// stem directly and failed with `File exists (os error 17)` when a file
-/// named `<data_dir>/opencoder.db` existed.
-pub async fn open_store_at(data_dir: &Path) -> Result<RdbStore> {
-    tokio::fs::create_dir_all(data_dir).await.ok();
-    let db = opencoder_core::session_store_rdb_dir(data_dir);
-    RdbStore::open(&db)
-        .await
-        .with_context(|| format!("open session store: {}", db.display()))
+pub(crate) async fn open_store(workdir: &Path) -> Result<TursoStore> {
+    let data_dir = opencoder_core::data_dir_for(workdir);
+    tokio::fs::create_dir_all(&data_dir).await.ok();
+    TursoStore::open(data_dir.join("opencoder.db")).await
 }
 
 /// One transcript line for `session show`: role tag plus the message text.
@@ -257,8 +243,6 @@ pub(crate) fn config_show_json(cfg: &Config) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use super::models_summary;
     use opencoder_core::{Config, ContentBlock, Message, Role};
 
@@ -436,9 +420,9 @@ mod tests {
     async fn build_session_json_emits_meta_messages_and_subagent_tasks() {
         use super::build_session_json;
         use opencoder_core::{ContentBlock, Message, Role};
-        use opencoder_store::{RdbStore, SessionMeta, Store};
+        use opencoder_store::{SessionMeta, Store, TursoStore};
 
-        let store = RdbStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "s1".into(),
@@ -504,9 +488,9 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_redacts_clear_context_sentinel() {
         use super::build_session_json;
-        use opencoder_store::{RdbStore, SessionMeta, Store};
+        use opencoder_store::{SessionMeta, Store, TursoStore};
 
-        let store = RdbStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "redact-s1".into(),
@@ -541,9 +525,9 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_errors_on_missing_session() {
         use super::build_session_json;
-        use opencoder_store::RdbStore;
+        use opencoder_store::TursoStore;
 
-        let store = RdbStore::open_memory().await.unwrap();
+        let store = TursoStore::open_memory().await.unwrap();
         let err = build_session_json(&store, "does-not-exist").await;
         assert!(err.is_err(), "missing session must error, not empty output");
     }
@@ -577,14 +561,5 @@ mod tests {
         let raw = std::fs::read_to_string(workdir.join("opencoder.json")).unwrap();
         let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(cfg["model"], "openai/gpt-4o");
-    }
-
-    #[tokio::test]
-    async fn open_store_at_creates_and_opens_the_rdb_store() {
-        let dir = tempfile::tempdir().unwrap();
-        open_store_at(dir.path()).await.unwrap();
-        assert!(opencoder_core::session_store_rdb_dir(dir.path()).is_dir());
-        // Idempotent boot: opening the same data dir again succeeds.
-        open_store_at(dir.path()).await.unwrap();
     }
 }

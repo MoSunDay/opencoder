@@ -59,9 +59,6 @@ pub fn long_version() -> &'static str {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct BuildInfo {
-    /// Engine id of the **main** session/runtime storage (e.g. "rdb").
-    /// Describes only the main store; the ontology backend is independent
-    /// SQL and is not covered by this field.
     pub storage_engine: &'static str,
     pub todo_files_contract: u32,
     pub ontology_catalog_schema: u32,
@@ -79,7 +76,7 @@ pub struct BuildInfo {
 
 pub fn build_info() -> BuildInfo {
     BuildInfo {
-        storage_engine: "rdb",
+        storage_engine: "turso",
         todo_files_contract: 1,
         ontology_catalog_schema: 1,
         execution_io: crate::brain::ExecutionIoCompatibility::current(),
@@ -147,9 +144,7 @@ mod tests {
         assert_eq!(info.git_commit, GIT_COMMIT_FULL);
         assert_eq!(info.protocol_version, crate::fleet::PROTOCOL_VERSION);
         assert_eq!(info.spa_sha256, SPA_SHA256);
-        // Main session/runtime storage engine; the ontology backend is
-        // independent SQL and is intentionally not described by this field.
-        assert_eq!(info.storage_engine, "rdb");
+        assert_eq!(info.storage_engine, "turso");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&build_info_json()).unwrap()["version_long"],
             VERSION_LONG

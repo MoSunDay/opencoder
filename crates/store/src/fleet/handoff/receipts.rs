@@ -1,17 +1,13 @@
-//! Dispatch receipts: first-writer durable proof of an accepted request,
-//! plus the frozen assignment each receipt gates.
-use super::super::keys;
-use super::super::records;
-use super::FleetStore;
-use crate::rdb_store::{kv, tx};
+use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
 use opencoder_core::fleet::{Assignment, CreateExecution, ExecutionKind, RpcReply};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use turso::transaction::TransactionBehavior;
+use turso::{params, params_from_iter};
 
-/// Project sessions retain one owner while each initial admission has its
-/// own run ID.
+/// Project sessions retain one owner while each initial admission has its own run ID.
 pub fn dispatch_key(request: &CreateExecution) -> &str {
     if request.kind == ExecutionKind::Project {
         request.input["run_id"].as_str().unwrap_or(&request.id)
@@ -40,189 +36,351 @@ pub struct ExecutionNames {
     pub plan_name: Option<String>,
 }
 
-pub(super) fn receipt(store: &rdb::store::Store, scope: &str, id: &str) -> Result<Option<Receipt>> {
-    kv::get_json(store, &keys::rcp_key(scope, id))
-}
-
-/// First writer owns the original intent. Returns false on content reuse.
-pub(super) fn claim_request(
-    store: &rdb::store::Store,
-    scope: &str,
-    id: &str,
-    fingerprint: &str,
-) -> Result<bool> {
-    if let Some(existing) = kv::get_json::<Receipt>(store, &keys::rcp_key(scope, id))? {
-        return Ok(existing.fingerprint == fingerprint);
-    }
-    let mut batch = rocksdb::WriteBatch::default();
-    tx::put(
-        &mut batch,
-        &keys::rcp_key(scope, id),
-        &Receipt {
-            fingerprint: fingerprint.to_owned(),
-            phase: "claimed".into(),
-            payload: Value::Null,
-        },
-    )?;
-    tx::commit(store, batch)?;
-    Ok(true)
-}
-
-/// Caller holds request_lock for this key. Updates cannot change intent.
-pub(super) fn save_receipt(
-    store: &rdb::store::Store,
-    scope: &str,
-    id: &str,
-    receipt: &Receipt,
-) -> Result<()> {
-    let key = keys::rcp_key(scope, id);
-    let existing = kv::get_json::<Receipt>(store, &key)?
-        .ok_or_else(|| anyhow::anyhow!("request receipt ownership conflict"))?;
-    ensure!(
-        existing.fingerprint == receipt.fingerprint,
-        "request receipt ownership conflict"
-    );
-    let mut batch = rocksdb::WriteBatch::default();
-    tx::put(&mut batch, &key, receipt)?;
-    tx::commit(store, batch)
-}
-
-pub(super) fn assignment(store: &rdb::store::Store, id: &str) -> Result<Option<Assignment>> {
-    kv::get_json(store, &keys::asg_key(id))
-}
-
-/// Batch lookup of dispatch-time names for the execution list (no N+1 per
-/// id); ids without a stored assignment are simply absent from the map.
-pub(super) fn execution_names(
-    store: &rdb::store::Store,
-    ids: &[String],
-) -> Result<HashMap<String, ExecutionNames>> {
-    let mut out = HashMap::with_capacity(ids.len());
-    for id in ids {
-        let Some(raw) = rdb::store::get(store, b"", &keys::asg_key(id)).map_err(kv::engine_err)?
-        else {
-            continue;
-        };
-        let value: Value = serde_json::from_slice(&raw)?;
-        out.insert(
-            id.clone(),
-            ExecutionNames {
-                target: pointer_str(&value, "/request/target"),
-                definition_name: pointer_str(&value, "/definition/name"),
-                spec_name: pointer_str(&value, "/definition/spec/name"),
-                plan_name: pointer_str(&value, "/request/input/layered_request/plan/title"),
-            },
-        );
-    }
-    Ok(out)
-}
-
-fn pointer_str(value: &Value, pointer: &str) -> Option<String> {
-    value
-        .pointer(pointer)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
-
-/// Freeze ownership and input before the RPC. Conversation indexes are
-/// published only after the node confirms durable acceptance.
-///
-/// Receipt + assignment (+ index row + project run-key index) stage in ONE
-/// batch, so a failed prepare leaves nothing written.
-pub(super) fn prepare_assignment(
-    store: &rdb::store::Store,
-    assignment: &Assignment,
-    fingerprint: &str,
-) -> Result<()> {
-    let i = &assignment.index;
-    ensure!(
-        i.id == assignment.request.id && i.kind == assignment.request.kind,
-        "assignment index must match request id and kind"
-    );
-    let mut batch = rocksdb::WriteBatch::default();
-    if let Some(raw) = rdb::store::get(store, b"", &keys::asg_key(&i.id)).map_err(kv::engine_err)? {
-        let old: Assignment = serde_json::from_slice(&raw)?;
-        ensure!(
-            old.index.node_id == i.node_id
-                && old.index.kind == i.kind
-                && old.index.created_at == i.created_at,
-            "assignment ownership conflict"
-        );
-        if old.request == assignment.request {
-            return Ok(());
-        }
-        ensure!(
-            old.request.kind == ExecutionKind::Project
-                && dispatch_key(&old.request) != dispatch_key(&assignment.request),
-            "assignment conflict"
-        );
-        let rejected = receipt(store, "execution", dispatch_key(&old.request))?;
-        ensure!(
-            rejected.is_some_and(|row| row.phase == "rejected"),
-            "previous project dispatch is unresolved or accepted"
-        );
-        if i.kind == ExecutionKind::Project {
-            batch.delete(keys::prk_key(dispatch_key(&old.request)));
+impl FleetConnection {
+    pub async fn receipt(&self, scope: &str, id: &str) -> Result<Option<Receipt>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT fingerprint,phase,payload FROM dispatch_receipts WHERE scope=?1 AND id=?2",
+                params![scope, id],
+            )
+            .await?;
+        match rows.next().await? {
+            None => Ok(None),
+            Some(row) => Ok(Some(Receipt {
+                fingerprint: row.get(0)?,
+                phase: row.get(1)?,
+                payload: serde_json::from_str(&row.get::<String>(2)?)?,
+            })),
         }
     }
-    if !matches!(i.kind, ExecutionKind::Agent | ExecutionKind::Operator) {
-        super::acceptance::stage_insert(store, &mut batch, i, None)?;
-    } else if records::index(store, &i.id)?.is_some() {
-        // The index row of an agent/operator dispatch is published by node
-        // acceptance; a conflicting pre-existing row still must be fenced.
-        super::acceptance::validate_row(store, i)?;
-    }
-    tx::put(&mut batch, &keys::asg_key(&i.id), assignment)?;
-    if i.kind == ExecutionKind::Project {
-        batch.put(
-            keys::prk_key(dispatch_key(&assignment.request)),
-            i.id.as_bytes(),
-        );
-    }
-    let key = keys::rcp_key("execution", dispatch_key(&assignment.request));
-    let existing = kv::get_json::<Receipt>(store, &key)?
-        .filter(|row| row.fingerprint == fingerprint)
-        .ok_or_else(|| anyhow::anyhow!("missing dispatch receipt"))?;
-    tx::put(
-        &mut batch,
-        &key,
-        &Receipt {
-            phase: "prepared".into(),
-            ..existing
-        },
-    )?;
-    tx::commit(store, batch)
-}
 
-pub(super) fn finish_dispatch(
-    store: &rdb::store::Store,
-    id: &str,
-    fingerprint: &str,
-    reply: &RpcReply,
-) -> Result<()> {
-    ensure!(
-        (200..300).contains(&reply.status),
-        "node acceptance required"
-    );
-    let accepted: opencoder_core::fleet::ExecutionIndex =
-        serde_json::from_value(reply.body.clone())?;
-    let mut batch = rocksdb::WriteBatch::default();
-    super::acceptance::stage_insert(store, &mut batch, &accepted, Some(id))?;
-    let key = keys::rcp_key("execution", id);
-    let existing = kv::get_json::<Receipt>(store, &key)?
-        .filter(|row| row.fingerprint == fingerprint)
-        .ok_or_else(|| anyhow::anyhow!("request receipt ownership conflict"))?;
-    tx::put(
-        &mut batch,
-        &key,
-        &Receipt {
-            phase: "accepted".into(),
-            payload: serde_json::to_value(reply)?,
-            ..existing
-        },
-    )?;
-    tx::commit(store, batch)
+    /// First writer owns the original intent. Returns false on content reuse.
+    pub async fn claim_request(&self, scope: &str, id: &str, fingerprint: &str) -> Result<bool> {
+        self.conn.execute(
+            "INSERT INTO dispatch_receipts VALUES (?1,?2,?3,'claimed','null') ON CONFLICT(scope,id) DO NOTHING",
+            params![scope,id,fingerprint],
+        ).await?;
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT fingerprint FROM dispatch_receipts WHERE scope=?1 AND id=?2",
+                params![scope, id],
+            )
+            .await?;
+        Ok(rows.next().await?.unwrap().get::<String>(0)? == fingerprint)
+    }
+
+    /// Caller holds request_lock for this key. Updates cannot change intent.
+    pub async fn save_receipt(&self, scope: &str, id: &str, receipt: &Receipt) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE dispatch_receipts SET phase=?4,payload=?5 WHERE scope=?1 AND id=?2 AND fingerprint=?3",
+            params![scope,id,receipt.fingerprint.clone(),receipt.phase.clone(),serde_json::to_string(&receipt.payload)?],
+        ).await?;
+        ensure!(changed == 1, "request receipt ownership conflict");
+        Ok(())
+    }
+
+    pub async fn assignment(&self, id: &str) -> Result<Option<Assignment>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT assignment FROM execution_assignments WHERE id=?1",
+                [id],
+            )
+            .await?;
+        rows.next()
+            .await?
+            .map(|row| Ok(serde_json::from_str(&row.get::<String>(0)?)?))
+            .transpose()
+    }
+
+    /// Batch lookup of dispatch-time names for the execution list. One SQL
+    /// round trip (no N+1); ids without a stored assignment are simply absent
+    /// from the map.
+    pub async fn execution_names(&self, ids: &[String]) -> Result<HashMap<String, ExecutionNames>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT id, json_extract(assignment,'$.request.target'), \
+             json_extract(assignment,'$.definition.name'), \
+             json_extract(assignment,'$.definition.spec.name'), \
+             json_extract(assignment,'$.request.input.layered_request.plan.title') \
+             FROM execution_assignments WHERE id IN ({placeholders})"
+        );
+        let args: Vec<turso::Value> = ids
+            .iter()
+            .map(|id| turso::Value::Text(id.clone()))
+            .collect();
+        let mut rows = self.conn.query(&sql, params_from_iter(args)).await?;
+        let mut out = HashMap::with_capacity(ids.len());
+        while let Some(row) = rows.next().await? {
+            out.insert(
+                row.get::<String>(0)?,
+                ExecutionNames {
+                    target: row.get::<Option<String>>(1)?,
+                    definition_name: row.get::<Option<String>>(2)?,
+                    spec_name: row.get::<Option<String>>(3)?,
+                    plan_name: row.get::<Option<String>>(4)?,
+                },
+            );
+        }
+        Ok(out)
+    }
+
+    /// Freeze ownership and input before the RPC. Conversation indexes are
+    /// published only after the node confirms durable acceptance.
+    pub async fn prepare_assignment(
+        &self,
+        assignment: &Assignment,
+        fingerprint: &str,
+    ) -> Result<()> {
+        ensure!(
+            assignment.index.id == assignment.request.id
+                && assignment.index.kind == assignment.request.kind,
+            "assignment index must match request id and kind"
+        );
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
+        let i = &assignment.index;
+        let mut rows = tx
+            .query(
+                "SELECT assignment FROM execution_assignments WHERE id=?1",
+                [i.id.as_str()],
+            )
+            .await?;
+        if let Some(row) = rows.next().await? {
+            let old: Assignment = serde_json::from_str(&row.get::<String>(0)?)?;
+            ensure!(
+                old.index.node_id == i.node_id
+                    && old.index.kind == i.kind
+                    && old.index.created_at == i.created_at,
+                "assignment ownership conflict"
+            );
+            if old.request == assignment.request {
+                drop(rows);
+                tx.commit().await?;
+                return Ok(());
+            }
+            ensure!(
+                old.request.kind == ExecutionKind::Project
+                    && dispatch_key(&old.request) != dispatch_key(&assignment.request),
+                "assignment conflict"
+            );
+            let mut rejected = tx
+                .query(
+                    "SELECT phase FROM dispatch_receipts WHERE scope='execution' AND id=?1",
+                    [dispatch_key(&old.request)],
+                )
+                .await?;
+            ensure!(
+                rejected
+                    .next()
+                    .await?
+                    .is_some_and(|row| row.get::<String>(0).ok().as_deref() == Some("rejected")),
+                "previous project dispatch is unresolved or accepted"
+            );
+        }
+        drop(rows);
+        if !matches!(i.kind, ExecutionKind::Agent | ExecutionKind::Operator) {
+            super::acceptance::insert(&tx, i, None).await?;
+        }
+        let mut rows = tx
+            .query(
+                "SELECT node_id,kind,created_at FROM execution_index WHERE id=?1",
+                [i.id.as_str()],
+            )
+            .await?;
+        if let Some(row) = rows.next().await? {
+            ensure!(
+                row.get::<String>(0)? == i.node_id
+                    && row.get::<String>(1)? == i.kind.prefix()
+                    && row.get::<i64>(2)? == i.created_at,
+                "execution ownership conflict"
+            );
+        }
+        drop(rows);
+        tx.execute(
+            "INSERT INTO execution_assignments VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET assignment=excluded.assignment",
+            params![i.id.clone(), serde_json::to_string(assignment)?],
+        )
+        .await?;
+        let changed = tx.execute("UPDATE dispatch_receipts SET phase='prepared' WHERE scope='execution' AND id=?1 AND fingerprint=?2", params![dispatch_key(&assignment.request),fingerprint]).await?;
+        ensure!(changed == 1, "missing dispatch receipt");
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn finish_dispatch(
+        &self,
+        id: &str,
+        fingerprint: &str,
+        reply: &RpcReply,
+    ) -> Result<()> {
+        ensure!(
+            (200..300).contains(&reply.status),
+            "node acceptance required"
+        );
+        let accepted = serde_json::from_value(reply.body.clone())?;
+        let tx = turso::transaction::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )
+        .await?;
+        super::acceptance::insert(&tx, &accepted, Some(id)).await?;
+        let changed = tx.execute(
+            "UPDATE dispatch_receipts SET phase='accepted',payload=?3 WHERE scope='execution' AND id=?1 AND fingerprint=?2",
+            params![id, fingerprint, serde_json::to_string(reply)?],
+        ).await?;
+        ensure!(changed == 1, "request receipt ownership conflict");
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 #[path = "access/receipts.rs"]
 mod database_access;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencoder_core::fleet::{ExecutionIndex, ExecutionStatus};
+
+    async fn store() -> FleetStore {
+        FleetStore::open_memory().await.unwrap()
+    }
+
+    /// Raw-JSON assignment fixture: `request_extra` lands inside
+    /// `$.request`, `definition_extra` at the assignment top level.
+    async fn put_raw_assignment(
+        store: &FleetStore,
+        id: &str,
+        request_extra: &str,
+        definition_extra: &str,
+    ) {
+        let rc = if request_extra.is_empty() { "" } else { "," };
+        let dc = if definition_extra.is_empty() { "" } else { "," };
+        let payload = format!(
+            r#"{{"index":{{"id":"{id}","created_at":1,"kind":"dag","node_id":"n1","status":"pending"}},"request":{{"id":"{id}","kind":"dag"{rc}{request_extra}}}{dc}{definition_extra}}}"#
+        );
+        store
+            .db
+            .connect()
+            .await
+            .unwrap()
+            .execute(
+                "INSERT INTO execution_assignments VALUES (?1,?2)",
+                params![id, payload],
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn execution_names_batches_shapes_and_skips_missing_ids() {
+        let store = store().await;
+        let rows: [(&str, &str, &str); 5] = [
+            ("agent-a", r#""target":"coder-x""#, ""),
+            (
+                "dag-b",
+                "",
+                r#""definition":{"id":"etl","name":"etl","spec":{"name":"etl"}}"#,
+            ),
+            (
+                "team-c",
+                r#""target":"stale-name""#,
+                r#""definition":{"name":"demo"}"#,
+            ),
+            ("dag-d", "", r#""definition":{"spec":{"name":"legacy"}}"#),
+            (
+                "brain-e",
+                r#""input":{"layered_request":{"plan":{"title":"Frozen plan"}}}"#,
+                "",
+            ),
+        ];
+        for (id, request_extra, definition_extra) in rows {
+            put_raw_assignment(&store, id, request_extra, definition_extra).await;
+        }
+        let ids: Vec<String> = rows.iter().map(|(id, ..)| (*id).to_string()).collect();
+        let mut all = ids.clone();
+        all.push("ghost-x".into());
+        let names = store.execution_names(&all).await.unwrap();
+        assert_eq!(names.len(), 5, "an id without an assignment stays absent");
+        assert_eq!(names["agent-a"].target.as_deref(), Some("coder-x"));
+        assert_eq!(names["agent-a"].definition_name, None);
+        assert_eq!(names["dag-b"].spec_name.as_deref(), Some("etl"));
+        assert_eq!(names["dag-b"].definition_name.as_deref(), Some("etl"));
+        assert_eq!(names["team-c"].definition_name.as_deref(), Some("demo"));
+        assert_eq!(names["team-c"].target.as_deref(), Some("stale-name"));
+        assert_eq!(names["dag-d"].definition_name, None, "spec-only snapshot");
+        assert_eq!(names["dag-d"].spec_name.as_deref(), Some("legacy"));
+        assert_eq!(names["brain-e"].plan_name.as_deref(), Some("Frozen plan"));
+    }
+
+    #[tokio::test]
+    async fn execution_names_with_empty_ids_short_circuits() {
+        let store = store().await;
+        put_raw_assignment(&store, "agent-a", r#""target":"coder-x""#, "").await;
+        let names = store.execution_names(&[]).await.unwrap();
+        assert!(
+            names.is_empty(),
+            "an empty id list short-circuits to an empty map"
+        );
+    }
+
+    #[tokio::test]
+    async fn execution_names_reads_assignments_written_by_prepare() {
+        let store = store().await;
+        let index = ExecutionIndex {
+            id: "team-real-1".into(),
+            created_at: 7,
+            kind: ExecutionKind::Team,
+            node_id: "n1".into(),
+            status: ExecutionStatus::Pending,
+        };
+        let request = CreateExecution {
+            id: index.id.clone(),
+            kind: ExecutionKind::Team,
+            target: Some("demo".into()),
+            input: serde_json::json!({}),
+            node_id: Some("n1".into()),
+        };
+        let fingerprint = opencoder_core::token_hash(&serde_json::to_string(&request).unwrap());
+        assert!(
+            store
+                .claim_request("execution", "team-real-1", &fingerprint)
+                .await
+                .unwrap(),
+            "test owns the dispatch receipt"
+        );
+        store
+            .prepare_assignment(
+                &Assignment {
+                    private_context: None,
+                    runtime: None,
+                    codex: None,
+                    index: index.clone(),
+                    request,
+                    definition: Some(serde_json::json!({"name": "demo", "captain": "act"})),
+                },
+                &fingerprint,
+            )
+            .await
+            .unwrap();
+        let names = store
+            .execution_names(&["team-real-1".to_string(), "team-ghost".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(names.len(), 1);
+        assert_eq!(names["team-real-1"].target.as_deref(), Some("demo"));
+        assert_eq!(
+            names["team-real-1"].definition_name.as_deref(),
+            Some("demo")
+        );
+        assert_eq!(names["team-real-1"].spec_name, None);
+    }
+}

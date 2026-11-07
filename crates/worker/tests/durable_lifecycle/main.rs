@@ -295,7 +295,7 @@ async fn cancelled_project_execution_cannot_resume() {
         .id;
     let old_run = "prun-old-done";
     support::seed_project_run(
-        &opencoder_core::runtime_store_rdb_dir(&fleet.root().join("n0/node")),
+        &fleet.root().join("n0/node/runtime.db"),
         old_run,
         todo_id,
         opencoder_store::ProjectTodoRunStatus::Done,

@@ -5,6 +5,75 @@ use crate::common::{conv, fresh, make_session};
 use opencoder_store::{SessionFilter, SessionMeta, Store};
 
 #[tokio::test]
+async fn list_preview_preserves_unicode_limits_and_malformed_json_behavior() {
+    let (_dir, store) = fresh().await;
+    let cases = [
+        (
+            "short",
+            serde_json::json!([{"kind": "text", "text": "sample".repeat(400)}]).to_string(),
+            "sample".repeat(14).chars().take(80).collect::<String>(),
+        ),
+        (
+            "unicode",
+            serde_json::json!([{"kind": "text", "text": "界".repeat(3000)}]).to_string(),
+            "界".repeat(80),
+        ),
+        (
+            "long",
+            serde_json::json!([{"kind": "text", "text": "x".repeat(9000)}]).to_string(),
+            String::new(),
+        ),
+        ("malformed", "{broken".into(), String::new()),
+        (
+            "nul-after-json",
+            "[{\"kind\":\"text\",\"text\":\"before\"}]\0ignored".into(),
+            "before".into(),
+        ),
+        (
+            "nul-in-json",
+            "[{\"kind\":\"text\",\"text\":\"before\0after\"}]".into(),
+            String::new(),
+        ),
+    ];
+    for (id, raw, _) in &cases {
+        make_session(&store, id, 1).await;
+        store
+            .append_message(id, &opencoder_core::Message::user(*id, "placeholder"))
+            .await
+            .unwrap();
+        store
+            .conn()
+            .await
+            .unwrap()
+            .execute(
+                "UPDATE messages SET blocks_json = ? WHERE session_id = ?",
+                turso::params![raw.as_str(), *id],
+            )
+            .await
+            .unwrap();
+    }
+    make_session(&store, "empty", 1).await;
+    let listed = store
+        .list_sessions(&SessionFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), cases.len() + 1);
+    for (id, _, expected) in cases {
+        assert_eq!(
+            listed.iter().find(|row| row.id == id).unwrap().preview,
+            expected,
+            "{id}"
+        );
+    }
+    assert!(listed
+        .iter()
+        .find(|row| row.id == "empty")
+        .unwrap()
+        .preview
+        .is_empty());
+}
+
+#[tokio::test]
 async fn list_pagination_with_metadata() {
     let (_dir, store) = fresh().await;
     for i in 0..6u32 {

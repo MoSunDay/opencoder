@@ -1,9 +1,9 @@
 use opencoder_store::project::comments::{CommentError, CommentQuery, NewComment};
-use opencoder_store::{ProjectStore, RdbStore};
+use opencoder_store::{ProjectStore, Store, TursoStore};
 use serde_json::json;
 
-async fn setup() -> RdbStore {
-    let s = RdbStore::open_memory().await.unwrap();
+async fn setup() -> TursoStore {
+    let s = TursoStore::open_memory().await.unwrap();
     s.create_todo(&serde_json::from_value(json!({"id":"t","title":"Task","draft":"body","status":"draft","agent":"act","created_at":1,"updated_at":1})).unwrap()).await.unwrap();
     s
 }
@@ -153,4 +153,73 @@ async fn execution_sources_are_verified_in_the_append_transaction() {
     );
     entry.request_id = "new".into();
     assert!(s.append_todo_comment(&entry).await.is_err());
+}
+
+#[tokio::test]
+async fn version_38_upgrade_preserves_tasks_and_authentication_rows() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("store.db");
+    let s = TursoStore::open(&file).await.unwrap();
+    s.create_user(
+        "migration-user",
+        "fixture-token-digest",
+        opencoder_core::identity::Role::Editor,
+        1,
+    )
+    .await
+    .unwrap();
+    s.create_todo(&serde_json::from_value(json!({"id":"t","title":"Task","draft":"body","status":"draft","agent":"act","created_at":1,"updated_at":1})).unwrap()).await.unwrap();
+    let conn = s.conn().await.unwrap();
+    conn.execute("DROP TRIGGER project_todo_comments_delete", ())
+        .await
+        .unwrap();
+    conn.execute("DROP TABLE project_todo_comments", ())
+        .await
+        .unwrap();
+    conn.execute("UPDATE schema_version SET version=38", ())
+        .await
+        .unwrap();
+    let count: i64 = conn
+        .query("SELECT COUNT(*) FROM platform_users", ())
+        .await
+        .unwrap()
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .get(0)
+        .unwrap();
+    drop(conn);
+    drop(s);
+    let s = TursoStore::open(&file).await.unwrap();
+    assert_eq!(s.get_todo("t").await.unwrap().unwrap().draft, "body");
+    assert!(s
+        .todo_comments("t", CommentQuery::default())
+        .await
+        .unwrap()
+        .unwrap()
+        .comments
+        .is_empty());
+    s.append_todo_comment(&note(1)).await.unwrap();
+    let actual: i64 = s
+        .conn()
+        .await
+        .unwrap()
+        .query("SELECT COUNT(*) FROM platform_users", ())
+        .await
+        .unwrap()
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .get(0)
+        .unwrap();
+    assert_eq!(count, actual);
+    let user = s
+        .find_user_by_token_hash("fixture-token-digest")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(user.name, "migration-user");
+    assert_eq!(user.role, opencoder_core::identity::Role::Editor);
 }

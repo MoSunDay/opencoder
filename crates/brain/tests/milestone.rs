@@ -159,8 +159,8 @@ fn paused_run_keeps_pending_human_guidance_for_resume() {
         1,
     ));
     waiting.run.pending_guidance = true;
-    let paused = snap(command(&waiting, &req.plan, "pause", None, 2).unwrap());
-    let resumed = snap(command(&paused, &req.plan, "resume", None, 3).unwrap());
+    let paused = snap(command(&waiting, &req.plan, "pause", 2).unwrap());
+    let resumed = snap(command(&paused, &req.plan, "resume", 3).unwrap());
     assert_eq!(resumed.run.phase, LayeredPhase::Ready);
     assert!(resumed.run.pending_guidance);
     assert!(!barrier(&resumed));
@@ -235,7 +235,7 @@ fn fifth_round_blocks_rework_without_creating_executions() {
     assert_eq!(blocked.operations.len(), current.operations.len());
     let mut blocked = snap(blocked);
     blocked.run.max_rounds = 6;
-    let resumed = snap(command(&blocked, &req.plan, "resume", None, 90).unwrap());
+    let resumed = snap(command(&blocked, &req.plan, "resume", 90).unwrap());
     let next = dispatch(&resumed, &req, 1);
     assert_eq!(next.run.round, 6);
     assert_eq!(next.run.phase, LayeredPhase::Waiting);
@@ -299,7 +299,7 @@ fn resumed_decision_receives_exact_assessment_keys_and_previous_rejection() {
         "assess every current milestone exactly once".into(),
         20,
     ));
-    let resumed = snap(command(&rejected, &req.plan, "resume", None, 21).unwrap());
+    let resumed = snap(command(&rejected, &req.plan, "resume", 21).unwrap());
     let mut admitted = resumed;
     admitted.run.phase = LayeredPhase::Deciding;
     let context = layer_context(&admitted, &req, &catalog(), Default::default(), None).unwrap();
@@ -347,87 +347,4 @@ fn decision_context_maps_layer_ids_to_one_based_targets() {
         "{error}"
     );
     assert!(decide(&initial, &req, &catalog(), &proposal(&initial, &req, 1), 2).is_ok());
-}
-
-#[test]
-fn resume_may_append_one_human_input_before_the_resume_marker() {
-    let req = request();
-    let mut waiting = snap(dispatch(
-        &snap(initialize("brain-resume-append", &req, 1).unwrap()),
-        &req,
-        1,
-    ));
-    waiting.run.error = Some("previous rejection retained".into());
-    let paused = snap(command(&waiting, &req.plan, "pause", None, 2).unwrap());
-    assert_eq!(paused.run.phase, LayeredPhase::Paused);
-    assert_eq!(
-        paused.run.error.as_deref(),
-        Some("previous rejection retained")
-    );
-
-    let appended = command(
-        &paused,
-        &req.plan,
-        "resume",
-        Some("  resume with the appended constraint  "),
-        3,
-    )
-    .unwrap();
-    // The trimmed input becomes pending guidance and is recorded before the
-    // resume marker, and the prior error survives for the next decision.
-    assert_eq!(appended.run.phase, LayeredPhase::Ready);
-    assert!(appended.run.pending_guidance);
-    assert_eq!(
-        appended.run.error.as_deref(),
-        Some("previous rejection retained")
-    );
-    let kinds: Vec<&str> = appended
-        .events
-        .iter()
-        .map(|event| event.event_type.as_str())
-        .collect();
-    assert_eq!(kinds, ["human_input", "run_resumed"]);
-    assert_eq!(
-        appended.events[0].user_input.as_deref(),
-        Some("resume with the appended constraint")
-    );
-
-    // An ordinary resume keeps the old behaviour: no input event, no guidance.
-    let resumed = snap(appended);
-    let paused_again = snap(command(&resumed, &req.plan, "pause", None, 4).unwrap());
-    let ordinary_change = command(&paused_again, &req.plan, "resume", None, 5).unwrap();
-    let ordinary = snap(ordinary_change.clone());
-    assert!(ordinary.run.pending_guidance, "earlier guidance survives");
-    assert_eq!(
-        ordinary_change
-            .events
-            .iter()
-            .map(|event| event.event_type.as_str())
-            .collect::<Vec<_>>(),
-        ["run_resumed"]
-    );
-}
-
-#[test]
-fn resume_append_is_rejected_outside_a_stopped_run() {
-    let req = request();
-    let initial = snap(initialize("brain-resume-gate", &req, 1).unwrap());
-    let waiting = snap(dispatch(&initial, &req, 1));
-    // A running (waiting) run is not paused or blocked: no resume at all.
-    assert!(command(&waiting, &req.plan, "resume", Some("late input"), 2).is_err());
-    let paused = snap(command(&waiting, &req.plan, "pause", None, 2).unwrap());
-    // Appended input only applies to resume, never to pause or cancel.
-    assert!(command(&paused, &req.plan, "pause", Some("not now"), 3).is_err());
-    assert!(command(&paused, &req.plan, "cancel", Some("not now"), 3).is_err());
-    // The text obeys the same 1..4096 byte admission rule as human_input.
-    for text in ["", "   ", &"x".repeat(4097)] {
-        let error = command(&paused, &req.plan, "resume", Some(text), 3).unwrap_err();
-        assert!(error.to_string().contains("1..4096"), "{error}");
-    }
-    assert_eq!(paused.run.phase, LayeredPhase::Paused);
-
-    // A terminal run never resumes.
-    let cancelled = snap(command(&paused, &req.plan, "cancel", None, 3).unwrap());
-    assert!(command(&cancelled, &req.plan, "resume", None, 4).is_err());
-    assert!(command(&cancelled, &req.plan, "resume", Some("too late"), 4).is_err());
 }

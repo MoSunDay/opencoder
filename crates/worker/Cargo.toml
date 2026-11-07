@@ -46,7 +46,6 @@ opencoder-control.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
-rdb.workspace = true
 
 [[test]]
 name = "platform"

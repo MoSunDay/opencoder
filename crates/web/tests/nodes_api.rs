@@ -9,7 +9,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures::StreamExt;
 use opencoder_llm::MockChatClient;
-use opencoder_store::{EventKind, RdbStore, SessionEventRecord, SessionFilter, SessionMeta, Store};
+use opencoder_store::{
+    EventKind, SessionEventRecord, SessionFilter, SessionMeta, Store, TursoStore,
+};
 use tower::ServiceExt;
 
 mod support;
@@ -22,7 +24,7 @@ struct Ctx {
 }
 
 async fn app(token: Option<&str>) -> Ctx {
-    let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),

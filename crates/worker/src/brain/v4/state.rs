@@ -92,9 +92,6 @@ pub async fn outcome(
         LayeredPhase::Completed => ExecutionStatus::Done,
         LayeredPhase::Failed => ExecutionStatus::Error,
         LayeredPhase::Cancelled => ExecutionStatus::Cancelled,
-        // A control pause freezes future scheduling; the root journal keeps
-        // the paused status until an explicit resume returns it to idle.
-        LayeredPhase::Paused => ExecutionStatus::Paused,
         _ => ExecutionStatus::Idle,
     };
     let mut result = result(snapshot);

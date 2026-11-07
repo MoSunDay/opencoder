@@ -92,10 +92,9 @@ futures = "0.3"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["json", "ws"] }
 turso = { version = "=0.8.3", default-features = false }
-# Primary embedded KV engine, pinned to an audited upstream rev for reproducible
-# builds across machines/CI (turso stays for ontology/legacy SQL surfaces only).
+# Base storage stays on turso; rdb/rocksdb serve the opencoder-event queue only.
 # `store` feature = embedder-only RocksDB slice; avoids the full server stack.
-rdb = { git = "https://github.com/MoSunDay/rdb.git", rev = "e0ee630dd8f8d1530fd76a1ee219baa89b1ab5db", default-features = false, features = ["store"] }
+rdb = { path = "/root/rdb", default-features = false, features = ["store"] }
 rocksdb = "0.24"
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "gzip", "socks"] }

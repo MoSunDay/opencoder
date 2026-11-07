@@ -120,31 +120,12 @@ pub fn admit(snapshot: &LayeredSnapshot, operation_id: &str, now: i64) -> Result
     Ok(update)
 }
 
-/// Upper bound of one accepted human input, matching the `human_input`
-/// admission rule so an appended resume text can never bypass it.
-const APPENDED_INPUT_MAX_BYTES: usize = 4096;
-
 pub fn command(
     snapshot: &LayeredSnapshot,
     _plan: &LayeredPlan,
     action: &str,
-    appended: Option<&str>,
     now: i64,
 ) -> Result<LayeredChange> {
-    let appended = match (action, appended) {
-        // Only an explicit resume may carry new human input; the text obeys
-        // the same 1..4096 byte admission rule as `human_input`.
-        ("resume", Some(text)) => {
-            let text = text.trim();
-            ensure!(
-                !text.is_empty() && text.len() <= APPENDED_INPUT_MAX_BYTES,
-                "appended input must contain 1..4096 bytes"
-            );
-            Some(text)
-        }
-        (_, Some(_)) => anyhow::bail!("appended input only applies to resume"),
-        (_, None) => None,
-    };
     ensure!(!snapshot.run.phase.terminal(), "run is terminal");
     let mut update = change(snapshot, now);
     match action {
@@ -157,21 +138,11 @@ pub fn command(
                 ),
                 "only paused or blocked runs can resume"
             );
-            if let Some(text) = appended {
-                // The new input becomes pending guidance for the next decision
-                // and is recorded before the resume marker, so the wake that
-                // follows replays it in order.
-                update.run.pending_guidance = true;
-                let mut input = event(&update.run, "human_input", None);
-                input.user_input = Some(text.to_owned());
-                update.events.push(input);
-            }
-            update.run.phase =
-                if barrier(snapshot) || snapshot.run.pending_guidance || appended.is_some() {
-                    LayeredPhase::Ready
-                } else {
-                    LayeredPhase::Waiting
-                };
+            update.run.phase = if barrier(snapshot) || snapshot.run.pending_guidance {
+                LayeredPhase::Ready
+            } else {
+                LayeredPhase::Waiting
+            };
             // Keep the rejection visible to the next decision. A valid decision clears it.
         }
         "cancel" => {

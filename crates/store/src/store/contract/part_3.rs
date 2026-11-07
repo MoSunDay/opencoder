@@ -1,7 +1,7 @@
 // Method group 3; assembled before async_trait expands the complete contract.
 macro_rules! store_contract_2 {
     ($($methods:tt)*) => {
-        store_contract_3! {
+        store_contract_finish! {
             $($methods)*
     async fn update_node_task_status(
         &self,
@@ -63,8 +63,8 @@ macro_rules! store_contract_2 {
     }
 
     /// Bulk-clear a node's console dialogs: delete every session bound to a
-    /// TERMINAL node task of `node_id` (done | error | cancelled) — the
-    /// delete cascades take the node_tasks row plus messages/inputs/events/subagent
+    /// TERMINAL node task of `node_id` (done | error | cancelled) — the FK
+    /// cascades take the node_tasks row plus messages/inputs/events/subagent
     /// tasks with it. Sessions whose node task is still pending/running/
     /// cancelling are KEPT so a running execution survives the sweep.
     /// Returns how many sessions were removed and which ids were skipped.
@@ -275,7 +275,7 @@ macro_rules! store_contract_2 {
         )
     }
     /// Delete one definition. Fire history (`schedule_runs`) is kept — the
-    /// ledger is an audit trail and is decoupled from definitions by design.
+    /// ledger is an audit trail and has no FK by design.
     async fn delete_schedule(&self, _id: &str) -> Result<()> {
         anyhow::bail!(
             "schedule store API is not supported by {}",

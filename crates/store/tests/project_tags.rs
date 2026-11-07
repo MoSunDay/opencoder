@@ -2,7 +2,7 @@
 use opencoder_store::project::ProjectTag;
 use opencoder_store::{
     ProjectGoalRecord, ProjectGoalStatus, ProjectInitiativePatch, ProjectInitiativeRecord,
-    ProjectStore, ProjectTodoPatch, ProjectTodoRecord, RdbStore,
+    ProjectStore, ProjectTodoPatch, ProjectTodoRecord, TursoStore,
 };
 
 fn initiative(id: &str, goal: Option<&str>) -> ProjectInitiativeRecord {
@@ -29,8 +29,8 @@ fn tag(id: &str, scope: &str, owner: &str, name: &str) -> ProjectTag {
         name: name.into(),
     }
 }
-async fn setup() -> RdbStore {
-    let s = RdbStore::open_memory().await.unwrap();
+async fn setup() -> TursoStore {
+    let s = TursoStore::open_memory().await.unwrap();
     for id in ["p", "q"] {
         s.create_goal(&ProjectGoalRecord {
             summary: Default::default(),
@@ -191,6 +191,89 @@ async fn todo_unlink_and_deletion_remove_tag_links() {
     assert!(s.list_todo_tags().await.unwrap().is_empty());
     assert!(s.get_todo("t").await.unwrap().is_some());
 }
+#[tokio::test]
+async fn v31_migration_removes_legacy_containers_but_preserves_todo_payloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let s = TursoStore::open(&path).await.unwrap();
+    s.create_initiative(&initiative("keep", None))
+        .await
+        .unwrap();
+    s.create_initiative(&initiative("legacy", None))
+        .await
+        .unwrap();
+    s.create_todo(&todo("a", Some("keep"))).await.unwrap();
+    s.create_todo(&todo("b", Some("legacy"))).await.unwrap();
+    drop(s);
+    let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
+    let c = db.connect().unwrap();
+    c.execute_batch(
+        "DROP TABLE project_todo_tags;
+         DROP TABLE project_tags;
+         DROP INDEX idx_project_initiatives_goal;
+         DROP INDEX idx_project_todos_initiative;",
+    )
+    .await
+    .unwrap();
+    c.execute(
+        "ALTER TABLE project_initiatives RENAME TO project_milestones",
+        (),
+    )
+    .await
+    .unwrap();
+    c.execute(
+        "ALTER TABLE project_milestones ADD COLUMN kind TEXT NOT NULL DEFAULT 'initiative'",
+        (),
+    )
+    .await
+    .unwrap();
+    c.execute(
+        "UPDATE project_milestones SET kind='milestone' WHERE id='legacy'",
+        (),
+    )
+    .await
+    .unwrap();
+    c.execute(
+        "ALTER TABLE project_todos RENAME COLUMN initiative_id TO milestone_id",
+        (),
+    )
+    .await
+    .unwrap();
+    c.execute("UPDATE schema_version SET version=31", ())
+        .await
+        .unwrap();
+    c.execute_batch(
+        "CREATE INDEX idx_project_milestones_goal ON project_milestones(goal_id);
+         CREATE INDEX idx_project_todos_milestone ON project_todos(milestone_id);",
+    )
+    .await
+    .unwrap();
+    drop(c);
+    drop(db);
+    for _ in 0..2 {
+        let s = TursoStore::open(&path).await.unwrap();
+        assert_eq!(
+            s.list_initiatives(None)
+                .await
+                .unwrap()
+                .iter()
+                .map(|i| i.id.as_str())
+                .collect::<Vec<_>>(),
+            ["keep"]
+        );
+        let a = s.get_todo("a").await.unwrap().unwrap();
+        let b = s.get_todo("b").await.unwrap().unwrap();
+        assert_eq!(a.initiative_id.as_deref(), Some("keep"));
+        assert!(b.initiative_id.is_none());
+        assert_eq!(b.draft, "说明");
+        assert_eq!(b.board_status, "todo");
+    }
+}
+
 #[tokio::test]
 async fn tag_scope_rejects_missing_owner_and_allows_moving_existing_definition() {
     let s = setup().await;

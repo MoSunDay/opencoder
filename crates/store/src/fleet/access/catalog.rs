@@ -1,12 +1,15 @@
-use super::FleetStore;
-use anyhow::Result;
-use serde_json::Value;
+use super::*;
 
 impl FleetStore {
     pub async fn catalog_reference_candidates(&self, name: &str) -> Result<Vec<(String, Value)>> {
         let name = name.to_owned();
         self.db
-            .read(move |store| super::catalog_reference_candidates(store, &name))
+            .read(move |conn| async move {
+                let name = &name;
+                FleetConnection { conn }
+                    .catalog_reference_candidates(name)
+                    .await
+            })
             .await
     }
 }

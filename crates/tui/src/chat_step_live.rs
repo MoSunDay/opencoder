@@ -144,9 +144,7 @@ mod tests {
     }
 
     fn blocks(group_at: usize) -> Vec<ChatBlock> {
-        let mut v = vec![ChatBlock::User {
-            rendered: Vec::new(),
-        }];
+        let mut v = vec![ChatBlock::User { rendered: Vec::new() }];
         v.insert(group_at, group(vec![], false, false));
         v
     }
@@ -154,10 +152,9 @@ mod tests {
     fn disclosure(v: &[ChatBlock]) -> (bool, Vec<(bool, bool)>) {
         v.iter()
             .find_map(|b| match b {
-                ChatBlock::StepGroup { open, steps, .. } => Some((
-                    *open,
-                    steps.iter().map(|s| (s.open, s.calls_open)).collect(),
-                )),
+                ChatBlock::StepGroup { open, steps, .. } => {
+                    Some((*open, steps.iter().map(|s| (s.open, s.calls_open)).collect()))
+                }
                 _ => None,
             })
             .unwrap()
@@ -183,9 +180,7 @@ mod tests {
         }
         // User collapsed the group row and the step earlier.
         if let ChatBlock::StepGroup {
-            user_touched,
-            steps,
-            ..
+            user_touched, steps, ..
         } = &mut v[1]
         {
             *user_touched = true;
@@ -230,9 +225,7 @@ mod tests {
     #[test]
     fn canonical_group_targets_first_group_after_floor() {
         let v = vec![
-            ChatBlock::User {
-                rendered: Vec::new(),
-            },
+            ChatBlock::User { rendered: Vec::new() },
             group(vec![], false, false),
             ChatBlock::Marker(vec![Line::from("m")]),
             group(vec![], false, false),

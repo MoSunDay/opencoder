@@ -58,7 +58,10 @@ fn replay_defers_summary_block_below_retained_tail() {
         _ => unreachable!("filtered above"),
     }
     // Retained tail first, folded-history marker after it.
-    assert!(matches!(chat.blocks.first(), Some(ChatBlock::User { .. })));
+    assert!(matches!(
+        chat.blocks.first(),
+        Some(ChatBlock::User { .. })
+    ));
     assert!(matches!(
         chat.blocks.last(),
         Some(ChatBlock::Compaction { .. })

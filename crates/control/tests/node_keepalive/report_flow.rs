@@ -3,8 +3,8 @@ use opencoder_core::fleet::*;
 use opencoder_node::fleet::NodeService;
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -111,20 +111,31 @@ async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
         {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let writer =
-            super::report_storage::hold_writer(&root.path().join("data/control.db.rdb")).await;
+        let db = turso::Builder::new_local(
+            (root.path().join("data/control.db"))
+                .to_str()
+                .expect("UTF-8 database path"),
+        )
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
+        let writer = db.connect().unwrap();
+        writer.execute("BEGIN IMMEDIATE", ()).await.unwrap();
         inventory.changes.send(1).unwrap();
         while inventory.reports.load(Ordering::SeqCst) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(tokio::time::timeout(
-            Duration::from_millis(20),
-            state
-                .fleet
-                .put_definition("test", "writer-barrier", &serde_json::json!({})),
-        )
-        .await
-        .is_err());
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(20),
+                state
+                    .fleet
+                    .put_definition("test", "writer-barrier", &serde_json::json!({})),
+            )
+            .await
+            .is_err()
+        );
         assert!(
             !tokio::time::timeout(Duration::from_secs(1), state.fleet.nodes())
                 .await
@@ -163,7 +174,7 @@ async fn slow_full_report_commit_preserves_heartbeat_and_owned_cancel_reply() {
         }
         let after = state.hub.views().await.remove(0);
         let reports_before_commit = inventory.reports.load(Ordering::SeqCst);
-        super::report_storage::commit_writer(writer).await;
+        writer.execute("COMMIT", ()).await.unwrap();
         assert!(
             after.online,
             "a live peer disconnected under report storage backpressure"
@@ -219,7 +230,7 @@ async fn report_ack(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn acknowledged_report_detach_cannot_promote_or_ack_replacement_connection() {
-    use super::report_storage::{commit_writer, send, until, Fixture};
+    use super::report_storage::{Fixture, send, until};
     use futures::StreamExt;
     let fixture = Fixture::start().await;
     let mut old = fixture.connect(1).await;
@@ -243,7 +254,7 @@ async fn acknowledged_report_detach_cannot_promote_or_ack_replacement_connection
     old.close(None).await.unwrap();
     until(async || !fixture.state.hub.views().await[0].online).await;
     let mut new = fixture.open(10).await;
-    commit_writer(writer).await;
+    writer.execute("COMMIT", ()).await.unwrap();
     fixture
         .state
         .fleet

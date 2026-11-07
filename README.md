@@ -54,7 +54,7 @@ OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它�
 - **🗜️ 自动压缩** — token 估算驱动的上下文压缩，`compaction.{auto,context_threshold,reserved,tail_turns,buffer}` 全可配置。
 - **🎮 steer / followup 两段式投递** — 运行中可在 turn 边界即时插入 steer，idle 时消费恰好一条 queue。
 - **🌐 无损事件回放** — SSE 事件 schema v2 迁移，`SessionEvent` 作为单一真相源，replay 完整重建工具块。
-- **⚡ 高性能** — 冷启动 ~9 ms；存储走原子批量提交（WriteBatch），rdb 单发实测：append 1000 条 5.6 ms（0.006 ms/条）、load 1000 条 1.7 ms、list 200 会话 4.1 ms，阈值契约见 [store_perf.rs](crates/store/tests/store_perf.rs)；二进制 ~42 MB（thin-LTO + strip，静态链接 RocksDB）。
+- **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；存储走原子批量提交（WriteBatch），阈值测试见 [docs/perf.md](docs/perf.md)，迁移到 rdb 后存储性能数值需重新采样。
 
 ## 🚀 快速开始
 
@@ -204,13 +204,14 @@ Fleet 管理 CLI 默认读取 `~/.config/opencoder/ctl.json`（设置 `XDG_CONFI
 
 | 指标 | 实测 | 目标 |
 | --- | --- | --- |
-| 冷启动（`--help`，5 样本） | **~9 ms** | < 50 ms |
-| 二进制大小 | **~42 MB**（41,662,904 B，thin-LTO + strip，静态链接 RocksDB） | — |
-| 追加 1000 条消息（WriteBatch 批量提交） | 5.6 ms → **0.006 ms/条** | < 2 ms/条 |
-| 加载 1000 条消息 | **1.7 ms** | < 50 ms |
-| 列出 200 个 session | **4.1 ms** | < 100 ms |
+| 冷启动（`--help`） | **~6 ms** | < 50 ms |
+| 二进制大小 | **9.3 MB** | — |
+| 追加 1000 条消息（事务） | 30.5 ms → **0.031 ms/条** | < 2 ms/条 |
+| 加载 1000 条消息 | **2.4 ms** | < 50 ms |
+| 列出 200 个 session | **0.95 ms** | < 100 ms |
+| 全量确定性测试套件 | **~3 s / 1076 测试** | — |
 
-阈值契约测试见 [`store_perf.rs`](crates/store/tests/store_perf.rs)（`--release` 运行取实测值）；冷启动为 `--help` 5 样本计时。
+详见 [`docs/perf.md`](docs/perf.md)。
 
 ## 📊 与 opencode 对比
 
@@ -243,10 +244,10 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 | 写入模型 | WAL 事务（`journal_mode=WAL` 等 PRAGMA） | 单次修改一个 `WriteBatch` 原子提交，失败不留半批数据 |
 | 并发模型 | 多读一写（WAL） | 单 owner/write lease（进程内共享句柄 + 跨进程 `.owner.lock`）+ snapshot reads |
 | 访问层 | Drizzle ORM（JS，运行时迁移 `migration` 表） | KV 数据模型 + `Store` trait（`crates/store/src/store.rs`） |
-| 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | KV key 家族版本化 |
+| 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | KV key 家族版本化；旧 SQLite 会话库走显式迁移命令 |
 | 库文件命名 | `opencode.db`（按 channel 可变，如 `opencode-dev.db`） | `<data_dir>/<stem>.rdb`（每 workdir 一个目录） |
 
-> Ontology 使用独立的 SQLite 后端，与主存储相互独立。
+> Ontology 使用独立的 SQLite 后端，不随主存储的 rdb 迁移。
 
 > 说明：端到端任务表现受 LLM 主导（首轮 token 延迟为 provider RTT），同一模型下两者任务能力等价；**差异集中在运行时基线** —— 内存占用、启动延迟、分发体积。对受约束环境（CI runner、容器、弱机）与多实例部署（按进程计的 RSS 直接决定并发密度），opencoder 的低开销优势可被直接摊销。
 

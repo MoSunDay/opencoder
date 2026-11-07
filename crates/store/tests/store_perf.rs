@@ -7,12 +7,12 @@
 use std::time::Instant;
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_store::{RdbStore, SessionFilter, SessionMeta, Store};
+use opencoder_store::{SessionFilter, SessionMeta, Store, TursoStore};
 use tempfile::TempDir;
 
-async fn setup() -> (TempDir, RdbStore) {
+async fn setup() -> (TempDir, TursoStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = RdbStore::open(dir.path().join("perf.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("perf.db")).await.unwrap();
     (dir, store)
 }
 

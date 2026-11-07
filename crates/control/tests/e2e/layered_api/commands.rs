@@ -90,26 +90,6 @@ async fn layered_commands_forward_only_the_three_lifecycle_actions() {
     assert_eq!(pause.execution.id, RUN);
     assert_eq!(pause.input, json!(null));
 
-    // A resume may carry one appended input; control forwards it unchanged
-    // through the same command entrypoint.
-    h.node.set_brain("resume", 200, json!({"phase":"ready"}));
-    let (status, body) = h
-        .req(
-            Method::POST,
-            &path,
-            Some(json!({"action":"resume","input":{"text":"resume with this constraint"}})),
-        )
-        .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body["phase"], json!("ready"));
-    let resume = h
-        .node
-        .brain_calls()
-        .into_iter()
-        .find(|call| call.action == "resume")
-        .unwrap();
-    assert_eq!(resume.input, json!({"text":"resume with this constraint"}));
-
     // Unknown and historical runs are never layered command targets.
     let (status, body) = h
         .req(

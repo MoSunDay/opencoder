@@ -7,8 +7,9 @@ use opencoder_core::{
 };
 use opencoder_store::{
     fleet::FleetStore, EventKind, ProjectExecutorKind, ProjectStore, ProjectTodoRecord,
-    ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, RdbStore,
+    ProjectTodoRunKind, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus,
     SessionEventRecord, SessionMeta, Store, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
+    TursoStore,
 };
 
 fn index(id: &str, created_at: i64) -> ExecutionIndex {
@@ -87,7 +88,9 @@ fn session(id: &str) -> SessionMeta {
 #[tokio::test]
 async fn huge_utf8_message_is_reassembled_from_bounded_sql_chunks() {
     let dir = tempfile::tempdir().unwrap();
-    let store = RdbStore::open(dir.path().join("runtime.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("runtime.db"))
+        .await
+        .unwrap();
     store.create_session(&session("session-a")).await.unwrap();
     let message = Message::user("message-a", "你".repeat(400_000));
     store.append_message("session-a", &message).await.unwrap();
@@ -127,7 +130,9 @@ async fn huge_utf8_message_is_reassembled_from_bounded_sql_chunks() {
 #[tokio::test]
 async fn event_page_obeys_row_and_payload_budgets() {
     let dir = tempfile::tempdir().unwrap();
-    let store = RdbStore::open(dir.path().join("runtime.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("runtime.db"))
+        .await
+        .unwrap();
     store
         .create_session(&session("session-events"))
         .await
@@ -190,7 +195,9 @@ async fn event_page_obeys_row_and_payload_budgets() {
 #[tokio::test]
 async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
     let dir = tempfile::tempdir().unwrap();
-    let store = RdbStore::open(dir.path().join("runtime.db")).await.unwrap();
+    let store = TursoStore::open(dir.path().join("runtime.db"))
+        .await
+        .unwrap();
     store.create_session(&session("parent")).await.unwrap();
     let workflow = TodoWorkflowRecord {
         id: "todos-page".into(),

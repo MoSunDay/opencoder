@@ -56,8 +56,7 @@ mod tests {
     /// alone persists nothing, so the row cannot be assumed to exist.
     #[tokio::test]
     async fn dispatch_as_first_input_creates_parent_row_and_runtime() {
-        let store: Arc<dyn Store> =
-            Arc::new(opencoder_store::RdbStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
         assert!(
             store.get_session("parent-1").await.unwrap().is_none(),
             "precondition: opening the TUI seeded no task record"
@@ -81,8 +80,7 @@ mod tests {
     /// create never clobbers registered subtasks or a codex/envs runtime.
     #[tokio::test]
     async fn existing_parent_runtime_is_returned_untouched() {
-        let store: Arc<dyn Store> =
-            Arc::new(opencoder_store::RdbStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "parent-2".into(),
@@ -103,10 +101,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        store
-            .set_harness_runtime("parent-2", &seeded)
-            .await
-            .unwrap();
+        store.set_harness_runtime("parent-2", &seeded).await.unwrap();
 
         let runtime = ensure_parent_runtime(&store, "parent-2", "act", "m".into())
             .await

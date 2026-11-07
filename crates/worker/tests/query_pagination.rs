@@ -7,7 +7,7 @@ use opencoder_core::fleet::{
 };
 use opencoder_core::Message;
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{EventKind, SessionEventRecord, Store, TursoStore};
+use opencoder_store::{EventKind, RdbStore, SessionEventRecord, Store};
 use serde_json::json;
 use support::*;
 
@@ -29,9 +29,11 @@ async fn oversized_legacy_message_is_chunked_and_detail_stays_bounded() {
     })
     .await;
     settled(&node, id).await;
-    let fixture = TursoStore::open(dir.path().join("node/runtime.db"))
-        .await
-        .unwrap();
+    let fixture = RdbStore::open(opencoder_core::runtime_store_rdb_dir(
+        &dir.path().join("node"),
+    ))
+    .await
+    .unwrap();
     let huge = Message::user("legacy-huge", "界".repeat(800_000));
     let huge_seq = fixture.append_message(id, &huge).await.unwrap();
     let execution = node

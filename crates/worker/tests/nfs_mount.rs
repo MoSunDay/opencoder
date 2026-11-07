@@ -241,8 +241,9 @@ async fn readonly_nfs_node_snapshots_and_offline_followup() {
     assert_eq!(reply.status, 400, "{reply:?}");
     assert!(!source.join("executions").exists());
     assert!(!source.join("runtime.db").exists());
-    assert!(node_root.join("node/runtime.db").is_file());
-    assert!(second_root.join("node/runtime.db").is_file());
+    // The runtime store is an rdb directory on the shared stem policy.
+    assert!(node_root.join("node/runtime.db.rdb").is_dir());
+    assert!(second_root.join("node/runtime.db.rdb").is_dir());
     assert!(node_root
         .join("node/agent/agent-v1/execution.json")
         .is_file());

@@ -40,14 +40,14 @@ mod tests {
 
 - **位置**：`crates/<crate>/tests/*.rs`（含目录目标 `tests/<dir>/main.rs`）
 - **对象**：跨模块协作、持久化、Mock 驱动的执行流程
-- **要求**：用 `MockChatClient`（非真网络）、`tempdir`（非真文件系统）、`LibsqlStore::open_memory()`（非真数据库文件）
+- **要求**：用 `MockChatClient`（非真网络）、`tempdir`（非真文件系统）、`TursoStore::open_memory()`（非真数据库文件）
 - **示例**：`steer_followup.rs`、`recovery.rs`、`web_contract.rs`、`store_integration/`；根包进程级形态：`tests/operator_e2e/`、`tests/dag_e2e/`（真二进制子进程 + loopback LLM 桩，零外部服务 → 仍判第 2 层）
 
 ```rust
 // crates/session/tests/steer_followup.rs
 #[tokio::test]
 async fn steer_promotes_at_turn_boundary_and_resets_step() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let mock = MockChatClient::new();
     // ... 断言 drain 语义
 }
@@ -89,6 +89,6 @@ async fn steer_promotes_at_turn_boundary_and_resets_step() {
 ## Mock 使用规范
 
 - `MockChatClient`：FIFO 脚本回放 + 请求体录制（`crates/llm/src/mock.rs`）
-- `LibsqlStore::open_memory()`：内存 SQLite，零文件残留
+- `TursoStore::open_memory()`：内存 SQLite，零文件残留
 - `tempfile::TempDir`：文件系统操作的隔离临时目录
 - 不要 Mock 自己的内部类型（只 Mock 外部边界：LLM、文件系统、网络）

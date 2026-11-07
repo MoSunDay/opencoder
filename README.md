@@ -54,7 +54,7 @@ OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它�
 - **🗜️ 自动压缩** — token 估算驱动的上下文压缩，`compaction.{auto,context_threshold,reserved,tail_turns,buffer}` 全可配置。
 - **🎮 steer / followup 两段式投递** — 运行中可在 turn 边界即时插入 steer，idle 时消费恰好一条 queue。
 - **🌐 无损事件回放** — SSE 事件 schema v2 迁移，`SessionEvent` 作为单一真相源，replay 完整重建工具块。
-- **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；存储走原子批量提交（WriteBatch），阈值测试见 [docs/perf.md](docs/perf.md)，迁移到 rdb 后存储性能数值需重新采样。
+- **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；Turso WAL 并发读写，千条消息追加 30 ms；阈值契约见 [store_perf.rs](crates/store/tests/store_perf.rs)。
 
 ## 🚀 快速开始
 
@@ -211,7 +211,7 @@ Fleet 管理 CLI 默认读取 `~/.config/opencoder/ctl.json`（设置 `XDG_CONFI
 | 列出 200 个 session | **0.95 ms** | < 100 ms |
 | 全量确定性测试套件 | **~3 s / 1076 测试** | — |
 
-详见 [`docs/perf.md`](docs/perf.md)。
+详见 [`store_perf.rs`](crates/store/tests/store_perf.rs)。
 
 ## 📊 与 opencode 对比
 

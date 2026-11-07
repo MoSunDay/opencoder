@@ -94,7 +94,7 @@ axum = { version = "0.7", features = ["json", "ws"] }
 turso = { version = "=0.8.3", default-features = false }
 # Base storage stays on turso; rdb/rocksdb serve the opencoder-event queue only.
 # `store` feature = embedder-only RocksDB slice; avoids the full server stack.
-rdb = { path = "/root/rdb", default-features = false, features = ["store"] }
+rdb = { git = "https://github.com/MoSunDay/rdb.git", rev = "e0ee630dd8f8d1530fd76a1ee219baa89b1ab5db", default-features = false, features = ["store"] }
 rocksdb = "0.24"
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "gzip", "socks"] }

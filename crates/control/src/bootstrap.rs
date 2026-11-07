@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use opencoder_brain::activation::configured_request as configured_planner_request;
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{fleet::FleetStore, Store, TursoStore};
+use opencoder_store::{fleet::FleetStore, RdbStore, Store};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -48,13 +48,13 @@ pub async fn new_state(
     client: Option<Arc<dyn ChatStream>>,
 ) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let turso = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
-    new_state_with_projects(workdir, data, client, turso).await
+    let store = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
+    new_state_with_projects(workdir, data, client, store).await
 }
 
 /// Test/injection seam over `new_state`: swaps only the project store while
-/// the shared `store` keeps the internal turso. Production goes through
-/// `new_state`.
+/// the shared `store` keeps the internal rdb catalog store. Production goes
+/// through `new_state`.
 pub async fn new_state_with_projects(
     workdir: PathBuf,
     data: PathBuf,
@@ -74,7 +74,7 @@ pub async fn new_state_with_projects(
 
 pub(crate) async fn new_resource_state(workdir: PathBuf, data: PathBuf) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let projects = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
+    let projects = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
     state_with_projects(
         workdir,
         data,
@@ -112,8 +112,8 @@ async fn state_with_projects(
     } else {
         None
     };
-    let turso = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
-    let store: Arc<dyn Store> = turso;
+    let catalog = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
+    let store: Arc<dyn Store> = catalog;
     let client = client.unwrap_or_else(|| {
         Arc::new(BrainClient {
             config: config.clone(),
@@ -245,7 +245,7 @@ pub async fn serve_release(
     let data = resolve_data_dir(&workdir, data)?;
     let schema = crate::release::ontology_schema::startup(platform.as_ref(), port, &data).await?;
     tokio::fs::create_dir_all(&data).await?;
-    let projects = Arc::new(TursoStore::open_catalog(data.join("definitions.db")).await?);
+    let projects = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
     let state =
         state_with_projects(workdir.clone(), data, None, projects, true, schema.policy).await?;
     drop(schema);
@@ -260,8 +260,8 @@ pub async fn serve_release(
         seed_admin(&state.store, &token).await?;
     }
     // One-time import of legacy `schedules.json` definitions into the
-    // turso `schedules` table (only when the table is empty; a failure
-    // warns and never blocks boot) — see `seed_schedules`.
+    // rdb-backed `schedules` store (only when no definitions exist; a
+    // failure warns and never blocks boot) — see `seed_schedules`.
     crate::seed_schedules::seed_schedules(&state.store, &workdir).await;
     let config = Config::load(&workdir)?;
     if let Some(platform) = state.lifecycle.platform.get() {
@@ -504,7 +504,7 @@ mod seed_admin_tests {
     use opencoder_store::Store;
 
     async fn memory_store() -> Arc<dyn Store> {
-        Arc::new(TursoStore::open_memory().await.unwrap())
+        Arc::new(RdbStore::open_memory().await.unwrap())
     }
 
     async fn name_of_digest(store: &Arc<dyn Store>, token: &str) -> Option<String> {

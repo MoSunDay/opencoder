@@ -15,10 +15,17 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 - `crates/control/src/api/brain_runs/v4/` — 准入、派发、事件转交与视图
 - `crates/control/src/api/brain_runs/catalog/availability.rs` —
   profile 引用可用性检查
-- `crates/worker/src/brain/v4/` — 节点侧投影、恢复、模型调度与确认
+- `crates/worker/src/brain/v4/` — 节点侧投影、恢复、模型调度与确认；run 级
+  pause/resume 与 resume 附带人工输入（`api.rs`，详见
+  [changelog](../../../features/changelog/2026-11-06/brain-run-pause-resume-append.md)）
 - `crates/worker/src/brain/v4/budget.rs` — 冻结模型容量与人工输入准入
+  （含 resume 附带文本的累计 human-input budget）
 - `crates/worker/src/brain/workspace/mod.rs` — 每 run 独立工作区
 - `crates/worker/src/brain/output/index.rs` — 内容寻址的输出清单索引
+- `crates/store/src/rdb_store/execution/brain_layered.rs` — 层屏障/终态/暂停
+  信号在同一提交内镜像到平台事件日志（`brain.run_paused` / `brain.run_resumed`
+  additive；`operation_terminal` 缺 execution_id 整笔拒绝。见
+  [event](../../foundation/event/index.md)）
 
 ## 测试与运维
 - `crates/brain/tests/milestone.rs`、`milestone/` — 图约束与层屏障

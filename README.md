@@ -54,7 +54,7 @@ OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它�
 - **🗜️ 自动压缩** — token 估算驱动的上下文压缩，`compaction.{auto,context_threshold,reserved,tail_turns,buffer}` 全可配置。
 - **🎮 steer / followup 两段式投递** — 运行中可在 turn 边界即时插入 steer，idle 时消费恰好一条 queue。
 - **🌐 无损事件回放** — SSE 事件 schema v2 迁移，`SessionEvent` 作为单一真相源，replay 完整重建工具块。
-- **⚡ 高性能** — 冷启动 ~6 ms，二进制 9.3 MB（thin-LTO + strip）；存储走原子批量提交（WriteBatch），阈值测试见 [docs/perf.md](docs/perf.md)，迁移到 rdb 后存储性能数值需重新采样。
+- **⚡ 高性能** — 冷启动 ~9 ms；存储走原子批量提交（WriteBatch），rdb 单发实测：append 1000 条 5.6 ms（0.006 ms/条）、load 1000 条 1.7 ms、list 200 会话 4.1 ms，阈值契约见 [store_perf.rs](crates/store/tests/store_perf.rs)；二进制 ~42 MB（thin-LTO + strip，静态链接 RocksDB）。
 
 ## 🚀 快速开始
 
@@ -204,14 +204,13 @@ Fleet 管理 CLI 默认读取 `~/.config/opencoder/ctl.json`（设置 `XDG_CONFI
 
 | 指标 | 实测 | 目标 |
 | --- | --- | --- |
-| 冷启动（`--help`） | **~6 ms** | < 50 ms |
-| 二进制大小 | **9.3 MB** | — |
-| 追加 1000 条消息（事务） | 30.5 ms → **0.031 ms/条** | < 2 ms/条 |
-| 加载 1000 条消息 | **2.4 ms** | < 50 ms |
-| 列出 200 个 session | **0.95 ms** | < 100 ms |
-| 全量确定性测试套件 | **~3 s / 1076 测试** | — |
+| 冷启动（`--help`，5 样本） | **~9 ms** | < 50 ms |
+| 二进制大小 | **~42 MB**（41,662,904 B，thin-LTO + strip，静态链接 RocksDB） | — |
+| 追加 1000 条消息（WriteBatch 批量提交） | 5.6 ms → **0.006 ms/条** | < 2 ms/条 |
+| 加载 1000 条消息 | **1.7 ms** | < 50 ms |
+| 列出 200 个 session | **4.1 ms** | < 100 ms |
 
-详见 [`docs/perf.md`](docs/perf.md)。
+阈值契约测试见 [`store_perf.rs`](crates/store/tests/store_perf.rs)（`--release` 运行取实测值）；冷启动为 `--help` 5 样本计时。
 
 ## 📊 与 opencode 对比
 
@@ -232,6 +231,8 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 | 会话存储 | SQLite（WAL）+ Drizzle ORM | RocksDB（rdb）+ 自写 `Store` trait | 存储模型不同；见下方[存储对比](#-存储) |
 
 > **冷启 token 开销**口径：取各 agent 首次发给 LLM 的请求体，计数其中的 `system` 消息 + `tools` 数组（首轮固定开销，发生在任何用户输入之前），用 `cl100k_base` BPE 计 token；与上表其余 `--help` 运行时基线指标独立测量。这一项是每一轮对话都会产生的固定成本。
+
+> 上表 opencoder 列为 Turso 存储时代（2026-07-19）的历史快照；迁移到 RocksDB（rdb）后于 2026-11-07 重采样：冷启动 ~9 ms、二进制 ~42 MB（静态链接 RocksDB，仍为 Rust 原生单二进制），存储吞吐见[性能表](#-性能)。
 
 ### 🗄️ 存储
 

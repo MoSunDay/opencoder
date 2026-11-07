@@ -105,8 +105,19 @@ pub(crate) async fn handle_submit_action(
     // Unknown @-tokens fall through to the normal submit (@file mentions
     // are unaffected).
     if mention_dispatch(
-        &text, chat, subtask_ui, store, config, client_llm, workdir, session_id, agent_name,
-        history, hist_idx, mode_flash, anim_tick,
+        &text,
+        chat,
+        subtask_ui,
+        store,
+        config,
+        client_llm,
+        workdir,
+        session_id,
+        agent_name,
+        history,
+        hist_idx,
+        mode_flash,
+        anim_tick,
     ) {
         return LoopFlow::Proceed;
     }
@@ -236,6 +247,7 @@ pub(crate) async fn handle_submit_action(
     }
     LoopFlow::Proceed
 }
+
 
 /// `@<capability> <question>` one-shot subtask dispatch: route the
 /// submit to a registered Server Agent/Operator instead of a local turn. The

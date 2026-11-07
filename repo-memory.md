@@ -14,8 +14,8 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 - [agents/core](agents/foundation/core/index.md) — 共享类型与 Config。
 - [agents/llm](agents/foundation/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
-- [agents/store](agents/foundation/store/index.md) — `Store` trait、RocksDB（rdb）主后端与平台事件持久化。CLI 与 TUI 的会话库启动共用 `local::session_cmd::open_store_at`（建目录后直接开规范 `<stem>.rdb` 目录），入口不再各自拼路径；不存在任何旧库读取/迁移路径。
-- [agents/event](agents/foundation/event/index.md) — `opencoder-event`：事件日志、监听器、广播总线、触发执行与全局暂停门；通用基建，未接生产 dispatcher。
+- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的 SQLite 基建。
+- [agents/event](agents/foundation/event/index.md) — `opencoder-event`：事件日志、监听器、广播总线、触发执行与全局暂停门；默认纯内存，`rdb` feature 提供 RocksDB 持久队列账本；通用基建，未接生产 dispatcher。
 
 **runtime**
 

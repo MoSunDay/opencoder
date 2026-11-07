@@ -102,17 +102,14 @@ fn pause_retains_the_barrier_and_cancellation_accepts_a_racing_success_receipt()
     let req = request();
     let initial = snap(initialize("brain-pause", &req, 1).unwrap());
     let running = snap(dispatch(&initial, &req, 1));
-    let paused = snap(command(&running, &req.plan, "pause", None, 11).unwrap());
+    let paused = snap(command(&running, &req.plan, "pause", 11).unwrap());
     let ended = finish(paused, &req, LayeredOperationStatus::Done);
     assert_eq!(ended.run.phase, LayeredPhase::Paused);
     assert_eq!(
-        command(&ended, &req.plan, "resume", None, 30)
-            .unwrap()
-            .run
-            .phase,
+        command(&ended, &req.plan, "resume", 30).unwrap().run.phase,
         LayeredPhase::Ready
     );
-    let cancelled = snap(command(&running, &req.plan, "cancel", None, 11).unwrap());
+    let cancelled = snap(command(&running, &req.plan, "cancel", 11).unwrap());
     let ended = finish(cancelled, &req, LayeredOperationStatus::Done);
     assert_eq!(ended.run.phase, LayeredPhase::Cancelled);
     assert!(ended.operations.iter().all(|op| op.status.terminal()));

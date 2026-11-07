@@ -1,12 +1,10 @@
 //! Unified per-workdir data-directory resolution.
 //!
-//! Every crate that opens a per-workdir store (CLI, TUI, Web) must derive the
+//! Every crate that opens a SQLite store (CLI, TUI, Web) must derive the
 //! *same* on-disk data dir for the same workdir, otherwise sessions created in
 //! one process are invisible to another — surfacing as "session not found" and
 //! a detached `opencoder[exited]` pane. This module owns the single canonical
-//! algorithm so the three former call sites can no longer drift. It also owns
-//! the store path policy ([`session_store_rdb_dir`] /
-//! [`runtime_store_rdb_dir`]) shared by every store opener.
+//! algorithm so the three former call sites can no longer drift.
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -58,35 +56,9 @@ pub fn data_dir_for(workdir: &Path) -> PathBuf {
     data_root().join(canonical_workdir_digest(workdir))
 }
 
-/// RocksDB directory suffix appended to a store stem: `opencoder.db` → the
-/// directory `opencoder.db.rdb`.
-pub const RDB_DIR_SUFFIX: &str = "rdb";
-
-/// Shared policy of [`session_store_rdb_dir`] and [`runtime_store_rdb_dir`]:
-/// every store lives in the single canonical directory
-/// `<data_dir>/<stem>.rdb`, returned whether or not anything exists yet (a
-/// fresh store is created there). A plain file at `<stem>` is never read,
-/// opened or replaced — the `.rdb` name never collides with it.
-fn rdb_dir(data_dir: &Path, stem: &str) -> PathBuf {
-    data_dir.join(format!("{stem}.{RDB_DIR_SUFFIX}"))
-}
-
-/// RocksDB directory of the per-workdir session store — see [`rdb_dir`] for
-/// the policy.
-pub fn session_store_rdb_dir(data_dir: &Path) -> PathBuf {
-    rdb_dir(data_dir, "opencoder.db")
-}
-
-/// RocksDB directory of the runtime store — same policy as
-/// [`session_store_rdb_dir`], shared by every runtime-store opener so host
-/// and guest sides cannot drift apart.
-pub fn runtime_store_rdb_dir(data_dir: &Path) -> PathBuf {
-    rdb_dir(data_dir, "runtime.db")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{data_dir_for, runtime_store_rdb_dir, session_store_rdb_dir, workdir_hash};
+    use super::{data_dir_for, workdir_hash};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -193,49 +165,5 @@ mod tests {
             data_dir_for(std::path::Path::new("/a/b")),
             data_dir_for(std::path::Path::new("/a/bb"))
         );
-    }
-
-    /// Fresh data dir: the canonical `.rdb` name is resolved for both
-    /// store stems.
-    #[test]
-    fn rdb_dir_resolves_the_canonical_rdb_name() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(
-            session_store_rdb_dir(dir.path()),
-            dir.path().join("opencoder.db.rdb"),
-            "fresh layout resolves to the .rdb name"
-        );
-        assert_eq!(
-            runtime_store_rdb_dir(dir.path()),
-            dir.path().join("runtime.db.rdb")
-        );
-        // The canonical name holds once the .rdb directory exists, even
-        // when a bare-stem directory is also present.
-        std::fs::create_dir_all(dir.path().join("opencoder.db.rdb")).unwrap();
-        std::fs::create_dir_all(dir.path().join("opencoder.db")).unwrap();
-        assert_eq!(
-            session_store_rdb_dir(dir.path()),
-            dir.path().join("opencoder.db.rdb")
-        );
-    }
-
-    /// A plain `opencoder.db` file never collides with the store: the
-    /// `.rdb` name is returned and the file is left untouched.
-    #[test]
-    fn rdb_dir_never_collides_with_a_plain_stem_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("opencoder.db"), b"plain sqlite bytes").unwrap();
-        std::fs::write(dir.path().join("runtime.db"), b"plain sqlite bytes").unwrap();
-        assert_eq!(
-            session_store_rdb_dir(dir.path()),
-            dir.path().join("opencoder.db.rdb"),
-            "a plain stem file is never used as the RocksDB directory"
-        );
-        assert_eq!(
-            runtime_store_rdb_dir(dir.path()),
-            dir.path().join("runtime.db.rdb")
-        );
-        assert!(dir.path().join("opencoder.db").is_file(), "file untouched");
-        assert!(dir.path().join("runtime.db").is_file(), "file untouched");
     }
 }

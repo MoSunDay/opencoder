@@ -6,7 +6,7 @@ use crate::{
 use anyhow::Result;
 use opencoder_core::{fleet::*, Config};
 use opencoder_llm::ChatStream;
-use opencoder_store::{RdbStore, Store};
+use opencoder_store::{Store, TursoStore};
 use std::{
     collections::HashMap,
     fs::File,
@@ -132,12 +132,9 @@ impl Worker {
             anyhow::bail!("invalid persisted node identity");
         }
         Config::load(&options.workdir)?;
-        // Runtime store on the shared legacy-stem → rdb-directory policy; the
-        // legacy SQLite file name (and its sidecars) stay symlink-checked.
-        let runtime_db = opencoder_core::runtime_store_rdb_dir(&data_dir);
+        let runtime_db = data_dir.join("runtime.db");
         for path in [
             runtime_db.clone(),
-            data_dir.join("runtime.db"),
             data_dir.join("runtime.db-wal"),
             data_dir.join("runtime.db-shm"),
             data_dir.join("runtime.db-tshm"),
@@ -145,15 +142,15 @@ impl Worker {
         ] {
             crate::migration_io::reject_symlink(&path, "node runtime database")?;
         }
-        let store_db = Arc::new(RdbStore::open(runtime_db).await?);
-        let store: Arc<dyn Store> = store_db.clone();
+        let turso = Arc::new(TursoStore::open(runtime_db).await?);
+        let store: Arc<dyn Store> = turso.clone();
         let project = opencoder_project::ProjectService::new();
         // 节点执行面没有 brain 运行时：brain todo 在节点上拒绝启动（由
         // 控制面预解析后再派发）。
         project
             .init(
                 store.clone(),
-                store_db,
+                turso,
                 options.workdir.clone(),
                 client.clone(),
                 None,

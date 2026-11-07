@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use opencoder_store::{
     ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunKind, ProjectTodoRunPatch,
-    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, RdbStore,
+    ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, TursoStore,
 };
 use tokio::sync::Barrier;
 
@@ -54,7 +54,7 @@ fn execute_run(id: &str, todo_id: &str, version: i64, now: i64) -> ProjectTodoRu
 #[tokio::test]
 async fn concurrent_claims_create_exactly_one_run() {
     const CALLERS: usize = 20;
-    let store = Arc::new(RdbStore::open_memory().await.unwrap());
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
     store
         .create_todo(&todo("todo", ProjectTodoStatus::Planned, 1))
         .await
@@ -94,7 +94,7 @@ async fn concurrent_claims_create_exactly_one_run() {
 
 #[tokio::test]
 async fn run_insert_failure_rolls_back_claim() {
-    let store = RdbStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("target", ProjectTodoStatus::Planned, 1))
         .await
@@ -130,7 +130,7 @@ async fn run_insert_failure_rolls_back_claim() {
 
 #[tokio::test]
 async fn existing_running_and_terminal_run_replay_do_not_duplicate() {
-    let store = RdbStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("todo", ProjectTodoStatus::Planned, 1))
         .await
@@ -182,7 +182,7 @@ async fn existing_running_and_terminal_run_replay_do_not_duplicate() {
 
 #[tokio::test]
 async fn plan_claim_blocks_execute_and_finalization_commits_todo_and_run_together() {
-    let store = RdbStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("atomic", ProjectTodoStatus::Planned, 1))
         .await
@@ -205,6 +205,26 @@ async fn plan_claim_blocks_execute_and_finalization_commits_todo_and_run_togethe
         finished_at: Some(4),
         ..Default::default()
     };
+    let conn = store.conn().await.unwrap();
+    conn.execute("CREATE TRIGGER fail_finalization BEFORE UPDATE ON project_todo_runs BEGIN SELECT RAISE(FAIL, 'injected finalization failure'); END", ()).await.unwrap();
+    assert!(store.finish_todo_run(&plan.id, &patch, 4).await.is_err());
+    assert_eq!(
+        store
+            .get_todo("atomic")
+            .await
+            .unwrap()
+            .unwrap()
+            .plan_md
+            .as_deref(),
+        Some("# plan")
+    );
+    assert_eq!(
+        store.get_todo_run(&plan.id).await.unwrap().unwrap().status,
+        ProjectTodoRunStatus::Running
+    );
+    conn.execute("DROP TRIGGER fail_finalization", ())
+        .await
+        .unwrap();
     assert!(store.finish_todo_run(&plan.id, &patch, 4).await.unwrap());
     assert_eq!(
         store
@@ -248,7 +268,7 @@ async fn plan_claim_blocks_execute_and_finalization_commits_todo_and_run_togethe
 
 #[tokio::test]
 async fn medium_fields_respect_total_page_budget_without_losing_history() {
-    let store = RdbStore::open_memory().await.unwrap();
+    let store = TursoStore::open_memory().await.unwrap();
     store
         .create_todo(&todo("pages", ProjectTodoStatus::Planned, 1))
         .await

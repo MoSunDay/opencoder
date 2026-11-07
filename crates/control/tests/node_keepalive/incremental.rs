@@ -1,9 +1,9 @@
 //! Negotiated reports exercise the real socket, writer transaction and shared fence.
-use super::report_storage::{commit_writer, index, send, snapshot, Fixture};
+use super::report_storage::{Fixture, index, send, snapshot};
 use futures::StreamExt;
 use opencoder_core::fleet::*;
 use std::time::Duration;
-use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 pub(super) async fn ack(socket: &mut Socket, id: u64, sequence: u64) -> bool {
@@ -261,7 +261,7 @@ async fn final_delta_ack_waits_for_storage_and_brain_does_not_consume_fragment_s
             .status,
         ExecutionStatus::Running
     );
-    commit_writer(writer).await;
+    writer.execute("COMMIT", ()).await.unwrap();
     assert!(ack(&mut socket, 2, 2).await);
     assert_eq!(
         fixture

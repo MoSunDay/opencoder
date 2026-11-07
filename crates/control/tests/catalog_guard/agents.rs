@@ -1,8 +1,4 @@
 use super::support::{call, Harness};
-use opencoder_core::fleet::{
-    Assignment, CreateExecution, ExecutionIndex, ExecutionKind, ExecutionStatus,
-};
-use opencoder_store::fleet::handoff::dispatch_key;
 use serde_json::{json, Value};
 
 async fn create(h: &Harness, name: &str) {
@@ -87,68 +83,53 @@ async fn agent_saved_alias_and_active_execution_block_delete_without_touching_hi
         .delete_definition("brain_plan", "saved")
         .await
         .unwrap();
-    // Seed a live agent dispatch through the fleet handoff APIs: the index
-    // row an agent dispatch publishes at acceptance, plus its frozen
-    // assignment and the dispatch receipt that owns it.
-    let fleet = &h.state.fleet;
-    let record = ExecutionIndex {
-        id: "run".into(),
-        created_at: 1,
-        kind: ExecutionKind::Agent,
-        node_id: "node".into(),
-        status: ExecutionStatus::Running,
-    };
-    let assignment = Assignment {
-        private_context: None,
-        runtime: None,
-        codex: None,
-        index: record.clone(),
-        request: CreateExecution {
-            id: record.id.clone(),
-            kind: record.kind,
-            target: Some("sample".into()),
-            input: Value::Null,
-            node_id: None,
-        },
-        definition: None,
-    };
-    fleet.put_index(&record).await.unwrap();
-    assert!(fleet
-        .claim_request(
-            "execution",
-            dispatch_key(&assignment.request),
-            "guard-fingerprint"
-        )
+    let path = h.dir.path().join("state/control.db");
+    let conn = turso::Builder::new_local(path.to_str().unwrap())
+        .experimental_multiprocess_wal(true)
+        .build()
         .await
-        .unwrap());
-    fleet
-        .prepare_assignment(&assignment, "guard-fingerprint")
-        .await
+        .unwrap()
+        .connect()
         .unwrap();
+    conn.execute(
+        "INSERT INTO execution_index VALUES('run',1,'agent','node','running')",
+        (),
+    )
+    .await
+    .unwrap();
+    let assignment = json!({"index":{"id":"run","created_at":1,"kind":"agent","node_id":"node","status":"running"},"request":{"kind":"agent","target":"sample"}}).to_string();
+    conn.execute(
+        "INSERT INTO execution_assignments VALUES('run',?1)",
+        [assignment.clone()],
+    )
+    .await
+    .unwrap();
     assert_eq!(
         h.call("DELETE", "/api/agents/sample", Value::Null).await.0,
         409
     );
-    fleet
-        .put_index(&ExecutionIndex {
-            status: ExecutionStatus::Done,
-            ..record
-        })
+    conn.execute("UPDATE execution_index SET status='done'", ())
         .await
         .unwrap();
     assert_eq!(
         h.call("DELETE", "/api/agents/sample", Value::Null).await.0,
         200
     );
-    // Finished history keeps the frozen assignment untouched.
-    let stored = fleet
-        .assignment("run")
+    let mut rows = conn
+        .query(
+            "SELECT assignment FROM execution_assignments WHERE id='run'",
+            (),
+        )
         .await
-        .unwrap()
-        .expect("finished assignment history is retained");
+        .unwrap();
     assert_eq!(
-        serde_json::to_value(&stored).unwrap(),
-        serde_json::to_value(&assignment).unwrap()
+        rows.next()
+            .await
+            .unwrap()
+            .unwrap()
+            .get::<String>(0)
+            .unwrap(),
+        assignment
     );
 }
 

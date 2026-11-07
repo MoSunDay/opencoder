@@ -4,8 +4,8 @@ Commit: (working-tree, 待提交)
 
 `opencoder-event`：事件驱动调度的通用基建。默认纯内存、零存储引擎
 依赖；`--features rdb` 才附带 RocksDB 持久队列。尚未接入任何生产
-dispatcher，主存储（RocksDB/rdb 的 [store](../store/index.md)）不受本
-crate 影响；Ontology 保留独立 SQLite 后端。
+dispatcher，基础存储（turso 的 [store](../store/index.md)）不受本 crate
+影响。
 
 ## 索引
 - [src/domain/](../../../crates/event/src/domain) — 纯域：事件词汇与不可变
@@ -29,8 +29,7 @@ crate 影响；Ontology 保留独立 SQLite 后端。
   字节序即数值序）、`evn/last` 高水位、`evc/<consumer-id>` 游标、
   `evl/<id>` 监听器、`evw/<execution>` 等待；seq 分配与日志行同一
   `WriteBatch` 原子提交；RocksDB 目录锁拒绝同路径二次打开 + 进程内写租约
-  串行化追加。本 crate 中唯一直接使用 rdb/rocksdb 的模块（store/worker
-  的 rdb 使用在各自 crate 内）
+  串行化追加。workspace 中唯一使用 rdb/rocksdb 的模块
 
 ## 测试
 - [tests/bus_ledger.rs](../../../crates/event/tests/bus_ledger.rs) — 总线
@@ -50,13 +49,7 @@ crate 影响；Ontology 保留独立 SQLite 后端。
 
 未接生产：无生产 `ActionExecutor`、outbox 或控制面接线，没有任何调度
 循环调用 `run_pump` / `dispatch_gated`；`SchedulerGate` 无生产 setter
-（默认放行），Brain run 级 pause/resume 也不触碰全局 gate。平台事件的
-唯一生产 producer 是 store 侧 `commit_brain_layered` 的 Brain 信号
-additive mirror：`brain.layer_barrier_reached`、run 级
-`brain.run_paused` / `brain.run_resumed`，以及 `operation_terminal`
-镜像（必须携带 execution id，否则整笔提交拒绝，镜像为
-`execution.terminal`），与 Brain 投影同一原子批提交。`execution.paused`
-与 `brain.operation_terminal` 仍为保留词汇，当前无 producer。
+（默认放行）。`execution.paused`、`brain.*` 为保留词汇，当前无 producer。
 
 ## 相关
-- [store](../store/index.md) — 主存储（RocksDB/rdb）；本 crate 的事件队列在 Store 之外
+- [store](../store/index.md) — 基础存储（turso）；事件队列在 Store 之外

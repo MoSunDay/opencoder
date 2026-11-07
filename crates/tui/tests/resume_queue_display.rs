@@ -12,10 +12,10 @@
 //! `prompt`; the panel removes consumed rows by the store row seq.
 use std::sync::Arc;
 
-use opencoder_store::{Delivery, RdbStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, SessionInput, SessionMeta, Store, TursoStore};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(RdbStore::open_memory().await.unwrap())
+    Arc::new(TursoStore::open_memory().await.unwrap())
 }
 
 /// Mirror of the app.rs admit shape: prompt is the clean (token-stripped)

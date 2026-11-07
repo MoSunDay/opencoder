@@ -86,10 +86,7 @@ step above keeps its disclosure untouched"
     view.apply(&SessionEvent::TextDelta("later output".into()));
     assert_eq!(
         disclosure(&view),
-        (
-            false,
-            vec![(true, true, vec![true]), (false, false, vec![])]
-        ),
+        (false, vec![(true, true, vec![true]), (false, false, vec![])]),
         "new output must respect a user close: only auto-managed levels settle"
     );
 }

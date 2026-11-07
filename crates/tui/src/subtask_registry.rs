@@ -44,8 +44,7 @@ pub fn settle_status(status: ExecutionStatus) -> Option<&'static str> {
         ExecutionStatus::Pending
         | ExecutionStatus::Running
         | ExecutionStatus::Cancelling
-        | ExecutionStatus::Interrupted
-        | ExecutionStatus::Paused => None,
+        | ExecutionStatus::Interrupted => None,
         ExecutionStatus::Idle => Some("done"),
         ExecutionStatus::Done | ExecutionStatus::Error | ExecutionStatus::Cancelled => {
             Some(status.as_str())
@@ -169,7 +168,6 @@ mod tests {
             (ExecutionStatus::Running, None),
             (ExecutionStatus::Cancelling, None),
             (ExecutionStatus::Interrupted, None),
-            (ExecutionStatus::Paused, None),
             (ExecutionStatus::Idle, Some("done")),
             (ExecutionStatus::Done, Some("done")),
             (ExecutionStatus::Error, Some("error")),

@@ -35,7 +35,7 @@ async fn events_append_and_after_replay() {
 
 #[tokio::test]
 async fn single_event_failure_does_not_poison_following_durable_appends() {
-    use opencoder_store::{EventKind, SessionEventRecord, TursoStore};
+    use opencoder_store::{EventKind, RdbStore, SessionEventRecord};
     let (dir, store) = fresh().await;
     make_session(&store, "s", 1).await;
     let mut event = SessionEventRecord {
@@ -57,7 +57,7 @@ async fn single_event_failure_does_not_poison_following_durable_appends() {
     assert_eq!(next.len(), 2);
     assert!(first[0] < next[0] && next[0] < next[1]);
     drop(store);
-    let reopened = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let reopened = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     let saved = reopened.events_after("s", 0).await.unwrap();
     assert_eq!(saved.len(), 3);
     assert_eq!(
@@ -70,9 +70,9 @@ async fn single_event_failure_does_not_poison_following_durable_appends() {
 }
 
 #[tokio::test]
-async fn backend_name_reports_turso() {
+async fn backend_name_reports_rdb() {
     let (_dir, store) = fresh().await;
-    assert_eq!(store.backend_name(), "turso");
+    assert_eq!(store.backend_name(), "rdb");
 }
 
 #[tokio::test]

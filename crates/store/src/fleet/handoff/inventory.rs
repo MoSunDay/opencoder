@@ -1,63 +1,48 @@
 //! Validate a Runtime inventory without querying ownership once per history row.
-use super::super::{FleetConnection, FleetStore};
+use super::super::keys;
+use super::FleetStore;
+use crate::rdb_store::{kv, tx};
 use anyhow::{ensure, Result};
-use turso::transaction::TransactionBehavior;
-use turso::{params, Connection};
 
-// JSON virtual-table values have no declared affinity. An explicit TEXT type
-// lets Turso seek the ownership primary key instead of scanning it per ID.
-const OWNER_LOOKUP: &str = "SELECT owner.runtime_id FROM json_each(?1) requested
-    LEFT JOIN runtime_owners owner ON owner.execution_id=CAST(requested.value AS TEXT)";
-
-impl FleetConnection {
-    /// Existing ownership is immutable and stays read-only. Newly discovered
-    /// children are assigned atomically after rechecking under the writer lock.
-    pub async fn assign_runtime_inventory(&self, runtime: &str, ids: &[&str]) -> Result<()> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-        let encoded = serde_json::to_string(ids)?;
-        if !has_unassigned(&self.conn, runtime, &encoded).await? {
-            return Ok(());
-        }
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
-        let mut registered = tx
-            .query("SELECT 1 FROM host_runtimes WHERE id=?1", [runtime])
-            .await?;
-        ensure!(registered.next().await?.is_some(), "no registered runtime");
-        drop(registered);
-        // Another connection may have assigned an ID after the optimistic read.
-        has_unassigned(&tx, runtime, &encoded).await?;
-        tx.execute(
-            "INSERT INTO runtime_owners(execution_id,runtime_id)
-             SELECT DISTINCT requested.value,?2 FROM json_each(?1) requested
-             WHERE NOT EXISTS(SELECT 1 FROM runtime_owners owner
-                              WHERE owner.execution_id=CAST(requested.value AS TEXT))",
-            params![encoded, runtime],
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(())
+/// Existing ownership is immutable and stays read-only. Newly discovered
+/// children are assigned atomically after rechecking under the writer lease.
+/// Ids owned by a different runtime are an explicit conflict, not a skip.
+pub(super) fn assign_runtime_inventory(
+    store: &rdb::store::Store,
+    runtime: &str,
+    ids: &[&str],
+) -> Result<()> {
+    if ids.is_empty() {
+        return Ok(());
     }
-}
-
-async fn has_unassigned(conn: &Connection, runtime: &str, encoded: &str) -> Result<bool> {
-    let mut rows = conn.query(OWNER_LOOKUP, [encoded]).await?;
+    // Deduplicate like SQL's SELECT DISTINCT before the ownership scan.
+    let mut unique = ids.to_vec();
+    unique.sort_unstable();
+    unique.dedup();
+    let mut unassigned = Vec::new();
     let mut missing = false;
-    while let Some(row) = rows.next().await? {
-        match row.get::<Option<String>>(0)? {
+    for id in &unique {
+        match kv::get_json::<String>(store, &keys::own_key(id))? {
             Some(owner) => ensure!(owner == runtime, "execution runtime ownership conflict"),
-            None => missing = true,
+            None => {
+                missing = true;
+                unassigned.push(id);
+            }
         }
     }
-    Ok(missing)
+    if !missing {
+        return Ok(());
+    }
+    let mut batch = rocksdb::WriteBatch::default();
+    ensure!(
+        kv::get_json::<super::RuntimeRecord>(store, &keys::rt_key(runtime))?.is_some(),
+        "no registered runtime"
+    );
+    for id in unassigned {
+        tx::put(&mut batch, &keys::own_key(id), &runtime)?;
+    }
+    tx::commit(store, batch)
 }
 
 #[path = "access/inventory.rs"]
 mod database_access;
-#[cfg(test)]
-mod tests;

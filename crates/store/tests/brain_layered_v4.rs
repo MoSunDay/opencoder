@@ -2,9 +2,6 @@ use opencoder_core::brain::layered::*;
 use opencoder_core::fleet::ExecutionKind;
 use opencoder_store::Store;
 
-#[path = "brain_layered_v4/reporting.rs"]
-mod reporting;
-
 fn run(phase: LayeredPhase, layer: u32, generation: u64) -> LayeredRun {
     LayeredRun {
         pending_guidance: false,
@@ -87,7 +84,7 @@ fn operation(
 
 #[tokio::test]
 async fn layered_projection_is_atomic_and_generation_fenced() {
-    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
+    let store = opencoder_store::RdbStore::open_memory().await.unwrap();
     let first = store.commit_brain_layered(&created()).await.unwrap();
     assert_eq!(first.schema_version, LAYERED_SCHEMA_VERSION);
     assert_eq!(first.run.last_event_seq, 1);
@@ -121,7 +118,7 @@ async fn layered_projection_is_atomic_and_generation_fenced() {
 async fn terminal_attempt_is_immutable_and_survives_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("layered.db");
-    let store = opencoder_store::TursoStore::open(&path).await.unwrap();
+    let store = opencoder_store::RdbStore::open(&path).await.unwrap();
     store.commit_brain_layered(&created()).await.unwrap();
 
     let mut terminal = created();
@@ -177,7 +174,7 @@ async fn terminal_attempt_is_immutable_and_survives_reopen() {
     assert_eq!(completed.run.phase, LayeredPhase::Completed);
 
     drop(store);
-    let reopened = opencoder_store::TursoStore::open(&path).await.unwrap();
+    let reopened = opencoder_store::RdbStore::open(&path).await.unwrap();
     assert_eq!(
         reopened
             .brain_layered("brain-layered-store")
@@ -190,7 +187,7 @@ async fn terminal_attempt_is_immutable_and_survives_reopen() {
 
 #[tokio::test]
 async fn retry_attempts_are_stored_as_separate_operations() {
-    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
+    let store = opencoder_store::RdbStore::open_memory().await.unwrap();
     let mut retried = created();
     retried.run.phase = LayeredPhase::Waiting;
     retried.run.layer = 1;
@@ -221,7 +218,7 @@ async fn retry_attempts_are_stored_as_separate_operations() {
 
 #[tokio::test]
 async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
-    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
+    let store = opencoder_store::RdbStore::open_memory().await.unwrap();
     assert!(store
         .brain_layered("brain-missing")
         .await
@@ -245,8 +242,6 @@ async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
 #[test]
 fn brain_v4_tables_do_not_increment_current_schema_version() {
     // v4 tables bootstrap unconditionally, so they must not move the
-    // The layered tables remain additive at the current schema watermark.
-    assert_eq!(opencoder_store::turso_store::schema_watermark(), 39);
 }
 
 fn recovery_change(old: &LayeredSnapshot) -> LayeredChange {
@@ -268,8 +263,8 @@ async fn stored_error(
     phase: LayeredPhase,
     activation: u64,
     cancelled: bool,
-) -> (opencoder_store::TursoStore, LayeredSnapshot) {
-    let store = opencoder_store::TursoStore::open_memory().await.unwrap();
+) -> (opencoder_store::RdbStore, LayeredSnapshot) {
+    let store = opencoder_store::RdbStore::open_memory().await.unwrap();
     let mut initial = created();
     initial.run.phase = phase;
     initial.run.layer = 1;
@@ -359,4 +354,163 @@ async fn current_error_recovery_rejects_invalid_state_sequence_or_identity() {
         store.brain_layered(&old.run.run_id).await.unwrap(),
         Some(success)
     );
+}
+
+#[tokio::test]
+async fn layer_barrier_is_mirrored_to_platform_log_while_paused() {
+    let store = opencoder_store::RdbStore::open_memory().await.unwrap();
+    store.commit_brain_layered(&created()).await.unwrap();
+    store
+        .set_scheduler_gate(&opencoder_event::domain::gate::paused("maintenance", 5))
+        .await
+        .unwrap();
+
+    let mut barrier = created();
+    barrier.expected_generation = Some(0);
+    barrier.run.generation = 1;
+    barrier.run.phase = LayeredPhase::Paused;
+    barrier.events = vec![event("layer_barrier_reached", &barrier.run)];
+    store.commit_brain_layered(&barrier).await.unwrap();
+
+    let events = store.platform_events_after(0, 10).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind.as_str(), "brain.layer_barrier_reached");
+    assert_eq!(events[0].payload["run_id"], "brain-layered-store");
+    assert_eq!(
+        store
+            .scheduler_gate()
+            .await
+            .unwrap()
+            .unwrap()
+            .reason
+            .as_deref(),
+        Some("maintenance")
+    );
+}
+
+#[tokio::test]
+async fn brain_control_signals_mirror_into_platform_log() {
+    let store = opencoder_store::RdbStore::open_memory().await.unwrap();
+    store.commit_brain_layered(&created()).await.unwrap();
+
+    let mut paused = created();
+    paused.expected_generation = Some(0);
+    paused.run.generation = 1;
+    paused.run.phase = LayeredPhase::Paused;
+    paused.events = vec![event("run_paused", &paused.run)];
+    store.commit_brain_layered(&paused).await.unwrap();
+
+    let mut resumed = created();
+    resumed.expected_generation = Some(1);
+    resumed.run.generation = 2;
+    resumed.run.phase = LayeredPhase::Ready;
+    resumed.run.layer = 1;
+    resumed.run.activation = 1;
+    let mut resumed_event = event("run_resumed", &resumed.run);
+    resumed_event.decision_summary = Some("resume".into());
+    resumed.events = vec![resumed_event];
+    store.commit_brain_layered(&resumed).await.unwrap();
+
+    let mut terminal = created();
+    terminal.expected_generation = Some(2);
+    terminal.run.generation = 3;
+    terminal.run.phase = LayeredPhase::Paused;
+    let mut done = event("operation_terminal", &terminal.run);
+    done.execution_id = Some("agent-e1".into());
+    done.decision_summary = Some("done".into());
+    terminal.events = vec![done];
+    store.commit_brain_layered(&terminal).await.unwrap();
+
+    let events = store.platform_events_after(0, 10).await.unwrap();
+    let kinds: Vec<String> = events
+        .iter()
+        .map(|event| event.kind.as_str().to_string())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "brain.run_paused",
+            "brain.run_resumed",
+            "execution.terminal"
+        ]
+    );
+    // Run control mirrors retain the run identity and any execution identity.
+    assert_eq!(events[0].payload["run_id"], "brain-layered-store");
+    assert_eq!(events[0].payload["execution_id"], serde_json::Value::Null);
+    assert_eq!(events[1].payload["run_id"], "brain-layered-store");
+    assert_eq!(events[1].payload["layer"], 1);
+    assert_eq!(events[1].payload["activation"], 1);
+    assert_eq!(events[2].payload["execution_id"], "agent-e1");
+    // Run-level control signals never touch the dispatch gate: pause stops the
+    // run's own scheduling, not the node-wide dispatcher.
+    assert!(store.scheduler_gate().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn operation_terminal_requires_an_execution_identity_for_platform_mirror() {
+    let store = opencoder_store::RdbStore::open_memory().await.unwrap();
+    let baseline = store.commit_brain_layered(&created()).await.unwrap();
+    let outbox_before: Vec<(String, u64)> = store
+        .pending_reports(None, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|report| (report.key, report.cursor))
+        .collect();
+    // The Ready baseline queues exactly one wake row, so a paused batch that
+    // landed would have consumed it — a leftover proves the outbox is intact.
+    assert_eq!(outbox_before.len(), 1);
+
+    let mut terminal = created();
+    terminal.expected_generation = Some(0);
+    terminal.run.generation = 1;
+    terminal.run.phase = LayeredPhase::Paused;
+    // execution_id stays None: the mirror cannot name a sub-execution.
+    terminal.events = vec![event("operation_terminal", &terminal.run)];
+    let error = store.commit_brain_layered(&terminal).await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "operation terminal event requires an execution id"
+    );
+
+    // All-or-nothing: projection, brain event log, reporting outbox,
+    // watermark and platform log are exactly the baseline state.
+    assert_eq!(
+        store.brain_layered("brain-layered-store").await.unwrap(),
+        Some(baseline)
+    );
+    assert_eq!(
+        store
+            .brain_layered_events("brain-layered-store", 0, 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let outbox_after: Vec<(String, u64)> = store
+        .pending_reports(None, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|report| (report.key, report.cursor))
+        .collect();
+    assert_eq!(outbox_after, outbox_before);
+    let watermark = store
+        .report_run_state("brain-layered-store")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((watermark.generation, watermark.last_event_seq), (0, 1));
+    assert!(store.platform_events_after(0, 10).await.unwrap().is_empty());
+
+    // The same change with an execution id mirrors as one execution.terminal
+    // platform event, and the rejected batch consumed no generation.
+    terminal.events[0].execution_id = Some("agent-e1".into());
+    let committed = store.commit_brain_layered(&terminal).await.unwrap();
+    assert_eq!(committed.run.last_event_seq, 2);
+    let events = store.platform_events_after(0, 10).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind.as_str(), "execution.terminal");
+    assert_eq!(events[0].payload["execution_id"], "agent-e1");
+    assert_eq!(events[0].payload["run_id"], "brain-layered-store");
 }

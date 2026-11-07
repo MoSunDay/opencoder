@@ -1,4 +1,4 @@
-//! `finish_todo_run` 的终态回写语义（turso 落地）：按 run kind 决定 todo
+//! `finish_todo_run` 的终态回写语义（rdb 落地）：按 run kind 决定 todo
 //! 状态的归属——Plan 回 Planned（plan_md 落盘）、Execute 独占 todo 终态、
 //! Step（playbook 子尝试）永不回写 todo 状态，todo 生命周期由父
 //! playbook 的 Execute 行独占。幂等守卫（重复终结返回 false）一并覆盖。
@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use opencoder_store::{
     ProjectExecutorKind, ProjectStore, ProjectTodoPatch, ProjectTodoRecord, ProjectTodoRunKind,
-    ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, TursoStore,
+    ProjectTodoRunPatch, ProjectTodoRunRecord, ProjectTodoRunStatus, ProjectTodoStatus, RdbStore,
 };
 
 async fn fresh() -> (tempfile::TempDir, Arc<dyn ProjectStore>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(TursoStore::open(dir.path().join("test.db")).await.unwrap());
+    let store = Arc::new(RdbStore::open(dir.path().join("test.db")).await.unwrap());
     (dir, store)
 }
 

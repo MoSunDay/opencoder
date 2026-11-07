@@ -249,7 +249,7 @@ pub struct SessionInput {
     pub prompt: String,
     /// Image attachments carried alongside the prompt as data URIs
     /// (`data:image/<fmt>;base64,...`). Empty for plain-text inputs. Persisted
-    /// in `session_inputs.images_json` so steered/queued/resumed inputs keep
+    /// with the input row so steered/queued/resumed inputs keep
     /// their images across turn boundaries and restarts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
@@ -553,7 +553,8 @@ pub struct MessageRow {
 }
 
 /// Bounded raw slice of one persisted `blocks_json` value. The slice is taken
-/// in SQL before Turso materializes it, so legacy oversized rows stay bounded.
+/// from the raw stored bytes before the rdb store materializes them, so
+/// legacy oversized rows stay bounded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageChunkRecord {
     pub seq: i64,

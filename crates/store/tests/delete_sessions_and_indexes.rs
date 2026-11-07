@@ -8,10 +8,10 @@
 use opencoder_core::fleet::*;
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_store::fleet::FleetStore;
-use opencoder_store::{SessionFilter, SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionFilter, SessionMeta, Store};
 
-async fn fresh() -> TursoStore {
-    TursoStore::open_memory().await.unwrap()
+async fn fresh() -> RdbStore {
+    RdbStore::open_memory().await.unwrap()
 }
 
 fn meta(id: &str) -> SessionMeta {
@@ -23,7 +23,7 @@ fn meta(id: &str) -> SessionMeta {
     }
 }
 
-async fn listed(store: &TursoStore) -> Vec<String> {
+async fn listed(store: &RdbStore) -> Vec<String> {
     store
         .list_sessions(&SessionFilter {
             limit: 100,

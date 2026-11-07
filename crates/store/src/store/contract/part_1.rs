@@ -89,7 +89,7 @@ macro_rules! store_contract_0 {
     /// `resume` on the compaction path to avoid reloading the (potentially
     /// huge) soft-deleted compacted head. The default impl falls back to a full
     /// `load_messages` + in-memory drain so test fakes need not override it;
-    /// the Turso backend overrides with an `OFFSET` query that skips without
+    /// the rdb backend overrides with a range read that skips without
     /// deserializing the dropped rows.
     async fn load_messages_after(&self, session_id: &str, skip_count: i64) -> Result<Vec<Message>> {
         Ok(message_projection::after(
@@ -109,7 +109,7 @@ macro_rules! store_contract_0 {
         let msgs = self.load_messages(session_id).await?;
         Ok(message_projection::message_rows(msgs))
     }
-    /// Read raw message JSON in bounded SQL slices. Implementations must not
+    /// Read raw message JSON in bounded raw slices. Implementations must not
     /// materialize a whole oversized row before applying `raw_budget`.
     async fn load_message_page(
         &self,

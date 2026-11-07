@@ -1,4 +1,4 @@
-use opencoder_store::{EventKind, SessionEventRecord, SessionMeta, Store, TursoStore};
+use opencoder_store::{EventKind, RdbStore, SessionEventRecord, SessionMeta, Store};
 use serde_json::json;
 
 fn event(id: &str, name: &str, kind: &str, at: i64) -> SessionEventRecord {
@@ -14,7 +14,7 @@ fn event(id: &str, name: &str, kind: &str, at: i64) -> SessionEventRecord {
 
 #[tokio::test]
 async fn snapshot_has_latest_attempts_and_exact_cursor_without_log_payloads() {
-    let store = TursoStore::open_memory().await.unwrap();
+    let store = RdbStore::open_memory().await.unwrap();
     for id in ["run", "other"] {
         store
             .create_session(&SessionMeta {

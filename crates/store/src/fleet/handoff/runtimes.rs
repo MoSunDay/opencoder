@@ -1,9 +1,10 @@
-use super::super::{FleetConnection, FleetStore};
+//! Host runtimes and immutable execution ownership.
+use super::super::keys;
+use super::FleetStore;
+use crate::rdb_store::{kv, tx};
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use turso::params;
-use turso::transaction::TransactionBehavior;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeRecord {
@@ -20,159 +21,105 @@ pub struct RuntimeOwner {
     pub release_id: String,
 }
 
-impl FleetConnection {
-    pub async fn register_runtime(&self, runtime: &RuntimeRecord) -> Result<()> {
-        ensure!(
-            opencoder_core::fleet::valid_id(&runtime.id),
-            "invalid runtime id"
-        );
-        ensure!(
-            opencoder_core::fleet::valid_id(&runtime.release_id),
-            "invalid release id"
-        );
-        ensure!(runtime.mode == "staged", "runtime must register staged");
-        let config = serde_json::to_string(&runtime.config)?;
-        self.conn
-            .execute(
-                "INSERT INTO host_runtimes VALUES (?1,?2,?3,'staged') ON CONFLICT(id) DO NOTHING",
-                params![
-                    runtime.id.clone(),
-                    runtime.release_id.clone(),
-                    config.clone()
-                ],
-            )
-            .await?;
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT release_id,config FROM host_runtimes WHERE id=?1",
-                [runtime.id.as_str()],
-            )
-            .await?;
-        let row = rows.next().await?.unwrap();
-        ensure!(
-            row.get::<String>(0)? == runtime.release_id && row.get::<String>(1)? == config,
-            "runtime identity already registered with different configuration"
-        );
-        Ok(())
+pub(super) fn register_runtime(store: &rdb::store::Store, runtime: &RuntimeRecord) -> Result<()> {
+    ensure!(
+        opencoder_core::fleet::valid_id(&runtime.id),
+        "invalid runtime id"
+    );
+    ensure!(
+        opencoder_core::fleet::valid_id(&runtime.release_id),
+        "invalid release id"
+    );
+    ensure!(runtime.mode == "staged", "runtime must register staged");
+    let mut batch = rocksdb::WriteBatch::default();
+    if kv::get_json::<RuntimeRecord>(store, &keys::rt_key(&runtime.id))?.is_none() {
+        batch.put(keys::rt_key(&runtime.id), kv::encode(runtime)?);
+        crate::rdb_store::tx::commit(store, batch)?;
     }
+    let existing = kv::get_json::<RuntimeRecord>(store, &keys::rt_key(&runtime.id))?.unwrap();
+    ensure!(
+        existing.release_id == runtime.release_id && existing.config == runtime.config,
+        "runtime identity already registered with different configuration"
+    );
+    Ok(())
+}
 
-    pub async fn runtimes(&self) -> Result<Vec<RuntimeRecord>> {
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT id,release_id,config,mode FROM host_runtimes ORDER BY id",
-                (),
-            )
-            .await?;
-        let mut records = Vec::new();
-        while let Some(row) = rows.next().await? {
-            records.push(RuntimeRecord {
-                id: row.get(0)?,
-                release_id: row.get(1)?,
-                config: serde_json::from_str(&row.get::<String>(2)?)?,
-                mode: row.get(3)?,
-            });
+pub(super) fn runtimes(store: &rdb::store::Store) -> Result<Vec<RuntimeRecord>> {
+    let mut records = Vec::new();
+    for (_, value) in crate::rdb_store::tx::scan_prefix(store, b"rt/")? {
+        records.push(kv::decode(&value)?);
+    }
+    Ok(records) // key order = id order
+}
+
+pub(super) fn owner(store: &rdb::store::Store, execution_id: &str) -> Result<Option<RuntimeOwner>> {
+    let Some(runtime_id) = kv::get_json::<String>(store, &keys::own_key(execution_id))? else {
+        return Ok(None);
+    };
+    let runtime = kv::get_json::<RuntimeRecord>(store, &keys::rt_key(&runtime_id))?
+        .context("runtime owner references a missing runtime")?;
+    Ok(Some(RuntimeOwner {
+        execution_id: execution_id.to_owned(),
+        runtime_id,
+        release_id: runtime.release_id,
+    }))
+}
+
+/// Activation affects only previously unseen IDs. Ownership never moves.
+/// The `rta/` singleton is the UNIQUE-active marker: retiring the previous
+/// runtime and activating the new one commit in one batch.
+pub(super) fn activate_runtime(store: &rdb::store::Store, id: &str) -> Result<()> {
+    let mut batch = rocksdb::WriteBatch::default();
+    let mut found = false;
+    for (key, value) in crate::rdb_store::tx::scan_prefix(store, b"rt/")? {
+        let mut record: RuntimeRecord = kv::decode(&value)?;
+        if record.id == id {
+            found = true;
+            record.mode = "active".into();
+        } else if record.mode == "active" {
+            record.mode = "retired".into();
+        } else {
+            continue;
         }
-        Ok(records)
+        batch.put(key, kv::encode(&record)?);
     }
+    ensure!(found, "candidate runtime is not registered");
+    batch.put(keys::rt_active_key(), id.as_bytes());
+    crate::rdb_store::tx::commit(store, batch)
+}
 
-    /// Activation affects only previously unseen IDs. Ownership never moves.
-    pub async fn activate_runtime(&self, id: &str) -> Result<()> {
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
-        let mut rows = tx
-            .query("SELECT 1 FROM host_runtimes WHERE id=?1", [id])
-            .await?;
+/// First acceptance and activation serialize on the write lease. Children
+/// explicitly inherit the reporting runtime; an existing row is never
+/// overwritten.
+pub(super) fn assign_runtime(
+    store: &rdb::store::Store,
+    execution_id: &str,
+    inherited: Option<&str>,
+) -> Result<String> {
+    if let Some(owner) = owner(store, execution_id)? {
         ensure!(
-            rows.next().await?.is_some(),
-            "candidate runtime is not registered"
+            inherited.is_none_or(|id| id == owner.runtime_id),
+            "execution runtime ownership conflict"
         );
-        drop(rows);
-        tx.execute(
-            "UPDATE host_runtimes SET mode='retired' WHERE mode='active' AND id!=?1",
-            [id],
-        )
-        .await?;
-        tx.execute("UPDATE host_runtimes SET mode='active' WHERE id=?1", [id])
-            .await?;
-        tx.commit().await?;
-        Ok(())
+        return Ok(owner.runtime_id);
     }
-
-    pub async fn owner(&self, execution_id: &str) -> Result<Option<RuntimeOwner>> {
-        let mut rows = self.conn.query("SELECT o.runtime_id,r.release_id FROM runtime_owners o JOIN host_runtimes r ON r.id=o.runtime_id WHERE o.execution_id=?1", [execution_id]).await?;
-        rows.next()
-            .await?
-            .map(|row| {
-                Ok(RuntimeOwner {
-                    execution_id: execution_id.into(),
-                    runtime_id: row.get(0)?,
-                    release_id: row.get(1)?,
-                })
-            })
-            .transpose()
-    }
-
-    /// First acceptance and activation serialize in SQLite. Children explicitly
-    /// inherit the reporting runtime; an existing row is never overwritten.
-    pub async fn assign_runtime(
-        &self,
-        execution_id: &str,
-        inherited: Option<&str>,
-    ) -> Result<String> {
-        // Ownership is immutable. Inventory and history reads must not take
-        // the shared database's writer lock for every already-known task.
-        if let Some(owner) = self.owner(execution_id).await? {
-            ensure!(
-                inherited.is_none_or(|id| id == owner.runtime_id),
-                "execution runtime ownership conflict"
-            );
-            return Ok(owner.runtime_id);
+    let runtime = match inherited {
+        Some(id) => {
+            kv::get_json::<RuntimeRecord>(store, &keys::rt_key(id))?.context("no active runtime")?
         }
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
-        let mut rows = tx
-            .query(
-                "SELECT runtime_id FROM runtime_owners WHERE execution_id=?1",
-                [execution_id],
-            )
-            .await?;
-        if let Some(row) = rows.next().await? {
-            let runtime: String = row.get(0)?;
-            ensure!(
-                inherited.is_none_or(|id| id == runtime),
-                "execution runtime ownership conflict"
-            );
-            return Ok(runtime);
+        None => {
+            let active = rdb::store::get(store, b"", &keys::rt_active_key())
+                .map_err(kv::engine_err)?
+                .context("no active runtime")?;
+            let id = String::from_utf8(active)?;
+            kv::get_json::<RuntimeRecord>(store, &keys::rt_key(&id))?
+                .context("no active runtime")?
         }
-        drop(rows);
-        let mut rows = match inherited {
-            Some(id) => {
-                tx.query("SELECT id FROM host_runtimes WHERE id=?1", [id])
-                    .await?
-            }
-            None => {
-                tx.query("SELECT id FROM host_runtimes WHERE mode='active'", ())
-                    .await?
-            }
-        };
-        let runtime: String = rows.next().await?.context("no active runtime")?.get(0)?;
-        drop(rows);
-        tx.execute(
-            "INSERT INTO runtime_owners VALUES (?1,?2)",
-            params![execution_id, runtime.clone()],
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(runtime)
-    }
+    };
+    let mut batch = rocksdb::WriteBatch::default();
+    tx::put(&mut batch, &keys::own_key(execution_id), &runtime.id)?;
+    crate::rdb_store::tx::commit(store, batch)?;
+    Ok(runtime.id)
 }
 
 #[path = "access/runtimes.rs"]

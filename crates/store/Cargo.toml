@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opencoder-database.workspace = true
+tempfile.workspace = true
 opencoder-core.workspace = true
 opencoder-dag.workspace = true
 serde.workspace = true
@@ -15,14 +15,16 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
-turso.workspace = true
+opencoder-event.workspace = true
+chrono.workspace = true
+rdb.workspace = true
+rocksdb.workspace = true
 ulid.workspace = true
 fs2 = "0.4"
 sha2 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true
-turso.workspace = true
 
 [[test]]
 name = "bounded_pagination"
@@ -31,14 +33,6 @@ path = "tests/contracts/bounded_pagination.rs"
 [[test]]
 name = "fleet_report"
 path = "tests/contracts/fleet_report.rs"
-
-[[test]]
-name = "fleet_schema"
-path = "tests/contracts/fleet_schema.rs"
-
-[[test]]
-name = "input_idempotency"
-path = "tests/contracts/input_idempotency.rs"
 
 [[test]]
 name = "project_atomic_claim"

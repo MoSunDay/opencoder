@@ -3,10 +3,10 @@
 //! clearable, which the plain `Option<T>` (None = "skip") semantics cannot
 //! express.
 
-use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, SessionPatch, Store};
 
-async fn mem() -> TursoStore {
-    TursoStore::open_memory().await.unwrap()
+async fn mem() -> RdbStore {
+    RdbStore::open_memory().await.unwrap()
 }
 
 fn meta(id: &str) -> SessionMeta {

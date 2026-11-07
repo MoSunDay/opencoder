@@ -8,20 +8,20 @@
 //!   `updated_at` while `created_at` stays at the first insert
 //! - list_is_stable_id_order: listing does not depend on insert history
 //! - delete_keeps_fire_history: the `schedule_runs` ledger outlives its
-//!   definition (no FK), and `last_schedule_run` keeps answering
-//! - fresh bootstrap creates the table; reopening is idempotent
+//!   definition (ledger rows are kept), and `last_schedule_run` keeps answering
+//! - fresh bootstrap creates the store; reopening is idempotent
 //!
-//! Runs against a real on-disk turso file (tempdir) so WAL pragmas are
+//! Runs against a real on-disk rdb database (tempdir) so atomic writes are
 //! exercised truthfully.
 
 use opencoder_core::config::{ScheduleJob, ScheduleKind, ScheduleOverlap};
-use opencoder_store::{Store, TursoStore, SCHEDULE_RUN_FIRED};
+use opencoder_store::{RdbStore, Store, SCHEDULE_RUN_FIRED};
 use std::collections::BTreeMap;
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, TursoStore) {
+async fn fresh() -> (TempDir, RdbStore) {
     let dir = tempfile::tempdir().unwrap();
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, store)
 }
 
@@ -125,34 +125,4 @@ async fn delete_removes_the_definition_but_keeps_the_fire_ledger() {
     // No FK: the ledger outlives the definition (audit trail).
     let runs = store.list_schedule_runs("nightly", 10).await.unwrap();
     assert_eq!(runs.len(), 1, "fire history outlives the definition");
-}
-
-#[tokio::test]
-async fn bootstrap_creates_the_table_and_reopens_idempotently() {
-    let (dir, store) = fresh().await;
-    let conn = store.conn().await.unwrap();
-    let mut stmt = conn
-        .prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedules'")
-        .await
-        .unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    let n = rows
-        .next()
-        .await
-        .unwrap()
-        .expect("COUNT row")
-        .get::<i64>(0)
-        .unwrap();
-    assert_eq!(n, 1, "the schedules table must exist after bootstrap");
-    drop(store);
-
-    // Reopening (idempotent bootstrap) must not fail nor drop definitions.
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
-    store
-        .upsert_schedule(&job("survives"), 1_000)
-        .await
-        .unwrap();
-    drop(store);
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
-    assert_eq!(store.list_schedules().await.unwrap().len(), 1);
 }

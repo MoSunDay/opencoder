@@ -1,8 +1,8 @@
-//! P0 functional tests for the Turso-backed Store.
+//! P0 functional tests for the rdb-backed Store.
 //!
 //! Each test asserts a *behavior contract*, not "the function runs":
 //! - create_get_update_delete_session_contract: full CRUD lifecycle
-//! - clear_other_sessions_keeps_current_and_cascades: keep-one cleanup + FK cascade
+//! - clear_other_sessions_keeps_current_and_cascades: keep-one cleanup + cascade
 //! - append_and_load_preserves_all_roles_and_blocks: roles/blocks/usage round-trip
 //! - jsonl_import_roundtrip: import preserves message history + idempotent re-run
 //! - transaction_rollback_on_partial_failure: failed batch leaves no partial rows
@@ -12,8 +12,8 @@
 //! - cancelled_transaction_*: future-cancellation must not panic and the store
 //!   stays usable/consistent afterwards
 //!
-//! These run against a real on-disk Turso file (tempdir) so WAL behaviour is
-//! exercised truthfully, not mocked. Concurrent-writer stress tests live in
+//! These run against a real on-disk rdb database (tempdir) so atomic
+//! write-batch behaviour is exercised truthfully, not mocked. Concurrent-writer stress tests live in
 //! `store_concurrency.rs`, schema-migration tests in `store_migrations.rs`, and
 //! subagent-task tests in `subagent_status_counts.rs`.
 //!
@@ -31,4 +31,3 @@ mod events;
 mod listing;
 mod messages;
 mod sessions;
-mod transactions;

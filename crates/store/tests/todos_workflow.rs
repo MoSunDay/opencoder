@@ -1,5 +1,5 @@
 use opencoder_store::{
-    SessionMeta, Store, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TursoStore,
+    RdbStore, SessionMeta, Store, TodoEventRecord, TodoItemRecord, TodoWorkflowRecord,
     TASK_TYPE_TODO_WORKFLOW,
 };
 
@@ -57,7 +57,7 @@ fn event(kind: &str) -> TodoEventRecord {
 
 #[tokio::test]
 async fn workflow_projection_and_event_commit_are_atomic_and_versioned() {
-    let store = TursoStore::open_memory().await.unwrap();
+    let store = RdbStore::open_memory().await.unwrap();
     store.create_session(&parent("parent-1")).await.unwrap();
     let seq = store
         .create_todo_workflow(
@@ -94,38 +94,8 @@ async fn workflow_projection_and_event_commit_are_atomic_and_versioned() {
 }
 
 #[tokio::test]
-async fn schema_v8_reopens_at_v9_with_todo_tables() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("v8.db");
-    {
-        let db = turso::Builder::new_local(path.to_str().expect("UTF-8 database path"))
-            .experimental_multiprocess_wal(true)
-            .build()
-            .await
-            .unwrap();
-        let conn = db.connect().unwrap();
-        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
-            .await
-            .unwrap();
-        conn.execute("INSERT INTO schema_version VALUES (8)", ())
-            .await
-            .unwrap();
-    }
-    let store = TursoStore::open(&path).await.unwrap();
-    store.create_session(&parent("parent-1")).await.unwrap();
-    store
-        .create_todo_workflow(
-            &workflow(0, "pending"),
-            &[item("pending")],
-            &event("created"),
-        )
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
 async fn reverse_todo_history_skips_global_sequence_gaps_and_respects_byte_budget() {
-    let store = TursoStore::open_memory().await.unwrap();
+    let store = RdbStore::open_memory().await.unwrap();
     store.create_session(&parent("parent-1")).await.unwrap();
     store
         .create_todo_workflow(&workflow(0, "running"), &[], &event("created"))

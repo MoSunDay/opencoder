@@ -1,10 +1,10 @@
 use opencoder_core::identity::{Identity, Role};
 use opencoder_store::project::comments::{CommentError, CommentMutation, CommentQuery, NewComment};
-use opencoder_store::{ProjectStore, TursoStore};
+use opencoder_store::{ProjectStore, RdbStore};
 use serde_json::json;
 
-async fn setup() -> (TursoStore, NewComment, i64) {
-    let store = TursoStore::open_memory().await.unwrap();
+async fn setup() -> (RdbStore, NewComment, i64) {
+    let store = RdbStore::open_memory().await.unwrap();
     for id in ["task", "other"] {
         store.create_todo(&serde_json::from_value(json!({"id":id,"title":"Task","draft":"body","status":"draft","agent":"act","created_at":1,"updated_at":1})).unwrap()).await.unwrap();
     }

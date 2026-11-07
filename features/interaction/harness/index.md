@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # Agent Harness
 
@@ -29,9 +29,9 @@ opencode/codex 双执行器契约与资源作用域；类型与设置以 core �
 - [web 域卡](../../../agents/frontend/web/index.md)、
   [worker 域卡](../../../agents/execution/worker/index.md)
   — 远端 Operator 的托管设置与执行
-- [Codex 启动脚本](../../../docs/codex-startup-script.md)、
-  [外部输入协议](../../../docs/external-harness-control.md)
-- [rootfs 制备](../../../docs/registered-runners.md)、
+- [Codex 启动脚本](../../../crates/dag-runtime/src/sandbox/codex/mod.rs)、
+  [外部输入协议](../../../crates/session/src/harness/codex/control/mod.rs)
+- [rootfs 制备](../../../scripts/prepare-dag-rootfs.sh)、
   [DAG 执行约定](../../../rules/04-dag-execution-contract.md)
 
 ## 相关

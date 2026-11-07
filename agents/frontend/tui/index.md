@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # tui 模块
 
@@ -67,7 +67,7 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 
 - 不持有 SessionState（worker 持有）；notepad 与本地 `!cmd` 不进模型 context。
 - 本地任务复用共享 `SessionState`，Codex 执行与事件解码见
-  [session](../../runtime/session/index.md)；远端任务使用) Server 注册的执行器。
+  [session](../../runtime/session/index.md)；远端任务使用 Server 注册的执行器。
 - 远端绑定保存在 Harness 运行态；凭据仅由连接层读取 `OPENCODER_SERVER_TOKEN`。
 
 相关模块：[core](../../foundation/core/index.md)、[session](../../runtime/session/index.md)、

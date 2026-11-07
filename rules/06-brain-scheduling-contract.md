@@ -4,7 +4,7 @@ Commit: 37ee51ce6274e0ade8eb9fc8a34da1a1b7e7aa57
 
 修改 Brain 计划、能力绑定、决策、派发、结果评估、人工引导或恢复逻辑之前，先读本规则。核心策略是：**按里程碑分层，同层并行，整层结束后检查结果，再决定前进、返工或停止。**
 
-本规则约束调度行为；接口与请求示例见 [运行协议](../docs/brain-orchestration.md)。涉及 DAG 的执行、资源和工作区时，同时遵守 [规则 04](04-dag-execution-contract.md)。不能只修改提示词来绕过代码约束。
+本规则约束调度行为；接口与请求示例见 [运行协议](../crates/control/src/api/brain_runs)。涉及 DAG 的执行、资源和工作区时，同时遵守 [规则 04](04-dag-execution-contract.md)。不能只修改提示词来绕过代码约束。
 
 ## 职责与计划
 

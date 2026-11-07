@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # worker 模块
 
@@ -46,4 +46,4 @@ Windows 节点只接受 `ExecutionKind::Operator`，用户边界见
 - [agents/node](../../platform/node/index.md)、[agents/dag-runtime](../../workflow/dag-runtime/index.md)
 - [DAG 执行约定](../../../rules/04-dag-execution-contract.md)
 - [agents/brain](../../orchestration/brain/index.md)
-- [运行协议](../../../docs/brain-orchestration.md)、[动态步骤接口](../../../docs/dag-dynamic.md)
+- [运行协议](../../../crates/control/src/api/brain_runs)、[动态步骤接口](../../../crates/dag/src/dynamic.rs)

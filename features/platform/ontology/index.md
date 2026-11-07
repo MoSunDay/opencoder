@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # Ontology
 
@@ -64,7 +64,7 @@ Web 导航提供独立 Ontology 分类：图谱、实体、实体类型、关系
 
 数据库首次初始化后，正文目录固定。修改或删除已有的显式 `files_dir` 会被维护预检拒绝；直接启动使用不同目录也会失败。相同目录的规范化路径别名可以复用。备份恢复保留原目录绑定，不能通过改配置迁移正文。
 
-跨数据格式升级须使用维护流程；当前格式和兼容范围以发布说明为准。备份和恢复必须同时包含 ontology.db 与实际正文目录；外部正文目录也纳入备份。具体流程见 [平滑发布与维护](../../../docs/smooth-release.md)。
+跨数据格式升级须使用维护流程；当前格式和兼容范围以发布说明为准。备份和恢复必须同时包含 ontology.db 与实际正文目录；外部正文目录也纳入备份。具体流程见 [平滑发布验收](../../../scripts/acceptance/smooth_release/main.py)。
 
 ## 目录管理
 
@@ -84,7 +84,7 @@ Web 导航提供独立 Ontology 分类：图谱、实体、实体类型、关系
 - 重启回收：控制面重启后恢复挂起运行——已到终态的执行补齐候选，未派发项记为 interrupted before dispatch；每运行请求锁跳过仍由活跃驱动器持有的运行，避免双写。
 - 评审：`POST /api/ontology/envs/:env/freshness/reviews`（body 为 `run_id`、`entity_id`、`verdict`、可选 `comment`）单事务完成。重复评审返回 409；通过要求该项成功且带候选；能力目录托管的实体与属性不接受评审写回（409）；配置回写时生成不可变 Markdown 正文版本；`data_level` 提升一级并递增实体 revision，全程审计。`GET /api/ontology/envs/:env/freshness/reviews?run_id=` 查询评审记录。
 - 数据平面接口：`GET/POST /api/ontology/envs/:env/freshness/policies`、`GET/PATCH /api/ontology/envs/:env/freshness/policies/:id`（软删除用 PATCH 设置 `is_deleted` 并携带 `expected_revision`）、`GET /api/ontology/envs/:env/freshness/runs` 与 `/runs/:id`、评审接口同上。读取对 viewer 开放，写入需管理角色。CLI 用法见 [CLI 用法](../../../rules/10-ontology-cli.md) 的 `freshness` 行。
-- 存量库升级：新增 `freshness_policies`、`freshness_runs`、`freshness_reviews` 三张 JSON 正文表，schema 版本保持 1；已有数据库经标准 `--maintenance` 维护窗口一次性补表，流程见 [平滑发布与维护](../../../docs/smooth-release.md)。
+- 存量库升级：新增 `freshness_policies`、`freshness_runs`、`freshness_reviews` 三张 JSON 正文表，schema 版本保持 1；已有数据库经标准 `--maintenance` 维护窗口一次性补表，流程见 [维护窗口验收](../../../scripts/acceptance/maintenance_release/main.py)。
 - 边界：不做定时调度、运行取消、模型预审、属性粒度级别与图谱子集圈定，留待后续阶段。变更记录见 [Ontology 数据保鲜](../../changelog/2026-10-30/ontology-freshness.md)。
 
 ## 相关

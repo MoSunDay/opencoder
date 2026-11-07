@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # ctl 模块
 
@@ -25,9 +25,9 @@ Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
   [cmd/executions.rs](../../../crates/ctl/src/cmd/executions.rs) — DAG 与执行查询
 - [cmd/mod.rs](../../../crates/ctl/src/cmd/mod.rs) — HTTP 结果到退出码的映射
 - `tests/` — 子命令→RequestPlan 契约与集成 e2e
-- 文档：[用法](../../../docs/project-cli.md)、[任务文件](../../../docs/project-files.md)、
-  [概述用法](../../../docs/project-summaries.md)
+- 代码：[project 命令](../../../crates/ctl/src/cmd/project.rs)、[任务文件](../../../crates/control/src/project_files)、
+  [概述 API](../../../crates/web/src/api_project/summary.rs)
 
 ## 相关
 
-- [brain](../../orchestration/brain/index.md)、[运行协议](../../../docs/brain-orchestration.md)
+- [brain](../../orchestration/brain/index.md)、[运行协议](../../../crates/control/src/api/brain_runs)

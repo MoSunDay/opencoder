@@ -42,7 +42,7 @@
 
 OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它以单一二进制 `opencoder` 提供 **交互式 TUI**、**无头一次性运行**、**集中式 HTTP/SSE 服务端** 与 **远程瘦客户端** 四种工作形态。所有上层逻辑只依赖两个抽象口子 —— `Arc<dyn Store>` 与 `Arc<dyn ChatStream>` —— 因此持久化层（Turso）与 LLM 后端（OpenAI 兼容）均可替换。
 
-多节点平台由 `opencoder-server` 管理调度、`opencoder-agent` 执行任务，复用 Web 控制台；运行明细保存在所属节点。部署、NFS 资源共享与恢复语义见 [Agent 调度平台](docs/agent-platform.md)。
+多节点平台由 `opencoder-server` 管理调度、`opencoder-agent` 执行任务，复用 Web 控制台；运行明细保存在所属节点。部署、NFS 资源共享与恢复语义见 [Agent 调度平台](features/platform/agent-platform/index.md)。
 
 ## ✨ 特性
 
@@ -58,9 +58,7 @@ OpenCoder 是一个完全独立、从零实现的 Rust 原生编码代理。它�
 
 ## 🚀 快速开始
 
-Windows 11 x64 支持原生 TUI 和 operator 节点，使用稳定版 PowerShell 7.4 及以上（7.x）。安装、构建与支持范围见 [Windows 使用说明](docs/windows.md)。
-
-> 👉 新用户上手（TUI 键位、notepad 浏览/编辑文件、任务附加备注等）见 [**快速上手指南**](docs/quickstart.md)。
+Windows 11 x64 支持原生 TUI 和 operator 节点，使用稳定版 PowerShell 7.4 及以上（7.x）。安装、构建与支持范围见 [Windows 使用说明](features/platform/windows/index.md)。
 
 ### 安装
 
@@ -292,7 +290,6 @@ opencoder/
 │   ├── agent/     # 独立执行节点二进制
 │   ├── local/     # 本地 CLI 与 headless 运行时
 │   └── ctl/       # Fleet 管理 CLI
-├── docs/          # 性能 profile 等文档
 ├── features/      # 能力地图 + 按日期归档的 changelog
 ├── rules/         # 开发规则（测试 / 回归 / 分层）
 ├── scripts/       # 安装脚本、e2e 测试

@@ -596,3 +596,198 @@ async fn exhausted_budget_blocks_dispatch_until_the_budget_command_and_resume() 
     assert_eq!(completed.operations.len(), 6);
     node.shutdown().await.unwrap();
 }
+
+/// The root journal status reported by inspect for a layered root.
+async fn journal_status(node: &Worker, id: &str) -> String {
+    let reply = node
+        .handle(NodeOperation::Inspect {
+            execution: root(id),
+        })
+        .await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    reply.body["execution"]["status"]
+        .as_str()
+        .expect("root status")
+        .to_string()
+}
+
+async fn wait_journal_status(node: &Worker, id: &str, wanted: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if journal_status(node, id).await == wanted {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("root status never became {wanted}"));
+}
+
+const APPENDED: &str = "Resume with the appended verification constraint";
+
+#[tokio::test]
+async fn pause_parks_the_root_journal_and_appended_resume_wakes_a_fresh_decision() {
+    let (_config, _home) = plan::isolated_config();
+    let client = Arc::new(LayeredClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client.clone()).await;
+    let id = "brain-pause-resume";
+    create(&node, id).await;
+    control::decide_next_layer(&node, id).await;
+    control::wait_dispatch(&node, 1).await;
+    wait_journal_status(&node, id, "idle").await;
+
+    // Pause freezes future scheduling: the journal parks at `paused`, the
+    // dispatched child is untouched and no new wake is published.
+    control::ok(&node, id, "pause", Value::Null).await;
+    let paused = control::snapshot(&node, id).await;
+    assert_eq!(paused.run.phase, LayeredPhase::Paused);
+    assert!(
+        paused.operations.iter().all(|op| !op.cancel_requested),
+        "pause must not cancel started children: {:?}",
+        paused.operations
+    );
+    assert!(
+        control::actions(&control::frames(&node).await, "layered_wake").is_empty(),
+        "a paused run publishes no wake"
+    );
+    wait_journal_status(&node, id, "paused").await;
+
+    // Resume may append one human input; it lands between the pause marker
+    // and the resume marker so the wake replays it in order.
+    control::ok(&node, id, "resume", json!({"text": APPENDED})).await;
+    let resumed = control::snapshot(&node, id).await;
+    assert_eq!(resumed.run.phase, LayeredPhase::Ready);
+    assert!(resumed.run.pending_guidance);
+    let events = control::events(&node, id).await;
+    let at = |kind: &str| events.iter().position(|event| event["event_type"] == kind);
+    let input_at = events
+        .iter()
+        .position(|event| event["event_type"] == "human_input" && event["user_input"] == APPENDED)
+        .expect("appended human input recorded");
+    assert!(
+        at("run_paused").expect("pause marker") < input_at
+            && input_at < at("run_resumed").expect("resume marker"),
+        "{:?}",
+        control::event_types(&events)
+    );
+    // The resumed root earns a new wake that follows the normal outbox flow.
+    let wake = control::wait_wake(&node).await;
+    assert!(wake["generation"].as_u64().expect("resumed generation") > paused.run.generation);
+    wait_journal_status(&node, id, "idle").await;
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn resume_append_input_rejects_invalid_text_without_mutating_the_run() {
+    let (_config, _home) = plan::isolated_config();
+    let client = Arc::new(LayeredClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), client).await;
+    let id = "brain-resume-invalid-text";
+    create(&node, id).await;
+    control::ok(&node, id, "pause", Value::Null).await;
+    let before = serde_json::to_value(&control::snapshot(&node, id).await).unwrap();
+    for input in [
+        json!({"text":"   "}),
+        json!({"text":""}),
+        json!({"text":"x".repeat(4097)}),
+        json!({"text":7}),
+    ] {
+        assert_eq!(
+            control::rpc(&node, root(id), "resume", input.clone())
+                .await
+                .status,
+            400,
+            "{input}"
+        );
+        assert_eq!(
+            serde_json::to_value(&control::snapshot(&node, id).await).unwrap(),
+            before,
+            "rejected text must not mutate the run"
+        );
+    }
+    assert_eq!(journal_status(&node, id).await, "paused");
+    control::ok(&node, id, "resume", Value::Null).await;
+    assert_eq!(
+        control::snapshot(&node, id).await.run.phase,
+        LayeredPhase::Ready
+    );
+    node.shutdown().await.unwrap();
+}
+
+/// A one-node plan keeps the frozen guidance reservation small under the
+/// default model window, so cumulative admission can be exhausted in-test.
+fn one_node_input() -> Value {
+    json!({"schema_version":7,
+        "frozen_capabilities":[{"capability_id":"cap-work","kind":"agent","target":"act","input_desc":"task","output_desc":"evidence","definition":{},"version":"1"}],
+        "layered_request":{"schema_version":7,"plan":{"schema_version":7,"title":"capacity","objective":"verify resume budget",
+        "layers":[{"layer_id":"work","title":"Work","task":"work","objective":"work","success_criteria":"evidence retained"}],
+        "nodes":[{"node_id":"only","layer_id":"work","title":"only","objective":"work","capability_id":"cap-work"}],
+        "edges":[],"max_rounds":4}}})
+}
+
+#[tokio::test]
+async fn resume_append_input_over_the_cumulative_budget_returns_413_unchanged() {
+    let (_config, _home) = support::isolated_config();
+    let dir = tempfile::tempdir().unwrap();
+    let node = worker(dir.path(), mock()).await;
+    let id = "brain-resume-budget";
+    let reply = node
+        .handle(NodeOperation::Create {
+            assignment: assignment(
+                &node,
+                id,
+                ExecutionKind::Brain,
+                one_node_input(),
+                Some(json!({})),
+            ),
+        })
+        .await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    settled(&node, id).await;
+    control::ok(&node, id, "pause", Value::Null).await;
+    wait_journal_status(&node, id, "paused").await;
+
+    // Fill the cumulative guidance budget with recorded paused inputs.
+    let overflow = "中".repeat(1000);
+    let mut rejected = false;
+    for _ in 0..40 {
+        if control::rpc(
+            &node,
+            root(id),
+            "human_input",
+            json!({"text": overflow.as_str()}),
+        )
+        .await
+        .status
+            == 413
+        {
+            rejected = true;
+            break;
+        }
+    }
+    assert!(rejected, "guidance admission must be finite");
+    let before = serde_json::to_value(&control::snapshot(&node, id).await).unwrap();
+    let events_before = control::events(&node, id).await.len();
+
+    // The appended resume text runs the same cumulative check and overflows:
+    // no event, no generation bump, no journal move.
+    let reply = control::rpc(
+        &node,
+        root(id),
+        "resume",
+        json!({"text": overflow.as_str()}),
+    )
+    .await;
+    assert_eq!(reply.status, 413, "{reply:?}");
+    assert_eq!(
+        serde_json::to_value(&control::snapshot(&node, id).await).unwrap(),
+        before,
+        "budget overflow must not mutate the run"
+    );
+    assert_eq!(control::events(&node, id).await.len(), events_before);
+    assert_eq!(journal_status(&node, id).await, "paused");
+    node.shutdown().await.unwrap();
+}

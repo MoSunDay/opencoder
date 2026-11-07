@@ -70,9 +70,8 @@ Done / Error settle 后整 turn 折回 `N Steps + Say` 稠密摘要；steps 在�
 
 - `cargo test -p opencoder-tui --lib` → 1816 passed / 1 failed。唯一失败
   `app::subagent_input::tests::store_failure_preserves_pending_images` 为
-  本工作区既有问题：他人未提交的 `TursoStore`→`RdbStore`（rdb 原型）
-  替换移除了 `TursoStore`，RdbStore 原型不按 FK 拒绝写入；干净 worktree
-  @ `a6548ed1b` 上同一测试通过，与 step ladder 改动无关。
+  本工作区既有问题：他人未提交的存储后端原型替换不按 FK 拒绝写入；干净
+  worktree @ `a6548ed1b` 上同一测试通过，与 step ladder 改动无关。
 - `cargo clippy -p opencoder-tui --all-targets` → 本次改动文件零警告；
   唯一 `opencoder-tui` 告警（`ts_mirror_tests.rs` 的
   `suspicious_open_options`）同样来自工作区未提交的 ts_registry 原型，

@@ -55,7 +55,7 @@
 - `cargo clippy -p opencoder-tui --all-targets -- -D warnings`（仅保留既有
   基线允许项 `large_enum_variant` / `dead_code` / `result_large_err`）
   → 零警告。
-- 工作区（含他人未提交的 `ts_registry` RocksDB 原型）内
-  `ts_mirror::tests::maybe_wrap_gates_on_existing_registry` 会失败：原型把
-  `open(path)` 映射为 `path.rdb` 目录、不再创建 `ts.db` 文件；干净基线
-  全绿，与本次改动无关。
+- 工作区（含他人未提交的 `ts_registry` 存储原型）内
+  `ts_mirror::tests::maybe_wrap_gates_on_existing_registry` 会失败：原型
+  改变了存储路径布局、不再创建 `ts.db` 文件；干净基线全绿，与本次改动
+  无关。

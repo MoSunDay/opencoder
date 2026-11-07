@@ -1,9 +1,9 @@
-Commit: cad77d3ea60afe746b58708af1a309b0c55c83f2
+Commit: 5b7a43b662409e71e31917a366798f7eba7ff730
 
 # event 模块
 
 `opencoder-event`：事件驱动调度的通用基建。默认纯内存、零存储引擎
-依赖；`--features rdb` 才附带 RocksDB 持久队列。尚未接入任何生产
+依赖；不附带任何持久化后端。尚未接入任何生产
 dispatcher，基础存储（turso 的 [store](../store/index.md)）不受本 crate
 影响。
 
@@ -24,12 +24,6 @@ dispatcher，基础存储（turso 的 [store](../store/index.md)）不受本 cra
   `run_pump`：严格按持久游标重放，整批动作全部成功才前移游标；失败保留
   游标并上报 seq + 监听器 id（at-least-once）；门暂停返回 `Paused` 且不动
   游标
-- [src/queue.rs](../../../crates/event/src/queue.rs)（`--features rdb`）—
-  `RdbQueueLedger`：RocksDB 持久队列账本。键布局 `evt/<seq:020>`（零填充，
-  字节序即数值序）、`evn/last` 高水位、`evc/<consumer-id>` 游标、
-  `evl/<id>` 监听器、`evw/<execution>` 等待；seq 分配与日志行同一
-  `WriteBatch` 原子提交；RocksDB 目录锁拒绝同路径二次打开 + 进程内写租约
-  串行化追加。workspace 中唯一使用 rdb/rocksdb 的模块
 
 ## 测试
 - [tests/bus_ledger.rs](../../../crates/event/tests/bus_ledger.rs) — 总线
@@ -40,10 +34,7 @@ dispatcher，基础存储（turso 的 [store](../store/index.md)）不受本 cra
   派发逐监听器结果
 - [tests/registry.rs](../../../crates/event/tests/registry.rs) — 监听器注册
   校验与匹配顺序
-- [tests/rdb_queue.rs](../../../crates/event/tests/rdb_queue.rs)（rdb）—
-  追加原子性/单调 seq、重开存活、单拥有者拒绝、监听器与等待持久化
-- 纯函数内联测试在 `src/domain/*`、`src/ledger.rs`、`src/queue.rs`；
-  测试清单见 [changelog](../../../features/changelog/2026-11-06/event-rdb-queue-ledger.md)
+- 纯函数内联测试在 `src/domain/*`、`src/ledger.rs`。
 
 ## 生产边界
 

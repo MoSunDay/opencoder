@@ -10,7 +10,7 @@
 - 纯函数 `emit_table`/`table_row_line`/`table_cell_width`：列宽取各列单元格显示宽最大值（`unicode-width`），单元格右补空格对齐，` │ `（muted）分隔；首行（表头）逐 span `patch(BOLD)` 保留 inline 样式；表头后一行 `─×w` 以 `─┼─` 相连的分隔线（总宽与表头严格相等，见下方修正）；残缺行/空表不 panic，缺格补空白格，零格行跳过。
 - 不截断不折行（viewport 自行处理超宽）。
 
-实测：将 /root/rdb 真实会话（01M2G6F3…，427 轮、3 万+ text_delta、102 行表格文本）全量事件经 `SessionEvent::from_sse` 重放 ChatView 后 flatten，`Check│Outcome` 表从挤行变为对齐表格。
+实测：将本地另一工作区真实会话（01M2G6F3…，427 轮、3 万+ text_delta、102 行表格文本）全量事件经 `SessionEvent::from_sse` 重放 ChatView 后 flatten，`Check│Outcome` 表从挤行变为对齐表格。
 
 ## 测试覆盖
 
@@ -21,7 +21,7 @@
 | 单元格内 inline code span 存活（accent 样式） | `chat::tests::markdown_table::inline_code_span_survives_inside_cells` |
 | 分隔线 `┼` 与表头 `│` 按显示宽列位对齐、行宽相等（ASCII + CJK 表） | `chat::tests::markdown_table::separator_cross_aligns_under_column_pipes` |
 | Chat e2e：TextDelta 流式表格 + LlmRoundEnd → flatten 含 `│` 表头与 `┼` 分隔线、无 `|---` | `chat::tests::markdown_table::chat_level_say_table_renders_after_llm_round_end` |
-| 真实会话重放：/root/rdb 300,940 事件全量重放渲染对齐（本条目实测证据，未入库） | scratch 重放（一次性，已清理） |
+| 真实会话重放：本地另一工作区 300,940 事件全量重放渲染对齐（本条目实测证据，未入库） | scratch 重放（一次性，已清理） |
 
 ## 修正（同日复审 aa8ffd66）：分隔线 `┼` 与列分隔 `│` 列位对齐
 
@@ -33,4 +33,4 @@
 
 回归：`cargo test -p opencoder-tui` 全绿（lib 1702 项 + 集成测试；say_markdown_e2e / say_pair_dedup / say_raw_repro / say_interleaved_finalize 全过）；`cargo clippy -p opencoder-tui --all-targets` 无新告警。
 
-运维注记：/root/rdb TUI（PID 1713559）仍运行 2026-09-14 22:31 的 pre-fix 平台版本二进制（`a46fff84`），需重启进程方可获得本轮与上轮修复。
+运维注记：本地另一工作区 TUI（PID 1713559）仍运行 2026-09-14 22:31 的 pre-fix 平台版本二进制（`a46fff84`），需重启进程方可获得本轮与上轮修复。

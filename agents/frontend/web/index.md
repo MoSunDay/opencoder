@@ -34,10 +34,11 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
   流结束后合并执行结果与会话快照
 - [stepsBlock.jsx](../../../crates/web/spa/src/stepsBlock.jsx) — Step 阶梯
   三级展开：纯用户控制、默认折叠（L0–L3 全部非受控）；运行中
-  （`ladderRunning`，Say 之前）的最后一步在**独立的 turn 实时区**
-  （阶梯下方兄弟节点，仅由 `ladderRunning` 门控）流式渲染（Step 头 +
-  thinking + call 行 running tag），settle 后实时区消失；实时区不随
-  阶梯开合；与 TUI `chat_live_turn.rs` 同契约
+  （`ladderRunning`，Say 之前）的最后一步由 **`TurnLiveRegion` 固定面板**
+  流式渲染（Step 头 + thinking + call 行 running tag）——面板在滚动区外
+  （transcript 滚动 div 与 QueuePanel 之间），绝不出现在气泡内；
+  `findRunningStepsTurn` 从最新 turn 往回找 running steps turn（最新已
+  settle 即无），settle 后实时区清空；与 TUI `chat_live_turn.rs` 同契约
 - [chat/inputAttempt.js](../../../crates/web/spa/src/chat/inputAttempt.js) — 人工输入 ID
   的生成与重试规则
 - [nav.js](../../../crates/web/spa/src/nav.js)、

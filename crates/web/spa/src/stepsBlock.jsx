@@ -14,16 +14,18 @@
 //           `❯ N Steps: {first-line preview}` and the running tag
 //           rides THERE (driven by sayActive, the sayStreaming ladder flag)
 //           until the sub-turn's ladder ends.
-//   TURN LIVE AREA — a SEPARATE sibling region BELOW the ladder while
-//         `ladderRunning`: the LAST step renders as `Step(k)` header + its
-//         thinking + its call rows (the same ToolContent rows as L3, so the
-//         per-call `running` tag/duration/error stream in place). When
-//         running retires (Say begins / the turn settles) the area clears
-//         and the step lives only inside the turn's folded ladder; if the
-//         next turn is already running, the area simply shows it. The area
-//         is gated ONLY on `ladderRunning` — zero coupling with the
-//         ladder's disclosure state, so opening L0 NEVER hides it (two
-//         separate regions, TUI parity with chat_live_turn.rs).
+//   TURN LIVE REGION — NOT part of this bubble at all: while a turn runs
+//         (`ladderRunning`), its LAST step streams in a SEPARATE pinned
+//         region outside the transcript scroll area (its own panel between
+//         the message list and the input, mounted by chat.jsx via
+//         `TurnLiveRegion` below): `Step(k)` header + thinking + call rows
+//         (the same ToolContent rows as L3, so per-call `running` tags
+//         stream in place). When running retires (Say begins / the turn
+//         settles) the region clears and the step lives only inside the
+//         turn's folded ladder; if the next turn is already running the
+//         region simply shows it. Gated ONLY on running state — zero
+//         coupling with any ladder's disclosure (opening L0 never changes
+//         it; TUI parity with chat_live_turn.rs).
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (uncontrolled);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
@@ -221,24 +223,69 @@ function StepCollapse({ step, index }) {
 }
 
 /// LIVE preview under the folded L0 summary: the LAST step's header + body
+/// The TURN LIVE REGION component — chat.jsx pins it BETWEEN the transcript
+/// scroll area and the input, so it is visibly a DIFFERENT thing from the
+/// Say/Step message area (never inside a bubble, never inside the ladder).
+/// It shows the NEWEST still-running steps turn's current (last) step
 /// (thinking + its call rows laid out flat, so the running call and its
-/// `running` tag stream in place). The 12px left inset matches antd's
-/// collapse body padding, keeping the live area aligned with the drilled
-/// rows; no separators — the area simply disappears once the turn settles
-/// (it never reacts to L0 opening or folding).
-function TurnLiveArea({ step, index }) {
-  const k = index + 1;
+/// `running` tag stream in place) and clears on settle. Gated ONLY on
+/// running state — it never reacts to any ladder's opening or folding.
+export function TurnLiveRegion({ turns }) {
+  const running = findRunningStepsTurn(turns);
+  if (!running || !Array.isArray(running.steps) || running.steps.length === 0) {
+    return null;
+  }
+  const steps = running.steps;
+  const step = steps[steps.length - 1];
+  const k = steps.length;
   const list = (step && Array.isArray(step.calls)) ? step.calls : [];
   const failed = list.some((c) => c && c.isError);
   return (
-    <div style={{ marginLeft: 12, marginBottom: 8 }}>
+    <div
+      data-turn-live-region
+      style={{
+        marginTop: 8,
+        padding: '8px 12px',
+        border: '1px solid var(--oc-border)',
+        borderRadius: 8,
+        background: 'var(--oc-panel-bg)',
+      }}
+    >
       <div style={{ fontFamily: MONO_VAR, fontSize: 12, marginBottom: 4 }}>
+        <span style={{ opacity: 0.65 }}>{'\u{2B25} live \u{00B7} '}</span>
         Step({k})
         {failed ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
       </div>
       <StepBody step={step} flatCalls />
     </div>
   );
+}
+
+/// The newest steps turn that is still running its ladder (no Say yet,
+/// `progressActive` true — falling back to the open-call test for older
+/// hand-built turns), if any. Mirrors StepsContent's `ladderRunning` logic;
+/// kept beside it so the two can never drift apart.
+function findRunningStepsTurn(turns) {
+  if (!Array.isArray(turns)) return null;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    if (!turn || turn.kind !== 'steps') continue;
+    const say = Array.isArray(turn.say) ? turn.say : [];
+    const hasSay = say.some((part) => (
+      part && part.kind === 'text' && !part.image
+        && typeof part.text === 'string' && part.text.trim().length > 0
+    ));
+    if (hasSay) return null; // the newest turn already settled
+    const calls = (Array.isArray(turn.steps) ? turn.steps : [])
+      .flatMap((st) => ((st && Array.isArray(st.calls)) ? st.calls : []));
+    const openCall = calls.some((c) => c && c.output === null);
+    const running = typeof turn.progressActive === 'boolean'
+      ? turn.progressActive === true
+      : openCall;
+    if (running) return turn;
+    return null; // newest steps turn exists but is not running
+  }
+  return null;
 }
 
 /// Say header preview: imported from sayText.js and shared with the
@@ -277,12 +324,10 @@ export function StepsContent({ turn, preview }) {
   const running = hasSay
     ? turn.sayActive === true
     : (typeof turn.progressActive === 'boolean' ? turn.progressActive : openCall);
-  // The live preview rides the ladder's OWN pre-Say activity (TUI parity:
-  // Say's first chunk settles the ladder even while the running tag rides the
-  // Say row), so `sayActive` must NOT keep the preview alive.
-  const ladderRunning = !hasSay && (typeof turn.progressActive === 'boolean'
-    ? turn.progressActive === true
-    : openCall);
+  // The TURN LIVE REGION rides the ladder's OWN pre-Say activity (TUI
+  // parity: Say's first chunk settles the ladder even while the running tag
+  // rides the Say row), so `sayActive` must NOT keep it alive — its running
+  // scan lives in `findRunningStepsTurn` above, NOT in this bubble.
   // L0/L1/L2/L3 are ALL uncontrolled: folded by default, antd's own state
   // survives streaming rerenders, and Ctrl+L / ⤒ 收起 remounts the bubble
   // (epoch key in transcript.jsx) to reset. No auto effects, no overrides.
@@ -308,12 +353,6 @@ export function StepsContent({ turn, preview }) {
           )),
         }]}
       />
-      {/* TURN LIVE AREA — independent of the ladder's disclosure state; it
-          streams while the turn runs and clears on settle, regardless of
-          whether L0 is open (coexistence, TUI parity). */}
-      {ladderRunning && steps.length > 0 ? (
-        <TurnLiveArea step={steps[steps.length - 1]} index={steps.length - 1} />
-      ) : null}
     </>
   );
 }

@@ -206,44 +206,6 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
             }
         }
     }
-    // TURN LIVE AREA tail (mirrors `chat_live_turn::flatten`, appended by
-    // flatten_with AFTER every block; collect_headers pushes no targets for
-    // it, so it never enters per-block accounting): the running turn's
-    // current step forced open plus one trailing blank. A final expanded
-    // call's separator blank merges into that trailing blank.
-    if let Some(steps) = view
-        .blocks
-        .iter()
-        .skip(view.turn_block_start)
-        .find_map(|b| match b {
-            ChatBlock::StepGroup {
-                steps,
-                progress_active: true,
-                ..
-            } if !steps.is_empty() => Some(steps),
-            _ => None,
-        })
-    {
-        let s = steps.last().expect("non-empty by the guard");
-        expected += 1; // step row
-        if !s.thinking.is_empty() {
-            expected += 1 + s.thinking.len();
-        }
-        if !s.calls.is_empty() {
-            expected += 1; // calls aggregation row
-            let last_call = s.calls.len() - 1;
-            for (ci, c) in s.calls.iter().enumerate() {
-                expected += 1;
-                if c.expanded {
-                    expected += c.output.len();
-                    if ci != last_call {
-                        expected += 1; // separator; the final one merges
-                    } // into the area's trailing blank
-                }
-            }
-        }
-        expected += 1; // the area's trailing blank
-    }
     assert_eq!(
         actual, expected,
         "flatten_with emitted {actual} lines but collect_headers accounts {expected}"

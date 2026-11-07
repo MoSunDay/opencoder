@@ -1,26 +1,29 @@
-//! The TURN LIVE AREA — an independent region at the tail of the
-//! transcript, deliberately OUTSIDE every ladder: while the admitted turn
-//! runs (`progress_active` on its group, i.e. no Say has begun yet), this
-//! area streams the CURRENT (last) step (step row + thinking + calls,
-//! running calls carry the spinner). When the turn settles (Say first
-//! chunk / Done / Error / new turn) the area disappears and the step lives
-//! only inside that turn's FOLDED ladder; if the next turn immediately
-//! starts running, the area simply shows that turn's current step.
+//! The TURN LIVE REGION — its OWN layout area between the transcript and
+//! the composer (`render.rs`), deliberately OUTSIDE the transcript content:
+//! while the admitted turn runs (`progress_active` on its group, i.e. no
+//! Say has begun yet), this region streams the CURRENT (last) step (step
+//! row + thinking + calls, running calls carry the spinner). When the turn
+//! settles (Say first chunk / Done / Error / new turn) the region clears
+//! and the step lives only inside that turn's FOLDED ladder; if the next
+//! turn immediately starts running, the region simply shows that turn's
+//! current step.
 //!
-//! Zero coupling with ladder disclosure: the ladder blocks render pure
-//! user-controlled fold state (`chat_step_render.rs`); opening or folding
-//! them never changes this area, and this area never renders "inside" a
-//! ladder block. It adds NO click targets and no line accounting is
-//! needed: it is the transcript tail, so nothing follows it and
-//! `collect_headers` (`chat_headers.rs`) is unaffected.
+//! Zero coupling with ladder disclosure AND with the transcript itself:
+//! `flatten_with` does NOT emit these lines (the transcript only ever
+//! holds Say + ladder blocks), so scroll, selection, hit-rects and line
+//! accounting (`chat_headers.rs`) are all untouched by streaming. The
+//! ladder blocks render pure user-controlled fold state
+//! (`chat_step_render.rs`); opening or folding them never changes this
+//! region, and this region never renders "inside" a ladder block.
 
-use ratatui::text::Line;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 
-use super::{step_render, ChatBlock, Step};
+use super::{step_render, theme, ChatBlock, Step};
 
 /// The running turn's steps, if any: the group inside the CURRENT turn
 /// floor whose `progress_active` is armed. Replay/snapshot and settled
-/// turns never arm it, so the live area is a live-stream-only region.
+/// turns never arm it, so the live region is a live-stream-only area.
 pub(crate) fn active_steps(blocks: &[ChatBlock], turn_start: usize) -> Option<&[Step]> {
     let floor = turn_start.min(blocks.len());
     blocks[floor..]
@@ -36,12 +39,18 @@ pub(crate) fn active_steps(blocks: &[ChatBlock], turn_start: usize) -> Option<&[
         .filter(|steps| !steps.is_empty())
 }
 
-/// Render the live area: the current step's body forced open (identical
-/// shapes to a user-expanded ladder step, via the shared step-body
-/// renderer) plus one trailing blank. Appended AFTER every transcript
-/// block by `flatten_with` — a separate area, never inside a ladder.
-pub(crate) fn flatten(out: &mut Vec<Line<'static>>, steps: &[Step], anim_tick: u32) {
+/// The live region's full line buffer: a dim header rule that marks the
+/// region's start (it is NOT transcript content), then the current step's
+/// body forced open — identical shapes to a user-expanded ladder step, via
+/// the shared step-body renderer. Render-only: NO click targets.
+pub(crate) fn render_lines(steps: &[Step], anim_tick: u32) -> Vec<Line<'static>> {
+    let mut out = vec![Line::from(Span::styled(
+        "\u{2b25} live",
+        Style::default()
+            .fg(theme::warn_color())
+            .add_modifier(Modifier::DIM),
+    ))];
     let si = steps.len() - 1;
-    step_render::push_step_body(out, si, &steps[si], steps.len(), anim_tick, true, true);
-    out.push(Line::from(""));
+    step_render::push_step_body(&mut out, si, &steps[si], steps.len(), anim_tick, true, true);
+    out
 }

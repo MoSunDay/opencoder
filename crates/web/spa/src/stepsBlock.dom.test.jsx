@@ -25,6 +25,7 @@ vi.mock('./api.js', () => ({
 
 import './test/setup-dom.js';
 import { TranscriptView } from './transcript.jsx';
+import { TurnLiveRegion } from './stepsBlock.jsx';
 
 const stepsTurn = () => ({
   kind: 'steps',
@@ -47,6 +48,25 @@ const stepsTurn = () => ({
 
 const mount = (turns) => render(
   <TranscriptView turns={turns || [stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
+);
+
+/// Live tests mount BOTH surfaces the chat page shows: the transcript AND
+/// the TURN LIVE REGION pinned outside the message area (chat.jsx mounts it
+/// between the scroll container and the input — a different thing from the
+/// Say/Step bubbles).
+const mountWithLiveRegion = (turns) => render(
+  <>
+    <TranscriptView turns={turns || [stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />
+    <TurnLiveRegion turns={turns || [stepsTurn()]} />
+  </>,
+);
+
+/// Rerender BOTH surfaces together (same shape as mountWithLiveRegion).
+const rerenderWithLiveRegion = (mounted, turns) => mounted.rerender(
+  <>
+    <TranscriptView turns={turns} usage={null} status="streaming" error={null} emptyText="无" />
+    <TurnLiveRegion turns={turns} />
+  </>,
 );
 
 afterEach(() => {
@@ -297,13 +317,14 @@ describe('StepsContent three-level drill-down', () => {
   });
 });
 
-describe('turn live area (independent of the ladder)', () => {
+describe('turn live region (its own area, outside the message list)', () => {
   // The ladder is user-controlled and folded by default: antd keeps closed
   // panels mounted once opened, so folded state is asserted through the
   // item's active class — never through text absence alone. The TURN LIVE
-  // AREA below the ladder is a SEPARATE region rendered while the turn
-  // runs — gated only on `ladderRunning`, never on the ladder's open
-  // state (coexistence, TUI parity with chat_live_turn.rs).
+  // REGION is a SEPARATE pinned area (never inside a bubble, never inside
+  // the scroll list) rendered while the turn runs — gated only on running
+  // state, never on any ladder's disclosure (TUI parity with
+  // chat_live_turn.rs).
   const itemActive = (matcher) => screen.getByText(matcher)
     .closest('.ant-collapse-item').classList.contains('ant-collapse-item-active');
   const summaryHeader = (matcher) => screen.getByText(matcher).closest('.ant-collapse-header');
@@ -314,26 +335,30 @@ describe('turn live area (independent of the ladder)', () => {
     return turn;
   };
 
-  it('running turn streams the last step in the live area below the folded summary', () => {
-    mount([runningTurn()]);
+  it('running turn streams the last step in the separate live region, not the transcript', () => {
+    mountWithLiveRegion([runningTurn()]);
     // The summary stays folded and keeps its own running tag.
     expect(itemActive('2 Steps')).toBe(false);
     expect(within(summaryHeader('2 Steps')).getByText('running')).toBeTruthy();
-    // The LAST step's header + thinking + call row render in the live area
-    // without a click; the older step stays inside the folded ladder.
-    expect(screen.getByText('Step(2)')).toBeTruthy();
-    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
-    expect(screen.getByText(/🔧 read/)).toBeTruthy();
-    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
+    // The LAST step's header + thinking + call row stream in the LIVE
+    // REGION without a click; the transcript keeps ONLY the folded ladder.
+    const region = screen.getByText('Step(2)').closest('[data-turn-live-region]');
+    expect(region).toBeTruthy();
+    expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
+    expect(within(region).getByText(/🔧 read/)).toBeTruthy();
+    expect(within(region).queryByText(/Step\(1\)/)).toBeNull();
+    expect(within(region).queryByText('look at the repo first')).toBeNull();
     expect(screen.queryByText('look at the repo first')).toBeNull();
-    // The live area sits AFTER the summary row in document order.
+    // The region is NOT inside any transcript bubble.
+    expect(region.closest('.ant-bubble')).toBeNull();
+    // The region sits AFTER the transcript's summary row in document order.
     const summary = screen.getByText('2 Steps');
     const step2 = screen.getByText('Step(2)');
     expect(summary.compareDocumentPosition(step2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('live area advances to the newest step while the ladder stays folded', () => {
-    const mounted = mount([runningTurn()]);
+  it('live region advances to the newest step while the ladder stays folded', () => {
+    const mounted = mountWithLiveRegion([runningTurn()]);
     expect(screen.getByText('Step(2)')).toBeTruthy();
     const grown = runningTurn();
     grown.steps.push({
@@ -343,74 +368,74 @@ describe('turn live area (independent of the ladder)', () => {
         input: 'pattern', output: null, isError: false, durationMs: 0, startedAt: 0,
       }],
     });
-    mounted.rerender(
-      <TranscriptView turns={[grown]} usage={null} status="streaming" error={null} emptyText="无" />,
-    );
+    rerenderWithLiveRegion(mounted, [grown]);
     expect(screen.getByText('3 Steps')).toBeTruthy();
     expect(itemActive('3 Steps')).toBe(false);
-    expect(screen.getByText('Step(3)')).toBeTruthy();
-    expect(screen.getByText('fresh reasoning')).toBeTruthy();
-    expect(screen.getByText(/🔧 grep/)).toBeTruthy();
+    const region = screen.getByText('Step(3)').closest('[data-turn-live-region]');
+    expect(within(region).getByText('fresh reasoning')).toBeTruthy();
+    expect(within(region).getByText(/🔧 grep/)).toBeTruthy();
     // Only the LAST step streams: the previous one folded away.
-    expect(screen.queryByText('Step(2)')).toBeNull();
-    expect(screen.queryByText('reading the entrypoint')).toBeNull();
+    expect(within(region).queryByText('Step(2)')).toBeNull();
+    expect(within(region).queryByText('reading the entrypoint')).toBeNull();
   });
 
   it('streams the running step via the open-call fallback without a progress flag', () => {
     const fallback = stepsTurn();
     fallback.steps[1].thinking = 'reading the entrypoint';
     fallback.steps[1].calls[0].output = null;
-    mount([fallback]);
+    mountWithLiveRegion([fallback]);
     expect(itemActive('2 Steps')).toBe(false);
     expect(screen.getByText('Step(2)')).toBeTruthy();
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
-  it('settle clears the live area and the ladder stays folded', () => {
-    const mounted = mount([runningTurn()]);
+  it('settle clears the live region and the ladder stays folded', () => {
+    const mounted = mountWithLiveRegion([runningTurn()]);
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
-    mounted.rerender(
-      <TranscriptView turns={[stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
-    );
+    rerenderWithLiveRegion(mounted, [stepsTurn()]);
     expect(itemActive('2 Steps')).toBe(false);
     expect(screen.queryByText(/Step\(2\)/)).toBeNull();
     expect(screen.queryByText('reading the entrypoint')).toBeNull();
     expect(screen.queryByText(/🔧 read/)).toBeNull();
     expect(screen.queryByText('running')).toBeNull();
+    expect(screen.queryByText(/live/)).toBeNull();
   });
 
-  it('opening the ladder keeps the live area and the open state survives streaming rerenders', () => {
-    const mounted = mount([runningTurn()]);
+  it('opening the ladder keeps the live region and the open state survives streaming rerenders', () => {
+    const mounted = mountWithLiveRegion([runningTurn()]);
     fireEvent.click(screen.getByText('2 Steps'));
     expect(itemActive('2 Steps')).toBe(true);
-    // TWO SEPARATE REGIONS coexisting: the ladder's own Step(2) row renders
-    // in-panel AND the live area below still streams the same running step
-    // (its thinking + call row stay visible — nothing is suppressed).
+    // TWO SEPARATE AREAS coexisting: the ladder's own Step(2) row renders
+    // in the transcript bubble AND the pinned live region outside it still
+    // streams the same running step (thinking + call row — nothing is
+    // suppressed in either direction).
     expect(screen.getAllByText(/Step\(2\)/)).toHaveLength(2);
-    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
-    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+    const region = screen.getAllByText(/Step\(2\)/)
+      .map((n) => n.closest('[data-turn-live-region]'))
+      .find(Boolean);
+    expect(region).toBeTruthy();
+    expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
+    expect(within(region).getByText(/🔧 read/)).toBeTruthy();
 
     const still = runningTurn();
     still.steps[1].calls[0].output = 'updated streamed output';
-    mounted.rerender(
-      <TranscriptView turns={[still]} usage={null} status="streaming" error={null} emptyText="无" />,
-    );
+    rerenderWithLiveRegion(mounted, [still]);
     // The user's open state survives the streaming rerender AND the live
-    // area keeps streaming underneath — no coupling in either direction.
+    // region keeps streaming — no coupling in either direction.
     expect(itemActive('2 Steps')).toBe(true);
     expect(screen.getAllByText(/Step\(2\)/)).toHaveLength(2);
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
-  it('running tag appears on live area call rows, not on finished ones', () => {
+  it('running tag appears on live region call rows, not on finished ones', () => {
     const running = runningTurn();
     running.steps[1].calls.push({
       kind: 'tool', role: 'assistant', id: 'c1', name: 'grep',
       input: 'pattern', output: null, isError: false, durationMs: 0, startedAt: 0,
     });
-    mount([running]);
+    mountWithLiveRegion([running]);
     // Two running texts now: the L0 summary tag and the open call row tag.
     expect(screen.getAllByText('running')).toHaveLength(2);
     const grepRow = screen.getByText(/🔧 grep/).closest('.ant-collapse-item');

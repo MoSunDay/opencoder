@@ -49,6 +49,9 @@ pub enum ExecutionStatus {
     Idle,
     Cancelling,
     Interrupted,
+    /// A control pause stopped future scheduling; started work keeps running
+    /// and an explicit resume returns the execution to [`Self::Idle`].
+    Paused,
     Done,
     Error,
     Cancelled,
@@ -65,6 +68,7 @@ impl ExecutionStatus {
             Self::Idle => "idle",
             Self::Cancelling => "cancelling",
             Self::Interrupted => "interrupted",
+            Self::Paused => "paused",
             Self::Done => "done",
             Self::Error => "error",
             Self::Cancelled => "cancelled",
@@ -200,6 +204,7 @@ pub struct NodeView {
     pub reserved_loops: u64,
 }
 
+#[allow(clippy::large_enum_variant)] // serde wire union; allocation is not on the hot path
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum NodeOperation {

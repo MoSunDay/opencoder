@@ -249,16 +249,23 @@ mod tests {
         let persisted = serde_json::to_string(&runtime).unwrap();
         assert!(persisted.contains(r#""run_as":{"uid":950"#));
         assert_eq!(
-            serde_json::from_str::<HarnessRuntime>(&persisted).unwrap().run_as,
+            serde_json::from_str::<HarnessRuntime>(&persisted)
+                .unwrap()
+                .run_as,
             runtime.run_as
         );
         // Legacy persisted runtimes (and the empty form) carry no run_as.
         let legacy = r#"{"literal_mentions":true,"envs":{"HOME":"/node/home"}}"#;
         assert_eq!(
-            serde_json::from_str::<HarnessRuntime>(legacy).unwrap().run_as,
+            serde_json::from_str::<HarnessRuntime>(legacy)
+                .unwrap()
+                .run_as,
             None
         );
-        assert_eq!(serde_json::from_str::<HarnessRuntime>("{}").unwrap().run_as, None);
+        assert_eq!(
+            serde_json::from_str::<HarnessRuntime>("{}").unwrap().run_as,
+            None
+        );
         // Round-tripping drops the field entirely when unset.
         assert!(!serde_json::to_string(&HarnessRuntime::default())
             .unwrap()

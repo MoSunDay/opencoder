@@ -138,7 +138,9 @@ async fn watcher_completion_folds_tokens_into_parent_registry_and_chat() {
     assert_eq!((session.as_str(), id.as_str()), ("parent-1", "agent-sub-1"));
     assert_eq!(status, "done");
     assert!(
-        summary.as_deref().is_some_and(|text| text.contains("答案文本")),
+        summary
+            .as_deref()
+            .is_some_and(|text| text.contains("答案文本")),
         "summary came from /result, got: {summary:?}"
     );
     assert_eq!(tokens, 200, "paged message usage 120 + 80 folds");
@@ -171,8 +173,8 @@ async fn watcher_completion_folds_tokens_into_parent_registry_and_chat() {
     let registry = crate::remote::subtasks::load_registry(&store, "parent-1")
         .await
         .unwrap();
-    let entry = crate::subtask_registry::find(&registry, "agent-sub-1")
-        .expect("registry kept the entry");
+    let entry =
+        crate::subtask_registry::find(&registry, "agent-sub-1").expect("registry kept the entry");
     assert_eq!(entry.status, "done");
     assert_eq!(entry.tokens, 200);
     assert_eq!(
@@ -274,7 +276,9 @@ async fn watcher_maps_idle_agent_convergence_to_done() {
     assert_eq!((session.as_str(), id.as_str()), ("parent-1", "agent-sub-1"));
     assert_eq!(status, "done", "idle convergence is delivered as done");
     assert!(
-        summary.as_deref().is_some_and(|text| text.contains("空闲收敛结果")),
+        summary
+            .as_deref()
+            .is_some_and(|text| text.contains("空闲收敛结果")),
         "summary came from /result, got: {summary:?}"
     );
     assert_eq!(tokens, 90, "paged message usage 50 + 40 folds");
@@ -307,8 +311,8 @@ async fn watcher_maps_idle_agent_convergence_to_done() {
     let registry = crate::remote::subtasks::load_registry(&store, "parent-1")
         .await
         .unwrap();
-    let entry = crate::subtask_registry::find(&registry, "agent-sub-1")
-        .expect("registry kept the entry");
+    let entry =
+        crate::subtask_registry::find(&registry, "agent-sub-1").expect("registry kept the entry");
     assert_eq!(entry.status, "done");
     assert_eq!(entry.tokens, 90);
     assert_eq!(

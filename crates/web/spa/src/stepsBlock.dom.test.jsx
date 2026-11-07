@@ -297,134 +297,119 @@ describe('StepsContent three-level drill-down', () => {
   });
 });
 
-describe('live ladder disclosure (auto-open + user override)', () => {
-  // antd keeps closed-after-open panels mounted (hidden), so folded state is
-  // asserted through the item's active class, exactly like the user-state
-  // test above — never through text absence.
+describe('live step preview (folded ladder)', () => {
+  // The ladder is user-controlled and folded by default: antd keeps closed
+  // panels mounted once opened, so folded state is asserted through the
+  // item's active class — never through text absence alone. The live preview
+  // below the summary row is the one thing rendered OUTSIDE the collapsed
+  // panel while the turn runs.
   const itemActive = (matcher) => screen.getByText(matcher)
     .closest('.ant-collapse-item').classList.contains('ant-collapse-item-active');
+  const summaryHeader = (matcher) => screen.getByText(matcher).closest('.ant-collapse-header');
+  const runningTurn = () => {
+    const turn = stepsTurn();
+    turn.progressActive = true;
+    turn.steps[1].thinking = 'reading the entrypoint';
+    return turn;
+  };
 
-  it('auto-opens the running position while progressActive — older steps stay folded', () => {
-    const running = stepsTurn();
-    running.progressActive = true;
-    mount([running]);
-    // L0 + the LAST step + its calls aggregate are open WITHOUT clicks.
-    expect(itemActive('2 Steps')).toBe(true);
-    expect(screen.getByText(/Step\(1\)/)).toBeTruthy();
-    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
-    expect(itemActive(/Step\(2\)/)).toBe(true);
-    expect(itemActive('1 Function call')).toBe(true);
-    expect(screen.getByText(/🔧 read/)).toBeTruthy();
-    // The older step keeps its fold: only its ROW is visible.
-    expect(itemActive(/Step\(1\)/)).toBe(false);
-    expect(screen.queryByText('look at the repo first')).toBeNull();
-    expect(screen.queryByText(/🔧 bash/)).toBeNull();
-  });
-
-  it('auto-opens the same running position via the open-call fallback (output: null)', () => {
-    const running = stepsTurn();
-    running.steps[1].calls[0].output = null;
-    mount([running]);
-    expect(itemActive('2 Steps')).toBe(true);
-    expect(itemActive(/Step\(2\)/)).toBe(true);
-    expect(screen.getByText(/🔧 read/)).toBeTruthy();
-    expect(itemActive(/Step\(1\)/)).toBe(false);
-    expect(screen.queryByText('look at the repo first')).toBeNull();
-  });
-
-  it('auto-collapses everything back to the `2 Steps` summary when the turn settles', () => {
-    const running = stepsTurn();
-    running.progressActive = true;
-    const mounted = mount([running]);
-    expect(itemActive('2 Steps')).toBe(true);
-    mounted.rerender(
-      <TranscriptView turns={[stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
-    );
+  it('running turn previews the last step below the folded summary', () => {
+    mount([runningTurn()]);
+    // The summary stays folded and keeps its own running tag.
     expect(itemActive('2 Steps')).toBe(false);
-    expect(itemActive(/Step\(2\)/)).toBe(false);
-    expect(itemActive('1 Function call')).toBe(false);
+    expect(within(summaryHeader('2 Steps')).getByText('running')).toBeTruthy();
+    // The LAST step's header + thinking + call row render below it without a
+    // click; the older step stays inside the folded ladder.
+    expect(screen.getByText('Step(2)')).toBeTruthy();
+    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
+    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+    expect(screen.queryByText(/Step\(1\)/)).toBeNull();
+    expect(screen.queryByText('look at the repo first')).toBeNull();
+    // The preview sits AFTER the summary row in document order.
+    const summary = screen.getByText('2 Steps');
+    const step2 = screen.getByText('Step(2)');
+    expect(summary.compareDocumentPosition(step2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('an expanded call row pins its step and calls open across the settle', () => {
-    const running = stepsTurn();
-    running.progressActive = true;
-    const mounted = mount([running]);
-    // The auto-opened running position puts the LAST step's call row in
-    // reach; drill into that call result (no explicit ladder clicks).
-    fireEvent.click(screen.getByText(/🔧 read/));
-    expect(screen.getByText('fn main() {}')).toBeTruthy();
-    mounted.rerender(
-      <TranscriptView turns={[stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
-    );
-    // The call row pinned its enclosing step + calls aggregate open, so the
-    // drilled result stays visible (user override beats the emptied auto).
-    expect(itemActive(/Step\(2\)/)).toBe(true);
-    expect(itemActive('1 Function call')).toBe(true);
-    expect(screen.getByText('fn main() {}')).toBeTruthy();
-    // Other levels collapse as usual: the turn row and the older step.
-    expect(itemActive('2 Steps')).toBe(false);
-    expect(itemActive(/Step\(1\)/)).toBe(false);
-  });
-
-  it('a step born while running moves the auto slot: the old step folds by itself', () => {
-    const running = stepsTurn();
-    running.progressActive = true;
-    const mounted = mount([running]);
-    expect(itemActive(/Step\(2\)/)).toBe(true);
-    const grown = stepsTurn();
-    grown.progressActive = true;
-    grown.steps.push({ thinking: 'fresh reasoning', calls: [] });
+  it('preview advances to the newest step while the ladder stays folded', () => {
+    const mounted = mount([runningTurn()]);
+    expect(screen.getByText('Step(2)')).toBeTruthy();
+    const grown = runningTurn();
+    grown.steps.push({
+      thinking: 'fresh reasoning',
+      calls: [{
+        kind: 'tool', role: 'assistant', id: 'c1', name: 'grep',
+        input: 'pattern', output: null, isError: false, durationMs: 0, startedAt: 0,
+      }],
+    });
     mounted.rerender(
       <TranscriptView turns={[grown]} usage={null} status="streaming" error={null} emptyText="无" />,
     );
     expect(screen.getByText('3 Steps')).toBeTruthy();
-    expect(itemActive(/Step\(2\)/)).toBe(false);
-    expect(screen.getByText(/Step\(3\)/)).toBeTruthy();
-    expect(itemActive(/Step\(3\)/)).toBe(true);
+    expect(itemActive('3 Steps')).toBe(false);
+    expect(screen.getByText('Step(3)')).toBeTruthy();
     expect(screen.getByText('fresh reasoning')).toBeTruthy();
+    expect(screen.getByText(/🔧 grep/)).toBeTruthy();
+    // Only the LAST step is previewed: the previous one folded away.
+    expect(screen.queryByText('Step(2)')).toBeNull();
+    expect(screen.queryByText('reading the entrypoint')).toBeNull();
   });
 
-  it('a user-closed level wins over the auto state across streaming rerenders', () => {
-    const running = stepsTurn();
-    running.progressActive = true;
-    const mounted = mount([running]);
-    expect(itemActive('2 Steps')).toBe(true);
-    fireEvent.click(screen.getByText('2 Steps'));
+  it('previews the running step via the open-call fallback without a progress flag', () => {
+    const fallback = stepsTurn();
+    fallback.steps[1].thinking = 'reading the entrypoint';
+    fallback.steps[1].calls[0].output = null;
+    mount([fallback]);
     expect(itemActive('2 Steps')).toBe(false);
-    const still = stepsTurn();
-    still.progressActive = true;
+    expect(screen.getByText('Step(2)')).toBeTruthy();
+    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
+    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+  });
+
+  it('settle clears the preview and the ladder stays folded', () => {
+    const mounted = mount([runningTurn()]);
+    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
+    mounted.rerender(
+      <TranscriptView turns={[stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
+    );
+    expect(itemActive('2 Steps')).toBe(false);
+    expect(screen.queryByText(/Step\(2\)/)).toBeNull();
+    expect(screen.queryByText('reading the entrypoint')).toBeNull();
+    expect(screen.queryByText(/🔧 read/)).toBeNull();
+    expect(screen.queryByText('running')).toBeNull();
+  });
+
+  it('opening the ladder hides the preview and the open state survives streaming rerenders', () => {
+    const mounted = mount([runningTurn()]);
+    fireEvent.click(screen.getByText('2 Steps'));
+    expect(itemActive('2 Steps')).toBe(true);
+    // Step rows replace the preview: its flat thinking/call row is gone.
+    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
+    expect(screen.queryByText('reading the entrypoint')).toBeNull();
+    expect(screen.queryByText(/🔧 read/)).toBeNull();
+
+    const still = runningTurn();
+    still.steps[1].calls[0].output = 'updated streamed output';
     mounted.rerender(
       <TranscriptView turns={[still]} usage={null} status="streaming" error={null} emptyText="无" />,
     );
-    // The auto keys say open, but the user override keeps the turn folded.
-    expect(itemActive('2 Steps')).toBe(false);
-    expect(itemActive(/Step\(2\)/)).toBe(true);
+    // The user's open state survives the streaming rerender: the ladder stays
+    // open and the preview does not reappear underneath it.
+    expect(itemActive('2 Steps')).toBe(true);
+    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
+    expect(screen.queryByText('reading the entrypoint')).toBeNull();
+    expect(screen.queryByText(/🔧 read/)).toBeNull();
   });
 
-  it('a user-opened OLD step stays open when the auto slot moves on', () => {
-    const running = stepsTurn();
-    running.progressActive = true;
-    const mounted = mount([running]);
-    fireEvent.click(screen.getByText(/Step\(1\)/));
-    expect(screen.getByText('look at the repo first')).toBeTruthy();
-    const grown = stepsTurn();
-    grown.progressActive = true;
-    grown.steps.push({ thinking: 'fresh reasoning', calls: [] });
-    mounted.rerender(
-      <TranscriptView turns={[grown]} usage={null} status="streaming" error={null} emptyText="无" />,
-    );
-    expect(itemActive(/Step\(1\)/)).toBe(true);
-    expect(screen.getByText('look at the repo first')).toBeTruthy();
-    expect(itemActive(/Step\(3\)/)).toBe(true);
-  });
-
-  it('shows the running tag on a running call row, not on finished ones', () => {
-    const running = stepsTurn();
+  it('running tag appears on preview call rows, not on finished ones', () => {
+    const running = runningTurn();
     running.steps[1].calls.push({
       kind: 'tool', role: 'assistant', id: 'c1', name: 'grep',
       input: 'pattern', output: null, isError: false, durationMs: 0, startedAt: 0,
     });
     mount([running]);
+    // Two running texts now: the L0 summary tag and the open call row tag.
+    expect(screen.getAllByText('running')).toHaveLength(2);
     const grepRow = screen.getByText(/🔧 grep/).closest('.ant-collapse-item');
     expect(within(grepRow).getByText('running')).toBeTruthy();
     const readRow = screen.getByText(/🔧 read/).closest('.ant-collapse-item');

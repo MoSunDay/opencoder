@@ -72,26 +72,31 @@ fn text_delta_appends_to_assistant_block() {
 }
 
 #[test]
-fn reasoning_delta_streams_into_an_auto_opened_step() {
+fn reasoning_delta_streams_into_the_live_preview_step() {
     // Thinking is a structural part of a step, never a top-level block.
-    // While the turn runs the step auto-opens at its running position, so
-    // the first delta materializes its markdown immediately (live
-    // disclosure) instead of staying hidden behind the group row.
+    // The ladder stays FOLDED while the turn runs — the current step
+    // streams below the group row as the render-only live preview, so the
+    // birth delta materializes its markdown immediately instead of staying
+    // hidden behind the group row.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("analyzing".into()));
     assert!(matches!(
         v.blocks[0],
-        ChatBlock::StepGroup { open: true, .. }
+        ChatBlock::StepGroup {
+            open: false,
+            progress_active: true,
+            ..
+        }
     ));
     let step = &match &v.blocks[0] {
         ChatBlock::StepGroup { steps, .. } => &steps[0],
         _ => unreachable!(),
     };
-    assert!(step.open, "the live running step auto-opens");
+    assert!(!step.open, "the ladder opens nothing on its own");
     assert_eq!(step.thinking_raw, "analyzing");
     assert!(
         !crate::chat::steps::span_text(&step.thinking).is_empty(),
-        "the birth delta renders live"
+        "the birth delta renders for the preview"
     );
     assert!(!step.thinking_dirty);
     assert!(block_text(&v).contains("analyzing"));

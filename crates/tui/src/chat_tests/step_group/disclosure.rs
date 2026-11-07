@@ -23,29 +23,34 @@ fn disclosure(view: &ChatView) -> (bool, Vec<(bool, bool, Vec<bool>)>) {
 }
 
 #[test]
-fn new_output_never_closes_user_opened_ladder_levels() {
-    // Under live disclosure the ladder AUTO-opens at its running position;
-    // a click on an already-open level therefore folds/pins it instead of
-    // opening it. The user takes ownership of a level by cycling it
-    // (fold + reopen = same visible state, now `user_touched`), after which
-    // no streaming event may move that level again — new output never
-    // closes a user-opened level, and new output never reopens a
-    // user-closed one.
+fn streaming_never_moves_user_set_levels() {
+    // Disclosure is ALWAYS user-controlled: the ladder is born folded and
+    // no streaming event opens or closes a level. Whatever state the user
+    // sets — open or folded — persists through deltas, round finalization,
+    // tool output, a new running step, and even the Say settle.
     let mut view = ChatView::default();
     view.apply(&SessionEvent::ReasoningDelta("first thought".into()));
-    // Pin Turn + Step(1) in their auto-open state.
-    view.toggle_tool_call_at(0, 0); // Turn → folded (pinned).
-    view.toggle_tool_call_at(0, 0); // Turn → reopened (pinned).
-    view.toggle_tool_call_at(0, 1); // Step(1) → folded (pinned).
-    view.toggle_tool_call_at(0, 1); // Step(1) → reopened (pinned).
+    assert_eq!(
+        disclosure(&view),
+        (false, vec![(false, false, vec![])]),
+        "the ladder is born folded; the running step only previews"
+    );
+
+    view.toggle_tool_call_at(0, 0); // Turn -> open.
+    view.toggle_tool_call_at(0, 1); // Step(1) -> open.
+    assert_eq!(disclosure(&view), (true, vec![(true, false, vec![])]));
 
     view.apply(&SessionEvent::ReasoningDelta(" grows".into()));
-    assert_eq!(disclosure(&view), (true, vec![(true, true, vec![])]));
+    assert_eq!(
+        disclosure(&view),
+        (true, vec![(true, false, vec![])]),
+        "deltas keep the user's state"
+    );
 
     view.apply(&SessionEvent::LlmRoundEnd);
     assert_eq!(
         disclosure(&view),
-        (true, vec![(true, true, vec![])]),
+        (true, vec![(true, false, vec![])]),
         "round finalization must not close the user-open turn or step"
     );
 
@@ -54,7 +59,8 @@ fn new_output_never_closes_user_opened_ladder_levels() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
-    view.toggle_tool_call_at(0, 3); // Exact call result → expanded (pins the step).
+    view.toggle_tool_call_at(0, 2); // Calls aggregate -> open.
+    view.toggle_tool_call_at(0, 3); // Call row -> expanded.
     view.apply(&SessionEvent::ToolEnd {
         id: "call-1".into(),
         name: "bash".into(),
@@ -65,21 +71,14 @@ fn new_output_never_closes_user_opened_ladder_levels() {
     assert_eq!(
         disclosure(&view),
         (true, vec![(true, true, vec![true])]),
-        "tool output must preserve all pinned ancestors and its result fold"
+        "tool output must preserve the user's levels and the result fold"
     );
 
     view.apply(&SessionEvent::ReasoningDelta("next round".into()));
     assert_eq!(
         disclosure(&view),
-        (true, vec![(true, true, vec![true]), (true, true, vec![])]),
-        "the fresh step takes over the open running position; the pinned \
-step above keeps its disclosure untouched"
-    );
-    view.apply(&SessionEvent::LlmRoundEnd);
-    assert_eq!(
-        disclosure(&view),
-        (true, vec![(true, true, vec![true]), (true, true, vec![])]),
-        "round finalization must keep the entire ladder at its owned state"
+        (true, vec![(true, true, vec![true]), (false, false, vec![])]),
+        "the fresh running step opens NOTHING - it only takes the preview slot"
     );
 
     view.toggle_tool_call_at(0, 0); // User explicitly closes the Turn.
@@ -87,6 +86,6 @@ step above keeps its disclosure untouched"
     assert_eq!(
         disclosure(&view),
         (false, vec![(true, true, vec![true]), (false, false, vec![])]),
-        "new output must respect a user close: only auto-managed levels settle"
+        "the Say settle must respect the user close: every level keeps its state"
     );
 }

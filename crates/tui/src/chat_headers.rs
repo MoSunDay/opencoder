@@ -6,7 +6,7 @@
 //! Extracted from `chat.rs` for the line gate; behavior unchanged.
 
 use super::{
-    assistant_rows, step_render, ChatBlock, ChatView, CompactionHeader, SubagentHeader,
+    assistant_rows, step_render, ChatBlock, ChatView, CompactionHeader, Step, SubagentHeader,
     ThinkingHeader, ToolCallHeader,
 };
 
@@ -106,7 +106,12 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::StepGroup { steps, open, .. } => {
+                ChatBlock::StepGroup {
+                    steps,
+                    open,
+                    progress_active,
+                    ..
+                } => {
                     // Mirrors `flatten_step_group` exactly (three-level
                     // ladder): the turn row always (a clickable target);
                     // while the turn is open, per step the step row (target),
@@ -176,14 +181,33 @@ impl ChatView {
                             }
                         }
                     }
+                    // LIVE PREVIEW mirror: while the turn runs and the
+                    // ladder stays folded, `flatten_step_group` streams the
+                    // CURRENT (last) step forced open below the group row —
+                    // render-only, so NO ToolCallHeader targets are pushed
+                    // here (visible_targets stays `!open → group row only`);
+                    // the lines must still be counted so later blocks'
+                    // header_line_idx stay aligned.
+                    if !*open && *progress_active && !say_merged {
+                        if let Some(step) = steps.last() {
+                            line_idx += preview_step_body_lines(step);
+                        }
+                    }
                     // Exactly one blank after the group: when the last
                     // visible row is an expanded call, its separator blank
                     // (counted above) IS the trailing blank — don't add
                     // another.
-                    let ends_on_expanded_call = *open
-                        && steps.last().is_some_and(|s| {
+                    let ends_on_expanded_call = if *open {
+                        steps.last().is_some_and(|s| {
                             s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
-                        });
+                        })
+                    } else {
+                        // Preview forces the last step open, so its final
+                        // expanded call merges into the trailing blank too.
+                        !*open && *progress_active && !say_merged && steps
+                            .last()
+                            .is_some_and(|s| s.calls.last().is_some_and(|c| c.expanded))
+                    };
                     if !ends_on_expanded_call && (!say_merged || *open) {
                         line_idx += 1; // trailing blank
                     }
@@ -223,4 +247,26 @@ impl ChatView {
         }
         (think, sub, compaction, tool_calls)
     }
+}
+
+/// Line count of the running live preview's step body — mirrors
+/// `step_render::push_step_body` with the step FORCED open (step row +
+/// `💭 Thinking` header/body + calls aggregation + every call header +
+/// expanded results). The separator after each expanded call is counted
+/// unconditionally, mirroring the open-ladder walk above; when the preview
+/// ends on an expanded call the caller's `ends_on_expanded_call` branch
+/// merges it into the group's trailing blank instead of doubling it.
+fn preview_step_body_lines(step: &Step) -> usize {
+    let mut n = 1; // step row
+    if !step.thinking.is_empty() {
+        n += 1 + step.thinking.len();
+    }
+    if step.calls.is_empty() {
+        return n;
+    }
+    n += 1; // calls aggregation row
+    for c in &step.calls {
+        n += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+    }
+    n
 }

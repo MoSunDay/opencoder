@@ -25,8 +25,8 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 **frontend**
 
 - [agents/local](agents/frontend/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
-- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯流式自动披露：`chat_step_live`；一次性 `@capability` 子任务派发）。
-- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯披露 hook 与 TUI 同契约）。
+- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠 + turn 区实时预览：`chat_step_render`；一次性 `@capability` 子任务派发）。
+- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠 + turn 区实时预览：`stepsBlock.jsx`）。
 
 **ontology**
 

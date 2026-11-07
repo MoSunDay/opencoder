@@ -158,7 +158,14 @@ pub(crate) async fn tick(
                 dirty = true;
             }
             if let Some((done, total, _)) = crate::subtask_events::apply_update(
-                store, session_states, session_id, chat, session, id, status, summary.as_deref(),
+                store,
+                session_states,
+                session_id,
+                chat,
+                session,
+                id,
+                status,
+                summary.as_deref(),
                 tokens,
             )
             .await
@@ -181,7 +188,8 @@ pub(crate) async fn tick(
                     format!("subtask {} 已提交", outcome.execution_id),
                     anim_tick,
                 ));
-                if let Ok(registry) = crate::remote::subtasks::load_registry(store, session_id).await
+                if let Ok(registry) =
+                    crate::remote::subtasks::load_registry(store, session_id).await
                 {
                     chat.subtask_done = crate::subtask_registry::done_count(&registry);
                     chat.subtask_total = crate::subtask_registry::total_count(&registry);

@@ -258,7 +258,6 @@ pub(crate) async fn dispatch(
     })
 }
 
-
 /// Spawn `dispatch` on tokio, mirroring `super::selection::request`: the
 /// composer stays responsive and polls the returned one-shot channel.
 #[allow(clippy::too_many_arguments)]
@@ -352,7 +351,6 @@ mod tests {
         assert_eq!(sum_event_usage(&frames), 42);
         assert_eq!(sum_event_usage(&[]), 0);
     }
-
 
     #[test]
     fn parse_mention_matches_known_capability_and_question() {

@@ -15,6 +15,13 @@ fn legacy_thinking_view(runs: &[(&str, bool)]) -> ChatView {
     v
 }
 
+fn lines_of(v: &ChatView) -> Vec<String> {
+    v.flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect::<String>())
+        .collect()
+}
+
 #[test]
 fn thinking_block_collapses() {
     let mut v = legacy_thinking_view(&[("line1\nline2\nline3", false)]);
@@ -276,7 +283,7 @@ fn interleaved_reasoning_opens_a_new_turn_under_each_say() {
 }
 
 #[test]
-fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
+fn live_preview_materializes_reasoning_while_the_turn_runs() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("first".into()));
     v.apply(&SessionEvent::TextDelta("answer".into()));
@@ -288,29 +295,15 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
     assert!(matches!(v.blocks[1], ChatBlock::Assistant { .. }));
     assert!(matches!(v.blocks[2], ChatBlock::StepGroup { .. }));
 
-    // Turn 2's running step auto-opened on its first delta (live
-    // disclosure). The user folds it back: from then on the step is
-    // HIDDEN, so further deltas only append raw source and the render
-    // loop may skip a delta-only frame.
-    v.toggle_tool_call_at(2, 1); // Step(1) of the new group → folded (pinned).
-    v.toggle_tool_call_at(2, 0); // Group row → folded (pinned).
+    // While turn 2 runs the current step streams as the live preview below
+    // the FOLDED ladder — even one the user folded explicitly: the preview
+    // is render-only and stays until progress settles.
+    v.toggle_tool_call_at(2, 0); // Group row -> folded by the user.
     v.apply(&SessionEvent::ReasoningDelta(" more".into()));
     assert!(
-        v.last_open_thinking_collapsed(),
-        "collapsed step reasoning is not visible"
+        !v.last_open_thinking_collapsed(),
+        "the running step stays visible through the preview"
     );
-    let (thinking_raw, thinking_rendered) = match &v.blocks[0] {
-        ChatBlock::StepGroup { steps, .. } => (
-            steps[0].thinking_raw.clone(),
-            crate::chat::steps::span_text(&steps[0].thinking),
-        ),
-        _ => unreachable!("first block must be the step group"),
-    };
-    assert_eq!(thinking_raw, "first");
-    // Closing the Say sealed turn 1's step: its thinking is rendered then
-    // and there (counted exactly once), so the closed turn carries the
-    // rendered body already.
-    assert_eq!(thinking_rendered, "first");
     let (raw2, rendered2) = match &v.blocks[2] {
         ChatBlock::StepGroup { steps, .. } => (
             steps[0].thinking_raw.clone(),
@@ -319,17 +312,43 @@ fn collapsed_live_reasoning_stays_raw_until_the_step_opens() {
         _ => unreachable!("third block must be the step group"),
     };
     assert_eq!(raw2, "second more");
-    // The birth delta was rendered live; the delta that arrived while the
-    // step was folded stays raw — markdown materializes lazily on open.
-    assert_eq!(rendered2, "second");
+    assert_eq!(
+        rendered2, "second more",
+        "every delta materializes while the preview streams"
+    );
 
-    v.toggle_tool_call_at(2, 0);
-    v.toggle_tool_call_at(2, 1);
-    let thinking = match &v.blocks[2] {
-        ChatBlock::StepGroup { steps, .. } => crate::chat::steps::span_text(&steps[0].thinking),
+    // The Say settles turn 2: the preview retires behind the folded ladder
+    // and the pending thinking run folds into the closing turn's ladder as
+    // a sealed, rendered step.
+    v.apply(&SessionEvent::TextDelta("final".into()));
+    let text = lines_of(&v).join("\n");
+    assert!(
+        !text.contains("second more"),
+        "the settled step lives only inside the folded ladder: {text}"
+    );
+    let rendered2 = match &v.blocks[2] {
+        ChatBlock::StepGroup { steps, .. } => {
+            crate::chat::steps::span_text(&steps[0].thinking)
+        }
         _ => unreachable!("third block must be the step group"),
     };
-    assert_eq!(thinking, "second more");
+    assert_eq!(rendered2, "second more");
+
+    // Reasoning that resumes after the Say births the NEXT ladder below it,
+    // which previews fresh on its own.
+    v.apply(&SessionEvent::ReasoningDelta(" tail".into()));
+    let text = lines_of(&v).join("\n");
+    assert!(
+        text.contains("tail"),
+        "post-Say reasoning streams into a new previewing ladder: {text}"
+    );
+    let rendered3 = match v.blocks.last() {
+        Some(ChatBlock::StepGroup { steps, .. }) => {
+            crate::chat::steps::span_text(&steps[0].thinking)
+        }
+        _ => panic!("expected the new ladder below the Say"),
+    };
+    assert_eq!(rendered3, "tail");
 }
 
 #[test]

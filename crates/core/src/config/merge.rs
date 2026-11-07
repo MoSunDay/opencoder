@@ -533,13 +533,19 @@ mod tests {
         let mut cfg = Config::default();
         assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Enforced);
         assert_eq!(cfg.operator.access, OperatorAccessMode::ReadWrite);
-        merge_into(&mut cfg, serde_json::json!({"operator": {"linux_identity": "off"}}));
+        merge_into(
+            &mut cfg,
+            serde_json::json!({"operator": {"linux_identity": "off"}}),
+        );
         assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Off);
         // Partial blocks keep prior state; unknown/invalid values are
         // ignored (same silent-keep contract as the other nested blocks).
         merge_into(&mut cfg, serde_json::json!({"operator": {}}));
         assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Off);
-        merge_into(&mut cfg, serde_json::json!({"operator": {"linux_identity": "nope"}}));
+        merge_into(
+            &mut cfg,
+            serde_json::json!({"operator": {"linux_identity": "nope"}}),
+        );
         assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Off);
         merge_into(
             &mut cfg,
@@ -547,7 +553,10 @@ mod tests {
         );
         assert_eq!(cfg.operator.access, OperatorAccessMode::ReadOnly);
         assert_eq!(cfg.operator.linux_identity, LinuxIdentityMode::Enforced);
-        merge_into(&mut cfg, serde_json::json!({"operator": {"access": "nope"}}));
+        merge_into(
+            &mut cfg,
+            serde_json::json!({"operator": {"access": "nope"}}),
+        );
         assert_eq!(cfg.operator.access, OperatorAccessMode::ReadOnly);
     }
 

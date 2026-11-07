@@ -46,9 +46,9 @@ mod merge;
 mod model_guard;
 #[path = "config/runtime/ontology.rs"]
 mod ontology;
-mod persistence;
 #[path = "config/runtime/operator.rs"]
 mod operator;
+mod persistence;
 mod project;
 mod provider;
 pub mod redact;

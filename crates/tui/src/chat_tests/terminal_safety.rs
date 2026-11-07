@@ -21,12 +21,21 @@ fn thinking_delta_is_sanitized_once_before_it_reaches_rendering() {
     view.apply(&SessionEvent::ReasoningDelta(
         "old\rNEW\x08\x1b[2J\u{009b}31m\tline".into(),
     ));
-    // The live running step auto-opens on its first delta, so the streamed
-    // thinking renders immediately — no ladder toggling needed to expose it.
+    // The running step streams in the TURN LIVE REGION (its own area, never
+    // the transcript), so the sanitize check must cover BOTH surfaces.
 
     let text = flattened_text(&view);
+    let live = super::step_group::live_lines(&view).join("\n");
     assert_no_terminal_controls(&text);
-    assert!(text.contains("oldNEW[2J31m    line"), "got: {text:?}");
+    assert_no_terminal_controls(&live);
+    assert!(
+        live.contains("oldNEW[2J31m    line"),
+        "sanitized thinking streams in the live region: {live:?}"
+    );
+    assert!(
+        !text.contains("oldNEW"),
+        "the transcript never carries the live region's rows: {text:?}"
+    );
 }
 
 #[test]

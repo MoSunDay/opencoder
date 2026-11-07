@@ -75,9 +75,9 @@ fn text_delta_appends_to_assistant_block() {
 fn reasoning_delta_streams_into_the_live_preview_step() {
     // Thinking is a structural part of a step, never a top-level block.
     // The ladder stays FOLDED while the turn runs — the current step
-    // streams below the group row as the render-only live preview, so the
-    // birth delta materializes its markdown immediately instead of staying
-    // hidden behind the group row.
+    // streams in the separate TURN LIVE REGION, so the birth delta
+    // materializes its markdown immediately instead of staying hidden
+    // behind the group row.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("analyzing".into()));
     assert!(matches!(
@@ -99,7 +99,16 @@ fn reasoning_delta_streams_into_the_live_preview_step() {
         "the birth delta renders for the preview"
     );
     assert!(!step.thinking_dirty);
-    assert!(block_text(&v).contains("analyzing"));
+    assert!(
+        !step_group::live_lines(&v).is_empty()
+            && step_group::live_lines(&v).join("\n").contains("analyzing"),
+        "the birth delta renders in the live region: {:?}",
+        step_group::live_lines(&v)
+    );
+    assert!(
+        !block_text(&v).contains("analyzing"),
+        "the transcript never carries the live region's rows"
+    );
     assert!(
         !v.blocks
             .iter()

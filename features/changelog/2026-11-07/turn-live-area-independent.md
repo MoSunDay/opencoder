@@ -1,5 +1,10 @@
 # Turn 实时区：独立于阶梯开合的流式渲染（TUI + SPA）
 
+> **已取代**：本条的「TUI transcript 尾部尾缀 + SPA 阶梯下方兄弟节点」
+> 位置口径已被 `2026-11-07/turn-live-region-own-area.md` 取代 —— turn
+> 实时区是彻底独立的布局区（TUI 自有 Layout 块 / SPA 滚动区外固定
+> 面板），不进 transcript 也不进气泡。本条保留为历史记录。
+
 一句话：阶梯与实时展示是**两个区域**。阶梯回归**纯用户控制、默认折叠**
 （Say 仍按原样把 steps 合并进 `Say(n steps)` 头）；运行中 turn 的当前
 （最后一个）step 改在**独立的 turn 实时区**流式渲染 —— TUI 是

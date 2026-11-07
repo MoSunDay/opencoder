@@ -20,6 +20,7 @@ import { useNodes } from './fleet/useNodes.js';
 import { useTranscriptStream } from './chat/useTranscriptStream.js';
 import { consumedEchoText, emptyStream, turnsFromMessages, usageFromMessages } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
+import { TurnLiveRegion } from './stepsBlock.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
 import { postSessionInput } from './chat/inputAttempt.js';
 import { QueuePanel } from './queuePanel.jsx';
@@ -691,6 +692,12 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
             />
           </Spin>
         </div>
+
+        {/* TURN LIVE REGION — pinned OUTSIDE the transcript scroll area: a
+            different thing from the Say/Step message area; it streams the
+            running turn's current step and clears on settle, never coupled
+            to any ladder's disclosure (TUI parity). */}
+        <TurnLiveRegion turns={stream.turns} />
 
         <QueuePanel sessionId={hasNode ? dialogSel : null} refreshSignal={queueVersion} />
 

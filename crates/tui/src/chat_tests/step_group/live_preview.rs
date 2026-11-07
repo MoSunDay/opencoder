@@ -1,16 +1,17 @@
 //! Live (streaming) contract: disclosure NEVER moves on its own — every
 //! ladder is folded by default and no streaming event opens or closes a
 //! level. While the admitted turn runs (`progress_active`, i.e. no Say
-//! yet), the CURRENT (last) step streams in the TURN LIVE AREA — an
-//! independent render-only region at the transcript tail
-//! (`chat_live_turn.rs`), never inside a ladder block and never coupled to
-//! any ladder's disclosure state. Say's first chunk, run end, Error, or a
-//! new turn retires the area, and the step then lives only inside that
-//! turn's folded ladder; if the next turn is already running the area
-//! simply shows it. An open ladder COEXISTS with the live area (its rows
-//! plus the streaming tail), and the user's open state survives the
-//! settle; Ctrl+L folds levels but the render-only area keeps streaming.
-//! Replay/snapshot ladders never stream (`replay.rs`).
+//! yet), the CURRENT (last) step streams in the TURN LIVE REGION — its OWN
+//! area between the transcript and the composer (`chat_live_turn.rs`), a
+//! DIFFERENT thing from the Say/Step transcript: `flatten` never emits
+//! these lines and no ladder block ever contains them. Say's first chunk,
+//! run end, Error, or a new turn clears the region, and the step then
+//! lives only inside that turn's folded ladder; if the next turn is
+//! already running the region simply shows it. An open ladder COEXISTS
+//! with the region (its rows plus the streaming panel), and the user's
+//! open state survives the settle; Ctrl+L folds levels but the
+//! render-only region keeps streaming. Replay/snapshot ladders never
+//! stream (`replay.rs`).
 
 use super::*;
 
@@ -34,6 +35,11 @@ fn flat(view: &ChatView) -> String {
 
 fn flat_first(view: &ChatView) -> String {
     lines(view).first().cloned().unwrap_or_default()
+}
+
+/// The turn live region's rows joined (`live_lines`, see chat_tests/mod.rs).
+fn live(view: &ChatView) -> String {
+    live_lines(view).join("\n")
 }
 
 fn reasoning(view: &mut ChatView, text: &str) {
@@ -70,24 +76,35 @@ fn running_reasoning_streams_in_the_turn_live_area() {
     let text = flat(&v);
     assert!(
         flat_first(&v).starts_with("\u{25b8} 1 Step"),
-        "folded group row with its running hint: {:?}",
+        "the transcript's ladder row stays folded with its running hint: {:?}",
         flat_first(&v)
     );
-    assert!(text.contains("Step(1)"), "live area step row: {text}");
+    assert_eq!(
+        lines(&v).len(),
+        2,
+        "folded ladder renders exactly its row + blank in the transcript: {:?}",
+        lines(&v)
+    );
+    let lv = live(&v);
+    assert!(lv.contains("Step(1)"), "live region step row: {lv}");
     assert!(
-        text.contains("\u{1f4ad} Thinking"),
-        "live area thinking header: {text}"
+        lv.contains("\u{1f4ad} Thinking"),
+        "live region thinking header: {lv}"
     );
     assert!(
-        text.contains("first thought"),
-        "live thinking streams in the live area — no click needed: {text}"
+        lv.contains("first thought"),
+        "live thinking streams in the live region — no click needed: {lv}"
+    );
+    assert!(
+        !text.contains("first thought"),
+        "the TRANSCRIPT never carries the live region's rows: {text}"
     );
 
     reasoning(&mut v, " grows");
     assert!(
-        flat(&v).contains("first thought grows"),
+        live(&v).contains("first thought grows"),
         "further deltas of the SAME reasoning run keep streaming: {}",
-        flat(&v)
+        live(&v)
     );
 }
 
@@ -101,12 +118,12 @@ fn running_calls_stream_with_spinner_and_the_ladder_stays_folded() {
         (false, vec![(false, false)]),
         "a joining call opens nothing — the live area renders it instead"
     );
-    let text = flat(&v);
-    assert!(text.contains("1 Function call"), "calls aggregate: {text}");
-    assert!(text.contains("bash"), "running call row renders: {text}");
+    let lv = live(&v);
+    assert!(lv.contains("1 Function call"), "calls aggregate: {lv}");
+    assert!(lv.contains("bash"), "running call row renders: {lv}");
     assert!(
-        text.contains("\u{25b8} 1 Step"),
-        "the folded group row still carries its own running hint: {text}"
+        flat_first(&v).starts_with("\u{25b8} 1 Step"),
+        "the transcript's folded group row still carries its own running hint"
     );
 
     end_call(&mut v, "c1", "done");
@@ -116,9 +133,9 @@ fn running_calls_stream_with_spinner_and_the_ladder_stays_folded() {
         "call completion is not a Step boundary: the live area keeps streaming"
     );
     assert!(
-        flat(&v).contains("Step(1)"),
-        "the step stays visible in the live area after its call ends: {}",
-        flat(&v)
+        live(&v).contains("Step(1)"),
+        "the step stays visible in the live region after its call ends: {}",
+        live(&v)
     );
 }
 
@@ -140,18 +157,23 @@ fn a_new_step_moves_the_live_area_and_folds_the_previous_one() {
         "got {:?}",
         flat_first(&v)
     );
+    let lv = live(&v);
     assert!(
-        text.contains("Step(2)"),
-        "the live area moves to the new step: {text}"
+        lv.contains("Step(2)"),
+        "the live region moves to the new step: {lv}"
     );
     assert!(
-        text.contains("round two"),
-        "the new step's thinking streams: {text}"
+        lv.contains("round two"),
+        "the new step's thinking streams: {lv}"
     );
     assert!(
-        !text.contains("round one") && !text.contains("Step(1)"),
+        !lv.contains("round one") && !lv.contains("Step(1)"),
         "only the CURRENT step streams — the finished one lives inside the \
-folded ladder: {text}"
+folded ladder: {lv}"
+    );
+    assert!(
+        !text.contains("round two"),
+        "and the transcript stays ladder-only: {text}"
     );
 }
 
@@ -161,7 +183,7 @@ fn say_first_chunk_and_run_end_clear_the_live_area() {
     reasoning(&mut v, "think");
     start_call(&mut v, "c1");
     end_call(&mut v, "c1", "out");
-    assert!(flat(&v).contains("Step(1)"));
+    assert!(live(&v).contains("Step(1)"));
 
     v.apply(&SessionEvent::TextDelta("the answer".into()));
     let text = flat(&v);
@@ -170,8 +192,8 @@ fn say_first_chunk_and_run_end_clear_the_live_area() {
         "Say's first chunk settles the pair into the merged header: {text}"
     );
     assert!(
-        !text.contains("Step(1)") && !text.contains("think"),
-        "the live area retires — the step lives only inside the folded pair: {text}"
+        live_lines(&v).is_empty(),
+        "the live region clears — the step lives only inside the folded pair"
     );
 
     v.apply(&SessionEvent::Done);
@@ -186,16 +208,15 @@ fn say_first_chunk_and_run_end_clear_the_live_area() {
     reasoning(&mut v, "more work");
     start_call(&mut v, "c2");
     assert!(!disclosure(&v).0, "the closed ladder above stays closed");
-    let text = flat(&v);
+    let lv = live(&v);
     assert!(
-        text.contains("more work") && text.contains("Step(1)"),
-        "the second ladder's running step streams in the live area: {text}"
+        lv.contains("more work") && lv.contains("Step(1)"),
+        "the second ladder's running step streams in the live region: {lv}"
     );
     v.apply(&SessionEvent::Done);
     assert!(
-        !flat(&v).contains("more work"),
-        "Done settles the second ladder as well: {}",
-        flat(&v)
+        live_lines(&v).is_empty(),
+        "Done settles the second ladder as well"
     );
 }
 
@@ -203,12 +224,11 @@ fn say_first_chunk_and_run_end_clear_the_live_area() {
 fn error_clears_the_live_area_like_done() {
     let mut v = ChatView::default();
     reasoning(&mut v, "think");
-    assert!(flat(&v).contains("Step(1)"));
+    assert!(live(&v).contains("Step(1)"));
     v.apply(&SessionEvent::Error("boom".into()));
-    let text = flat(&v);
     assert!(
-        !text.contains("Step(1)") && !text.contains("think"),
-        "Error retires the live area like Done: {text}"
+        live_lines(&v).is_empty(),
+        "Error clears the live region like Done"
     );
 }
 
@@ -237,27 +257,29 @@ fn live_area_rows_are_not_clickable_targets() {
     );
 }
 
-/// TWO SEPARATE REGIONS: a user-opened ladder and the live area COEXIST —
-/// opening the ladder never touches the streaming tail (no suppression in
-/// either direction), and the user's open state survives the settle:
-/// streaming never closes a level behind the user's back.
+/// TWO SEPARATE AREAS: a user-opened ladder and the live region COEXIST —
+/// the TRANSCRIPT holds the ladder's rows, the live region (its own area
+/// between transcript and composer) streams the running step; opening the
+/// ladder never touches it (no suppression in either direction), and the
+/// user's open state survives the settle: streaming never closes a level
+/// behind the user's back.
 #[test]
-fn user_opened_ladder_coexists_with_the_live_area_and_survives_the_settle() {
+fn user_opened_ladder_coexists_with_the_live_region_and_survives_the_settle() {
     let mut v = ChatView::default();
     reasoning(&mut v, "round one");
     start_call(&mut v, "c1");
     v.toggle_tool_call_at(0, 0); // open the ladder mid-run
     let text = flat(&v);
+    let lv = live(&v);
     assert!(
-        text.contains("Step(1)") && text.contains("round one"),
-        "open ladder renders the step ROW in-region while the live area at \
-the tail streams the same running step's thinking — coexistence: {text}"
+        text.contains("Step(1)") && !text.contains("round one"),
+        "the TRANSCRIPT holds the ladder only — step rows, thinking folded \
+(the step itself is closed): {text}"
     );
-    let live_tail = &text[text.rfind("Step(1)").unwrap()..];
     assert!(
-        live_tail.contains("💭 Thinking") && live_tail.contains("round one"),
-        "the live area (forced open) trails every block, untouched by the \
-ladder's disclosure: {text}"
+        lv.contains("Step(1)") && lv.contains("\u{1f4ad} Thinking") && lv.contains("round one"),
+        "the LIVE REGION streams the same running step forced open — a \
+different area, untouched by the ladder's disclosure: {lv}"
     );
 
     reasoning(&mut v, " round two");
@@ -266,12 +288,11 @@ ladder's disclosure: {text}"
         (true, vec![(false, false), (false, false)]),
         "the new running step still opens nothing inside the user-open ladder"
     );
-    let text = flat(&v);
     assert!(
-        text.ends_with("round two\n"),
-        "the live area now streams the NEW current step: {text}"
+        live(&v).ends_with("round two"),
+        "the live region now streams the NEW current step: {}",
+        live(&v)
     );
-
     v.apply(&SessionEvent::TextDelta("answer".into()));
     assert_eq!(
         disclosure(&v),
@@ -279,33 +300,28 @@ ladder's disclosure: {text}"
         "settle never closes a level the user opened"
     );
     assert!(
-        !flat(&v).contains("round two"),
-        "and retires the live area like every settle: {}",
-        flat(&v)
+        live_lines(&v).is_empty(),
+        "and clears the live region like every settle"
     );
 }
 
 /// Ctrl+L folds every collapsible level, but the live area is not a
 /// disclosure level — the running step keeps streaming while the turn runs.
 #[test]
-fn collapse_all_keeps_the_live_area_visible() {
+fn collapse_all_keeps_the_live_region_visible() {
     let mut v = ChatView::default();
     reasoning(&mut v, "thinking");
     v.collapse_all_collapsible();
     assert_eq!(disclosure(&v), (false, vec![(false, false)]));
     reasoning(&mut v, " more");
     start_call(&mut v, "c1");
-    let text = flat(&v);
+    let lv = live(&v);
     assert!(
-        text.contains("thinking more") && text.contains("Step(1)"),
-        "the render-only live area survives Ctrl+L: {text}"
+        lv.contains("thinking more") && lv.contains("Step(1)"),
+        "the render-only live region survives Ctrl+L: {lv}"
     );
     v.apply(&SessionEvent::Done);
-    assert!(
-        !flat(&v).contains("Step(1)"),
-        "and retires normally at run end: {}",
-        flat(&v)
-    );
+    assert!(live_lines(&v).is_empty(), "and clears normally at run end");
 }
 
 #[test]

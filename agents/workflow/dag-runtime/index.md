@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # dag-runtime 模块
 
@@ -37,4 +37,5 @@ Server 不链接此运行时。
 - [sandbox/codex](../../../crates/dag-runtime/src/sandbox/codex/mod.rs) 将固定的 Codex 启动脚本参数传入原生步骤；执行仍使用工作流容器和节点上的入口。
 - [执行约定](../../../rules/04-dag-execution-contract.md)、[DAG 能力](../../../features/platform/dag/index.md)
 - [dag-binary](../dag-binary/index.md)、[worker](../../execution/worker/index.md)
-- [动态步骤说明](../../../docs/dag-dynamic.md)、[Codex 与 rootfs 配置](../../../docs/registered-runners.md)
+- [动态步骤](../../../crates/dag/src/dynamic.rs)、[Codex 启动](../../../crates/dag-runtime/src/sandbox/codex/mod.rs)、
+  [rootfs 制备](../../../scripts/prepare-dag-rootfs.sh)

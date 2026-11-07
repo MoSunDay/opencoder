@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # 大脑调度与运行历史
 
@@ -19,7 +19,7 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 - [crates/web/src/api_brain.rs](../../../crates/web/src/api_brain.rs) — 工作台
   API
 - [调度规则](../../../rules/06-brain-scheduling-contract.md)、
-  [运行协议](../../../docs/brain-orchestration.md)
+  [运行协议](../../../crates/control/src/api/brain_runs)
 - [历史数据清理](../../../scripts/maintenance/brain_cleanup)、
   [验收说明](../../../scripts/acceptance/brain/README.md)
 

@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # TODO 工作台
 
@@ -18,7 +18,6 @@ JSON/Markdown 目录编辑、运行、Review 与指定节点重跑；本卡只�
   工作台、模板与运行 API
 - [crates/local/src/todos_cmd.rs](../../../crates/local/src/todos_cmd.rs) — 本地
   TODO 命令
-- [操作文档](../../../docs/todo-workbench.md)
 
 ## 相关
 

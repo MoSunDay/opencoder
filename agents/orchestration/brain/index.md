@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # brain 模块
 
@@ -34,5 +34,5 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 ## 相关
 [调度规则](../../../rules/06-brain-scheduling-contract.md) ·
-[运行协议](../../../docs/brain-orchestration.md) ·
+[运行协议](../../../crates/control/src/api/brain_runs) ·
 [工作台](../../../features/platform/brain/index.md)

@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # local 模块
 
@@ -13,4 +13,4 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 - [src/ts/](../../../crates/local/src/ts) — tmux 会话与中央注册表
 - [src/todos_cmd.rs](../../../crates/local/src/todos_cmd.rs) — todos 子命令
 - [src/main.rs](../../../src/main.rs) — 仓库根二进制 `opencoder` 入口
-- Windows 支持边界见 [安装与构建](../../../docs/windows.md)
+- Windows 支持边界见 [Windows 能力卡](../../../features/platform/windows/index.md)

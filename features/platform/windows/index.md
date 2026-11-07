@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # Windows 原生支持
 
@@ -6,7 +6,6 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 
 ## 索引
 
-- [安装、运行、构建与人工验收](../../../docs/windows.md)
 - [scripts/install.ps1](../../../scripts/install.ps1) — Windows 安装器
 - [crates/core/src/platform/](../../../crates/core/src/platform) — 共享宿主操作
   （`shell.rs` 命令工具、`user_dirs.rs` 目录隔离、`windows_acl.rs`、

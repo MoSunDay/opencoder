@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # control 模块
 
@@ -52,4 +52,4 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
 - [agents/node](../node/index.md)、[agents/worker](../../execution/worker/index.md)
 - [dag-binary](../../workflow/dag-binary/index.md)、
   [DAG 执行约定](../../../rules/04-dag-execution-contract.md)
-- [agents/brain](../../orchestration/brain/index.md)、[运行协议](../../../docs/brain-orchestration.md)
+- [agents/brain](../../orchestration/brain/index.md)、[运行协议](../../../crates/control/src/api/brain_runs)

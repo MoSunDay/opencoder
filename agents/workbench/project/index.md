@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # project 模块
 
@@ -21,7 +21,7 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
   执行与派发适配
 - `crates/control/src/api/executions/results/` — 按需读取执行当前结论
 - `crates/control/src/project_files/mod.rs` — Server 上传任务文件与只读
-  NFS 导出，见 [任务文件](../../../docs/project-files.md)
+  NFS 导出，见 [任务文件](../../../crates/control/src/project_files)
 
 ## 相关
 - [项目模块约定](../../../rules/07-project-module-contract.md) — 归属、看板、执行关联、实时结果读取与进度规则

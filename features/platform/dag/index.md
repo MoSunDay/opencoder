@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # DAG 工作流
 
@@ -28,12 +28,12 @@ Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
   [api_dag_binaries.rs](../../../crates/web/src/api_dag_binaries.rs) — 画布/
   JSON 编辑与目录 API
 - [执行规则](../../../rules/04-dag-execution-contract.md)、
-  [动态步骤 API](../../../docs/dag-dynamic.md)、
-  [步骤控制](../../../docs/dag-step-control.md)
-- [镜像与 rootfs 制备](../../../docs/registered-runners.md)、
+  [动态步骤](../../../crates/dag/src/dynamic.rs)、
+  [步骤控制](../../../crates/dag/src/control/mod.rs)
+- [镜像与 rootfs 制备](../../../scripts/prepare-dag-rootfs.sh)、
   [目录去重与清理](../../../scripts/maintenance/catalog_cleanup/README.md)
 
 ## 相关
 
 - [调度平台](../agent-platform/index.md)、[Harness](../../interaction/harness/index.md)、
-  [平滑发布](../../../docs/smooth-release.md)
+  [平滑发布验收](../../../scripts/acceptance/smooth_release/main.py)

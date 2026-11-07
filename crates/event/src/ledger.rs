@@ -3,9 +3,8 @@
 //! [`EventLedger`] is the only storage surface this crate sees: the event
 //! log (append plus cursor reads), listener registry CRUD, and pause-wait
 //! registrations. [`MemoryLedger`] implements the trait with plain maps and
-//! is the reference semantics for tests. The optional `rdb` feature adds
-//! the durable RocksDB ledger (see [`crate::queue`]); this crate never
-//! links a storage engine by default.
+//! is the reference semantics for tests; this crate never
+//! links a storage engine.
 
 use std::collections::BTreeMap;
 

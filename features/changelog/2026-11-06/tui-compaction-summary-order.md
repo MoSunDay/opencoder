@@ -11,8 +11,8 @@
   `replay_messages`）在消息循环里拦截压缩摘要合成消息，收集后于常规块
   与 step 折叠完成时经 `push_compaction_summary_block` 追加到视图末尾；
   `replay_one` 不再就地渲染摘要块（其余合成消息仍跳过）。
-- `crates/store/src/rdb_store/mod.rs` — 顺手修复工作区内未完成原型无法
-  编译的问题：`_tmp` 改为 `Option<Arc<TempDir>>` 使 `#[derive(Clone)]`
+- 工作区内他人未提交的存储原型（后被整段回退、未合入）— 顺手修复其
+  无法编译的问题：`_tmp` 改为 `Option<Arc<TempDir>>` 使 `#[derive(Clone)]`
   成立（仅解除编译阻塞，不改动原型设计）。
 
 ## 行为口径
@@ -44,6 +44,6 @@
 - Clippy：`cargo clippy -p opencoder-tui --all-targets -- -D warnings
   -A clippy::large_enum_variant -A dead_code -A clippy::result_large_err` →
   零警告。三项 allow 均为工作区既有问题（core/fleet `NodeOperation`、
-  store 未完成 rdb 原型、session `result_large_err`），与本次改动无关；
+  store 未完成的存储原型、session `result_large_err`），与本次改动无关；
   `crates/tui` 内无任何告警。
 - 测试范围：本次修改及其直接影响的链路（TUI 压缩回放）；未运行全量测试。

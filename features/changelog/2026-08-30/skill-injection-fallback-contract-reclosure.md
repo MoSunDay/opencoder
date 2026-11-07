@@ -17,7 +17,7 @@ Commit: (working-tree, skill 注入 fallback 指针契约测试收口 + 树创�
 - clippy 门禁：`cargo clippy --workspace --all-targets -- -D warnings` → **0 告警**（01:39 快照；其后所有权方又改写 skill_tail 测试与 shellguard，该两处归其复验）。
 - 作用域测试（03:4x 当次复验）：`skill_body_injection` **7/0**、`question_gating` **6/0**；session/core src 自 01:07 后无变动，作用域绿稳定。
 - 全量 `cargo test --workspace` 两次尝试均被环境失效化，**尚无可签收数字**：
-  1. 01:40 → 跑至 session `child_cancel::parent_steer_cancels_running_child` 1 红（1087 passed）——机器负载 224+（无关 rdb 项目测试风暴）下的超时型 flake，该文件不在任何 WIP 修改面内；隔离复跑因风暴爬行被主动终止（释放 cargo 锁避免阻塞所有权方构建）。
+  1. 01:40 → 跑至 session `child_cancel::parent_steer_cancels_running_child` 1 红（1087 passed）——机器负载 224+ 下的超时型 flake，该文件不在任何 WIP 修改面内；隔离复跑因风暴爬行被主动终止（释放 cargo 锁避免阻塞所有权方构建）。
   2. 03:20 → shellguard lib 编译失败（`crate::allowlists` 缺失等 4 错）——所有权方 03:24/03:25（**门禁运行中**）正对该 crate 做重构手术，快照踩中其中间态。
 - shellguard 为孤立新 crate，无任何 crate 依赖（grep 各 Cargo.toml 证实），不传染 session/core 测试面，仅阻塞 workspace 级门禁本身。
 - 另发现：01:57 启动的全量门禁日志文件在进程存活期间自 /tmp 消失，原因未能归因；后续门禁日志改落 /root。

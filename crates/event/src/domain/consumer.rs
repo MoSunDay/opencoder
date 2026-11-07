@@ -2,7 +2,7 @@
 //!
 //! A consumer id names one durable replay position in the event log (see
 //! [`crate::ledger::EventLedger`]). The id becomes part of a storage key
-//! in every backend (`evc/<consumer-id>` in the rdb layout), so it is
+//! in every backend (`evc/<consumer-id>` in durable ledger layouts), so it is
 //! validated as strict pure logic shared by all implementations: non-empty,
 //! bounded length, ascii, no whitespace and no `/` (the key separator).
 //! Callers must never trust an arbitrary free-form string as a key.

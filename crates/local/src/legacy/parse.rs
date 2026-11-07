@@ -14,20 +14,6 @@ use opencoder_store::{Delivery, EventKind, SubagentStatus};
 
 use super::rows::{LegacyEvent, LegacyInput, LegacyMessage, LegacySession, LegacyTask};
 
-/// Column order the extraction SELECTs pin down; a mismatch is a programming
-/// error between `extract.rs` and the parsers, so it fails loudly.
-pub(crate) fn require_columns(found: &[String], expected: &[&str]) -> Result<()> {
-    let found_cols: Vec<&str> = found.iter().map(String::as_str).collect();
-    if found_cols == expected {
-        return Ok(());
-    }
-    bail!(
-        "unexpected legacy column layout: expected [{}], got [{}]",
-        expected.join(", "),
-        found_cols.join(", ")
-    );
-}
-
 fn cell<'a>(row: &'a [serde_json::Value], idx: usize, col: &str) -> Result<&'a serde_json::Value> {
     row.get(idx)
         .ok_or_else(|| anyhow!("column `{col}` missing from legacy row"))

@@ -85,7 +85,10 @@ fn streaming_never_moves_user_set_levels() {
     view.apply(&SessionEvent::TextDelta("later output".into()));
     assert_eq!(
         disclosure(&view),
-        (false, vec![(true, true, vec![true]), (false, false, vec![])]),
+        (
+            false,
+            vec![(true, true, vec![true]), (false, false, vec![])]
+        ),
         "the Say settle must respect the user close: every level keeps its state"
     );
 }

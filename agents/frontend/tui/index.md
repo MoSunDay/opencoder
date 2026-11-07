@@ -14,10 +14,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射（模式切换门禁）
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染与渲染入口
 - `src/chat_step_render.rs` — Step 阶梯渲染：阶梯纯用户控制、默认折叠；
-  运行中（`progress_active`，Say 之前）在折叠组行下方以 turn 区实时
-  预览流式渲染当前 step（`push_step_body` 阶梯/预览共用），settle 后
-  预览消失、step 只存在于折叠阶梯（与 SPA `stepsBlock.jsx` 同契约；
-  行号镜像见 `chat_headers.rs`）
+  运行中（`progress_active`，Say 之前）的当前 step 在**独立的 turn 实时
+  区**（transcript 尾部，`chat_live_turn.rs`）流式渲染（`push_step_body`
+  阶梯/实时区共用），settle 后实时区消失、step 只存在于折叠阶梯；实时
+  区不随阶梯开合（与 SPA `stepsBlock.jsx` 同契约）
 - [chat_steps_replay.rs](../../../crates/tui/src/chat_steps_replay.rs) — 回放侧
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
   `chat_steps.rs` 共用阶梯语义）

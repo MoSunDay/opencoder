@@ -22,7 +22,7 @@ fn push_bash_tool_starts_in_results_state() {
                     && steps[0].open
                     && steps[0].calls_open
                     && steps[0].calls[0].expanded
-                    && *progress_active,
+                    && !*progress_active,
                 "local `!cmd` runs visible from the start (whole ladder expanded)"
             );
             assert!(

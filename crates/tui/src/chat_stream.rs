@@ -243,7 +243,7 @@ impl ChatView {
                 progress_active,
                 ..
             } => steps.last().filter(|step| !step.sealed).map(|step| {
-                // The running live preview shows the current step's thinking
+                // The turn live area shows the current step's thinking
                 // below the folded ladder, so a running turn is never hidden.
                 !((*open && step.open) || *progress_active)
             }),

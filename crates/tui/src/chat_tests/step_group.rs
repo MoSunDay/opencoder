@@ -389,14 +389,15 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "solo");
-    // Pre-Say, while the turn runs: the ladder stays FOLDED and the current
-    // step streams below the group row as the render-only live preview
-    // (group row with the live hint, forced-open step, its thinking, the
-    // calls aggregate and the call row) — still ending on exactly one blank.
+    // Pre-Say, while the turn runs: the ladder stays FOLDED (group row +
+    // its trailing blank) and the current step streams in the SEPARATE TURN
+    // LIVE AREA at the transcript tail (forced-open step row, its thinking,
+    // the calls aggregate and the call row) — ending on exactly one blank.
     assert_eq!(
         lines(&v),
         vec![
             "\u{25b8} 1 Step  \u{280b} running ",
+            "",
             "  \u{276f} Step(1)",
             "    \u{1f4ad} Thinking",
             "        think",
@@ -404,7 +405,8 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
             "      \u{25b8} bash echo x",
             "",
         ],
-        "live auto-open ladder: every streamed row visible, one trailing blank"
+        "folded ladder + live area tail: every streamed row visible, one \
+trailing blank each"
     );
     v.apply(&SessionEvent::TextDelta("spoken".into()));
     assert_eq!(

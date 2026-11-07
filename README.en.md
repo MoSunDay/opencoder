@@ -179,7 +179,7 @@ Global options:
 | List 200 sessions | **0.95 ms** | < 100 ms |
 | Full deterministic test suite | **~3 s / 1076 tests** | — |
 
-See [`docs/perf.md`](docs/perf.md) for details.
+See [`store_perf.rs`](crates/store/tests/store_perf.rs) for details.
 
 ## 📊 Comparison with opencode
 

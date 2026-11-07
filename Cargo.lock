@@ -3290,6 +3290,7 @@ dependencies = [
 [[package]]
 name = "rdb"
 version = "0.3.0"
+source = "git+https://github.com/MoSunDay/rdb.git?rev=e0ee630dd8f8d1530fd76a1ee219baa89b1ab5db#e0ee630dd8f8d1530fd76a1ee219baa89b1ab5db"
 dependencies = [
  "hex",
  "md-5",

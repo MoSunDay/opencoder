@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: cad77d3ea60afe746b58708af1a309b0c55c83f2
 
 # OpenCoder 逻辑地图
 
@@ -14,7 +14,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 - [agents/core](agents/foundation/core/index.md) — 共享类型与 Config。
 - [agents/llm](agents/foundation/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
-- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的 SQLite 基建。
+- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的内嵌 turso 引擎。
 - [agents/event](agents/foundation/event/index.md) — `opencoder-event`：事件日志、监听器、广播总线、触发执行与全局暂停门；默认纯内存，`rdb` feature 提供 RocksDB 持久队列账本；通用基建，未接生产 dispatcher。
 
 **runtime**
@@ -30,7 +30,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 **ontology**
 
-- [agents/ontology](agents/ontology/index.md) — 独立 SQLite 的类型、实体、关系、图谱切面、目录多归属、数据保鲜与不可变正文。
+- [agents/ontology](agents/ontology/index.md) — 独立 `ontology.db`（内嵌 turso 引擎）的类型、实体、关系、图谱切面、目录多归属、数据保鲜与不可变正文。
 
 **workflow**
 

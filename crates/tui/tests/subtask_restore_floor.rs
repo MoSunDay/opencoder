@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use opencoder_core::{harness::SubtaskRef, Message};
-use opencoder_store::{SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, Store};
 use opencoder_tui::session_ui::{replay_into_chat, subtask_restore_floor, SessionUiState};
 use opencoder_tui::subtask_registry::sum_tokens;
 
@@ -36,7 +36,7 @@ fn assistant_with_usage(id: &str, total_tokens: u64) -> Message {
 }
 
 async fn fresh_store() -> Arc<dyn Store> {
-    let store = TursoStore::open_memory().await.unwrap();
+    let store = RdbStore::open_memory().await.unwrap();
     store
         .create_session(&SessionMeta {
             id: PARENT.into(),
@@ -69,7 +69,14 @@ async fn save_registry(store: &Arc<dyn Store>, refs: Vec<SubtaskRef>) {
 }
 
 async fn transcript(store: &Arc<dyn Store>) -> Vec<Message> {
-    store.append_messages(PARENT, &[assistant_with_usage("a1", 50), assistant_with_usage("a2", 50)])
+    store
+        .append_messages(
+            PARENT,
+            &[
+                assistant_with_usage("a1", 50),
+                assistant_with_usage("a2", 50),
+            ],
+        )
         .await
         .unwrap();
     store.load_messages(PARENT).await.unwrap()
@@ -153,5 +160,8 @@ async fn fresh_first_visit_floor_is_the_whole_registry_sum() {
     assert_eq!(floor, 130, "no snapshot: the whole Σregistry applies");
 
     let chat = replay_into_chat("act", &messages, &store, PARENT, floor).await;
-    assert_eq!(chat.tokens_total, 130, "usage 100 loses to the registry floor");
+    assert_eq!(
+        chat.tokens_total, 130,
+        "usage 100 loses to the registry floor"
+    );
 }

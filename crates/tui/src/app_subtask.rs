@@ -158,7 +158,14 @@ pub(crate) async fn tick(
                 dirty = true;
             }
             if let Some((done, total, _)) = crate::subtask_events::apply_update(
-                store, session_states, session_id, chat, session, id, status, summary.as_deref(),
+                store,
+                session_states,
+                session_id,
+                chat,
+                session,
+                id,
+                status,
+                summary.as_deref(),
                 tokens,
             )
             .await
@@ -181,7 +188,8 @@ pub(crate) async fn tick(
                     format!("subtask {} 已提交", outcome.execution_id),
                     anim_tick,
                 ));
-                if let Ok(registry) = crate::remote::subtasks::load_registry(store, session_id).await
+                if let Ok(registry) =
+                    crate::remote::subtasks::load_registry(store, session_id).await
                 {
                     chat.subtask_done = crate::subtask_registry::done_count(&registry);
                     chat.subtask_total = crate::subtask_registry::total_count(&registry);
@@ -222,7 +230,7 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
     use opencoder_core::harness::SubtaskRef;
-    use opencoder_store::TursoStore;
+    use opencoder_store::RdbStore;
 
     fn entry(id: &str) -> SubtaskRef {
         SubtaskRef {
@@ -241,7 +249,7 @@ mod tests {
     #[tokio::test]
     async fn key_is_inert_while_the_view_is_closed() {
         let mut view: Option<SubtaskView> = None;
-        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
         let mut chat = ChatView::default();
         let mut subtask_ui = SubtaskUi::new();
         let (admit_tx, _rx) = mpsc::channel(4);
@@ -276,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn enter_descends_into_the_selected_child_session() {
         let mut view = Some(SubtaskView::new(vec![entry("agent-a")]));
-        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
         let mut chat = ChatView::default();
         let mut subtask_ui = SubtaskUi::new();
         let (admit_tx, _rx) = mpsc::channel(4);

@@ -1,6 +1,6 @@
 //! Best-effort mirror of ts-owned sessions into the central ts registry.
 //!
-//! `opencoder ts` sessions live in the cli registry (`<data_root>/ts.db`); the
+//! `opencoder ts` sessions live in the cli registry (`<data_root>/ts.db.rdb`); the
 //! TUI itself only persists to its per-workdir store. This wrapper sits between
 //! the TUI and that store and mirrors the durable index columns (title,
 //! preview) the cli needs for `ts -l`/`ts -r`. Plain `tui`/`run` sessions are
@@ -42,13 +42,13 @@ pub(crate) async fn maybe_wrap(inner: Arc<dyn Store>, workdir: &Path) -> Arc<dyn
     maybe_wrap_at(inner, workdir, opencoder_core::data_root().join("ts.db")).await
 }
 
-/// Testable seam: wrap only when `ts_db` exists and opens cleanly.
+/// Testable seam: wrap only when the registry's rdb directory exists and opens cleanly.
 pub(crate) async fn maybe_wrap_at(
     inner: Arc<dyn Store>,
     workdir: &Path,
     ts_db: PathBuf,
 ) -> Arc<dyn Store> {
-    if !ts_db.is_file() {
+    if !TsRegistry::db_dir(&ts_db).is_dir() {
         return inner;
     }
     match TsRegistry::open(&ts_db).await {

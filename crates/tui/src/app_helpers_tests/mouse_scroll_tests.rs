@@ -35,9 +35,9 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
     let body = Rect::new(0, 0, 80, 12); // visible_h = 10, inner_w = 77
     let visible_h = body.height as usize - 2;
     assert!(
-            child_rows > parent_rows && child_rows > visible_h,
-            "precondition: child ({child_rows}) longer than parent ({parent_rows}) and viewport ({visible_h})"
-        );
+        child_rows > parent_rows && child_rows > visible_h,
+        "precondition: child ({child_rows}) longer than parent ({parent_rows}) and viewport ({visible_h})"
+    );
     // Parent must fit in the viewport — that is what made the old math trip.
     assert!(
         parent_rows < visible_h,

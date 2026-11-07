@@ -4,6 +4,7 @@
 //! making the child body un-scrollable.
 use super::*;
 use crossterm::event::KeyModifiers;
+use opencoder_core::data_dir_for;
 use opencoder_store::SessionMeta;
 
 mod ctrl_l_tests;
@@ -369,8 +370,8 @@ fn pending_mirror_uses_display_text_with_prompt_fallback() {
 
 #[tokio::test]
 async fn restore_pending_mirrors_restores_display_text_at_reload() {
-    use opencoder_store::TursoStore;
-    let store = TursoStore::open_memory().await.unwrap();
+    use opencoder_store::RdbStore;
+    let store = RdbStore::open_memory().await.unwrap();
     let sid = "resume-sess";
     store
         .create_session(&SessionMeta {
@@ -446,12 +447,13 @@ fn reapply_session_model_overrides_resumed_model() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)] // single-threaded test runtime; lock serializes env-var readers
 async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
-    // `open_store` materializes the on-disk sqlite DB at
-    // `<data_local>/opencoder/<hash(workdir)>/opencoder.db`. A tempdir workdir
-    // hashes to a unique subdir, so it is isolated and safe to scrub. This
-    // guards the extraction (moved verbatim out of `app::run`) by asserting the
-    // observable side effect — the DB file is created — without needing a live
-    // terminal or a running session.
+    // `open_store` delegates to the shared local opener, so it materializes
+    // the on-disk rdb store at `<data_local>/opencoder/<hash(workdir)>/
+    // opencoder.db.rdb` (a directory, never the legacy `opencoder.db` plain
+    // file). A tempdir workdir hashes to a unique subdir, so it is isolated
+    // and safe to scrub. This guards the delegation by asserting the
+    // observable side effect — the rdb directory is created — without
+    // needing a live terminal or a running session.
     // Serialize with HOME/XDG env-var mutators: `data_dir_for` resolves the
     // data root via `dirs::data_local_dir()` (reads HOME/XDG_DATA_HOME). A
     // concurrent env mutation in another test can make the computed path
@@ -467,15 +469,15 @@ async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
     let store = open_store(workdir.path())
         .await
         .expect("open_store succeeds");
-    let db_file = data_dir.join("opencoder.db");
+    let db_dir = data_dir.join("opencoder.db.rdb");
     assert!(
-        db_file.exists(),
-        "open_store must create opencoder.db at {}",
-        db_file.display()
+        db_dir.is_dir(),
+        "open_store must create the opencoder.db.rdb directory at {}",
+        db_dir.display()
     );
 
-    // Release the connection so we can clean up every artifact we created
-    // (db file + any -wal/-shm sidecars) without holding a lock.
+    // Release the handles so we can clean up every artifact we created
+    // without holding the rdb owner lock.
     drop(store);
     let _ = std::fs::remove_dir_all(&data_dir);
 }
@@ -517,9 +519,9 @@ fn snapshot_image_uris_empty_yields_empty() {
 #[tokio::test]
 async fn skill_only_submit_while_running_drains_images_via_queue() {
     use opencoder_store::Delivery;
-    use opencoder_store::TursoStore;
+    use opencoder_store::RdbStore;
 
-    let store = TursoStore::open_memory().await.unwrap();
+    let store = RdbStore::open_memory().await.unwrap();
     let sid = "gap1-session";
     store
         .create_session(&SessionMeta {
@@ -595,9 +597,9 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
 async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
     use opencoder_core::extract_skill_tokens;
     use opencoder_store::Delivery;
-    use opencoder_store::TursoStore;
+    use opencoder_store::RdbStore;
 
-    let store = TursoStore::open_memory().await.unwrap();
+    let store = RdbStore::open_memory().await.unwrap();
     let sid = "combined-session";
     store
         .create_session(&SessionMeta {

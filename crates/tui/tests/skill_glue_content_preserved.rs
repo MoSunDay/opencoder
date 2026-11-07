@@ -11,12 +11,12 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_session::SessionState;
-use opencoder_store::{SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, Store};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn text_done(text: &str) -> LlmEvent {

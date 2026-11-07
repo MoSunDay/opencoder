@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 opencoder-core.workspace = true
 opencoder-llm.workspace = true
+opencoder-local.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
 reqwest.workspace = true

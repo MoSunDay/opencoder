@@ -13,7 +13,7 @@ use opencoder_core::{
     Config, Message,
 };
 use opencoder_llm::MockChatClient;
-use opencoder_store::{Store, TursoStore};
+use opencoder_store::{RdbStore, Store};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -54,7 +54,7 @@ impl Fixture {
             url,
             state,
             server,
-            store: Arc::new(TursoStore::open_memory().await.unwrap()),
+            store: Arc::new(RdbStore::open_memory().await.unwrap()),
             mock: Arc::new(MockChatClient::new()),
             workdir: tempfile::tempdir().unwrap(),
         }

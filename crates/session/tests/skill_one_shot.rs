@@ -18,7 +18,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{resume, run, SessionState};
-use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, SessionPatch, Store};
 use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 // ---------------------------------------------------------------------------
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

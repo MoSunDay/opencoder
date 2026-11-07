@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use opencoder_llm::{ChatClient, ChatStream};
-use opencoder_store::{Store, TursoStore};
+use opencoder_store::{RdbStore, Store};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
@@ -108,7 +108,7 @@ pub async fn run_node(opts: NodeOpts, override_client: Option<Arc<dyn ChatStream
         .unwrap_or_else(|| opencoder_core::data_dir_for(&opts.workdir));
     tokio::fs::create_dir_all(&store_dir).await.ok();
     let store: Arc<dyn Store> = Arc::new(
-        TursoStore::open(store_dir.join("opencoder.db"))
+        RdbStore::open(opencoder_core::session_store_rdb_dir(&store_dir))
             .await
             .context("open local node store")?,
     );

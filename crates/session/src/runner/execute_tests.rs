@@ -269,9 +269,9 @@ async fn none_timeout_never_fires_for_hung_tool() {
 /// Cancelled, prune the stale registry entries, and emit SubagentEnd.
 #[tokio::test]
 async fn force_cancel_marks_task_and_prunes_registries() {
-    use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord, TursoStore};
+    use opencoder_store::{RdbStore, Store, SubagentStatus, SubagentTaskRecord};
 
-    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "force-cancel-parent".into(),

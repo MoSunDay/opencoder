@@ -12,10 +12,10 @@ use std::sync::Arc;
 use opencoder_core::{ApMode, AutoPilotConfig, Config, Message};
 use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_session::resume;
-use opencoder_store::{SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config_with_mode(mode: ApMode) -> Config {

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use opencoder_core::Config;
 use opencoder_llm::MockChatClient;
 use opencoder_session::resume;
-use opencoder_store::{SessionPatch, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionPatch, Store};
 
 fn cfg() -> Config {
     Config {
@@ -19,7 +19,7 @@ fn cfg() -> Config {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 async fn seed(store: &Arc<dyn Store>, id: &str) {

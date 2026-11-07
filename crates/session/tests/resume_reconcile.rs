@@ -9,11 +9,11 @@ use opencoder_core::{Config, ContentBlock, Message, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::resume;
 use opencoder_store::{
-    SessionMeta, SessionPatch, Store, SubagentStatus, SubagentTaskRecord, TursoStore,
+    RdbStore, SessionMeta, SessionPatch, Store, SubagentStatus, SubagentTaskRecord,
 };
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config(model: &str) -> Config {

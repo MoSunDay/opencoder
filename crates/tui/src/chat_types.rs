@@ -62,22 +62,22 @@ pub enum ChatBlock {
     /// owns one group anchored below its echo; intervening Say,
     /// image, marker, or subagent blocks do not split it. A Step is Thinking
     /// plus every function call until the next Thinking run. The group renders ONE
-    /// clickable `▸ N Steps` row at col 0 (collapsed by default); opening it
-    /// lists the step rows, opening a step reveals its thinking plus a
-    /// `N Function calls` aggregation row, and opening that row reveals the
-    /// individual calls. Opening a call reveals only that call's result.
+    /// clickable `▸ N Steps` row at col 0 (folded by default, always
+    /// user-controlled); opening it lists the step rows, opening a step
+    /// reveals its thinking plus a `N Function calls` aggregation row, and
+    /// opening that row reveals the individual calls. Opening a call reveals
+    /// only that call's result. No streaming event opens or closes any level:
+    /// user toggles persist exactly as clicked.
     /// `progress_active` drives the group-row animation until Say begins and
     /// cannot be reactivated after non-empty Say output exists.
-    /// LIVE DISCLOSURE: while the turn runs (`progress_active`), the group
-    /// auto-opens and renders the whole running turn's step rows — finished
-    /// steps stay collapsed one-line rows, only the running (last) step
-    /// streams its thinking + calls (`step_live::activate`); Say's first
-    /// chunk, turn end, and new-turn admission re-collapse every
-    /// auto-managed level (`step_live::settle`). Steps are collapsed by
-    /// default everywhere else; replay/snapshot groups stay fully collapsed.
-    /// `user_touched` pins the group row to the user's last click: once set
-    /// (row toggle or Ctrl+L), automatic disclosure never touches it again
-    /// for the rest of the turn.
+    /// LIVE PREVIEW: while the turn runs (`progress_active == true`) AND the
+    /// group is folded (`open == false`) AND it has steps, the CURRENT (last)
+    /// step renders expanded directly below the folded `N Steps` row — same
+    /// shapes as an open step (step row, thinking, calls aggregate, call
+    /// headers incl. running spinner, expanded call outputs). The preview is
+    /// render-only: it adds no click targets and disappears the moment
+    /// progress settles (Say's first chunk, run end, new turn), leaving the
+    /// step only inside the folded ladder.
     /// ADJACENT-pair merge: when this group's next block is its turn's Say,
     /// the standalone `N Steps` row is replaced by one merged header
     /// `{❯|▸} Say(n step{s}): <say first line>` that both toggles the
@@ -90,7 +90,6 @@ pub enum ChatBlock {
         steps: Vec<Step>,
         open: bool,
         progress_active: bool,
-        user_touched: bool,
     },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
@@ -273,6 +272,9 @@ pub struct SubagentHeader {
 /// content (thinking + calls aggregation row) is visible only while the
 /// step is open; individual call rows additionally require `calls_open`;
 /// a single call's result additionally requires `ToolCall::expanded`.
+/// While the turn runs and the group is folded, the LAST step is also
+/// rendered as a live preview with `open`/`calls_open` forced on — without
+/// mutating these flags.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
     /// Sanitized source accumulated from live reasoning deltas. Keeping the
@@ -284,9 +286,10 @@ pub struct Step {
     /// `Thinking` block behind — its reasoning is absorbed here (see
     /// `steps::absorb_pending_thinking`).
     pub thinking: Vec<Line<'static>>,
-    /// Whether `thinking_raw` has advanced beyond `thinking`. Collapsed
-    /// streaming steps only append source; opening the step materializes the
-    /// markdown once, avoiding an O(n²) full re-render on every hidden delta.
+    /// Whether `thinking_raw` has advanced beyond `thinking`. Steps that are
+    /// not visible (folded ladder, no live preview) only append source;
+    /// materialization re-renders the markdown once, avoiding an O(n²) full
+    /// re-render on every hidden delta.
     pub thinking_dirty: bool,
     pub calls: Vec<ToolCall>,
     /// Whether this step's Thinking content + calls aggregation row render.
@@ -299,12 +302,6 @@ pub struct Step {
     /// flag). Rendered on demand by `steps::render_step_thinking`, sealed once
     /// per step at round finalize.
     pub sealed: bool,
-    /// Whether the USER last touched this step's disclosure (`open` +
-    /// `calls_open`): a row click or Ctrl+L. Once set, the live
-    /// auto-disclosure logic (`step_live`) never opens or collapses this
-    /// step again for the rest of the turn — user action always wins over
-    /// the streaming auto-open/settle cycle.
-    pub user_touched: bool,
 }
 
 /// One tool call inside a step of a `ChatBlock::StepGroup`.

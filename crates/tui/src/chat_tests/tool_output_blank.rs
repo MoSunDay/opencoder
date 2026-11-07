@@ -40,11 +40,9 @@ fn one_step_group(calls: Vec<ToolCall>) -> ChatBlock {
             open: true,
             calls_open: true,
             sealed: true,
-            user_touched: false,
         }],
         open: true,
         progress_active: false,
-        user_touched: false,
     }
 }
 
@@ -227,11 +225,9 @@ fn collapsed_group_shape_is_unchanged() {
                 open: false,
                 calls_open: false,
                 sealed: true,
-                user_touched: false,
             }],
             open: false,
             progress_active: false,
-            user_touched: false,
         }],
         ..Default::default()
     };

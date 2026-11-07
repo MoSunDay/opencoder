@@ -59,10 +59,10 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         "the first delta opens the streaming step and must render"
     );
 
-    // The running step auto-opened; fold the group row (a user pin) so the
-    // follow-up delta streams into a HIDDEN step again — delta-only frames
-    // can then be coalesced.
-    chat.toggle_tool_call_at(0, 0);
+    // The running step streams below the FOLDED ladder as the render-only
+    // live preview — no auto-open exists to undo. The follow-up delta is
+    // still VISIBLE through the preview, so delta-only frames must keep
+    // rendering (nothing to coalesce while the preview streams).
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
     fold_ui_events(
@@ -88,17 +88,45 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         &opencoder_session::QuestionHub::new(),
     )
     .await;
-    // The group already exists after the first frame. A later hidden delta is
-    // an O(1) raw append and can skip repainting.
     assert!(
-        skip_next_render,
-        "a hidden delta-only frame should be coalesced"
+        !skip_next_render,
+        "a preview-visible delta-only frame must still render"
     );
     assert_eq!(
         first_step_thinking_text(&chat),
         "first second",
         "both deltas coalesce into the same step's thinking"
     );
+
+    // The Say settles the preview: the ladder folds back to its summary and
+    // the reasoning that resumes after it streams into a NEW ladder below
+    // the Say. While that Say is open the new ladder still previews, so
+    // keep the hidden-delta coalescing to the settled window: after the
+    // round ends the ladder is folded with no preview and a further hidden
+    // delta may skip repainting again.
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
+    fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::TextDelta("answer".into()))),
+        &mut chat,
+        &store,
+        "thinking-render-test",
+        &mut queue_items,
+        &mut false,
+        &mut crate::queue_admitter::AdmitUiState::default(),
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+        &mut notepad,
+        &mut None,
+        &opencoder_session::QuestionHub::new(),
+    )
+    .await;
+    assert!(!skip_next_render, "the Say itself renders");
 }
 
 #[tokio::test]

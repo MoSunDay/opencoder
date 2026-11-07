@@ -156,11 +156,9 @@ fn replay_one_prefetched_tool_image_renders() {
             open: false,
             calls_open: false,
             sealed: false,
-            user_touched: false,
         }],
         open: false,
         progress_active: false,
-        user_touched: false,
     });
     replay_one(&mut chat, &msg, &prefetched);
 

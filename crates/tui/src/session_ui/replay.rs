@@ -48,13 +48,11 @@ fn flush_segment(
         open: false,
         calls_open: false,
         sealed: true,
-        user_touched: false,
     }];
     chat.blocks.push(ChatBlock::StepGroup {
         steps,
         open: false,
         progress_active: false,
-        user_touched: false,
     });
 }
 

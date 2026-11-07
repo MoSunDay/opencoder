@@ -35,7 +35,6 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
                 mut steps,
                 open,
                 progress_active,
-                user_touched,
             } => {
                 if steps.is_empty() {
                     // Defensive: a zero-step group carries nothing; the
@@ -57,18 +56,15 @@ pub(crate) fn coalesce_steps(blocks: &mut Vec<ChatBlock>) {
                     Some(ChatBlock::StepGroup {
                         steps: prev,
                         progress_active: prev_progress,
-                        user_touched: prev_touched,
                         ..
                     }) => {
                         prev.append(&mut steps);
                         *prev_progress |= progress_active;
-                        *prev_touched |= user_touched;
                     }
                     _ => out.push(ChatBlock::StepGroup {
                         steps,
                         open,
                         progress_active,
-                        user_touched,
                     }),
                 }
             }
@@ -116,13 +112,11 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
         let mut steps: Vec<Step> = Vec::new();
         let mut open = false;
         let mut progress_active = false;
-        let mut user_touched = false;
         for block in segment.iter_mut() {
             if let ChatBlock::StepGroup {
                 steps: group_steps,
                 open: group_open,
                 progress_active: group_progress,
-                user_touched: group_touched,
             } = block
             {
                 for mut step in group_steps.drain(..) {
@@ -133,7 +127,6 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
                             previous.open |= step.open;
                             previous.calls_open |= step.calls_open;
                             previous.sealed &= step.sealed;
-                            previous.user_touched |= step.user_touched;
                             continue;
                         }
                     }
@@ -141,7 +134,6 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
                 }
                 open |= *group_open;
                 progress_active |= *group_progress;
-                user_touched |= *group_touched;
             }
         }
         if steps.is_empty() {
@@ -155,7 +147,6 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
                     steps: std::mem::take(&mut steps),
                     open,
                     progress_active,
-                    user_touched,
                 });
                 inserted = true;
             }
@@ -168,7 +159,6 @@ fn normalize_turn_groups(blocks: &mut Vec<ChatBlock>) {
                 steps,
                 open,
                 progress_active,
-                user_touched,
             });
         }
     }

@@ -1,5 +1,10 @@
 # Step 阶梯流式自动披露（TUI + SPA）
 
+> ⚠️ 历史条目：本文的自动披露口径已被
+> `2026-11-07/step-ladder-live-preview.md` 取代（阶梯纯用户控制 +
+> turn 区实时预览）。正文保持历史原样。
+
+
 一句话：运行中的 turn 不再整体藏进 `▸ N Steps` 单行——当前 running step
 （最后一个未完成 step）在阶梯运行位自动展开，thinking 增量与 call 行实时
 渲染、运行中的 call 行带 spinner/running 标记；step 完成（下一次 Thinking

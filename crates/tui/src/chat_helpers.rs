@@ -140,8 +140,10 @@ impl ChatView {
     /// Push a placeholder single-call `ChatBlock::StepGroup` for a `!cmd`
     /// execution, fully expanded through every ladder level (turn → step →
     /// function-call result) so the user sees the command running with its
-    /// output. Call [`finish_bash_tool`] to fill in the output without
-    /// changing the user's disclosure state.
+    /// output. No pins are involved: disclosure is always user-controlled, so
+    /// this is just the state the synthetic ladder is born with. Call
+    /// [`finish_bash_tool`] to fill in the output without changing the
+    /// user's disclosure state.
     pub(crate) fn push_bash_tool(&mut self, cmd: &str) {
         use crate::theme;
         use ratatui::style::{Modifier, Style};
@@ -169,11 +171,9 @@ impl ChatView {
                 open: true,
                 calls_open: true,
                 sealed: true,
-                user_touched: true,
             }],
             open: true,
             progress_active: true,
-            user_touched: true,
         });
     }
 

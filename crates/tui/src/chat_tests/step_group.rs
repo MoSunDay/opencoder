@@ -347,7 +347,8 @@ mod turn_boundary;
 #[path = "step_group/disclosure.rs"]
 mod disclosure;
 
-mod live_disclosure;
+#[path = "step_group/live_preview.rs"]
+mod live_preview;
 
 /// Expanding a step mid-stream must not freeze its thinking: after the
 /// expand-time render cleared `thinking_dirty`, further deltas of the same
@@ -388,13 +389,14 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "solo");
-    // Pre-Say, while the turn runs: the ladder auto-opens at its running
-    // position (group row with the live hint, open step, its thinking, the
+    // Pre-Say, while the turn runs: the ladder stays FOLDED and the current
+    // step streams below the group row as the render-only live preview
+    // (group row with the live hint, forced-open step, its thinking, the
     // calls aggregate and the call row) — still ending on exactly one blank.
     assert_eq!(
         lines(&v),
         vec![
-            "\u{276f} 1 Step  \u{280b} running ",
+            "\u{25b8} 1 Step  \u{280b} running ",
             "  \u{276f} Step(1)",
             "    \u{1f4ad} Thinking",
             "        think",

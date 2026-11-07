@@ -67,11 +67,9 @@ fn step_group_closed() -> ChatBlock {
             open: false,
             calls_open: false,
             sealed: false,
-            user_touched: false,
         }],
         open: false,
         progress_active: false,
-        user_touched: false,
     }
 }
 
@@ -138,7 +136,12 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                     expected += text.lines().count();
                 }
             }
-            ChatBlock::StepGroup { steps, open, .. } => {
+            ChatBlock::StepGroup {
+                steps,
+                open,
+                progress_active,
+                ..
+            } => {
                 // Mirrors the StepGroup arm in collect_headers: group row
                 // (or merged Say header when the next block is the Say) plus
                 // its separator blank, then the three-level ladder while
@@ -170,14 +173,36 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                             }
                         }
                     }
+                } else if *progress_active {
+                    // LIVE PREVIEW: the folded-but-running ladder streams
+                    // its current (last) step forced open — lines only, no
+                    // targets (mirrors `preview_step_body_lines`).
+                    if let Some(s) = steps.last() {
+                        let mut n = 1; // step row
+                        if !s.thinking.is_empty() {
+                            n += 1 + s.thinking.len();
+                        }
+                        if !s.calls.is_empty() {
+                            n += 1; // calls aggregation row
+                            for c in &s.calls {
+                                n += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                            }
+                        }
+                        expected += n;
+                    }
                 }
                 // Exactly one blank after the group: a final expanded
                 // call's separator blank (counted per call above) doubles as
                 // the trailing blank.
-                let ends_on_expanded_call = *open
-                    && steps.last().is_some_and(|s| {
+                let ends_on_expanded_call = if *open {
+                    steps.last().is_some_and(|s| {
                         s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
-                    });
+                    })
+                } else {
+                    *progress_active && !say_merged_after_group && steps
+                        .last()
+                        .is_some_and(|s| s.calls.last().is_some_and(|c| c.expanded))
+                };
                 if !ends_on_expanded_call && (*open || !say_merged_after_group) {
                     expected += 1; // trailing blank
                 }

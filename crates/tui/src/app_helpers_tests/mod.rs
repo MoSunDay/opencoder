@@ -449,7 +449,7 @@ fn reapply_session_model_overrides_resumed_model() {
 async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
     // `open_store` delegates to the shared local opener, so it materializes
     // the on-disk rdb store at `<data_local>/opencoder/<hash(workdir)>/
-    // opencoder.db.rdb` (a directory, never the legacy `opencoder.db` plain
+    // opencoder.db.rdb` (a directory, never a plain `opencoder.db`
     // file). A tempdir workdir hashes to a unique subdir, so it is isolated
     // and safe to scrub. This guards the delegation by asserting the
     // observable side effect — the rdb directory is created — without

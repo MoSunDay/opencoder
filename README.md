@@ -232,8 +232,6 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 
 > **冷启 token 开销**口径：取各 agent 首次发给 LLM 的请求体，计数其中的 `system` 消息 + `tools` 数组（首轮固定开销，发生在任何用户输入之前），用 `cl100k_base` BPE 计 token；与上表其余 `--help` 运行时基线指标独立测量。这一项是每一轮对话都会产生的固定成本。
 
-> 上表 opencoder 列为 Turso 存储时代（2026-07-19）的历史快照；迁移到 RocksDB（rdb）后于 2026-11-07 重采样：冷启动 ~9 ms、二进制 ~42 MB（静态链接 RocksDB，仍为 Rust 原生单二进制），存储吞吐见[性能表](#-性能)。
-
 ### 🗄️ 存储
 
 存储模型不同：opencode 内嵌 SQLite 单文件（WAL 模式），OpenCoder 主存储为 RocksDB（`rdb`）目录：
@@ -245,10 +243,10 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 | 写入模型 | WAL 事务（`journal_mode=WAL` 等 PRAGMA） | 单次修改一个 `WriteBatch` 原子提交，失败不留半批数据 |
 | 并发模型 | 多读一写（WAL） | 单 owner/write lease（进程内共享句柄 + 跨进程 `.owner.lock`）+ snapshot reads |
 | 访问层 | Drizzle ORM（JS，运行时迁移 `migration` 表） | KV 数据模型 + `Store` trait（`crates/store/src/store.rs`） |
-| 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | KV key 家族版本化；旧 SQLite 会话库走显式迁移命令 |
+| 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | KV key 家族版本化 |
 | 库文件命名 | `opencode.db`（按 channel 可变，如 `opencode-dev.db`） | `<data_dir>/<stem>.rdb`（每 workdir 一个目录） |
 
-> Ontology 使用独立的 SQLite 后端，不随主存储的 rdb 迁移。
+> Ontology 使用独立的 SQLite 后端，与主存储相互独立。
 
 > 说明：端到端任务表现受 LLM 主导（首轮 token 延迟为 provider RTT），同一模型下两者任务能力等价；**差异集中在运行时基线** —— 内存占用、启动延迟、分发体积。对受约束环境（CI runner、容器、弱机）与多实例部署（按进程计的 RSS 直接决定并发密度），opencoder 的低开销优势可被直接摊销。
 

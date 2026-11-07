@@ -410,17 +410,17 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
                     }
                 }
             }
-            StoreTarget::LegacyFileOnly => {
-                // Only the legacy plain SQLite file remains (legacy/
-                // migratable, never an rdb directory): its content cannot be
-                // purged through the rdb store, so keep and report every row
-                // rather than failing (or orphaning) the cleanup.
+            StoreTarget::PlainFileOnly => {
+                // Only a plain `opencoder.db` file remains (never an rdb
+                // directory): its content cannot be purged through the rdb
+                // store, so keep and report every row rather than failing
+                // (or orphaning) the cleanup.
                 for entry in entries {
                     tracing::warn!(
                         session = %entry.id,
                         store = %dir.display(),
-                        "ts: cleanup keeps row backed only by a legacy sqlite store \
-                         (migratable via `opencoder session migrate-legacy`)"
+                        "ts: cleanup keeps row backed only by a plain sqlite \
+                         file (no rdb store to purge through)"
                     );
                     kept.push(entry.id.clone());
                 }
@@ -502,15 +502,15 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
                         format!("delete global tmux session {id} from {}", db.display())
                     })?;
                 }
-                StoreTarget::LegacyFileOnly => {
-                    // Content lives only in the legacy plain SQLite file:
-                    // keep the registry row and report it (legacy/migratable,
-                    // not an rdb directory) rather than delete a row whose
-                    // content cannot be purged — or fail.
+                StoreTarget::PlainFileOnly => {
+                    // Content lives only in a plain `opencoder.db` file
+                    // (not an rdb directory): keep the registry row and
+                    // report it rather than delete a row whose content
+                    // cannot be purged — or fail.
                     println!(
-                        "kept global tmux session {id}: its content is in a legacy \
-                         sqlite store at {}; migrate it with `opencoder session \
-                         migrate-legacy` before deleting; not deleting the registry row",
+                        "kept global tmux session {id}: its content is only a \
+                         plain sqlite file at {} (no rdb store); not deleting \
+                         the registry row",
                         dir.join("opencoder.db").display()
                     );
                     return Ok(());
@@ -586,19 +586,18 @@ pub(crate) struct TsSweepTarget {
 
 /// Pure classification of one registered store dir for cleanup/delete: the
 /// RocksDB directory the session-store path policy resolves to, or why there
-/// is none to open. A legacy plain `opencoder.db` SQLite file is classified
-/// as legacy/migratable content — it is never mistaken for (or opened as) an
-/// rdb directory; callers keep/report rows and point at
-/// `opencoder session migrate-legacy`.
+/// is none to open. A plain `opencoder.db` SQLite file is classified as
+/// non-rdb content — it is never mistaken for (or opened as) an rdb
+/// directory; callers keep/report rows instead of failing or orphaning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StoreTarget {
     /// Openable rdb directory (`.rdb` layout or the development-layout
     /// directory variant).
     Rdb(PathBuf),
-    /// Only the legacy plain `opencoder.db` SQLite file remains — migratable
-    /// via `opencoder session migrate-legacy`; callers keep/report rows
-    /// instead of failing or orphaning content.
-    LegacyFileOnly,
+    /// Only a plain `opencoder.db` SQLite file remains (never an rdb
+    /// directory); callers keep/report rows instead of failing or
+    /// orphaning content.
+    PlainFileOnly,
     /// Nothing store-shaped exists (content already removed).
     Missing,
 }
@@ -608,7 +607,7 @@ fn store_target(store_dir: &Path) -> StoreTarget {
     if db.is_dir() {
         StoreTarget::Rdb(db)
     } else if store_dir.join("opencoder.db").is_file() {
-        StoreTarget::LegacyFileOnly
+        StoreTarget::PlainFileOnly
     } else {
         StoreTarget::Missing
     }

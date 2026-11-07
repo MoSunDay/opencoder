@@ -607,11 +607,10 @@ pub(crate) fn push_user(
 /// Open (creating its data dir if needed) the session store rooted at
 /// `workdir`. Delegates to the shared local opener
 /// (`opencoder_local::session_cmd::open_store`) so the TUI gets the same
-/// startup sequence as the CLI — legacy-SQLite migration check first, then
-/// the canonical `opencoder.db.rdb` directory — instead of opening the
-/// legacy plain-file stem (which failed with `File exists (os error 17)`
-/// beside a legacy file). Extracted from `app::run` to keep that file under
-/// the 800-line iteration cap.
+/// startup sequence as the CLI — the canonical `opencoder.db.rdb` directory —
+/// instead of opening the plain-file stem (which failed with
+/// `File exists (os error 17)` beside such a file). Extracted from
+/// `app::run` to keep that file under the 800-line iteration cap.
 pub(crate) async fn open_store(workdir: &Path) -> Result<Arc<dyn Store>> {
     Ok(Arc::new(
         opencoder_local::session_cmd::open_store(workdir).await?,

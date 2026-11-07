@@ -2559,10 +2559,12 @@ dependencies = [
  "clap",
  "dirs",
  "opencoder-core",
+ "opencoder-database",
  "opencoder-llm",
  "opencoder-session",
  "opencoder-store",
  "opencoder-todos",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -2706,10 +2708,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "fs2",
  "opencoder-core",
  "opencoder-dag",
- "opencoder-database",
+ "opencoder-event",
+ "rdb",
+ "rocksdb",
  "serde",
  "serde_json",
  "sha2",
@@ -2717,7 +2722,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "turso",
  "ulid",
 ]
 
@@ -2771,6 +2775,7 @@ dependencies = [
  "libc",
  "opencoder-core",
  "opencoder-llm",
+ "opencoder-local",
  "opencoder-session",
  "opencoder-store",
  "pulldown-cmark",
@@ -2821,7 +2826,6 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
- "turso",
  "ulid",
  "uuid",
 ]
@@ -2852,6 +2856,7 @@ dependencies = [
  "opencoder-team",
  "opencoder-todos",
  "opencoder-web",
+ "rdb",
  "reqwest",
  "serde",
  "serde_json",
@@ -3290,6 +3295,7 @@ dependencies = [
 [[package]]
 name = "rdb"
 version = "0.3.0"
+source = "git+https://github.com/MoSunDay/rdb.git?rev=e0ee630dd8f8d1530fd76a1ee219baa89b1ab5db#e0ee630dd8f8d1530fd76a1ee219baa89b1ab5db"
 dependencies = [
  "hex",
  "md-5",

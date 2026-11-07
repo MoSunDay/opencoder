@@ -23,10 +23,10 @@ use std::time::Duration;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
-use opencoder_store::{Store, SubagentStatus, TursoStore};
+use opencoder_store::{RdbStore, Store, SubagentStatus};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

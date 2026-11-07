@@ -15,11 +15,11 @@ use std::time::{Duration, Instant};
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
-use opencoder_store::{Store, SubagentStatus, TursoStore};
+use opencoder_store::{RdbStore, Store, SubagentStatus};
 use tokio_util::sync::CancellationToken;
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

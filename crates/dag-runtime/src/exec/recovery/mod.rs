@@ -32,8 +32,12 @@ pub(crate) async fn session_id(ctx: &StepCtx, deps: &ExecDeps) -> Result<String>
 /// adds a continuation instruction rather than submitting the original prompt.
 pub async fn restore(session: &mut opencoder_session::SessionState) -> Result<bool> {
     use opencoder_store::Store;
-    let store =
-        Arc::new(opencoder_store::TursoStore::open(session.working_dir.join("runtime.db")).await?);
+    let store = Arc::new(
+        opencoder_store::RdbStore::open(opencoder_core::runtime_store_rdb_dir(
+            &session.working_dir,
+        ))
+        .await?,
+    );
     if store.get_session(&session.id).await?.is_some() {
         let passthrough = std::mem::take(&mut session.env_passthrough);
         let cancel = session.cancel.clone();

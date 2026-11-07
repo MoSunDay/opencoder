@@ -24,13 +24,13 @@ use opencoder_session::{
     apply_control_cmd, is_clear_context_handoff, resume, run, ControlCmd, SessionEvent,
     SessionState,
 };
-use opencoder_store::{SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, Store};
 
 const SEED_MARKER: &str = "<<OPENCODER_CLEAR_SEED>>";
 const BLANK_MARKER: &str = "<<OPENCODER_CLEAR_CONTEXT_MARKER>>";
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

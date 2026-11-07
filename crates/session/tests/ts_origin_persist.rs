@@ -9,10 +9,10 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{ChatStream, MockChatClient};
 use opencoder_session::SessionState;
-use opencoder_store::{Store, TursoStore};
+use opencoder_store::{RdbStore, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn mock_client() -> Arc<dyn ChatStream> {

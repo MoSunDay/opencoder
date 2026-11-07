@@ -3,7 +3,6 @@ pub mod daemon;
 pub mod display;
 pub mod exit_tips;
 pub mod install_tools;
-pub mod legacy;
 pub mod model_override;
 pub mod run;
 mod run_image;
@@ -271,24 +270,6 @@ pub enum SessionSub {
     Import {
         /// Path to the `.opencoder` bundle file.
         input: PathBuf,
-    },
-    /// Migrate a legacy SQLite session store (`<data_dir>/opencoder.db`)
-    /// into the RocksDB session store. The destination is fixed internally;
-    /// see `opencoder session migrate-legacy --help` for backup/marker
-    /// semantics.
-    MigrateLegacy {
-        /// Legacy SQLite database path. Defaults to `<data_dir>/opencoder.db`
-        /// for the current workdir.
-        #[arg(long, value_name = "PATH")]
-        from: Option<PathBuf>,
-        /// Backup file created before any mutation. Defaults to
-        /// `<source>.pre-rdb.bak`.
-        #[arg(long, value_name = "PATH")]
-        backup: Option<PathBuf>,
-        /// Report what would migrate without writing anything (no
-        /// destination writes, no backup, no marker).
-        #[arg(long, default_value_t = false)]
-        dry_run: bool,
     },
 }
 

@@ -17,10 +17,7 @@ fn disclosure(view: &ChatView) -> (bool, Vec<(bool, bool)>) {
         .find_map(|block| match block {
             ChatBlock::StepGroup { open, steps, .. } => Some((
                 *open,
-                steps
-                    .iter()
-                    .map(|s| (s.open, s.calls_open))
-                    .collect(),
+                steps.iter().map(|s| (s.open, s.calls_open)).collect(),
             )),
             _ => None,
         })
@@ -60,7 +57,10 @@ fn live_reasoning_auto_opens_the_running_position() {
     );
     // The streamed thinking renders live — no click needed.
     let flat = lines(&v).join("\n");
-    assert!(flat.contains("first thought"), "live thinking is visible: {flat:?}");
+    assert!(
+        flat.contains("first thought"),
+        "live thinking is visible: {flat:?}"
+    );
 
     reasoning(&mut v, " grows");
     assert_eq!(
@@ -82,7 +82,10 @@ fn tool_activity_keeps_the_running_position_open() {
     );
     // The running call row carries the motion glyph.
     let flat = lines(&v).join("\n");
-    assert!(flat.contains("bash"), "call row renders while running: {flat:?}");
+    assert!(
+        flat.contains("bash"),
+        "call row renders while running: {flat:?}"
+    );
     end_call(&mut v, "c1", "done");
     assert_eq!(
         disclosure(&v),
@@ -104,7 +107,11 @@ fn a_new_step_folds_the_finished_one_and_takes_over() {
         "the finished step collapses; the fresh running step takes the open slot"
     );
     // The group row stays open (with its live running hint) the whole time.
-    assert!(flat_first(&v).starts_with("\u{276f} 2 Steps"), "got {:?}", flat_first(&v));
+    assert!(
+        flat_first(&v).starts_with("\u{276f} 2 Steps"),
+        "got {:?}",
+        flat_first(&v)
+    );
 }
 
 /// LIVE FOCUS: while the turn runs, the auto-opened ladder renders EVERY
@@ -124,7 +131,10 @@ fn live_running_position_renders_the_whole_turn() {
     reasoning(&mut v, "round three");
 
     let flat = lines(&v).join("\n");
-    assert!(flat.contains("3 Steps"), "group row keeps the count: {flat}");
+    assert!(
+        flat.contains("3 Steps"),
+        "group row keeps the count: {flat}"
+    );
     assert!(
         flat.contains("Step(1)") && flat.contains("Step(2)") && flat.contains("Step(3)"),
         "every step row of the running turn renders: {flat}"
@@ -225,7 +235,10 @@ fn say_first_chunk_and_run_end_settle_the_ladder() {
         .find_map(|b| match b {
             ChatBlock::StepGroup { open, steps, .. } => Some((
                 *open,
-                steps.iter().map(|s| (s.open, s.calls_open)).collect::<Vec<_>>(),
+                steps
+                    .iter()
+                    .map(|s| (s.open, s.calls_open))
+                    .collect::<Vec<_>>(),
             )),
             _ => None,
         })
@@ -248,7 +261,10 @@ fn group_two_of(v: &ChatView) -> (bool, Vec<(bool, bool)>) {
         .find_map(|b| match b {
             ChatBlock::StepGroup { open, steps, .. } => Some((
                 *open,
-                steps.iter().map(|s| (s.open, s.calls_open)).collect::<Vec<_>>(),
+                steps
+                    .iter()
+                    .map(|s| (s.open, s.calls_open))
+                    .collect::<Vec<_>>(),
             )),
             _ => None,
         })

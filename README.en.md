@@ -200,8 +200,6 @@ OpenCoder and [sst/opencode](https://github.com/sst/opencode) (a TypeScript / No
 
 > **Cold-start token overhead** methodology: take each agent's first request body sent to the LLM, count tokens in the `system` message + the `tools` array (the fixed first-turn cost, incurred before any user input) with the `cl100k_base` BPE. Measured independently from the other `--help` runtime-baseline rows above. This is a fixed cost re-paid on every conversation turn.
 
-> The opencoder column above is a Turso-era snapshot (2026-07-19). After the move to RocksDB (rdb), re-sampled on 2026-11-07: cold start ~9 ms, binary ~42 MB (RocksDB statically linked, still a single native Rust binary); storage throughput is in the Performance table above.
-
 ### 🗄️ Storage
 
 The storage models differ: opencode embeds a single SQLite file (WAL mode), while OpenCoder's main store is a RocksDB (`rdb`) directory:
@@ -213,7 +211,7 @@ The storage models differ: opencode embeds a single SQLite file (WAL mode), whil
 | Write model | WAL transactions (`journal_mode=WAL` and other PRAGMAs) | One atomic `WriteBatch` commit per mutation; a failure leaves no half-written batch |
 | Concurrency model | Many readers / one writer (WAL) | Single owner / write lease (shared handle in-process + cross-process `.owner.lock`) + snapshot reads |
 | Access layer | Drizzle ORM (JS, runtime migrations via `migration` table) | KV data model + `Store` trait (`crates/store/src/store.rs`) |
-| Migration | Drizzle migration (runtime diff against `migration` table + `meta/_journal.json`) | Versioned KV key families; legacy SQLite session stores go through an explicit migration command |
+| Migration | Drizzle migration (runtime diff against `migration` table + `meta/_journal.json`) | Versioned KV key families |
 | DB file naming | `opencode.db` (varies by channel, e.g. `opencode-dev.db`) | `<data_dir>/<stem>.rdb` (one directory per workdir) |
 
 > Ontology uses an independent SQLite backend and does not follow the main store's move to `rdb`.

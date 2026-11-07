@@ -154,8 +154,10 @@ fn step_group_with_expanded_call_keeps_alignment() {
 
 #[test]
 fn step_group_running_call_keeps_alignment() {
-    // An unfinished call (elapsed_ms == None) adds a spinner SPAN to the
-    // group row — never an extra line. Accounting must stay identical.
+    // An unfinished call (elapsed_ms == None) streams ONLY in the TURN LIVE
+    // REGION while the group is armed (`progress_active`): the transcript
+    // gets ZERO ladder rows — no group row, no blank — so the accounting
+    // invariant holds with nothing rendered and no hit target exists.
     let v = view_with(vec![
         ChatBlock::StepGroup {
             steps: vec![Step {
@@ -180,34 +182,36 @@ fn step_group_running_call_keeps_alignment() {
         marker_n(1),
     ]);
     assert_line_accounting_matches(&v);
-    // The folded-but-running ladder renders just its group row + blank;
-    // the running step streams in the separate TURN LIVE REGION, which is
-    // NOT part of flatten: group row + blank + marker = 3.
-    assert_eq!(v.flatten().len(), 2 + 1);
-    // The spinner hint rides on the group row itself.
-    let row: String = v.flatten()[0]
-        .spans
+    let flat: Vec<String> = v
+        .flatten()
         .iter()
-        .map(|s| s.content.clone())
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
+    assert_eq!(
+        flat,
+        vec![String::new()],
+        "only the marker renders while the turn runs: {flat:?}"
+    );
+    let live = super::super::step_group::live_lines(&v);
     assert!(
-        row.contains("running"),
-        "group row should hint running: {row:?}"
+        live.iter().any(|l| l.contains("bash")),
+        "the running call streams in the live region instead: {live:?}"
     );
     assert!(
-        row.contains("Step  \u{280b} running"),
-        "group row should keep two spaces before the animation: {row:?}"
+        v.tool_call_headers().is_empty(),
+        "no transcript rows -> no targets"
     );
 }
 
-/// LIVE FOCUS alignment: a USER-OPENED ladder renders EVERY step row — each
-/// finished step one collapsed row, the running step streaming its thinking
-/// header/body plus the calls aggregation and call headers — and
-/// `collect_headers` must count the same rows so hit-rects stay aligned.
-/// The TURN LIVE REGION is a separate area and never enters flatten.
+/// RUNNING-OPEN LADDER alignment: while the group is armed
+/// (`progress_active`) EVEN a user-opened ladder renders ZERO transcript
+/// rows — the running turn streams only in the TURN LIVE REGION (current
+/// step alone), so no step row leaks and no target exists. On settle the
+/// SAME open ladder renders every row and `collect_headers` must count
+/// them exactly so hit-rects stay aligned.
 #[test]
-fn auto_running_position_keeps_alignment() {
-    let v = view_with(vec![
+fn running_open_ladder_keeps_alignment() {
+    let mut v = view_with(vec![
         ChatBlock::StepGroup {
             steps: vec![
                 Step {
@@ -240,8 +244,38 @@ fn auto_running_position_keeps_alignment() {
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
-    // The whole turn renders: finished steps as collapsed rows, the running
-    // step streaming its thinking.
+    assert_eq!(
+        flat,
+        vec![String::new()],
+        "armed group renders nothing — not even an open ladder's rows: {flat:?}"
+    );
+    assert!(v.tool_call_headers().is_empty(), "no rows -> no targets");
+    let live = super::super::step_group::live_lines(&v);
+    assert!(
+        live.iter().any(|l| l.contains("Step(2)"))
+            && live.iter().any(|l| l.contains("working"))
+            && live.iter().any(|l| l.contains("b")),
+        "only the CURRENT step streams, in the live region: {live:?}"
+    );
+    assert!(
+        !live.iter().any(|l| l.contains("Step(1)")),
+        "the finished step waits inside the group until settle: {live:?}"
+    );
+
+    // Settle (`progress_active` flips false): the same open ladder renders
+    // every row and the accounting must match again.
+    if let ChatBlock::StepGroup {
+        progress_active, ..
+    } = &mut v.blocks[0]
+    {
+        *progress_active = false;
+    }
+    assert_line_accounting_matches(&v);
+    let flat: Vec<String> = v
+        .flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
     assert!(
         flat.iter().any(|l| l.contains("Step(1)")),
         "finished step row renders: {flat:?}"
@@ -266,11 +300,12 @@ fn auto_running_position_keeps_alignment() {
     assert_eq!(headers[4].header_line_idx, headers[0].header_line_idx + 6);
 }
 
-/// LIVE REGION detachment: a folded-but-running ladder keeps its two lines
-/// (group row + blank) and NOTHING else — the current step streams in the
-/// separate TURN LIVE REGION (own layout area), so flatten is identical to
-/// any settled folded ladder and the folded group row stays the only
-/// target.
+/// LIVE REGION detachment: an armed group renders NOTHING in the
+/// transcript — not the group row, not a blank, no matter what its steps
+/// hold (expanded output, running calls). The current step streams in the
+/// separate TURN LIVE REGION (own layout area), which never enters flatten
+/// and never adds a target; a settled folded ladder keeps its usual two
+/// lines (see the sibling tests).
 #[test]
 fn live_region_stays_out_of_flatten_and_adds_no_targets() {
     let mut expanded = tool_call("a", 3);
@@ -310,18 +345,11 @@ fn live_region_stays_out_of_flatten_and_adds_no_targets() {
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
-    assert!(
-        !flat.iter().any(|l| l.contains("old")),
-        "the finished step stays folded inside the ladder: {flat:?}"
+    assert_eq!(
+        flat,
+        vec![String::new()],
+        "the running group contributes ZERO transcript rows (marker only): {flat:?}"
     );
-    assert!(
-        flat.iter()
-            .all(|l| !l.contains("Step(2)") && !l.contains("working")),
-        "the transcript carries NO live-region rows while the turn runs: {flat:?}"
-    );
-    // Folded block only: group row(1) + blank(1) + marker(1) = 3; the
-    // current step streams in the separate live region instead.
-    assert_eq!(v.flatten().len(), 3, "flat: {flat:?}");
     let live = super::super::step_group::live_lines(&v);
     assert!(
         live.iter().any(|l| l.contains("Step(2)"))
@@ -329,13 +357,9 @@ fn live_region_stays_out_of_flatten_and_adds_no_targets() {
             && live.iter().any(|l| l.contains("a")),
         "the live region streams the current step: {live:?}"
     );
-    // Render-only live area: the folded ladder keeps exactly ONE target —
-    // its group row.
-    let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 1, "headers: {headers:?}");
-    let row = &flat[headers[0].header_line_idx];
+    // Render-only live area over an absent ladder: no targets at all.
     assert!(
-        row.contains("2 Steps"),
-        "target lands on the group row: {row:?}"
+        v.tool_call_headers().is_empty(),
+        "no transcript rows -> no targets"
     );
 }

@@ -9,9 +9,11 @@
 //! current step.
 //!
 //! Zero coupling with ladder disclosure AND with the transcript itself:
-//! `flatten_with` does NOT emit these lines (the transcript only ever
-//! holds Say + ladder blocks), so scroll, selection, hit-rects and line
-//! accounting (`chat_headers.rs`) are all untouched by streaming. The
+//! `flatten_with` does NOT emit these lines (the transcript holds Say +
+//! settled ladders only — a running turn's group is ABSENT from it until
+//! settle, this region is the running turn's only surface), so scroll,
+//! selection, hit-rects and line accounting (`chat_headers.rs`) are all
+//! untouched by streaming. The
 //! ladder blocks render pure user-controlled fold state
 //! (`chat_step_render.rs`); opening or folding them never changes this
 //! region, and this region never renders "inside" a ladder block.

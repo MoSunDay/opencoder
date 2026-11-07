@@ -142,6 +142,12 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                 progress_active,
                 ..
             } => {
+                // A RUNNING group contributes ZERO lines: the turn streams
+                // only in the TURN LIVE REGION (`chat_live_turn.rs`), which
+                // is not part of flatten — mirrors the collect_headers arm.
+                if *progress_active {
+                    continue;
+                }
                 // Mirrors the StepGroup arm in collect_headers: group row
                 // (or merged Say header when the next block is the Say) plus
                 // its separator blank, then the three-level ladder while
@@ -175,9 +181,7 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                     }
                 } else {
                     // folded ladder: group row (+ blank) is the whole block
-                    // — the running step streams in the TURN LIVE AREA at
-                    // the tail, counted after the loop below.
-                    let _ = progress_active;
+                    // — a running group never reaches here (skipped above).
                 }
                 // Exactly one blank after the group: a final expanded
                 // call's separator blank (counted per call above) doubles as

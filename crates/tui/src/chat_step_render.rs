@@ -22,11 +22,11 @@ use super::{
 
 /// Append one `StepGroup` block's lines to `out`. Shape (three-level
 /// drill-down): the clickable turn row `{▸|❯} N Steps` (col 0, accent
-/// bold) + a live progress hint until Say begins; while the group is closed
-/// that row (plus one trailing
-/// blank) is the whole block; while the turn runs the CURRENT step streams
-/// in the separate TURN LIVE AREA at the transcript tail
-/// (`chat_live_turn.rs`), not here. Disclosure NEVER moves on its own: the
+/// bold); while the group is closed that row (plus one trailing
+/// blank) is the whole block. A RUNNING group (`progress_active`) never
+/// reaches here — `flatten_with` skips it entirely and the turn streams
+/// in the separate TURN LIVE REGION (`chat_live_turn.rs`), which is the
+/// running turn's only surface. Disclosure NEVER moves on its own: the
 /// ladder opens only by user toggle. While it
 /// is open, per step: the step row (indent 2) — while the step is open its
 /// `💭 Thinking` block (header
@@ -217,7 +217,6 @@ fn say_header_line(open: bool, n: usize, say: &SayHeader, anim_tick: u32) -> Lin
 pub(crate) fn flatten_step_group(
     out: &mut Vec<Line<'static>>,
     open: bool,
-    progress_active: bool,
     steps: &[Step],
     anim_tick: u32,
     say: Option<SayHeader>,
@@ -242,11 +241,11 @@ pub(crate) fn flatten_step_group(
             }
         }
         None => {
-            // L0 group row: `{▸|❯} N Steps` + a live spinner hint from
-            // step/tool activity until the next Say starts. The two leading
-            // spaces keep motion visually separate from the count without
-            // adding a row.
-            let mut spans = vec![Span::styled(
+            // L0 group row: `{▸|❯} N Steps`. A RUNNING group never reaches
+            // here (`flatten_with` skips it — the turn streams in the TURN
+            // LIVE REGION), so this row carries no running hint; the live
+            // hint rides only the merged Say header while the Say streams.
+            let spans = vec![Span::styled(
                 format!(
                     "{}{n} Step{}",
                     if open {
@@ -260,22 +259,10 @@ pub(crate) fn flatten_step_group(
                     .fg(theme::accent())
                     .add_modifier(Modifier::BOLD),
             )];
-            if progress_active {
-                spans.push(Span::styled(
-                    format!(
-                        "  {} running ",
-                        SPINNER[(anim_tick as usize) % SPINNER.len()]
-                    ),
-                    Style::default().fg(theme::warn_color()),
-                ));
-            }
             out.push(Line::from(spans));
             if !open {
                 // Folded ladder: the row plus one trailing blank is the
-                // whole block. While the turn runs its CURRENT step streams
-                // in the separate TURN LIVE AREA at the transcript tail
-                // (`chat_live_turn.rs`) — never inside this block, never
-                // coupled to this ladder's disclosure state.
+                // whole block.
                 out.push(Line::from(""));
                 return;
             }

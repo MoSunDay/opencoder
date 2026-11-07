@@ -9,6 +9,15 @@ use std::{
     sync::Arc,
 };
 
+/// RocksDB directory of the shared definitions catalog: the legacy SQLite
+/// file name kept as the directory stem (`definitions.db.rdb`), the same
+/// suffix policy as `FleetStore`/`TsRegistry`. Opening the legacy plain
+/// file itself as a RocksDB directory fails with `File exists` on upgraded
+/// installs, so the `.rdb` stem is always used.
+fn definitions_rdb_dir(data: &Path) -> std::path::PathBuf {
+    data.join("definitions.db.rdb")
+}
+
 /// Resolves the two provider routes at the point of use. A server can manage
 /// nodes without LLM credentials; a brain call reports the actual config error.
 struct BrainClient {
@@ -48,7 +57,7 @@ pub async fn new_state(
     client: Option<Arc<dyn ChatStream>>,
 ) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let store = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
+    let store = Arc::new(RdbStore::open_catalog(definitions_rdb_dir(&data)).await?);
     new_state_with_projects(workdir, data, client, store).await
 }
 
@@ -74,7 +83,7 @@ pub async fn new_state_with_projects(
 
 pub(crate) async fn new_resource_state(workdir: PathBuf, data: PathBuf) -> Result<Arc<AppState>> {
     tokio::fs::create_dir_all(&data).await?;
-    let projects = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
+    let projects = Arc::new(RdbStore::open_catalog(definitions_rdb_dir(&data)).await?);
     state_with_projects(
         workdir,
         data,
@@ -112,7 +121,7 @@ async fn state_with_projects(
     } else {
         None
     };
-    let catalog = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
+    let catalog = Arc::new(RdbStore::open_catalog(definitions_rdb_dir(&data)).await?);
     let store: Arc<dyn Store> = catalog;
     let client = client.unwrap_or_else(|| {
         Arc::new(BrainClient {
@@ -245,7 +254,7 @@ pub async fn serve_release(
     let data = resolve_data_dir(&workdir, data)?;
     let schema = crate::release::ontology_schema::startup(platform.as_ref(), port, &data).await?;
     tokio::fs::create_dir_all(&data).await?;
-    let projects = Arc::new(RdbStore::open_catalog(data.join("definitions.db")).await?);
+    let projects = Arc::new(RdbStore::open_catalog(definitions_rdb_dir(&data)).await?);
     let state =
         state_with_projects(workdir.clone(), data, None, projects, true, schema.policy).await?;
     drop(schema);

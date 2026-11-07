@@ -187,16 +187,25 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
 /// `opencoder session migrate-legacy`: resolve the fixed destination from the
 /// workdir's data dir, honor `--from`/`--backup` overrides for the source and
 /// backup file, then print the migration report.
-async fn migrate_legacy_dispatch(
-    workdir: &Path,
+/// Resolve migration options: defaults live in the active workdir's data
+/// dir; an explicit `--from` outside it re-bases source, derived backup AND
+/// destination next to that source, so marker, backup and imported data stay
+/// in one place instead of leaking sessions into the current workdir's store.
+pub(crate) fn resolve_migrate_opts(
+    data_dir: &Path,
     from: Option<PathBuf>,
     backup: Option<PathBuf>,
     dry_run: bool,
-) -> Result<()> {
-    let data_dir = opencoder_core::data_dir_for(workdir);
-    let mut opts = crate::legacy::MigrateOptions::defaults(&data_dir);
+) -> crate::legacy::MigrateOptions {
+    let mut opts = crate::legacy::MigrateOptions::defaults(data_dir);
     if let Some(source) = &from {
-        // An explicit source re-bases the derived backup next to it.
+        if *source != opts.source {
+            opts.destination = source
+                .parent()
+                .map(|dir| dir.join("opencoder.db.rdb"))
+                .map(PathBuf::from)
+                .unwrap_or_else(|| opts.destination.clone());
+        }
         opts.backup = crate::legacy::default_backup(source);
         opts.source = source.clone();
     }
@@ -204,6 +213,17 @@ async fn migrate_legacy_dispatch(
         opts.backup = backup.clone();
     }
     opts.dry_run = dry_run;
+    opts
+}
+
+async fn migrate_legacy_dispatch(
+    workdir: &Path,
+    from: Option<PathBuf>,
+    backup: Option<PathBuf>,
+    dry_run: bool,
+) -> Result<()> {
+    let data_dir = opencoder_core::data_dir_for(workdir);
+    let opts = resolve_migrate_opts(&data_dir, from, backup, dry_run);
     let report = crate::legacy::run(&opts).await?;
     print!("{}", crate::legacy::render_report(&report, &opts));
     Ok(())
@@ -305,6 +325,8 @@ pub(crate) fn config_show_json(cfg: &Config) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use super::models_summary;
     use opencoder_core::{Config, ContentBlock, Message, Role};
 
@@ -623,5 +645,46 @@ mod tests {
         let raw = std::fs::read_to_string(workdir.join("opencoder.json")).unwrap();
         let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(cfg["model"], "openai/gpt-4o");
+    }
+
+    #[test]
+    fn migrate_opts_default_to_the_active_data_dir() {
+        let dir = Path::new("/data/hashdir");
+        let opts = resolve_migrate_opts(dir, None, None, true);
+        assert_eq!(opts.source, dir.join("opencoder.db"));
+        assert_eq!(opts.destination, dir.join("opencoder.db.rdb"));
+        assert!(opts.dry_run);
+    }
+
+    #[test]
+    fn migrate_opts_rebase_destination_next_to_an_external_source() {
+        let opts = resolve_migrate_opts(
+            Path::new("/data/hashdir"),
+            Some(PathBuf::from("/data/otherdir/opencoder.db")),
+            None,
+            false,
+        );
+        assert_eq!(opts.source, Path::new("/data/otherdir/opencoder.db"));
+        assert_eq!(
+            opts.destination,
+            Path::new("/data/otherdir/opencoder.db.rdb")
+        );
+        assert_eq!(
+            opts.backup,
+            Path::new("/data/otherdir/opencoder.db.pre-rdb.bak")
+        );
+    }
+
+    #[test]
+    fn migrate_opts_keep_default_destination_for_explicit_default_source() {
+        let dir = Path::new("/data/hashdir");
+        let opts = resolve_migrate_opts(
+            dir,
+            Some(dir.join("opencoder.db")),
+            Some(PathBuf::from("/keep.bak")),
+            false,
+        );
+        assert_eq!(opts.destination, dir.join("opencoder.db.rdb"));
+        assert_eq!(opts.backup, Path::new("/keep.bak"));
     }
 }

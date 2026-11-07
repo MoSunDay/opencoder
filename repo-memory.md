@@ -14,7 +14,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 - [agents/core](agents/foundation/core/index.md) — 共享类型与 Config。
 - [agents/llm](agents/foundation/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
-- [agents/store](agents/foundation/store/index.md) — `Store` trait、RocksDB（rdb）主后端与平台事件持久化。CLI 与 TUI 的会话库启动共用 `local::session_cmd::open_store_at`（先迁移检查后开 `.rdb`），入口不再各自拼路径。
+- [agents/store](agents/foundation/store/index.md) — `Store` trait、RocksDB（rdb）主后端与平台事件持久化。CLI 与 TUI 的会话库启动共用 `local::session_cmd::open_store_at`（先迁移检查后开 `.rdb`），入口不再各自拼路径。legacy 读取器按 `pragma_table_info` 动态投影（缺列补 `NULL`、缺表计零行）以兼容多世代旧 schema；`session migrate-legacy --from` 外部源时 marker/backup/destination 三者随源目录重定基（`resolve_migrate_opts`）。
 - [agents/event](agents/foundation/event/index.md) — `opencoder-event`：事件日志、监听器、广播总线、触发执行与全局暂停门；通用基建，未接生产 dispatcher。
 
 **runtime**

@@ -1,13 +1,13 @@
 //! One-time import of the legacy `schedules.json` definitions into the
-//! Turso `schedules` table (schema v27).
+//! rdb-backed `schedules` store (schema v27).
 //!
-//! Since v27 the table is the scheduler's definition source of truth and
-//! the JSON file degrades to a seed input: on boot, ONLY when the table is
-//! empty, every valid file entry is imported (invalid entries are warned
+//! Since v27 the store is the scheduler's definition source of truth and
+//! the JSON file degrades to a seed input: on boot, ONLY when no definitions
+//! are stored, every valid file entry is imported (invalid entries are warned
 //! and skipped — the file was previously fail-soft too). Once definitions
 //! exist, the file is dead weight for job bodies; a server restart must
 //! never resurrect a definition the operator deleted, so the import is
-//! strictly table-empty gated: skip the import instead of merging definitions.
+//! strictly empty-store gated: skip the import instead of merging definitions.
 //! `scan_interval_secs` keeps its file role forever — see `scheduler`.
 
 use opencoder_store::Store;

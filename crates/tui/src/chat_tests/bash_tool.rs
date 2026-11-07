@@ -52,21 +52,12 @@ fn bash_tool_pin_survives_the_turn_end_settle() {
         .iter()
         .find(|b| matches!(b, ChatBlock::StepGroup { .. }))
     {
-        Some(ChatBlock::StepGroup {
-            steps,
-            open,
-            user_touched,
-            ..
-        }) => {
+        Some(ChatBlock::StepGroup { steps, open, .. }) => {
             let step = &steps[0];
             let call = &step.calls[0];
             assert!(
                 *open && step.open && step.calls_open && call.expanded,
-                "the user-pinned `!cmd` ladder must still be fully expanded after the settle"
-            );
-            assert!(
-                *user_touched && step.user_touched,
-                "both levels keep their user-pinned marker"
+                "the `!cmd` ladder must still be fully expanded after the settle"
             );
         }
         other => panic!("expected ChatBlock::StepGroup, got {other:?}"),

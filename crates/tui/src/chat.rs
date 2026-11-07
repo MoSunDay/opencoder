@@ -53,9 +53,6 @@ pub(crate) use step_render::SayHeader;
 #[path = "chat_steps.rs"]
 mod steps;
 
-#[path = "chat_step_live.rs"]
-mod step_live;
-
 #[path = "chat_steps_replay.rs"]
 mod steps_replay;
 
@@ -517,30 +514,18 @@ impl ChatView {
     /// step; a calls target flips the aggregate list; a call target toggles
     /// that single call's result. No-op if either index is out of range.
     pub fn toggle_tool_call_at(&mut self, block_idx: usize, call_idx: usize) {
-        let Some(ChatBlock::StepGroup {
-            open,
-            user_touched,
-            steps,
-            ..
-        }) = self.blocks.get_mut(block_idx)
-        else {
+        let Some(ChatBlock::StepGroup { open, steps, .. }) = self.blocks.get_mut(block_idx) else {
             return;
         };
         let Some(target) = steps::visible_targets(*open, steps).get(call_idx).copied() else {
             return;
         };
-        // Every manual toggle pins the touched level(s): the live
-        // auto-disclosure (`step_live`) never overrides the user again for
-        // the rest of the turn. Call rows pin their enclosing step, so a
-        // result the user drilled into survives the turn-end settle.
+        // Plain toggles: the state set here persists — streaming never
+        // re-opens or re-folds a level behind the user's back.
         match target {
-            StepTarget::Group => {
-                *user_touched = true;
-                *open = !*open;
-            }
+            StepTarget::Group => *open = !*open,
             StepTarget::Step(si) => {
                 if let Some(s) = steps.get_mut(si) {
-                    s.user_touched = true;
                     s.open = !s.open;
                     if s.open {
                         steps::render_step_thinking(s);
@@ -549,13 +534,11 @@ impl ChatView {
             }
             StepTarget::Calls(si) => {
                 if let Some(s) = steps.get_mut(si) {
-                    s.user_touched = true;
                     s.calls_open = !s.calls_open;
                 }
             }
             StepTarget::Call(si, ci) => {
                 if let Some(s) = steps.get_mut(si) {
-                    s.user_touched = true;
                     if let Some(c) = s.calls.get_mut(ci) {
                         c.expanded = !c.expanded;
                     }
@@ -576,20 +559,13 @@ impl ChatView {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
                 }
-                ChatBlock::StepGroup {
-                    open,
-                    user_touched,
-                    steps,
-                    ..
-                } => {
-                    // Pin every level as user-touched: a collapse-all must
-                    // also suppress the live auto-disclosure, or the next
-                    // streaming event would reopen the ladder underneath
-                    // the user's explicit close.
-                    *user_touched = true;
+                ChatBlock::StepGroup { open, steps, .. } => {
+                    // Plain fold of every level: streaming never re-opens
+                    // them, so the user's explicit close persists. The live
+                    // preview is render-only and still shows the running
+                    // step while `progress_active`.
                     *open = false;
                     for s in steps {
-                        s.user_touched = true;
                         s.open = false;
                         s.calls_open = false;
                         for c in &mut s.calls {

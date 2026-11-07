@@ -20,8 +20,15 @@
 //! round no tool call follows flushes into a call-less step at run-end /
 //! boundary pushes (`flush_pending_thinking`). Thinking never survives as a
 //! top-level block at rest; replay applies the same fold via
-//! `steps_replay::coalesce_steps` (`chat_steps_replay.rs`). Disclosure
-//! DURING streaming is owned by `step_live`.
+//! `steps_replay::coalesce_steps` (`chat_steps_replay.rs`).
+//!
+//! Disclosure is ALWAYS user-controlled: every ladder is folded by default
+//! and no streaming event opens or closes a level. While a turn runs
+//! (`progress_active`) the renderer draws the CURRENT (last) step as a
+//! render-only live preview below the folded `N Steps` row (see
+//! `chat_step_render.rs`); the preview retires when progress settles. This
+//! module only keeps the preview's thinking materialized while it is
+//! visible.
 
 use ratatui::text::Line;
 
@@ -90,10 +97,7 @@ fn append_step_call(steps: &mut Vec<Step>, mut thinking: Vec<Line<'static>>, cal
             open: false,
             calls_open: false,
             sealed: true,
-            user_touched: false,
         });
-        // New step born: fold the finished steps above.
-        super::step_live::settle_steps_before_last(steps);
         return;
     }
     if let Some(s) = steps.last_mut() {
@@ -108,8 +112,9 @@ fn append_step_call(steps: &mut Vec<Step>, mut thinking: Vec<Line<'static>>, cal
 }
 
 /// A fresh single-step group carrying `call` (live `ToolStart` with no
-/// trailing group, replayed group seeds, orphan synthesis). Starts settled
-/// (every level collapsed); live callers arm it via `set_turn_progress`.
+/// trailing group, replayed group seeds, orphan synthesis). Starts folded
+/// (every level collapsed); live callers arm it via `set_turn_progress`,
+/// which only drives the spinner + live preview, never disclosure.
 pub(crate) fn single_step_group(call: ToolCall, thinking: Vec<Line<'static>>) -> ChatBlock {
     let thinking_raw = span_text(&thinking);
     ChatBlock::StepGroup {
@@ -121,11 +126,9 @@ pub(crate) fn single_step_group(call: ToolCall, thinking: Vec<Line<'static>>) ->
             open: false,
             calls_open: false,
             sealed: true,
-            user_touched: false,
         }],
         open: false,
         progress_active: false,
-        user_touched: false,
     }
 }
 
@@ -151,13 +154,6 @@ pub(crate) fn set_turn_progress(blocks: &mut [ChatBlock], turn_start: usize, act
         unreachable!("step-group was matched above");
     };
     *progress_active = active;
-    // Animation and live disclosure move together: arming the spinner opens
-    // the running position, retiring it re-collapses auto-managed levels.
-    if active {
-        super::step_live::activate(blocks, turn_start);
-    } else {
-        super::step_live::settle(blocks, turn_start);
-    }
     true
 }
 
@@ -200,10 +196,11 @@ fn insert_floor(blocks: &[ChatBlock], floor: usize) -> usize {
 /// structural part of a step, never a top-level block. The first delta after
 /// one or more calls opens a new step; later deltas append there, and every
 /// call before the next reasoning run remains in the preceding step. A fresh
-/// group is pushed when the turn has no ladder yet. Live disclosure: a
-/// fresh step auto-opens at the running position while the turn runs
-/// (`step_live`), so streamed thinking renders in place; user-touched levels
-/// are never moved by the stream.
+/// group is pushed when the turn has no ladder yet. Disclosure never moves:
+/// the ladder is always folded unless the user opened it. What DOES render
+/// while `should_show_progress` (the live-preview gate: no Say yet in this
+/// turn) is the materialized markdown of the CURRENT step, because the
+/// preview renders the last step expanded below the folded `N Steps` row.
 ///
 /// An open streaming `Assistant` (the round's Say) rides on top of the
 /// ladder: the caller pops it before calling and pushes it back after, so
@@ -232,13 +229,11 @@ pub(crate) fn append_step_thinking_delta(
                     steps: Vec::new(),
                     open: false,
                     progress_active: should_show_progress,
-                    user_touched: false,
                 },
             );
             (at, Some(at))
         }
     };
-    let mut new_step_born = false;
     if let ChatBlock::StepGroup {
         steps,
         open,
@@ -256,12 +251,16 @@ pub(crate) fn append_step_thinking_delta(
                 open: false,
                 calls_open: false,
                 sealed: false,
-                user_touched: false,
             });
-            // New step born: fold the finished steps above; the live policy
-            // below re-arms the running position for the fresh step.
-            super::step_live::settle_steps_before_last(steps);
-            new_step_born = true;
+            // A fresh step takes over the live preview while the turn runs:
+            // materialize its first delta so the preview renders markdown
+            // right away (the finished steps above stay folded inside the
+            // ladder — no auto-open/auto-fold anywhere).
+            if should_show_progress {
+                if let Some(step) = steps.last_mut() {
+                    render_step_thinking(step);
+                }
+            }
         } else if let Some(step) = steps.last_mut() {
             step.thinking_raw.push_str(delta);
             // Mark dirty BEFORE the visibility-gated render: the expand-time
@@ -269,13 +268,12 @@ pub(crate) fn append_step_thinking_delta(
             // visible step would otherwise freeze on its first delta after
             // being expanded — new thinking output stops appearing.
             step.thinking_dirty = true;
-            if *open && step.open {
+            // Visible when the user opened this step OR when the folded
+            // ladder is showing the running step as a live preview.
+            if (*open && step.open) || should_show_progress {
                 render_step_thinking(step);
             }
         }
-    }
-    if new_step_born && should_show_progress {
-        super::step_live::activate(blocks, turn_start);
     }
     inserted_at
 }
@@ -329,11 +327,9 @@ pub(crate) fn thinking_step_group(thinking: Vec<Line<'static>>) -> ChatBlock {
             open: false,
             calls_open: false,
             sealed: true,
-            user_touched: false,
         }],
         open: false,
         progress_active: false,
-        user_touched: false,
     }
 }
 
@@ -367,7 +363,6 @@ pub(crate) fn place_thinking_step(
                     open: false,
                     calls_open: false,
                     sealed: true,
-                    user_touched: false,
                 });
                 return None;
             }
@@ -461,7 +456,6 @@ mod tests {
             thinking_raw: String::new(),
             thinking: Vec::new(),
             thinking_dirty: false,
-            user_touched: false,
             calls: (0..calls)
                 .map(|i| ToolCall {
                     id: format!("c{i}"),

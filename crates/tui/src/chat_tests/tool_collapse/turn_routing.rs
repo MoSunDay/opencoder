@@ -191,11 +191,11 @@ fn step_row_line_index_lands_on_the_step_row() {
     });
     // Collapsed ladder: exactly one target — the group row. The Say closed
     // the previous sub-turn, so this call opens a NEW ladder below it whose
-    // spinner is legitimately armed while the tool runs; the live ladder
-    // auto-opened at its running position, so fold the group row back (a
-    // user pin) to reach the single-row default.
+    // spinner is legitimately armed while the tool runs. The ladder is born
+    // folded (the running step streams as the render-only preview below the
+    // group row, which adds no targets), so the single-row default needs no
+    // toggling.
     let block_idx = groups(&v)[0].0;
-    v.toggle_tool_call_at(block_idx, 0);
     let (group_idx, group_line) = {
         let headers = v.tool_call_headers();
         assert_eq!(headers.len(), 1, "expected exactly the group-row header");

@@ -24,7 +24,6 @@ fn step_group_ladder_depth_alignment() {
                         open: open_steps,
                         calls_open,
                         sealed: true,
-                        user_touched: false,
                     },
                     Step {
                         thinking_raw: String::new(),
@@ -34,12 +33,10 @@ fn step_group_ladder_depth_alignment() {
                         open: open_steps,
                         calls_open,
                         sealed: true,
-                        user_touched: false,
                     },
                 ],
                 open: group_open,
                 progress_active: false,
-                user_touched: false,
             },
             marker_n(1),
         ])
@@ -93,7 +90,6 @@ fn step_group_with_expanded_call_keeps_alignment() {
                     open: true,
                     calls_open: true,
                     sealed: true,
-                    user_touched: false,
                 },
                 Step {
                     thinking_raw: String::new(),
@@ -103,12 +99,10 @@ fn step_group_with_expanded_call_keeps_alignment() {
                     open: true,
                     calls_open: true,
                     sealed: true,
-                    user_touched: false,
                 },
             ],
             open: true,
             progress_active: false,
-            user_touched: true,
         },
         marker_n(1),
     ]);
@@ -179,17 +173,16 @@ fn step_group_running_call_keeps_alignment() {
                 open: false,
                 calls_open: false,
                 sealed: false,
-                user_touched: false,
             }],
             open: false,
             progress_active: true,
-            user_touched: false,
         },
         marker_n(1),
     ]);
     assert_line_accounting_matches(&v);
-    // group row + trailing blank + marker_n.
-    assert_eq!(v.flatten().len(), 2 + 1);
+    // The folded-but-running ladder PREVIEWS its current step: group row +
+    // Step(1) row + calls aggregate + call header + trailing blank + marker.
+    assert_eq!(v.flatten().len(), 5 + 1);
     // The spinner hint rides on the group row itself.
     let row: String = v.flatten()[0]
         .spans
@@ -224,7 +217,6 @@ fn auto_running_position_keeps_alignment() {
                     open: false,
                     calls_open: false,
                     sealed: true,
-                    user_touched: false,
                 },
                 Step {
                     thinking_raw: String::new(),
@@ -234,12 +226,10 @@ fn auto_running_position_keeps_alignment() {
                     open: true,
                     calls_open: true,
                     sealed: false,
-                    user_touched: false,
                 },
             ],
             open: true,
             progress_active: true,
-            user_touched: false,
         },
         marker_n(1),
     ]);
@@ -274,4 +264,70 @@ fn auto_running_position_keeps_alignment() {
     assert_eq!(headers[1].header_line_idx, headers[0].header_line_idx + 1);
     assert_eq!(headers[2].header_line_idx, headers[0].header_line_idx + 2);
     assert_eq!(headers[4].header_line_idx, headers[0].header_line_idx + 6);
+}
+
+/// LIVE PREVIEW alignment: the folded-but-running ladder streams its
+/// CURRENT (last) step forced open — Step row + thinking header/body +
+/// calls aggregate + every call header (+ expanded results) — while
+/// `collect_headers` counts the same lines but pushes NO extra targets (the
+/// folded ladder still yields exactly its group row).
+#[test]
+fn live_preview_keeps_alignment_without_new_targets() {
+    let mut expanded = tool_call("a", 3);
+    expanded.expanded = true;
+    let mut running = tool_call("b", 0);
+    running.elapsed_ms = None; // still executing: spinner span, same line
+    let v = view_with(vec![
+        ChatBlock::StepGroup {
+            steps: vec![
+                Step {
+                    thinking_raw: String::new(),
+                    thinking: Vec::new(),
+                    thinking_dirty: false,
+                    calls: vec![tool_call("old", 1)],
+                    open: false,
+                    calls_open: false,
+                    sealed: true,
+                },
+                Step {
+                    thinking_raw: String::new(),
+                    thinking: vec![Line::from("working")],
+                    thinking_dirty: false,
+                    calls: vec![expanded, running],
+                    open: false,
+                    calls_open: false,
+                    sealed: false,
+                },
+            ],
+            open: false,
+            progress_active: true,
+        },
+        marker_n(1),
+    ]);
+    assert_line_accounting_matches(&v);
+    let flat: Vec<String> = v
+        .flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
+    assert!(
+        !flat.iter().any(|l| l.contains("old")),
+        "the finished step stays folded inside the ladder: {flat:?}"
+    );
+    assert!(
+        flat.iter().any(|l| l.contains("Step(2)"))
+            && flat.iter().any(|l| l.contains("working"))
+            && flat.iter().any(|l| l.contains("a")),
+        "the preview streams the current step: {flat:?}"
+    );
+    // Group row(1) + preview[step row(1) + thinking(1+1) + aggregate(1) +
+    // call a(1 + 3 out + 1 sep) + call b(1)] + trailing blank(1) +
+    // marker(1) = 13.
+    assert_eq!(v.flatten().len(), 13, "flat: {flat:?}");
+    // Render-only preview: the folded ladder keeps exactly ONE target —
+    // its group row.
+    let headers = v.tool_call_headers();
+    assert_eq!(headers.len(), 1, "headers: {headers:?}");
+    let row = &flat[headers[0].header_line_idx];
+    assert!(row.contains("2 Steps"), "target lands on the group row: {row:?}");
 }

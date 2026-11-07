@@ -237,10 +237,16 @@ impl ChatView {
     pub fn last_open_thinking_collapsed(&self) -> bool {
         let floor = self.turn_block_start.min(self.blocks.len());
         let step_hidden = self.blocks[floor..].iter().find_map(|block| match block {
-            ChatBlock::StepGroup { steps, open, .. } => steps
-                .last()
-                .filter(|step| !step.sealed)
-                .map(|step| !*open || !step.open),
+            ChatBlock::StepGroup {
+                steps,
+                open,
+                progress_active,
+                ..
+            } => steps.last().filter(|step| !step.sealed).map(|step| {
+                // The running live preview shows the current step's thinking
+                // below the folded ladder, so a running turn is never hidden.
+                !((*open && step.open) || *progress_active)
+            }),
             _ => None,
         });
         step_hidden == Some(true)

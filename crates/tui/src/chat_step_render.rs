@@ -24,12 +24,13 @@ use super::{
 /// drill-down): the clickable turn row `{▸|❯} N Steps` (col 0, accent
 /// bold) + a live progress hint until Say begins; while the group is closed
 /// that row (plus one trailing
-/// blank) is the whole block. While it is open, per step: the step row
-/// (indent 2) — while the turn runs, the auto-opened ladder renders EVERY
-/// step row of the running turn (finished steps stay collapsed one-line
-/// rows, so the current turn's trajectory stays visible); a user-opened
-/// ladder renders the same full list — while the step is open its `💭
-/// Thinking` block (header
+/// blank) is the whole block — except while the turn runs
+/// (`progress_active`): the CURRENT (last) step then streams below that
+/// row as a render-only LIVE PREVIEW (forced-open step row + thinking +
+/// calls; no targets), which retires when progress settles. Disclosure
+/// NEVER moves on its own: the ladder opens only by user toggle. While it
+/// is open, per step: the step row (indent 2) — while the step is open its
+/// `💭 Thinking` block (header
 /// indent 4, body indent 8) and a `N Function calls` aggregation row
 /// (indent 4); opening the aggregation shows call headers at indent 6, and
 /// an expanded call shows its result at indent 6. Exactly one trailing blank
@@ -271,100 +272,147 @@ pub(crate) fn flatten_step_group(
             }
             out.push(Line::from(spans));
             if !open {
+                // LIVE PREVIEW: while the turn runs and the ladder stays
+                // folded, the CURRENT (last) step streams below the `N
+                // Steps` row — forced open (step row + thinking + calls),
+                // render-only, no targets. Settle retires it; the step then
+                // lives only inside the folded ladder. A user-opened ladder
+                // suppresses the preview (its rows show instead).
+                if progress_active {
+                    if let Some(last) = steps.last() {
+                        push_step_body(
+                            out,
+                            steps.len() - 1,
+                            last,
+                            steps.len(),
+                            anim_tick,
+                            true,
+                            true,
+                        );
+                    }
+                }
                 out.push(Line::from(""));
                 return;
             }
         }
     }
-    // LIVE FOCUS: while the turn runs, the auto-opened ladder renders every
-    // step row of the running turn — finished steps as collapsed one-line
-    // rows, so the current turn's trajectory stays visible; a user-opened
-    // ladder renders the same full list.
+    // User-opened ladder: every step renders its `Step(n)` row; open steps
+    // reveal thinking + the calls aggregate, open aggregates reveal the
+    // call headers. The running live preview (folded arm above) reuses the
+    // same body renderer forced open, so ladder and preview stay identical.
     for (si, step) in steps.iter().enumerate() {
-        let step_open = step.open;
-        out.push(Line::from(vec![
-            Span::raw("  "),
-            Span::styled(
-                format!(
-                    "{}{})",
-                    if step_open {
-                        STEP_ROW_OPEN_PREFIX
-                    } else {
-                        STEP_ROW_CLOSED_PREFIX
-                    },
-                    si + 1,
-                ),
-                Style::default()
-                    .fg(theme::ok_color())
-                    .add_modifier(Modifier::BOLD),
+        push_step_body(
+            out,
+            si,
+            step,
+            steps.len(),
+            anim_tick,
+            step.open,
+            step.calls_open,
+        );
+    }
+    out.push(Line::from(""));
+}
+
+/// Render ONE step's ladder body: the `Step(n)` row (indent 2), then —
+/// while `step_open` — its `💭 Thinking` header (indent 4) + body (indent
+/// 8) and the `N Function call(s)` aggregation row (indent 4), then —
+/// while `calls_open` — each call header (indent 6; a still-running call
+/// carries the spinner) plus its expanded result (indent 6). Shared by the
+/// open ladder loop and the running live preview (folded arm; forced open
+/// without mutating the stored flags) so both paths render identically.
+/// `steps_len` drives the "final expanded call suppresses its separator"
+/// rule — the group's trailing blank provides it.
+fn push_step_body(
+    out: &mut Vec<Line<'static>>,
+    si: usize,
+    step: &Step,
+    steps_len: usize,
+    anim_tick: u32,
+    step_open: bool,
+    calls_open: bool,
+) {
+    out.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            format!(
+                "{}{})",
+                if step_open {
+                    STEP_ROW_OPEN_PREFIX
+                } else {
+                    STEP_ROW_CLOSED_PREFIX
+                },
+                si + 1,
             ),
-        ]));
-        if !step_open {
-            continue;
-        }
-        if !step.thinking.is_empty() {
-            out.push(Line::from(vec![
-                Span::raw("    "),
-                Span::styled(
-                    STEP_THINKING_HEADER,
-                    Style::default()
-                        .fg(theme::pink())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            out.extend(super::types::indented(&step.thinking, 8));
-        }
-        if step.calls.is_empty() {
-            continue;
-        }
-        let m = step.calls.len();
+            Style::default()
+                .fg(theme::ok_color())
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    if !step_open {
+        return;
+    }
+    if !step.thinking.is_empty() {
         out.push(Line::from(vec![
             Span::raw("    "),
             Span::styled(
-                format!(
-                    "{}{m} Function call{}",
-                    if step.calls_open {
-                        GROUP_ROW_OPEN_PREFIX
-                    } else {
-                        GROUP_ROW_CLOSED_PREFIX
-                    },
-                    if m == 1 { "" } else { "s" }
-                ),
+                STEP_THINKING_HEADER,
                 Style::default()
-                    .fg(theme::accent())
+                    .fg(theme::pink())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
-        if !step.calls_open {
-            continue;
+        out.extend(super::types::indented(&step.thinking, 8));
+    }
+    if step.calls.is_empty() {
+        return;
+    }
+    let m = step.calls.len();
+    out.push(Line::from(vec![
+        Span::raw("    "),
+        Span::styled(
+            format!(
+                "{}{m} Function call{}",
+                if calls_open {
+                    GROUP_ROW_OPEN_PREFIX
+                } else {
+                    GROUP_ROW_CLOSED_PREFIX
+                },
+                if m == 1 { "" } else { "s" }
+            ),
+            Style::default()
+                .fg(theme::accent())
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    if !calls_open {
+        return;
+    }
+    for (ci, c) in step.calls.iter().enumerate() {
+        let mut header = call_header(c);
+        // A still-running call (`ToolEnd` not yet seen) carries the same
+        // motion glyph as the group row, so the running position is
+        // visible per call, not only per turn. Same line — the
+        // header-accounting mirror in `chat_headers.rs` is unaffected.
+        if c.elapsed_ms.is_none() {
+            header.spans.push(Span::styled(
+                format!(" {}", SPINNER[(anim_tick as usize) % SPINNER.len()]),
+                Style::default().fg(theme::warn_color()),
+            ));
         }
-        for (ci, c) in step.calls.iter().enumerate() {
-            let mut header = call_header(c);
-            // A still-running call (`ToolEnd` not yet seen) carries the same
-            // motion glyph as the group row, so the running position is
-            // visible per call, not only per turn. Same line — the
-            // header-accounting mirror in `chat_headers.rs` is unaffected.
-            if c.elapsed_ms.is_none() {
-                header.spans.push(Span::styled(
-                    format!(" {}", SPINNER[(anim_tick as usize) % SPINNER.len()]),
-                    Style::default().fg(theme::warn_color()),
-                ));
-            }
-            out.extend(super::types::indented(std::slice::from_ref(&header), 6));
-            // Per-call expansion: only the toggled call shows its output.
-            // Exactly one blank follows the result: for the group's final
-            // visible row the group's trailing blank below already provides
-            // it, so the per-call separator is skipped instead of doubling.
-            if c.expanded {
-                out.extend(super::types::indented(&c.output, 6));
-                let group_final = si + 1 == steps.len() && ci + 1 == step.calls.len();
-                if !group_final {
-                    out.push(Line::from(""));
-                }
+        out.extend(super::types::indented(std::slice::from_ref(&header), 6));
+        // Per-call expansion: only the toggled call shows its output.
+        // Exactly one blank follows the result: for the group's final
+        // visible row the group's trailing blank below already provides
+        // it, so the per-call separator is skipped instead of doubling.
+        if c.expanded {
+            out.extend(super::types::indented(&c.output, 6));
+            let group_final = si + 1 == steps_len && ci + 1 == step.calls.len();
+            if !group_final {
+                out.push(Line::from(""));
             }
         }
     }
-    out.push(Line::from(""));
 }
 
 /// Derive the disclosure glyph without mutating the stored call header.

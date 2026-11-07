@@ -1,5 +1,10 @@
 # 直播位恢复整 turn 展示（TUI）
 
+> ⚠️ 历史条目：本文的自动披露口径已被
+> `2026-11-07/step-ladder-live-preview.md` 取代（阶梯纯用户控制 +
+> turn 区实时预览）。正文保持历史原样。
+
+
 一句话：撤销同日 `running_step_only`「运行位只画最新 step」的口径——直播
 运行位自动展开后渲染**整个**最新 turn 的全部 step 行（已完成 step 折叠为
 `▸ Step(i)` 单行，仅运行中的最后 step streaming thinking + calls），Say /

@@ -180,9 +180,11 @@ fn step_group_running_call_keeps_alignment() {
         marker_n(1),
     ]);
     assert_line_accounting_matches(&v);
-    // The folded-but-running ladder PREVIEWS its current step: group row +
-    // Step(1) row + calls aggregate + call header + trailing blank + marker.
-    assert_eq!(v.flatten().len(), 5 + 1);
+    // The folded-but-running ladder renders just its group row + blank; the
+    // running step streams in the TURN LIVE AREA at the tail: group row +
+    // blank + [step row + calls aggregate + call header + trailing blank]
+    // + marker = 7.
+    assert_eq!(v.flatten().len(), 6 + 1);
     // The spinner hint rides on the group row itself.
     let row: String = v.flatten()[0]
         .spans
@@ -199,11 +201,12 @@ fn step_group_running_call_keeps_alignment() {
     );
 }
 
-/// LIVE FOCUS alignment: while the turn runs, the auto-opened ladder
-/// renders EVERY step row of the running turn — each finished step one
-/// collapsed row, the running step streaming its thinking header/body plus
-/// the calls aggregation and call headers — and `collect_headers` must
-/// count the same rows so hit-rects stay aligned.
+/// LIVE FOCUS alignment: a USER-OPENED ladder renders EVERY step row — each
+/// finished step one collapsed row, the running step streaming its thinking
+/// header/body plus the calls aggregation and call headers — and
+/// `collect_headers` must count the same rows so hit-rects stay aligned.
+/// The TURN LIVE AREA at the tail coexists with it (the current step forced
+/// open + one trailing blank), render-only, never a target.
 #[test]
 fn auto_running_position_keeps_alignment() {
     let v = view_with(vec![
@@ -253,10 +256,11 @@ fn auto_running_position_keeps_alignment() {
         flat.iter().any(|l| l.contains("working")),
         "running thinking streams in place: {flat:?}"
     );
-    // Group row, both step rows, the running step's thinking (header+body),
-    // its calls aggregation and its call header: group(1) + 1 + (1+2+1+1)
-    // + trailing blank(1) + marker(1) = 9.
-    assert_eq!(v.flatten().len(), 9);
+    // Ladder block: group(1) + 1 + (1+2+1+1) + trailing blank(1) = 8,
+    // marker(1), then the live area repeats the CURRENT step forced open —
+    // step row + thinking header+body + aggregate + call header + trailing
+    // blank = 6 → 8 + 1 + 6 = 15 (coexistence, not suppression).
+    assert_eq!(v.flatten().len(), 15);
     // Every rendered row is a clickable target in visual order: group,
     // Step(1), Step(2), Calls(2), call b.
     let headers = v.tool_call_headers();
@@ -266,13 +270,13 @@ fn auto_running_position_keeps_alignment() {
     assert_eq!(headers[4].header_line_idx, headers[0].header_line_idx + 6);
 }
 
-/// LIVE PREVIEW alignment: the folded-but-running ladder streams its
-/// CURRENT (last) step forced open — Step row + thinking header/body +
-/// calls aggregate + every call header (+ expanded results) — while
-/// `collect_headers` counts the same lines but pushes NO extra targets (the
-/// folded ladder still yields exactly its group row).
+/// LIVE AREA alignment: the folded-but-running ladder keeps its two lines
+/// (group row + blank); its CURRENT (last) step streams at the transcript
+/// TAIL — Step row + thinking header/body + calls aggregate + every call
+/// header (+ expanded results) + one trailing blank — a render-only region
+/// with NO targets (the folded ladder still yields exactly its group row).
 #[test]
-fn live_preview_keeps_alignment_without_new_targets() {
+fn live_area_keeps_alignment_without_new_targets() {
     let mut expanded = tool_call("a", 3);
     expanded.expanded = true;
     let mut running = tool_call("b", 0);
@@ -318,16 +322,19 @@ fn live_preview_keeps_alignment_without_new_targets() {
         flat.iter().any(|l| l.contains("Step(2)"))
             && flat.iter().any(|l| l.contains("working"))
             && flat.iter().any(|l| l.contains("a")),
-        "the preview streams the current step: {flat:?}"
+        "the live area streams the current step: {flat:?}"
     );
-    // Group row(1) + preview[step row(1) + thinking(1+1) + aggregate(1) +
-    // call a(1 + 3 out + 1 sep) + call b(1)] + trailing blank(1) +
-    // marker(1) = 13.
-    assert_eq!(v.flatten().len(), 13, "flat: {flat:?}");
-    // Render-only preview: the folded ladder keeps exactly ONE target —
+    // Folded block: group row(1) + blank(1), marker(1), then the TURN LIVE
+    // AREA at the tail: step row(1) + thinking(1+1) + aggregate(1) +
+    // call a(1 + 3 out + 1 sep) + call b(1) + trailing blank(1) → 14.
+    assert_eq!(v.flatten().len(), 14, "flat: {flat:?}");
+    // Render-only live area: the folded ladder keeps exactly ONE target —
     // its group row.
     let headers = v.tool_call_headers();
     assert_eq!(headers.len(), 1, "headers: {headers:?}");
     let row = &flat[headers[0].header_line_idx];
-    assert!(row.contains("2 Steps"), "target lands on the group row: {row:?}");
+    assert!(
+        row.contains("2 Steps"),
+        "target lands on the group row: {row:?}"
+    );
 }

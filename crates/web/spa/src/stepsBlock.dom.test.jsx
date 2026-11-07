@@ -104,8 +104,8 @@ describe('StepsContent three-level drill-down', () => {
   it('keeps user disclosure state when new output rerenders the turn', () => {
     const initial = stepsTurn();
     // Settled turn: without `progressActive: false` the null-output
-    // fallback marks the turn running and the live auto-open would open
-    // levels without any click.
+    // fallback marks the turn running and the live area would stream below
+    // the ladder (it never opens anything, but keep the fixture settled).
     initial.progressActive = false;
     initial.steps[0].calls[0].output = null;
     const mounted = mount([initial]);
@@ -297,12 +297,13 @@ describe('StepsContent three-level drill-down', () => {
   });
 });
 
-describe('live step preview (folded ladder)', () => {
+describe('turn live area (independent of the ladder)', () => {
   // The ladder is user-controlled and folded by default: antd keeps closed
   // panels mounted once opened, so folded state is asserted through the
-  // item's active class — never through text absence alone. The live preview
-  // below the summary row is the one thing rendered OUTSIDE the collapsed
-  // panel while the turn runs.
+  // item's active class — never through text absence alone. The TURN LIVE
+  // AREA below the ladder is a SEPARATE region rendered while the turn
+  // runs — gated only on `ladderRunning`, never on the ladder's open
+  // state (coexistence, TUI parity with chat_live_turn.rs).
   const itemActive = (matcher) => screen.getByText(matcher)
     .closest('.ant-collapse-item').classList.contains('ant-collapse-item-active');
   const summaryHeader = (matcher) => screen.getByText(matcher).closest('.ant-collapse-header');
@@ -313,25 +314,25 @@ describe('live step preview (folded ladder)', () => {
     return turn;
   };
 
-  it('running turn previews the last step below the folded summary', () => {
+  it('running turn streams the last step in the live area below the folded summary', () => {
     mount([runningTurn()]);
     // The summary stays folded and keeps its own running tag.
     expect(itemActive('2 Steps')).toBe(false);
     expect(within(summaryHeader('2 Steps')).getByText('running')).toBeTruthy();
-    // The LAST step's header + thinking + call row render below it without a
-    // click; the older step stays inside the folded ladder.
+    // The LAST step's header + thinking + call row render in the live area
+    // without a click; the older step stays inside the folded ladder.
     expect(screen.getByText('Step(2)')).toBeTruthy();
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
     expect(screen.queryByText(/Step\(1\)/)).toBeNull();
     expect(screen.queryByText('look at the repo first')).toBeNull();
-    // The preview sits AFTER the summary row in document order.
+    // The live area sits AFTER the summary row in document order.
     const summary = screen.getByText('2 Steps');
     const step2 = screen.getByText('Step(2)');
     expect(summary.compareDocumentPosition(step2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('preview advances to the newest step while the ladder stays folded', () => {
+  it('live area advances to the newest step while the ladder stays folded', () => {
     const mounted = mount([runningTurn()]);
     expect(screen.getByText('Step(2)')).toBeTruthy();
     const grown = runningTurn();
@@ -350,12 +351,12 @@ describe('live step preview (folded ladder)', () => {
     expect(screen.getByText('Step(3)')).toBeTruthy();
     expect(screen.getByText('fresh reasoning')).toBeTruthy();
     expect(screen.getByText(/🔧 grep/)).toBeTruthy();
-    // Only the LAST step is previewed: the previous one folded away.
+    // Only the LAST step streams: the previous one folded away.
     expect(screen.queryByText('Step(2)')).toBeNull();
     expect(screen.queryByText('reading the entrypoint')).toBeNull();
   });
 
-  it('previews the running step via the open-call fallback without a progress flag', () => {
+  it('streams the running step via the open-call fallback without a progress flag', () => {
     const fallback = stepsTurn();
     fallback.steps[1].thinking = 'reading the entrypoint';
     fallback.steps[1].calls[0].output = null;
@@ -366,7 +367,7 @@ describe('live step preview (folded ladder)', () => {
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
-  it('settle clears the preview and the ladder stays folded', () => {
+  it('settle clears the live area and the ladder stays folded', () => {
     const mounted = mount([runningTurn()]);
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
     mounted.rerender(
@@ -379,29 +380,31 @@ describe('live step preview (folded ladder)', () => {
     expect(screen.queryByText('running')).toBeNull();
   });
 
-  it('opening the ladder hides the preview and the open state survives streaming rerenders', () => {
+  it('opening the ladder keeps the live area and the open state survives streaming rerenders', () => {
     const mounted = mount([runningTurn()]);
     fireEvent.click(screen.getByText('2 Steps'));
     expect(itemActive('2 Steps')).toBe(true);
-    // Step rows replace the preview: its flat thinking/call row is gone.
-    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
-    expect(screen.queryByText('reading the entrypoint')).toBeNull();
-    expect(screen.queryByText(/🔧 read/)).toBeNull();
+    // TWO SEPARATE REGIONS coexisting: the ladder's own Step(2) row renders
+    // in-panel AND the live area below still streams the same running step
+    // (its thinking + call row stay visible — nothing is suppressed).
+    expect(screen.getAllByText(/Step\(2\)/)).toHaveLength(2);
+    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
+    expect(screen.getByText(/🔧 read/)).toBeTruthy();
 
     const still = runningTurn();
     still.steps[1].calls[0].output = 'updated streamed output';
     mounted.rerender(
       <TranscriptView turns={[still]} usage={null} status="streaming" error={null} emptyText="无" />,
     );
-    // The user's open state survives the streaming rerender: the ladder stays
-    // open and the preview does not reappear underneath it.
+    // The user's open state survives the streaming rerender AND the live
+    // area keeps streaming underneath — no coupling in either direction.
     expect(itemActive('2 Steps')).toBe(true);
-    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
-    expect(screen.queryByText('reading the entrypoint')).toBeNull();
-    expect(screen.queryByText(/🔧 read/)).toBeNull();
+    expect(screen.getAllByText(/Step\(2\)/)).toHaveLength(2);
+    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
+    expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
-  it('running tag appears on preview call rows, not on finished ones', () => {
+  it('running tag appears on live area call rows, not on finished ones', () => {
     const running = runningTurn();
     running.steps[1].calls.push({
       kind: 'tool', role: 'assistant', id: 'c1', name: 'grep',

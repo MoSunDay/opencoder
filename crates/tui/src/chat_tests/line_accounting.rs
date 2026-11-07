@@ -173,36 +173,19 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                             }
                         }
                     }
-                } else if *progress_active {
-                    // LIVE PREVIEW: the folded-but-running ladder streams
-                    // its current (last) step forced open — lines only, no
-                    // targets (mirrors `preview_step_body_lines`).
-                    if let Some(s) = steps.last() {
-                        let mut n = 1; // step row
-                        if !s.thinking.is_empty() {
-                            n += 1 + s.thinking.len();
-                        }
-                        if !s.calls.is_empty() {
-                            n += 1; // calls aggregation row
-                            for c in &s.calls {
-                                n += 1 + if c.expanded { 1 + c.output.len() } else { 0 };
-                            }
-                        }
-                        expected += n;
-                    }
+                } else {
+                    // folded ladder: group row (+ blank) is the whole block
+                    // — the running step streams in the TURN LIVE AREA at
+                    // the tail, counted after the loop below.
+                    let _ = progress_active;
                 }
                 // Exactly one blank after the group: a final expanded
                 // call's separator blank (counted per call above) doubles as
                 // the trailing blank.
-                let ends_on_expanded_call = if *open {
-                    steps.last().is_some_and(|s| {
+                let ends_on_expanded_call = *open
+                    && steps.last().is_some_and(|s| {
                         s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
-                    })
-                } else {
-                    *progress_active && !say_merged_after_group && steps
-                        .last()
-                        .is_some_and(|s| s.calls.last().is_some_and(|c| c.expanded))
-                };
+                    });
                 if !ends_on_expanded_call && (*open || !say_merged_after_group) {
                     expected += 1; // trailing blank
                 }
@@ -222,6 +205,44 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                 expected += 1 + rendered.len() + 1;
             }
         }
+    }
+    // TURN LIVE AREA tail (mirrors `chat_live_turn::flatten`, appended by
+    // flatten_with AFTER every block; collect_headers pushes no targets for
+    // it, so it never enters per-block accounting): the running turn's
+    // current step forced open plus one trailing blank. A final expanded
+    // call's separator blank merges into that trailing blank.
+    if let Some(steps) = view
+        .blocks
+        .iter()
+        .skip(view.turn_block_start)
+        .find_map(|b| match b {
+            ChatBlock::StepGroup {
+                steps,
+                progress_active: true,
+                ..
+            } if !steps.is_empty() => Some(steps),
+            _ => None,
+        })
+    {
+        let s = steps.last().expect("non-empty by the guard");
+        expected += 1; // step row
+        if !s.thinking.is_empty() {
+            expected += 1 + s.thinking.len();
+        }
+        if !s.calls.is_empty() {
+            expected += 1; // calls aggregation row
+            let last_call = s.calls.len() - 1;
+            for (ci, c) in s.calls.iter().enumerate() {
+                expected += 1;
+                if c.expanded {
+                    expected += c.output.len();
+                    if ci != last_call {
+                        expected += 1; // separator; the final one merges
+                    } // into the area's trailing blank
+                }
+            }
+        }
+        expected += 1; // the area's trailing blank
     }
     assert_eq!(
         actual, expected,

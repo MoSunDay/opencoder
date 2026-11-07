@@ -1,5 +1,9 @@
 # Step 阶梯：撤销自动披露，改为 turn 区实时预览（TUI + SPA）
 
+> **已取代**：本条的「预览在折叠组行下方、展开让位」口径已被
+> `2026-11-07/turn-live-area-independent.md` 取代 —— turn 实时区是
+> 独立尾区，不随阶梯开合。本条保留为历史记录。
+
 一句话：阶梯回归**纯用户控制、默认折叠**（Say 是第一输出面，阶梯只是
 drill-down）——删除全部自动开合机制（TUI `chat_step_live` 策略模块与
 `user_touched` pin；SPA `steps/useLadderDisclosure.js` hook 与受控

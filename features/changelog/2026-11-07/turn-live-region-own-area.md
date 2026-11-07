@@ -1,5 +1,11 @@
 # Turn 实时区：自有布局区，不进 transcript 尾部也不进 steps 气泡（TUI + SPA）
 
+> **已细化**：运行中 turn 的展示面已由
+> `2026-11-07/running-turn-only-in-live-region.md` 细化 —— 运行中 turn
+> 现已完全不进 Steps 折叠/消息列表（无折叠组行），唯一展示面是实时
+> 区。本条其余口径（实时区自有布局、settle 语义、阶梯纯用户控制）继续
+> 有效。
+
 一句话：运行中 turn 的当前（最后一个）step 流式渲染在一个与 Say/Step
 消息区**完全分离的独立 UI 区域** —— TUI 是 transcript 主体与
 queue/composer 之间的**自有布局块**，SPA 是 transcript 滚动 div 与

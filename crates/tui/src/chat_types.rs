@@ -68,16 +68,12 @@ pub enum ChatBlock {
     /// opening that row reveals the individual calls. Opening a call reveals
     /// only that call's result. No streaming event opens or closes any level:
     /// user toggles persist exactly as clicked.
-    /// `progress_active` drives the group-row animation until Say begins and
-    /// cannot be reactivated after non-empty Say output exists.
-    /// LIVE PREVIEW: while the turn runs (`progress_active == true`) AND the
-    /// group is folded (`open == false`) AND it has steps, the CURRENT (last)
-    /// step renders expanded directly below the folded `N Steps` row — same
-    /// shapes as an open step (step row, thinking, calls aggregate, call
-    /// headers incl. running spinner, expanded call outputs). The preview is
-    /// render-only: it adds no click targets and disappears the moment
-    /// progress settles (Say's first chunk, run end, new turn), leaving the
-    /// step only inside the folded ladder.
+    /// `progress_active` marks the turn as STILL RUNNING (its Say has not
+    /// begun) and cannot be reactivated after non-empty Say output exists:
+    /// while armed the group contributes ZERO transcript lines — the turn
+    /// streams ONLY in the TURN LIVE REGION (`chat_live_turn.rs`); on settle
+    /// (Say's first chunk, run end, new turn) the flag flips false and the
+    /// group re-enters the transcript as a plain settled ladder.
     /// ADJACENT-pair merge: when this group's next block is its turn's Say,
     /// the standalone `N Steps` row is replaced by one merged header
     /// `{❯|▸} Say(n step{s}): <say first line>` that both toggles the
@@ -272,9 +268,9 @@ pub struct SubagentHeader {
 /// content (thinking + calls aggregation row) is visible only while the
 /// step is open; individual call rows additionally require `calls_open`;
 /// a single call's result additionally requires `ToolCall::expanded`.
-/// While the turn runs and the group is folded, the LAST step is also
-/// rendered as a live preview with `open`/`calls_open` forced on — without
-/// mutating these flags.
+/// While the turn runs, the LAST step is also rendered by the TURN LIVE
+/// REGION with `open`/`calls_open` forced on — without mutating these
+/// flags.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
     /// Sanitized source accumulated from live reasoning deltas. Keeping the

@@ -121,6 +121,18 @@ impl ChatView {
                     progress_active,
                     ..
                 } => {
+                    // A RUNNING group contributes ZERO transcript lines:
+                    // `progress_active` armed means this turn's Say has not
+                    // begun, so the turn streams ONLY in the TURN LIVE
+                    // REGION (`chat_live_turn.rs`) — no folded `N Steps`
+                    // row, no trailing blank, no hit target. On settle (the
+                    // flag flips false: Say's first chunk / run end / new
+                    // turn) the group re-enters the transcript below with
+                    // exactly the settled shape; adjacent blocks keep the
+                    // usual one-blank discipline for settled groups.
+                    if *progress_active {
+                        continue;
+                    }
                     // Adjacent-pair merge: when the block right below this
                     // group is the turn's Say (`Assistant`), the two render
                     // as one clickable header row — pass the Say so
@@ -141,14 +153,7 @@ impl ChatView {
                         }),
                         _ => None,
                     };
-                    step_render::flatten_step_group(
-                        &mut out,
-                        *open,
-                        *progress_active,
-                        steps,
-                        anim_tick,
-                        say,
-                    );
+                    step_render::flatten_step_group(&mut out, *open, steps, anim_tick, say);
                 }
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(
@@ -246,11 +251,13 @@ impl ChatView {
                 }
             }
         }
-        // The transcript holds ONLY Say + ladder blocks — the running
-        // turn's current step streams in the separate TURN LIVE REGION
-        // (own layout area, see `chat_live_turn.rs` / `render.rs`), NEVER
-        // in these lines: scroll, selection, hit-rects and line accounting
-        // stay untouched by streaming.
+        // The transcript holds ONLY Say + settled ladder blocks — a
+        // RUNNING turn (`progress_active`) is ABSENT from the transcript
+        // until it settles: its current step streams in the separate TURN
+        // LIVE REGION (own layout area, see `chat_live_turn.rs` /
+        // `render.rs`), which is the running turn's ONLY surface. Scroll,
+        // selection, hit-rects and line accounting stay untouched by
+        // streaming.
         out
     }
 

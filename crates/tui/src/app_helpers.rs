@@ -11,7 +11,7 @@ use anyhow::Result;
 use opencoder_core::{resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
 use opencoder_session::SessionState;
-use opencoder_store::{Delivery, SessionInput, SessionPatch, Store, TursoStore};
+use opencoder_store::{Delivery, SessionInput, SessionPatch, Store};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Terminal;
@@ -604,17 +604,17 @@ pub(crate) fn push_user(
     }
 }
 
-pub(crate) use opencoder_core::data_dir_for;
-
-/// Open (creating its data dir if needed) the on-disk sqlite store rooted at
-/// `workdir`. Best-effort dir creation: a mkdir failure is ignored via `.ok()`
-/// so the subsequent store-open surfaces the real error. Extracted from
-/// `app::run` to keep that file under the 800-line iteration cap.
+/// Open (creating its data dir if needed) the session store rooted at
+/// `workdir`. Delegates to the shared local opener
+/// (`opencoder_local::session_cmd::open_store`) so the TUI gets the same
+/// startup sequence as the CLI — legacy-SQLite migration check first, then
+/// the canonical `opencoder.db.rdb` directory — instead of opening the
+/// legacy plain-file stem (which failed with `File exists (os error 17)`
+/// beside a legacy file). Extracted from `app::run` to keep that file under
+/// the 800-line iteration cap.
 pub(crate) async fn open_store(workdir: &Path) -> Result<Arc<dyn Store>> {
-    let data_dir = data_dir_for(workdir);
-    tokio::fs::create_dir_all(&data_dir).await.ok();
     Ok(Arc::new(
-        TursoStore::open(data_dir.join("opencoder.db")).await?,
+        opencoder_local::session_cmd::open_store(workdir).await?,
     ))
 }
 

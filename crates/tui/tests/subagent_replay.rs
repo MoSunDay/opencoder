@@ -9,20 +9,19 @@ use std::sync::Arc;
 use opencoder_core::{ContentBlock, Message};
 use opencoder_session::SessionEvent;
 use opencoder_store::{
-    EventKind, SessionEventRecord, SessionMeta, Store, SubagentStatus, SubagentTaskRecord,
-    TursoStore,
+    EventKind, RdbStore, SessionEventRecord, SessionMeta, Store, SubagentStatus, SubagentTaskRecord,
 };
 use opencoder_tui::chat::ChatBlock;
 use opencoder_tui::session_ui::replay_into_chat;
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, Arc<TursoStore>) {
+async fn fresh() -> (TempDir, Arc<RdbStore>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, Arc::new(store))
 }
 
-async fn make_session(store: &TursoStore, id: &str) {
+async fn make_session(store: &RdbStore, id: &str) {
     let meta = SessionMeta {
         id: id.to_string(),
         title: Some(format!("title-{id}")),

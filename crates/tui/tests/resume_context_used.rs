@@ -10,17 +10,17 @@ use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_llm::estimate_messages_for_display;
-use opencoder_store::{SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, Store};
 use opencoder_tui::session_ui::replay_into_chat;
 use tempfile::TempDir;
 
-async fn fresh() -> (TempDir, Arc<TursoStore>) {
+async fn fresh() -> (TempDir, Arc<RdbStore>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = TursoStore::open(dir.path().join("test.db")).await.unwrap();
+    let store = RdbStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, Arc::new(store))
 }
 
-async fn make_session(store: &TursoStore, id: &str) {
+async fn make_session(store: &RdbStore, id: &str) {
     let meta = SessionMeta {
         id: id.to_string(),
         title: Some(format!("title-{id}")),
@@ -68,7 +68,10 @@ async fn resume_context_used_matches_transcript_estimate() {
     // A realistic turn pair: user prompt + assistant reply.
     let messages = vec![
         Message::user("u1", "please explain how the drain loop works in detail"),
-        assistant("a1", "the drain loop promotes steer at each turn boundary and consumes exactly one queue item when idle"),
+        assistant(
+            "a1",
+            "the drain loop promotes steer at each turn boundary and consumes exactly one queue item when idle",
+        ),
     ];
 
     let chat = replay_into_chat("act", &messages, &store_arc, "s1", 0).await;
@@ -109,8 +112,14 @@ async fn resume_context_used_grows_with_more_messages() {
     let long = vec![
         Message::user("u1", "hi"),
         assistant("a1", "hello there"),
-        Message::user("u2", "can you now write a long explanation about token estimation and compaction thresholds"),
-        assistant("a2", "token estimation uses a chars-per-token heuristic so compaction can fire before any usage is reported by the model"),
+        Message::user(
+            "u2",
+            "can you now write a long explanation about token estimation and compaction thresholds",
+        ),
+        assistant(
+            "a2",
+            "token estimation uses a chars-per-token heuristic so compaction can fire before any usage is reported by the model",
+        ),
     ];
 
     let chat_short = replay_into_chat("act", &short, &store_arc, "s3", 0).await;

@@ -345,7 +345,7 @@ mod fail_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opencoder_store::{SessionMeta, TursoStore};
+    use opencoder_store::{RdbStore, SessionMeta};
 
     fn mk_input(prompt: &str) -> SessionInput {
         SessionInput {
@@ -361,10 +361,10 @@ mod tests {
         }
     }
 
-    /// TursoStore with a pre-created session — the boilerplate every store
+    /// RdbStore with a pre-created session — the boilerplate every store
     /// test here needs.
-    async fn mem_store(sid: &str) -> Arc<TursoStore> {
-        let store = Arc::new(TursoStore::open_memory().await.unwrap());
+    async fn mem_store(sid: &str) -> Arc<RdbStore> {
+        let store = Arc::new(RdbStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
                 id: sid.into(),

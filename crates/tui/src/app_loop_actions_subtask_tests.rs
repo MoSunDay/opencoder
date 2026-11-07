@@ -3,7 +3,7 @@
 
 use super::*;
 use opencoder_core::harness::{HarnessRuntime, SubtaskRef};
-use opencoder_store::{SessionMeta, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta};
 
 fn entry(id: &str, status: &str) -> SubtaskRef {
     SubtaskRef {
@@ -19,7 +19,7 @@ fn entry(id: &str, status: &str) -> SubtaskRef {
 }
 
 async fn store_with_registry(sid: &str, refs: Vec<SubtaskRef>) -> Arc<dyn Store> {
-    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+    let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
             id: sid.into(),

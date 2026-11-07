@@ -206,7 +206,7 @@ mod tests {
     use crate::remote::subtasks::load_registry;
     use crate::subtask_registry::find;
     use opencoder_core::harness::{HarnessRuntime, SubtaskRef};
-    use opencoder_store::{SessionMeta, TursoStore};
+    use opencoder_store::{RdbStore, SessionMeta};
 
     fn entry(id: &str, status: &str, tokens: u64) -> SubtaskRef {
         SubtaskRef {
@@ -221,9 +221,9 @@ mod tests {
         }
     }
 
-    /// TursoStore with a session whose harness runtime owns `refs`.
+    /// RdbStore with a session whose harness runtime owns `refs`.
     async fn store_with_registry(sid: &str, refs: Vec<SubtaskRef>) -> Arc<dyn Store> {
-        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
                 id: sid.into(),
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_runtime_is_a_noop() {
-        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(RdbStore::open_memory().await.unwrap());
         let mut states = HashMap::new();
         let mut chat = ChatView::default();
         let outcome = apply_update(

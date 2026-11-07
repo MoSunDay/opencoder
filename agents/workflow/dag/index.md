@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # dag 模块
 
@@ -19,4 +19,4 @@ DAG 纯域 + 线协议；DTO LOCKED，无 IO，线协议变更需跨端同步（
 ## 相关
 - [dag-runtime](../dag-runtime/index.md) — 执行与原子持久化
 - [执行约定](../../../rules/04-dag-execution-contract.md)、[DAG 能力](../../../features/platform/dag/index.md)
-- [动态步骤](../../../docs/dag-dynamic.md) — 实例 API 与恢复契约
+- [动态实例与恢复](../../../crates/dag-runtime/src/runtime/dynamic.rs)

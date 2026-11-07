@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # web 模块
 
@@ -79,7 +79,7 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 
 - [control](../../platform/control/index.md)、[brain](../../orchestration/brain/index.md) —
   Brain 校验/快照发布/执行在后端
-- [动态 DAG 步骤](../../../docs/dag-dynamic.md)
+- [动态 DAG 步骤](../../../crates/dag/src/dynamic.rs)
 - [DAG 能力](../../../features/platform/dag/index.md)、
   [执行约定](../../../rules/04-dag-execution-contract.md)
 - [UI 验收约定](../../../rules/05-ui-acceptance.md)

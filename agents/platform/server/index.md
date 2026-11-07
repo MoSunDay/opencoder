@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # server 模块
 
@@ -21,8 +21,8 @@ Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
 - 就绪探针 [rolling/probes.py](../../../scripts/platform/rolling/probes.py)；发布验收)
   [smooth_release/live.py](../../../scripts/acceptance/smooth_release/live.py)、
   [signal_release/main.py](../../../scripts/acceptance/signal_release/main.py)
-- 文档：[项目 CLI 与鉴权](../../../docs/project-cli.md)、
-  [发布配置](../../../docs/smooth-release.md)
+- 代码：[项目 CLI](../../../crates/ctl/src/cmd/project.rs)、
+  [平滑发布验收](../../../scripts/acceptance/smooth_release/main.py)
 
 数据契约升级走维护流程；参见
 [DAG 执行约定](../../../rules/04-dag-execution-contract.md)。

@@ -56,9 +56,7 @@ OpenCoder is a fully independent, Rust-native coding agent implemented from scra
 
 ## 🚀 Quick Start
 
-Native Windows 11 x64 support covers the TUI and operator node with stable PowerShell 7.4 or newer in the 7.x series. See [Windows installation and scope](docs/windows.md).
-
-> 👉 New to OpenCoder? See the [**Quick Start guide**](docs/quickstart.en.md) — TUI keys, browsing/editing files with notepad, attaching notes to tasks, and more.
+Native Windows 11 x64 support covers the TUI and operator node with stable PowerShell 7.4 or newer in the 7.x series. See [Windows installation and scope](features/platform/windows/index.md).
 
 ### Installation
 
@@ -249,7 +247,6 @@ opencoder/
 │   ├── web/       # axum HTTP + SSE
 │   ├── client/    # Remote thin client
 │   └── cli/       # clap frontend + headless runtime
-├── docs/          # Performance profiles & other docs
 ├── features/      # Capability map + date-archived changelogs
 ├── rules/         # Development rules (testing / regression / layering)
 ├── scripts/       # Install scripts, e2e tests

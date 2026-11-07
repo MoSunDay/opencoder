@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # 项目工作台
 
@@ -23,9 +23,8 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
   [api_project/](../../../crates/web/src/api_project) — 工作台 API
 - [crates/ctl/src/cmd/project.rs](../../../crates/ctl/src/cmd/project.rs) —
   `opencoder-cli project` 命令
-- [项目 CLI](../../../docs/project-cli.md)、
-  [任务文件](../../../docs/project-files.md)、
-  [概述与快照](../../../docs/project-summaries.md)
+- [项目 CLI](../../../crates/ctl/src/cmd/project.rs)、
+  [概述与快照](../../../crates/web/src/api_project/summary.rs)
 - [项目模块约定](../../../rules/07-project-module-contract.md)、
   [opencoder-projects skill](../../../skills/opencoder-projects/SKILL.md)
 

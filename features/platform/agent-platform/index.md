@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # Agent 调度平台
 
@@ -28,8 +28,7 @@ Server 控制面与节点执行面的调度总纲；本卡只做指路，细节�
 - [session 域卡](../../../agents/runtime/session/index.md) — Operator 规则与会话隔离
 - [crates/tui/src/worker.rs](../../../crates/tui/src/worker.rs) — TUI 的
   Server 任务入口
-- [平台文档](../../../docs/agent-platform.md)、
-  [发布配置](../../../docs/smooth-release.md)
+- [平滑发布验收](../../../scripts/acceptance/smooth_release/main.py)
 - [会话索引维护](../../../scripts/maintenance/session_index/README.md)、
   [UI 验收约定](../../../rules/05-ui-acceptance.md)
 

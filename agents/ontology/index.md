@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 
 # ontology 模块
 
@@ -46,7 +46,7 @@ Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
 - `crates/control/src/ontology.rs` — 正文根校验与 `ontology` 只读 NFS 导出
 - [Web 页面](../frontend/web/index.md) — 类型与表单位于 `spa/src/ontology/`，图谱用 G6
 - [Server 与备份](../platform/server/index.md) 同时保存数据库和正文；维护升级见
-  [发布约定](../../docs/smooth-release.md)
+  [发布约定](../../scripts/acceptance/smooth_release/main.py)
 - `crates/database/src/lib.rs` — `opencoder-database` 独立读写执行器
 
 ## 数据保鲜

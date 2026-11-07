@@ -33,8 +33,8 @@ use axum::response::IntoResponse;
 use futures::StreamExt;
 use opencoder_core::Message;
 use opencoder_store::{
-    Delivery, EventKind, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, Store, SubagentTaskRecord, TursoStore,
+    Delivery, EventKind, RdbStore, SessionEventRecord, SessionFilter, SessionInput,
+    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
 };
 use opencoder_web::handle::SseEvt;
 use serde_json::json;
@@ -43,9 +43,9 @@ use tokio::sync::Mutex;
 /// Store wrapper that injects an "overlap-window" event the first time
 /// `events_after` runs, modelling an event persisted by a concurrent task
 /// between the handler's baseline snapshot and its replay query. Everything
-/// else delegates to the inner turso store.
+/// else delegates to the inner rdb store.
 struct OverlapSeedStore {
-    inner: Arc<TursoStore>,
+    inner: Arc<RdbStore>,
     overlap: Mutex<Option<SessionEventRecord>>,
     seeded: AtomicBool,
 }
@@ -152,7 +152,7 @@ const TTL_MARKER: &str = "__fingerprint_ttl_seed__";
 
 #[tokio::test]
 async fn seen_fingerprints_expire_at_first_forwarded_done() {
-    let inner = Arc::new(TursoStore::open_memory().await.unwrap());
+    let inner = Arc::new(RdbStore::open_memory().await.unwrap());
     let sid = "ttl";
     let store: Arc<dyn Store> = Arc::new(OverlapSeedStore {
         inner: inner.clone(),

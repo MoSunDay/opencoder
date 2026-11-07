@@ -15,7 +15,7 @@ use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_project::ProjectService;
 use opencoder_store::{
     ProjectExecutorKind, ProjectStore, ProjectTodoRecord, ProjectTodoRunStatus, ProjectTodoStatus,
-    Store, TursoStore,
+    RdbStore, Store,
 };
 use serde_json::json;
 #[path = "../../dag-runtime/tests/support/model.rs"]
@@ -34,7 +34,7 @@ fn done(text: &str) -> Vec<LlmEvent> {
 
 struct Harness {
     service: Arc<ProjectService>,
-    store: Arc<TursoStore>,
+    store: Arc<RdbStore>,
     projects: Arc<dyn ProjectStore>,
     dir: PathBuf,
     _keep: tempfile::TempDir,
@@ -43,7 +43,7 @@ struct Harness {
 }
 
 async fn harness_on(
-    store: Arc<TursoStore>,
+    store: Arc<RdbStore>,
     mock: Arc<MockChatClient>,
     brain: Option<opencoder_brain::Runtime>,
 ) -> Harness {
@@ -103,7 +103,7 @@ async fn harness_with(
     scripts: Vec<Vec<LlmEvent>>,
     brain: Option<opencoder_brain::Runtime>,
 ) -> Harness {
-    let store = Arc::new(TursoStore::open_memory().await.unwrap());
+    let store = Arc::new(RdbStore::open_memory().await.unwrap());
     let mut mock = MockChatClient::new();
     for script in scripts {
         mock = mock.push_script(script);

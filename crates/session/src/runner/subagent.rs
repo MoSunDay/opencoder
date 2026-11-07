@@ -120,7 +120,7 @@ pub(super) async fn run_subagent(
     }
     child.turn_cancel = Some(turn_token);
 
-    // Attach the parent's store so the child's messages persist to Turso
+    // Attach the parent's store so the child's messages persist to the rdb store
     // under its own session id. Also record the parent-child relationship.
     if let Some(store) = &parent.store {
         child = child.with_store(store.clone());
@@ -388,7 +388,7 @@ pub(super) async fn run_subagent(
         .map(|m| m.text())
         .unwrap_or_default();
 
-    // Record completion: prompt + result in Turso.
+    // Record completion: prompt + result in the rdb store.
     if let Some(store) = &parent.store {
         let _ = store.complete_subagent_task(&call_id, &text, ok).await;
     }

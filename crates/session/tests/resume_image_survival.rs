@@ -10,7 +10,7 @@ use std::sync::Arc;
 use opencoder_core::{Config, ContentBlock, Message, Role};
 use opencoder_llm::MockChatClient;
 use opencoder_session::resume;
-use opencoder_store::{SessionMeta, SessionPatch, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, SessionPatch, Store};
 
 fn cfg() -> Config {
     Config {
@@ -43,7 +43,7 @@ fn image_urls(msg: &Message) -> Vec<String> {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn meta(id: &str) -> SessionMeta {

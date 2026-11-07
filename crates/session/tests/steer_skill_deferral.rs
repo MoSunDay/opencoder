@@ -16,7 +16,7 @@ use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::{SessionEvent, SessionState};
-use opencoder_store::{Delivery, SessionInput, Store, TursoStore};
+use opencoder_store::{Delivery, RdbStore, SessionInput, Store};
 
 /// Serializes tests that mutate process-global HOME (`seed_builtin_skills`
 /// discovers skills under `$HOME/.opencoder/skills`).
@@ -56,7 +56,7 @@ impl Drop for HomeGuard {
 }
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

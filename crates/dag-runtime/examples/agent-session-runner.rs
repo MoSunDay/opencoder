@@ -162,8 +162,10 @@ fn run() -> Result<(), i32> {
             }
         };
         runtime.block_on(async {
-            let store =
-                Arc::new(opencoder_store::TursoStore::open(step_dir.join("runtime.db")).await?);
+            let store = Arc::new(
+                opencoder_store::RdbStore::open(opencoder_core::runtime_store_rdb_dir(&step_dir))
+                    .await?,
+            );
             use opencoder_store::Store;
             anyhow::ensure!(
                 store.get_session(&session_id).await?.is_some(),

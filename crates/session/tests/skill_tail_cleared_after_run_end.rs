@@ -26,14 +26,14 @@ use opencoder_core::{Config, ToolArc};
 use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::{resume, run, SessionEvent, SessionState};
-use opencoder_store::{Delivery, SessionInput, SessionMeta, SessionPatch, Store, TursoStore};
+use opencoder_store::{Delivery, RdbStore, SessionInput, SessionMeta, SessionPatch, Store};
 
 /// `body_with_source`-style skill body: leading `> Source:` path line + body
 /// text — exactly the shape `tail_reminder` parses the active path from.
 const SKILL_BODY: &str = "> Source: /skills/x/SKILL.md\n\nX-BODY: follow the skill.";
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn config() -> Config {

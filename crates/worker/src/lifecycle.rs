@@ -76,7 +76,36 @@ pub(crate) fn recover(status: ExecutionStatus, intent: Option<StopIntent>) -> Tr
         {
             ExecutionStatus::Interrupted
         }
+        // A paused run stays paused across recovery: only an explicit resume
+        // may return it to scheduling.
         None => status,
+    };
+    Transition { status, intent }
+}
+
+/// A non-terminal Brain control command. Pausing freezes the root's future
+/// scheduling (started children and their receipts keep flowing); resuming
+/// returns a paused root to idle so the normal wake flow re-enqueues it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BrainControl {
+    Pause,
+    Resume,
+}
+
+/// Apply a Brain control command to the journal status. Terminal runs are
+/// immutable, and the durable result, error and stop intent are never
+/// touched: a pause must never look like a stop or a finish.
+pub(crate) fn brain_control(
+    status: ExecutionStatus,
+    intent: Option<StopIntent>,
+    action: BrainControl,
+) -> Transition {
+    if status.terminal() {
+        return Transition { status, intent };
+    }
+    let status = match action {
+        BrainControl::Pause => ExecutionStatus::Paused,
+        BrainControl::Resume => ExecutionStatus::Idle,
     };
     Transition { status, intent }
 }
@@ -117,6 +146,9 @@ pub(crate) fn can_launch(status: ExecutionStatus, resume: bool) -> bool {
     }
 }
 
+/// A paused execution is deliberately excluded: pausing survives a restart
+/// without interruption, and only the explicit resume command (which returns
+/// the record to idle) re-enters the launch paths.
 pub(crate) fn shutdown_interrupt_required(status: ExecutionStatus) -> bool {
     matches!(
         status,
@@ -200,5 +232,68 @@ mod tests {
         ] {
             assert_eq!(recover(status, None).status, ExecutionStatus::Interrupted);
         }
+    }
+
+    #[test]
+    fn brain_control_pauses_and_resumes_without_touching_stop_semantics() {
+        let paused = brain_control(
+            ExecutionStatus::Idle,
+            Some(StopIntent::Interrupt),
+            BrainControl::Pause,
+        );
+        assert_eq!(paused.status, ExecutionStatus::Paused);
+        // The stop intent and the terminal result semantics stay untouched.
+        assert_eq!(paused.intent, Some(StopIntent::Interrupt));
+        assert!(!paused.status.terminal());
+
+        let resumed = brain_control(paused.status, paused.intent, BrainControl::Resume);
+        assert_eq!(resumed.status, ExecutionStatus::Idle);
+        assert_eq!(resumed.intent, Some(StopIntent::Interrupt));
+
+        // A paused record also survives a running activation finalizing it.
+        assert_eq!(
+            finalize(ExecutionStatus::Paused, None, ExecutionStatus::Idle).status,
+            ExecutionStatus::Idle
+        );
+        assert_eq!(
+            finalize(ExecutionStatus::Paused, None, ExecutionStatus::Paused).status,
+            ExecutionStatus::Paused
+        );
+        for status in [
+            ExecutionStatus::Done,
+            ExecutionStatus::Error,
+            ExecutionStatus::Cancelled,
+        ] {
+            assert_eq!(
+                brain_control(status, None, BrainControl::Pause).status,
+                status,
+                "terminal runs never move"
+            );
+            assert_eq!(
+                brain_control(status, None, BrainControl::Resume).status,
+                status,
+                "terminal runs never move"
+            );
+        }
+    }
+
+    #[test]
+    fn paused_runs_resume_explicitly_and_survive_recovery() {
+        assert!(!ExecutionStatus::Paused.terminal());
+        assert_eq!(ExecutionStatus::Paused.as_str(), "paused");
+        // Pausing is not a shutdown interruption and recovery keeps it paused.
+        assert!(!shutdown_interrupt_required(ExecutionStatus::Paused));
+        assert_eq!(
+            recover(ExecutionStatus::Paused, None).status,
+            ExecutionStatus::Paused
+        );
+        // Nothing but the explicit control command re-enters scheduling.
+        assert!(!can_start(ExecutionStatus::Paused));
+        assert!(!can_launch(ExecutionStatus::Paused, true));
+        assert_eq!(
+            brain_control(ExecutionStatus::Paused, None, BrainControl::Resume).status,
+            ExecutionStatus::Idle
+        );
+        assert!(can_launch(ExecutionStatus::Idle, true));
     }
 }

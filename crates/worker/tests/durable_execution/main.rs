@@ -5,7 +5,7 @@ use opencoder_core::fleet::*;
 use opencoder_core::Role;
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{Store, TursoStore};
+use opencoder_store::{RdbStore, Store};
 use opencoder_worker::Worker;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -44,12 +44,14 @@ async fn durable_acceptance_deduplicates_and_details_stay_on_node() {
         .as_array()
         .unwrap()
         .is_empty());
-    let persisted = TursoStore::open(dir.path().join("node/runtime.db"))
-        .await
-        .unwrap()
-        .load_messages("agent-durable")
-        .await
-        .unwrap();
+    let persisted = RdbStore::open(opencoder_core::runtime_store_rdb_dir(
+        &dir.path().join("node"),
+    ))
+    .await
+    .unwrap()
+    .load_messages("agent-durable")
+    .await
+    .unwrap();
     assert!(persisted.iter().any(|message| {
         message.role == Role::Assistant && message.text().contains("node-owned answer")
     }));
@@ -227,12 +229,14 @@ async fn failed_agent_can_be_explicitly_resumed_without_duplicating_initial_inpu
         2,
         "one explicit retry must call the model exactly once"
     );
-    let messages = TursoStore::open(dir.path().join("node/runtime.db"))
-        .await
-        .unwrap()
-        .load_messages(id)
-        .await
-        .unwrap();
+    let messages = RdbStore::open(opencoder_core::runtime_store_rdb_dir(
+        &dir.path().join("node"),
+    ))
+    .await
+    .unwrap()
+    .load_messages(id)
+    .await
+    .unwrap();
     let user_messages: Vec<_> = messages
         .iter()
         .filter(|message| message.role == Role::User)

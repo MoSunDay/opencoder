@@ -8,7 +8,7 @@ use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
 use opencoder_node::fleet::NodeService;
 use opencoder_store::{
     ProjectExecutorKind, ProjectStore, ProjectTodoRunKind, ProjectTodoRunRecord,
-    ProjectTodoRunStatus, TursoStore,
+    ProjectTodoRunStatus, RdbStore,
 };
 use opencoder_worker::{DrainPolicy, StorageCapacity, Worker, WorkerOptions, WorkerRuntime};
 use serde_json::{json, Value};
@@ -219,7 +219,7 @@ pub async fn seed_project_run(
     todo_id: &str,
     status: ProjectTodoRunStatus,
 ) {
-    let store = TursoStore::open(database).await.unwrap();
+    let store = RdbStore::open(database).await.unwrap();
     let version = store.next_todo_version(todo_id).await.unwrap();
     store
         .create_todo_run(&ProjectTodoRunRecord {

@@ -5,7 +5,7 @@ mod support;
 
 use opencoder_core::{fleet::*, harness::HarnessRuntime};
 use opencoder_node::fleet::NodeService;
-use opencoder_store::{Store, TursoStore};
+use opencoder_store::{RdbStore, Store};
 use serde_json::{json, Value};
 use support::{assignment, mock, settled, worker};
 
@@ -71,16 +71,22 @@ async fn recover(seed: usize) {
     record["assignment"]["index"]["status"] = json!("running");
     record["result"] = Value::Null;
     std::fs::write(&journal, serde_json::to_vec(&record).unwrap()).unwrap();
-    let store = TursoStore::open(root.join("node/runtime.db"))
+    let store = RdbStore::open(opencoder_core::runtime_store_rdb_dir(&root.join("node")))
         .await
         .unwrap();
     if seed == 0 {
-        store
-            .conn()
-            .await
+        // Simulate a session admitted before the runtime was persisted.
+        let db = opencoder_store::rdb_store::RdbDb::open(opencoder_core::runtime_store_rdb_dir(
+            &root.join("node"),
+        ))
+        .unwrap();
+        let mut row = opencoder_store::rdb_store::conversation::sessions::row(db.handle(), id)
             .unwrap()
-            .execute("UPDATE sessions SET harness_runtime=NULL WHERE id=?", [id])
-            .await
+            .unwrap();
+        row.harness_runtime = None;
+        let key = opencoder_store::rdb_store::kv::session_key(id);
+        rdb::store::set(db.handle(), b"", &key, &serde_json::to_vec(&row).unwrap())
+            .map_err(|e| anyhow::anyhow!("{e}"))
             .unwrap();
     } else {
         let mut runtime = store.harness_runtime(id).await.unwrap().unwrap();
@@ -168,7 +174,7 @@ async fn recover(seed: usize) {
         format!("{rules}\n\nfollow up @notes.md")
     );
     assert_eq!(records[1]["args"][1], "resume");
-    let store = TursoStore::open(root.join("node/runtime.db"))
+    let store = RdbStore::open(opencoder_core::runtime_store_rdb_dir(&root.join("node")))
         .await
         .unwrap();
     assert!(

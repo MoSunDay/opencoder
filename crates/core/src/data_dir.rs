@@ -5,9 +5,8 @@
 //! one process are invisible to another — surfacing as "session not found" and
 //! a detached `opencoder[exited]` pane. This module owns the single canonical
 //! algorithm so the three former call sites can no longer drift. It also owns
-//! the legacy-SQLite-stem → RocksDB-directory policy
-//! ([`session_store_rdb_dir`] / [`runtime_store_rdb_dir`]) shared by every
-//! store opener.
+//! the store path policy ([`session_store_rdb_dir`] /
+//! [`runtime_store_rdb_dir`]) shared by every store opener.
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -59,47 +58,30 @@ pub fn data_dir_for(workdir: &Path) -> PathBuf {
     data_root().join(canonical_workdir_digest(workdir))
 }
 
-/// RocksDB directory suffix appended to a legacy SQLite database stem: the
-/// legacy *file* name (`opencoder.db`, `runtime.db`) becomes the *directory*
-/// stem of its RocksDB replacement (`opencoder.db.rdb`).
+/// RocksDB directory suffix appended to a store stem: `opencoder.db` → the
+/// directory `opencoder.db.rdb`.
 pub const RDB_DIR_SUFFIX: &str = "rdb";
 
 /// Shared policy of [`session_store_rdb_dir`] and [`runtime_store_rdb_dir`]:
-/// resolve the RocksDB directory for a legacy SQLite stem inside `data_dir`.
-///
-/// - Prefer `<data_dir>/<stem>.rdb` — the canonical rdb layout, returned
-///   whether or not anything exists yet (a fresh store is created there).
-/// - Development-layout compatibility: when the `.rdb` directory does not
-///   exist but `<data_dir>/<stem>` is already a directory, that directory is
-///   the store (early rdb development layouts used the legacy stem directly
-///   as the RocksDB directory).
-/// - Never collide with a legacy plain file: a `<stem>` that is a regular
-///   file (the old SQLite database) is left untouched and the `.rdb` name is
-///   returned, so callers create the new store beside it instead of opening
-///   or replacing the legacy file.
-fn rdb_dir_preferring_new(data_dir: &Path, legacy_stem: &str) -> PathBuf {
-    let rdb_dir = data_dir.join(format!("{legacy_stem}.{RDB_DIR_SUFFIX}"));
-    if rdb_dir.exists() {
-        return rdb_dir;
-    }
-    let legacy = data_dir.join(legacy_stem);
-    if legacy.is_dir() {
-        return legacy;
-    }
-    rdb_dir
+/// every store lives in the single canonical directory
+/// `<data_dir>/<stem>.rdb`, returned whether or not anything exists yet (a
+/// fresh store is created there). A plain file at `<stem>` is never read,
+/// opened or replaced — the `.rdb` name never collides with it.
+fn rdb_dir(data_dir: &Path, stem: &str) -> PathBuf {
+    data_dir.join(format!("{stem}.{RDB_DIR_SUFFIX}"))
 }
 
-/// RocksDB directory of the per-workdir session store (legacy stem
-/// `opencoder.db`) — see [`rdb_dir_preferring_new`] for the policy.
+/// RocksDB directory of the per-workdir session store — see [`rdb_dir`] for
+/// the policy.
 pub fn session_store_rdb_dir(data_dir: &Path) -> PathBuf {
-    rdb_dir_preferring_new(data_dir, "opencoder.db")
+    rdb_dir(data_dir, "opencoder.db")
 }
 
-/// RocksDB directory of the runtime store (legacy stem `runtime.db`) —
-/// same policy as [`session_store_rdb_dir`], shared by every runtime-store
-/// opener so host and guest sides cannot drift apart.
+/// RocksDB directory of the runtime store — same policy as
+/// [`session_store_rdb_dir`], shared by every runtime-store opener so host
+/// and guest sides cannot drift apart.
 pub fn runtime_store_rdb_dir(data_dir: &Path) -> PathBuf {
-    rdb_dir_preferring_new(data_dir, "runtime.db")
+    rdb_dir(data_dir, "runtime.db")
 }
 
 #[cfg(test)]
@@ -213,10 +195,10 @@ mod tests {
         );
     }
 
-    /// Fresh data dir (or any state without a usable legacy directory):
-    /// the canonical `.rdb` name is preferred, for both store stems.
+    /// Fresh data dir: the canonical `.rdb` name is resolved for both
+    /// store stems.
     #[test]
-    fn rdb_dir_prefers_new_rdb_name() {
+    fn rdb_dir_resolves_the_canonical_rdb_name() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
             session_store_rdb_dir(dir.path()),
@@ -227,8 +209,8 @@ mod tests {
             runtime_store_rdb_dir(dir.path()),
             dir.path().join("runtime.db.rdb")
         );
-        // The preference holds once the .rdb directory exists, even when the
-        // legacy stem is also present as a directory.
+        // The canonical name holds once the .rdb directory exists, even
+        // when a bare-stem directory is also present.
         std::fs::create_dir_all(dir.path().join("opencoder.db.rdb")).unwrap();
         std::fs::create_dir_all(dir.path().join("opencoder.db")).unwrap();
         assert_eq!(
@@ -237,35 +219,17 @@ mod tests {
         );
     }
 
-    /// Development-layout compatibility: a directory named after the legacy
-    /// stem (and no `.rdb` directory yet) is used directly.
-    #[test]
-    fn rdb_dir_falls_back_to_legacy_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("opencoder.db")).unwrap();
-        assert_eq!(
-            session_store_rdb_dir(dir.path()),
-            dir.path().join("opencoder.db"),
-            "legacy-stem directory is the development-layout store"
-        );
-        std::fs::create_dir_all(dir.path().join("runtime.db")).unwrap();
-        assert_eq!(
-            runtime_store_rdb_dir(dir.path()),
-            dir.path().join("runtime.db")
-        );
-    }
-
-    /// A legacy plain SQLite file never collides with the new store: the
+    /// A plain `opencoder.db` file never collides with the store: the
     /// `.rdb` name is returned and the file is left untouched.
     #[test]
-    fn rdb_dir_never_collides_with_legacy_sqlite_file() {
+    fn rdb_dir_never_collides_with_a_plain_stem_file() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("opencoder.db"), b"legacy sqlite bytes").unwrap();
-        std::fs::write(dir.path().join("runtime.db"), b"legacy sqlite bytes").unwrap();
+        std::fs::write(dir.path().join("opencoder.db"), b"plain sqlite bytes").unwrap();
+        std::fs::write(dir.path().join("runtime.db"), b"plain sqlite bytes").unwrap();
         assert_eq!(
             session_store_rdb_dir(dir.path()),
             dir.path().join("opencoder.db.rdb"),
-            "legacy file is never used as the RocksDB directory"
+            "a plain stem file is never used as the RocksDB directory"
         );
         assert_eq!(
             runtime_store_rdb_dir(dir.path()),

@@ -166,7 +166,8 @@ impl SubtaskView {
                         snapshot.summary.as_deref(),
                         snapshot.tokens,
                     );
-                    self.snapshots.insert(snapshot.execution_id.clone(), snapshot);
+                    self.snapshots
+                        .insert(snapshot.execution_id.clone(), snapshot);
                 }
                 Some(Ok(()))
             }

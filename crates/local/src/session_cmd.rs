@@ -1,7 +1,8 @@
 //! CLI dispatch for `config`, `models`, and `session` subcommands.
 //!
 //! `config show` / `models` are pure P1 (resolved-config display).
-//! `session list|show|delete` reads the turso store — shared with P3 resume.
+//! `session list|show|delete` reads the rdb session store — shared with P3
+//! resume.
 
 use std::path::{Path, PathBuf};
 
@@ -9,8 +10,8 @@ use anyhow::{anyhow, Context, Result};
 
 use opencoder_core::Config;
 use opencoder_store::{
-    export_bundle, import_bundle, read_bundle, write_bundle, SessionFilter, SessionMeta, Store,
-    TursoStore,
+    export_bundle, import_bundle, read_bundle, write_bundle, RdbStore, SessionFilter, SessionMeta,
+    Store,
 };
 
 use crate::{Cli, ConfigSub, SessionSub};
@@ -104,6 +105,17 @@ pub(crate) fn models_summary(cfg: &Config) -> String {
 
 pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
     let workdir = current_workdir(cli)?;
+    // The legacy migration owns the store-open sequence (backup → import →
+    // marker) and must not run through `open_store`, which both opens the
+    // destination rdb store and runs the startup migration check itself.
+    if let SessionSub::MigrateLegacy {
+        from,
+        backup,
+        dry_run,
+    } = sub
+    {
+        return migrate_legacy_dispatch(&workdir, from.clone(), backup.clone(), *dry_run).await;
+    }
     let store = open_store(&workdir).await?;
     match sub {
         SessionSub::List => {
@@ -166,14 +178,42 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             println!("continue with: opencoder --session {id}");
             Ok(())
         }
+        SessionSub::MigrateLegacy { .. } => {
+            unreachable!("migrate-legacy is dispatched before the store is opened")
+        }
     }
+}
+
+/// `opencoder session migrate-legacy`: resolve the fixed destination from the
+/// workdir's data dir, honor `--from`/`--backup` overrides for the source and
+/// backup file, then print the migration report.
+async fn migrate_legacy_dispatch(
+    workdir: &Path,
+    from: Option<PathBuf>,
+    backup: Option<PathBuf>,
+    dry_run: bool,
+) -> Result<()> {
+    let data_dir = opencoder_core::data_dir_for(workdir);
+    let mut opts = crate::legacy::MigrateOptions::defaults(&data_dir);
+    if let Some(source) = &from {
+        // An explicit source re-bases the derived backup next to it.
+        opts.backup = crate::legacy::default_backup(source);
+        opts.source = source.clone();
+    }
+    if let Some(backup) = &backup {
+        opts.backup = backup.clone();
+    }
+    opts.dry_run = dry_run;
+    let report = crate::legacy::run(&opts).await?;
+    print!("{}", crate::legacy::render_report(&report, &opts));
+    Ok(())
 }
 
 /// Build the full session JSON value: meta (incl. compaction summary) + all
 /// message blocks (Text/Reasoning/ToolUse/ToolResult) + subagent task records
 /// (status/result/ok). Extracted from `show_session_json` so the shape is
 /// unit-testable without capturing stdout.
-pub(crate) async fn build_session_json(store: &TursoStore, id: &str) -> Result<serde_json::Value> {
+pub(crate) async fn build_session_json(store: &RdbStore, id: &str) -> Result<serde_json::Value> {
     let meta = store
         .get_session(id)
         .await?
@@ -204,7 +244,7 @@ pub(crate) async fn build_session_json(store: &TursoStore, id: &str) -> Result<s
 
 /// Emit full session state as JSON (see `build_session_json`). Machine-readable
 /// surface for deep e2e assertions, decoupled from storage internals.
-async fn show_session_json(store: &TursoStore, id: &str) -> Result<()> {
+async fn show_session_json(store: &RdbStore, id: &str) -> Result<()> {
     let body = build_session_json(store, id).await?;
     println!("{}", serde_json::to_string_pretty(&body)?);
     Ok(())
@@ -217,10 +257,32 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
     std::env::current_dir().context("get current dir")
 }
 
-pub(crate) async fn open_store(workdir: &Path) -> Result<TursoStore> {
-    let data_dir = opencoder_core::data_dir_for(workdir);
-    tokio::fs::create_dir_all(&data_dir).await.ok();
-    TursoStore::open(data_dir.join("opencoder.db")).await
+/// Open the session store for `workdir`'s hashed data dir: the shared
+/// CLI/TUI boot sequence of [`open_store_at`].
+pub async fn open_store(workdir: &Path) -> Result<RdbStore> {
+    open_store_at(&opencoder_core::data_dir_for(workdir)).await
+}
+
+/// Data-dir core of [`open_store`]: best-effort dir creation, legacy-SQLite
+/// migration check, then open `session_store_rdb_dir(&data_dir)`. Shared by
+/// the CLI and the TUI boot path so the sequence cannot drift — the TUI once
+/// opened the legacy plain-file stem directly and failed with
+/// `File exists (os error 17)` when an old build had left
+/// `<data_dir>/opencoder.db` behind.
+pub async fn open_store_at(data_dir: &Path) -> Result<RdbStore> {
+    tokio::fs::create_dir_all(data_dir).await.ok();
+    // Migrate a legacy SQLite store (if any) BEFORE opening the rdb store so
+    // migrated sessions are visible in the same process. A first run without
+    // a legacy file is a no-op here and opens normally.
+    if let Some(report) = crate::legacy::ensure_migrated(data_dir).await? {
+        tracing::info!(
+            source = ?report.marker,
+            roots = report.roots_imported,
+            skipped = report.roots_skipped,
+            "migrated legacy session store into the rdb session store"
+        );
+    }
+    RdbStore::open(opencoder_core::session_store_rdb_dir(data_dir)).await
 }
 
 /// One transcript line for `session show`: role tag plus the message text.
@@ -420,9 +482,9 @@ mod tests {
     async fn build_session_json_emits_meta_messages_and_subagent_tasks() {
         use super::build_session_json;
         use opencoder_core::{ContentBlock, Message, Role};
-        use opencoder_store::{SessionMeta, Store, TursoStore};
+        use opencoder_store::{RdbStore, SessionMeta, Store};
 
-        let store = TursoStore::open_memory().await.unwrap();
+        let store = RdbStore::open_memory().await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "s1".into(),
@@ -488,9 +550,9 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_redacts_clear_context_sentinel() {
         use super::build_session_json;
-        use opencoder_store::{SessionMeta, Store, TursoStore};
+        use opencoder_store::{RdbStore, SessionMeta, Store};
 
-        let store = TursoStore::open_memory().await.unwrap();
+        let store = RdbStore::open_memory().await.unwrap();
         store
             .create_session(&SessionMeta {
                 id: "redact-s1".into(),
@@ -525,9 +587,9 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_errors_on_missing_session() {
         use super::build_session_json;
-        use opencoder_store::TursoStore;
+        use opencoder_store::RdbStore;
 
-        let store = TursoStore::open_memory().await.unwrap();
+        let store = RdbStore::open_memory().await.unwrap();
         let err = build_session_json(&store, "does-not-exist").await;
         assert!(err.is_err(), "missing session must error, not empty output");
     }

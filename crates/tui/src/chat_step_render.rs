@@ -24,11 +24,10 @@ use super::{
 /// drill-down): the clickable turn row `{▸|❯} N Steps` (col 0, accent
 /// bold) + a live progress hint until Say begins; while the group is closed
 /// that row (plus one trailing
-/// blank) is the whole block — except while the turn runs
-/// (`progress_active`): the CURRENT (last) step then streams below that
-/// row as a render-only LIVE PREVIEW (forced-open step row + thinking +
-/// calls; no targets), which retires when progress settles. Disclosure
-/// NEVER moves on its own: the ladder opens only by user toggle. While it
+/// blank) is the whole block; while the turn runs the CURRENT step streams
+/// in the separate TURN LIVE AREA at the transcript tail
+/// (`chat_live_turn.rs`), not here. Disclosure NEVER moves on its own: the
+/// ladder opens only by user toggle. While it
 /// is open, per step: the step row (indent 2) — while the step is open its
 /// `💭 Thinking` block (header
 /// indent 4, body indent 8) and a `N Function calls` aggregation row
@@ -272,25 +271,11 @@ pub(crate) fn flatten_step_group(
             }
             out.push(Line::from(spans));
             if !open {
-                // LIVE PREVIEW: while the turn runs and the ladder stays
-                // folded, the CURRENT (last) step streams below the `N
-                // Steps` row — forced open (step row + thinking + calls),
-                // render-only, no targets. Settle retires it; the step then
-                // lives only inside the folded ladder. A user-opened ladder
-                // suppresses the preview (its rows show instead).
-                if progress_active {
-                    if let Some(last) = steps.last() {
-                        push_step_body(
-                            out,
-                            steps.len() - 1,
-                            last,
-                            steps.len(),
-                            anim_tick,
-                            true,
-                            true,
-                        );
-                    }
-                }
+                // Folded ladder: the row plus one trailing blank is the
+                // whole block. While the turn runs its CURRENT step streams
+                // in the separate TURN LIVE AREA at the transcript tail
+                // (`chat_live_turn.rs`) — never inside this block, never
+                // coupled to this ladder's disclosure state.
                 out.push(Line::from(""));
                 return;
             }
@@ -298,8 +283,7 @@ pub(crate) fn flatten_step_group(
     }
     // User-opened ladder: every step renders its `Step(n)` row; open steps
     // reveal thinking + the calls aggregate, open aggregates reveal the
-    // call headers. The running live preview (folded arm above) reuses the
-    // same body renderer forced open, so ladder and preview stay identical.
+    // call headers.
     for (si, step) in steps.iter().enumerate() {
         push_step_body(
             out,
@@ -318,12 +302,13 @@ pub(crate) fn flatten_step_group(
 /// while `step_open` — its `💭 Thinking` header (indent 4) + body (indent
 /// 8) and the `N Function call(s)` aggregation row (indent 4), then —
 /// while `calls_open` — each call header (indent 6; a still-running call
-/// carries the spinner) plus its expanded result (indent 6). Shared by the
-/// open ladder loop and the running live preview (folded arm; forced open
-/// without mutating the stored flags) so both paths render identically.
+/// carries the spinner) plus its expanded result (indent 6). Used by the
+/// open-ladder loop here and — forced open, without mutating the stored
+/// flags — by the independent turn live area (`chat_live_turn.rs`), so the
+/// ladder and the live area render identical shapes.
 /// `steps_len` drives the "final expanded call suppresses its separator"
 /// rule — the group's trailing blank provides it.
-fn push_step_body(
+pub(crate) fn push_step_body(
     out: &mut Vec<Line<'static>>,
     si: usize,
     step: &Step,

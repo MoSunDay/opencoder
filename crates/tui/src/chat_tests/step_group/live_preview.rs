@@ -1,14 +1,16 @@
-//! Live (streaming) preview contract: disclosure NEVER moves on its own —
-//! every ladder is folded by default and no streaming event opens or closes
-//! a level. While the admitted turn runs (`progress_active`, i.e. no Say
-//! yet), the renderer streams the CURRENT (last) step below the folded
-//! `N Steps` row as a render-only LIVE PREVIEW (forced-open step row +
-//! thinking + calls aggregate + call headers); Say's first chunk, run end,
-//! Error, or a new turn retires the preview, and the step then lives only
-//! inside the folded ladder. User toggles are plain persistent state: an
-//! open ladder suppresses the preview (its rows show instead) and survives
-//! the settle; Ctrl+L folds levels but the render-only preview keeps
-//! streaming. Replay/snapshot ladders never preview (`replay.rs`).
+//! Live (streaming) contract: disclosure NEVER moves on its own — every
+//! ladder is folded by default and no streaming event opens or closes a
+//! level. While the admitted turn runs (`progress_active`, i.e. no Say
+//! yet), the CURRENT (last) step streams in the TURN LIVE AREA — an
+//! independent render-only region at the transcript tail
+//! (`chat_live_turn.rs`), never inside a ladder block and never coupled to
+//! any ladder's disclosure state. Say's first chunk, run end, Error, or a
+//! new turn retires the area, and the step then lives only inside that
+//! turn's folded ladder; if the next turn is already running the area
+//! simply shows it. An open ladder COEXISTS with the live area (its rows
+//! plus the streaming tail), and the user's open state survives the
+//! settle; Ctrl+L folds levels but the render-only area keeps streaming.
+//! Replay/snapshot ladders never stream (`replay.rs`).
 
 use super::*;
 
@@ -57,13 +59,13 @@ fn end_call(view: &mut ChatView, id: &str, output: &str) {
 }
 
 #[test]
-fn running_reasoning_previews_the_last_step_below_the_folded_ladder() {
+fn running_reasoning_streams_in_the_turn_live_area() {
     let mut v = ChatView::default();
     reasoning(&mut v, "first thought");
     assert_eq!(
         disclosure(&v),
         (false, vec![(false, false)]),
-        "the ladder itself stays folded — the preview is render-only"
+        "the ladder itself stays folded — the live area is render-only"
     );
     let text = flat(&v);
     assert!(
@@ -71,14 +73,14 @@ fn running_reasoning_previews_the_last_step_below_the_folded_ladder() {
         "folded group row with its running hint: {:?}",
         flat_first(&v)
     );
-    assert!(text.contains("Step(1)"), "preview step row: {text}");
+    assert!(text.contains("Step(1)"), "live area step row: {text}");
     assert!(
         text.contains("\u{1f4ad} Thinking"),
-        "preview thinking header: {text}"
+        "live area thinking header: {text}"
     );
     assert!(
         text.contains("first thought"),
-        "live thinking streams in the preview — no click needed: {text}"
+        "live thinking streams in the live area — no click needed: {text}"
     );
 
     reasoning(&mut v, " grows");
@@ -90,14 +92,14 @@ fn running_reasoning_previews_the_last_step_below_the_folded_ladder() {
 }
 
 #[test]
-fn running_calls_preview_with_spinner_and_the_ladder_stays_folded() {
+fn running_calls_stream_with_spinner_and_the_ladder_stays_folded() {
     let mut v = ChatView::default();
     reasoning(&mut v, "thinking");
     start_call(&mut v, "c1");
     assert_eq!(
         disclosure(&v),
         (false, vec![(false, false)]),
-        "a joining call opens nothing — the preview renders it instead"
+        "a joining call opens nothing — the live area renders it instead"
     );
     let text = flat(&v);
     assert!(text.contains("1 Function call"), "calls aggregate: {text}");
@@ -111,17 +113,17 @@ fn running_calls_preview_with_spinner_and_the_ladder_stays_folded() {
     assert_eq!(
         disclosure(&v),
         (false, vec![(false, false)]),
-        "call completion is not a Step boundary: the preview keeps streaming"
+        "call completion is not a Step boundary: the live area keeps streaming"
     );
     assert!(
         flat(&v).contains("Step(1)"),
-        "the step stays visible in the preview after its call ends: {}",
+        "the step stays visible in the live area after its call ends: {}",
         flat(&v)
     );
 }
 
 #[test]
-fn a_new_step_moves_the_preview_and_folds_the_previous_one() {
+fn a_new_step_moves_the_live_area_and_folds_the_previous_one() {
     let mut v = ChatView::default();
     reasoning(&mut v, "round one");
     start_call(&mut v, "c1");
@@ -138,20 +140,23 @@ fn a_new_step_moves_the_preview_and_folds_the_previous_one() {
         "got {:?}",
         flat_first(&v)
     );
-    assert!(text.contains("Step(2)"), "the preview moves to the new step: {text}");
+    assert!(
+        text.contains("Step(2)"),
+        "the live area moves to the new step: {text}"
+    );
     assert!(
         text.contains("round two"),
         "the new step's thinking streams: {text}"
     );
     assert!(
         !text.contains("round one") && !text.contains("Step(1)"),
-        "only the CURRENT step previews — the finished one lives inside the \
+        "only the CURRENT step streams — the finished one lives inside the \
 folded ladder: {text}"
     );
 }
 
 #[test]
-fn say_first_chunk_and_run_end_clear_the_preview() {
+fn say_first_chunk_and_run_end_clear_the_live_area() {
     let mut v = ChatView::default();
     reasoning(&mut v, "think");
     start_call(&mut v, "c1");
@@ -166,25 +171,25 @@ fn say_first_chunk_and_run_end_clear_the_preview() {
     );
     assert!(
         !text.contains("Step(1)") && !text.contains("think"),
-        "the preview retires — the step lives only inside the folded pair: {text}"
+        "the live area retires — the step lives only inside the folded pair: {text}"
     );
 
     v.apply(&SessionEvent::Done);
     assert_eq!(
         disclosure(&v),
         (false, vec![(false, false)]),
-        "Done changes nothing disclosure-wise (the preview was already gone)"
+        "Done changes nothing disclosure-wise (the live area was already gone)"
     );
 
-    // A post-Say ladder re-arms: new activity below the Say previews fresh,
-    // on the NEW ladder only.
+    // A post-Say ladder re-arms: new activity below the Say streams fresh
+    // in the live area, on the NEW turn only.
     reasoning(&mut v, "more work");
     start_call(&mut v, "c2");
     assert!(!disclosure(&v).0, "the closed ladder above stays closed");
     let text = flat(&v);
     assert!(
         text.contains("more work") && text.contains("Step(1)"),
-        "the second ladder previews its running step: {text}"
+        "the second ladder's running step streams in the live area: {text}"
     );
     v.apply(&SessionEvent::Done);
     assert!(
@@ -195,7 +200,7 @@ fn say_first_chunk_and_run_end_clear_the_preview() {
 }
 
 #[test]
-fn error_clears_the_preview_like_done() {
+fn error_clears_the_live_area_like_done() {
     let mut v = ChatView::default();
     reasoning(&mut v, "think");
     assert!(flat(&v).contains("Step(1)"));
@@ -203,15 +208,15 @@ fn error_clears_the_preview_like_done() {
     let text = flat(&v);
     assert!(
         !text.contains("Step(1)") && !text.contains("think"),
-        "Error retires the preview like Done: {text}"
+        "Error retires the live area like Done: {text}"
     );
 }
 
-/// The preview is render-only: it must not create click targets (the folded
-/// ladder still yields exactly its group row) — `visible_targets` and the
-/// mouse map stay unchanged while it streams.
+/// The live area is render-only: it must not create click targets (the
+/// folded ladder still yields exactly its group row) — `visible_targets`
+/// and the mouse map stay unchanged while it streams.
 #[test]
-fn preview_rows_are_not_clickable_targets() {
+fn live_area_rows_are_not_clickable_targets() {
     let mut v = ChatView::default();
     reasoning(&mut v, "thinking");
     start_call(&mut v, "c1");
@@ -219,29 +224,40 @@ fn preview_rows_are_not_clickable_targets() {
     assert_eq!(
         headers.len(),
         1,
-        "only the group row is clickable while the preview streams: {headers:?}"
+        "only the group row is clickable while the live area streams: {headers:?}"
     );
-    // Clicking the group row opens the ladder (and thereby suppresses the
-    // preview) — plain toggle, no pins.
+    // Clicking the group row opens the ladder — plain toggle, no pins; the
+    // live area at the tail keeps streaming regardless.
     v.toggle_tool_call_at(0, 0);
     let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 2, "group + step row (calls aggregate waits for step.open): {headers:?}");
+    assert_eq!(
+        headers.len(),
+        2,
+        "group + step row (calls aggregate waits for step.open): {headers:?}"
+    );
 }
 
-/// A user-opened ladder suppresses the preview (its rows show instead — no
-/// duplicated streaming content), and the user's open state survives the
-/// settle: streaming never closes a level behind the user's back.
+/// TWO SEPARATE REGIONS: a user-opened ladder and the live area COEXIST —
+/// opening the ladder never touches the streaming tail (no suppression in
+/// either direction), and the user's open state survives the settle:
+/// streaming never closes a level behind the user's back.
 #[test]
-fn user_opened_ladder_suppresses_the_preview_and_survives_the_settle() {
+fn user_opened_ladder_coexists_with_the_live_area_and_survives_the_settle() {
     let mut v = ChatView::default();
     reasoning(&mut v, "round one");
     start_call(&mut v, "c1");
     v.toggle_tool_call_at(0, 0); // open the ladder mid-run
     let text = flat(&v);
     assert!(
-        text.contains("Step(1)") && !text.contains("round one"),
-        "open ladder renders the step ROW; the closed step keeps its thinking \
-folded and the preview is suppressed: {text}"
+        text.contains("Step(1)") && text.contains("round one"),
+        "open ladder renders the step ROW in-region while the live area at \
+the tail streams the same running step's thinking — coexistence: {text}"
+    );
+    let live_tail = &text[text.rfind("Step(1)").unwrap()..];
+    assert!(
+        live_tail.contains("💭 Thinking") && live_tail.contains("round one"),
+        "the live area (forced open) trails every block, untouched by the \
+ladder's disclosure: {text}"
     );
 
     reasoning(&mut v, " round two");
@@ -250,6 +266,11 @@ folded and the preview is suppressed: {text}"
         (true, vec![(false, false), (false, false)]),
         "the new running step still opens nothing inside the user-open ladder"
     );
+    let text = flat(&v);
+    assert!(
+        text.ends_with("round two\n"),
+        "the live area now streams the NEW current step: {text}"
+    );
 
     v.apply(&SessionEvent::TextDelta("answer".into()));
     assert_eq!(
@@ -257,12 +278,17 @@ folded and the preview is suppressed: {text}"
         (true, vec![(false, false), (false, false)]),
         "settle never closes a level the user opened"
     );
+    assert!(
+        !flat(&v).contains("round two"),
+        "and retires the live area like every settle: {}",
+        flat(&v)
+    );
 }
 
-/// Ctrl+L folds every collapsible level, but the preview is not a disclosure
-/// level — the running step keeps streaming while the turn runs.
+/// Ctrl+L folds every collapsible level, but the live area is not a
+/// disclosure level — the running step keeps streaming while the turn runs.
 #[test]
-fn collapse_all_keeps_the_live_preview_visible() {
+fn collapse_all_keeps_the_live_area_visible() {
     let mut v = ChatView::default();
     reasoning(&mut v, "thinking");
     v.collapse_all_collapsible();
@@ -272,7 +298,7 @@ fn collapse_all_keeps_the_live_preview_visible() {
     let text = flat(&v);
     assert!(
         text.contains("thinking more") && text.contains("Step(1)"),
-        "the render-only preview survives Ctrl+L: {text}"
+        "the render-only live area survives Ctrl+L: {text}"
     );
     v.apply(&SessionEvent::Done);
     assert!(
@@ -283,10 +309,10 @@ fn collapse_all_keeps_the_live_preview_visible() {
 }
 
 #[test]
-fn replay_ladders_carry_no_preview() {
+fn replay_ladders_carry_no_live_area() {
     // Mirrors `replay.rs::replay_tool_round`: a reasoning+tool-use assistant
     // message followed by its tool result. Replayed ladders are at rest —
-    // fully folded, no preview.
+    // fully folded, no live area.
     let mut asst = Message::assistant("a1");
     asst.blocks.push(ContentBlock::Reasoning {
         text: "pondering".into(),
@@ -308,11 +334,11 @@ fn replay_ladders_carry_no_preview() {
     assert_eq!(
         disclosure(&v),
         (false, vec![(false, false)]),
-        "replayed ladders never preview, even though the steps are complete"
+        "replayed ladders never stream, even though the steps are complete"
     );
     let text = flat(&v);
     assert!(
         !text.contains("Step(1)") && !text.contains("pondering"),
-        "no preview rows leak into a replayed transcript: {text}"
+        "no live-area rows leak into a replayed transcript: {text}"
     );
 }

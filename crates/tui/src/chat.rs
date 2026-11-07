@@ -56,6 +56,9 @@ mod steps;
 #[path = "chat_steps_replay.rs"]
 mod steps_replay;
 
+#[path = "chat_live_turn.rs"]
+mod live_turn;
+
 #[path = "compaction_block.rs"]
 mod compaction_block;
 #[path = "chat_context.rs"]

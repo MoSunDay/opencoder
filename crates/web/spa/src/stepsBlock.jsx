@@ -7,20 +7,23 @@
 //   L0  ❯ 2 Steps [running|error]  ← TURN Collapse (ghost), CLOSED by
 //         default and the ONLY thing a folded steps bubble renders; running
 //         from reasoning/tool activity until Say begins, then red on any
-//         error. Open state lives in StepsContent's own `stepsOpen` useState
-//         (no auto effects, no overrides), so a user-opened ladder survives
-//         streaming rerenders.
+//         error. L0 is fully UNCONTROLLED (no useState, no auto effects):
+//         antd keeps its own open state across streaming rerenders, so a
+//         user-opened ladder survives them.
 //         With the turn's own Say: the header becomes the Say row
 //           `❯ N Steps: {first-line preview}` and the running tag
 //           rides THERE (driven by sayActive, the sayStreaming ladder flag)
 //           until the sub-turn's ladder ends.
-//   LIVE PREVIEW — while `ladderRunning` and L0 is still folded, the LAST
-//         step renders directly below the summary row: `Step(k)` header +
-//         its thinking + its call rows (the same ToolContent rows as L3, so
-//         the per-call `running` tag/duration/error stream in place). When
-//         running retires (Say begins / the turn settles) the preview
-//         disappears and the step lives only inside the folded ladder.
-//         Opening L0 hides the preview (nothing is shown twice).
+//   TURN LIVE AREA — a SEPARATE sibling region BELOW the ladder while
+//         `ladderRunning`: the LAST step renders as `Step(k)` header + its
+//         thinking + its call rows (the same ToolContent rows as L3, so the
+//         per-call `running` tag/duration/error stream in place). When
+//         running retires (Say begins / the turn settles) the area clears
+//         and the step lives only inside the turn's folded ladder; if the
+//         next turn is already running, the area simply shows it. The area
+//         is gated ONLY on `ladderRunning` — zero coupling with the
+//         ladder's disclosure state, so opening L0 NEVER hides it (two
+//         separate regions, TUI parity with chat_live_turn.rs).
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (uncontrolled);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
@@ -43,7 +46,6 @@
 // by the L3 rows, the live preview, and flat `tool` turns (task handles).
 // The import is one-way (transcript → stepsBlock), no cycle.
 
-import { useState } from 'react';
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
 import { sayPresentation } from './transcript/markdown.js';
@@ -221,10 +223,10 @@ function StepCollapse({ step, index }) {
 /// LIVE preview under the folded L0 summary: the LAST step's header + body
 /// (thinking + its call rows laid out flat, so the running call and its
 /// `running` tag stream in place). The 12px left inset matches antd's
-/// collapse body padding, keeping the preview aligned with the drilled rows;
-/// no separators — the preview simply disappears once the ladder settles or
-/// the user opens L0.
-function StepPreview({ step, index }) {
+/// collapse body padding, keeping the live area aligned with the drilled
+/// rows; no separators — the area simply disappears once the turn settles
+/// (it never reacts to L0 opening or folding).
+function TurnLiveArea({ step, index }) {
   const k = index + 1;
   const list = (step && Array.isArray(step.calls)) ? step.calls : [];
   const failed = list.some((c) => c && c.isError);
@@ -247,9 +249,10 @@ function StepPreview({ step, index }) {
 /// empty/whitespace Say leaves the preview empty (bare colon).
 
 /// Turn row (L0): ONE ghost Collapse for the whole turn — default CLOSED,
-/// so a collapsed steps bubble shows only this row plus the live preview
-/// while the ladder runs (see header comment). The L0 open state is plain
-/// local UI state (`stepsOpen`), NOT an auto-managed policy. Two label modes:
+/// so a collapsed steps bubble shows only this row — while the ladder runs
+/// its current step additionally streams in the SEPARATE turn live area
+/// below (see header comment). L0 is fully UNCONTROLLED: plain user toggles,
+/// NOT an auto-managed policy. Two label modes:
 ///   * no Say yet: `❯ N Step(s)`; `running` while `progressActive` stays
 ///     true from reasoning/tool activity until Say begins (older hand-built
 ///     turns without that field fall back to the open-call test);
@@ -280,11 +283,9 @@ export function StepsContent({ turn, preview }) {
   const ladderRunning = !hasSay && (typeof turn.progressActive === 'boolean'
     ? turn.progressActive === true
     : openCall);
-  // L0 is the ONLY controlled level and its state is plain local UI state:
-  // folded by default, survives streaming rerenders, resets when Ctrl+L /
-  // ⤒ 收起 remounts the bubble (epoch key in transcript.jsx). No auto
-  // effects, no overrides; L1/L2/L3 stay uncontrolled.
-  const [stepsOpen, setStepsOpen] = useState(false);
+  // L0/L1/L2/L3 are ALL uncontrolled: folded by default, antd's own state
+  // survives streaming rerenders, and Ctrl+L / ⤒ 收起 remounts the bubble
+  // (epoch key in transcript.jsx) to reset. No auto effects, no overrides.
   const errored = calls.some((c) => c && c.isError);
   const headingPreview = preview ?? sayPresentation(say, turn.sayActive === true).preview;
   return (
@@ -293,8 +294,6 @@ export function StepsContent({ turn, preview }) {
         expandIcon={disclosureIcon}
         size="small"
         ghost
-        activeKey={stepsOpen ? ['steps'] : []}
-        onChange={(keys) => setStepsOpen(keys.includes('steps'))}
         items={[{
           key: 'steps',
           label: (
@@ -309,8 +308,11 @@ export function StepsContent({ turn, preview }) {
           )),
         }]}
       />
-      {ladderRunning && !stepsOpen && steps.length > 0 ? (
-        <StepPreview step={steps[steps.length - 1]} index={steps.length - 1} />
+      {/* TURN LIVE AREA — independent of the ladder's disclosure state; it
+          streams while the turn runs and clears on settle, regardless of
+          whether L0 is open (coexistence, TUI parity). */}
+      {ladderRunning && steps.length > 0 ? (
+        <TurnLiveArea step={steps[steps.length - 1]} index={steps.length - 1} />
       ) : null}
     </>
   );

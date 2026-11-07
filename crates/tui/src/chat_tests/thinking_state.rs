@@ -18,7 +18,12 @@ fn legacy_thinking_view(runs: &[(&str, bool)]) -> ChatView {
 fn lines_of(v: &ChatView) -> Vec<String> {
     v.flatten()
         .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect::<String>())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.clone())
+                .collect::<String>()
+        })
         .collect()
 }
 
@@ -327,9 +332,7 @@ fn live_preview_materializes_reasoning_while_the_turn_runs() {
         "the settled step lives only inside the folded ladder: {text}"
     );
     let rendered2 = match &v.blocks[2] {
-        ChatBlock::StepGroup { steps, .. } => {
-            crate::chat::steps::span_text(&steps[0].thinking)
-        }
+        ChatBlock::StepGroup { steps, .. } => crate::chat::steps::span_text(&steps[0].thinking),
         _ => unreachable!("third block must be the step group"),
     };
     assert_eq!(rendered2, "second more");

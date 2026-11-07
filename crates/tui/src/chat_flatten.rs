@@ -246,6 +246,15 @@ impl ChatView {
                 }
             }
         }
+        // TURN LIVE AREA — an independent region at the transcript tail,
+        // zero-coupled from every ladder's disclosure state (see
+        // `chat_live_turn.rs`): while the admitted turn runs, its CURRENT
+        // step streams here; settle retires the area (the step then lives
+        // only inside the turn's folded ladder), and if the next turn is
+        // already running the area simply shows that one.
+        if let Some(steps) = super::live_turn::active_steps(&self.blocks, self.turn_block_start) {
+            super::live_turn::flatten(&mut out, steps, anim_tick);
+        }
         out
     }
 

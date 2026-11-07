@@ -25,9 +25,9 @@
 //! Disclosure is ALWAYS user-controlled: every ladder is folded by default
 //! and no streaming event opens or closes a level. While a turn runs
 //! (`progress_active`) the renderer draws the CURRENT (last) step as a
-//! render-only live preview below the folded `N Steps` row (see
-//! `chat_step_render.rs`); the preview retires when progress settles. This
-//! module only keeps the preview's thinking materialized while it is
+//! render-only TURN LIVE AREA at the transcript tail (see
+//! `chat_live_turn.rs`); the area retires when progress settles. This
+//! module only keeps the live area's thinking materialized while it is
 //! visible.
 
 use ratatui::text::Line;
@@ -114,7 +114,7 @@ fn append_step_call(steps: &mut Vec<Step>, mut thinking: Vec<Line<'static>>, cal
 /// A fresh single-step group carrying `call` (live `ToolStart` with no
 /// trailing group, replayed group seeds, orphan synthesis). Starts folded
 /// (every level collapsed); live callers arm it via `set_turn_progress`,
-/// which only drives the spinner + live preview, never disclosure.
+/// which only drives the spinner + the turn live area, never disclosure.
 pub(crate) fn single_step_group(call: ToolCall, thinking: Vec<Line<'static>>) -> ChatBlock {
     let thinking_raw = span_text(&thinking);
     ChatBlock::StepGroup {
@@ -252,7 +252,7 @@ pub(crate) fn append_step_thinking_delta(
                 calls_open: false,
                 sealed: false,
             });
-            // A fresh step takes over the live preview while the turn runs:
+            // A fresh step takes over the turn live area while the turn runs:
             // materialize its first delta so the preview renders markdown
             // right away (the finished steps above stay folded inside the
             // ladder — no auto-open/auto-fold anywhere).
@@ -269,7 +269,7 @@ pub(crate) fn append_step_thinking_delta(
             // being expanded — new thinking output stops appearing.
             step.thinking_dirty = true;
             // Visible when the user opened this step OR when the folded
-            // ladder is showing the running step as a live preview.
+            // ladder is folded; the turn live area shows the running step.
             if (*open && step.open) || should_show_progress {
                 render_step_thinking(step);
             }

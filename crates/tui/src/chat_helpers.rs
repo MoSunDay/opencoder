@@ -173,7 +173,11 @@ impl ChatView {
                 sealed: true,
             }],
             open: true,
-            progress_active: true,
+            // Born fully open (user-openable) and NOT progress-armed: the
+            // synthetic ladder is final history the moment it exists, and
+            // streaming duty belongs to the TURN LIVE AREA tail — the call
+            // row's own spinner span shows activity without duplicating it.
+            progress_active: false,
         });
     }
 

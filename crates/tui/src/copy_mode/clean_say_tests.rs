@@ -140,11 +140,12 @@ fn streaming_say_preview_survives() {
 }
 
 #[test]
-fn running_call_header_cleans_to_its_label_only() {
+fn running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_text() {
     // A call whose `ToolEnd` has not arrived renders its header with a
     // trailing `" ⠋"` motion span (chat_step_render: `elapsed_ms` unset).
-    // The header text is content and must survive copy mode, but the
-    // spinner glyph is chrome and must never reach the copied text.
+    // While the turn runs that row lives ONLY in the TURN LIVE REGION (its
+    // own area — the transcript holds just the folded ladder row), so copy
+    // mode over the transcript can never pick up the spinner glyph.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("thinking".into()));
     v.apply(&SessionEvent::ToolStart {
@@ -152,23 +153,35 @@ fn running_call_header_cleans_to_its_label_only() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
-    // Precondition: the live ladder really carries the spinner span on the
+    // Precondition: the live region really carries the spinner span on the
     // running call's header row (tick 0 → first spinner frame).
+    let live_rows = crate::chat::live_turn::active_steps(&v.blocks, v.turn_block_start)
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .unwrap_or_default();
+    let live_text = live_rows
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.clone())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        row_texts(&v)
-            .iter()
-            .any(|l| l.contains('\u{280b}') && l.contains("bash")),
-        "precondition: the running call header carries the spinner glyph"
+        live_text.contains('\u{280b}') && live_text.contains("bash"),
+        "precondition: the live region's running call header carries the \
+spinner glyph: {live_text:?}"
+    );
+    assert!(
+        !row_texts(&v).iter().any(|l| l.contains("bash")),
+        "the transcript holds only the folded ladder while the region streams"
     );
 
     let text = copy_text(&v);
     assert!(
-        text.contains("bash echo x"),
-        "the running call's header label stays selectable in copy mode: {text}"
-    );
-    assert!(
-        !text.contains('\u{280b}'),
-        "the live spinner glyph is chrome and must be stripped: {text}"
+        !text.contains('\u{280b}') && !text.contains("bash echo x"),
+        "copy text stays transcript-only: no spinner, no live-region rows: {text}"
     );
 }
 

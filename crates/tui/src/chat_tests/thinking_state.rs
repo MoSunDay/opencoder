@@ -338,9 +338,9 @@ fn live_preview_materializes_reasoning_while_the_turn_runs() {
     assert_eq!(rendered2, "second more");
 
     // Reasoning that resumes after the Say births the NEXT ladder below it,
-    // which previews fresh on its own.
+    // which streams fresh in the live region on its own.
     v.apply(&SessionEvent::ReasoningDelta(" tail".into()));
-    let text = lines_of(&v).join("\n");
+    let text = super::step_group::live_lines(&v).join("\n");
     assert!(
         text.contains("tail"),
         "post-Say reasoning streams into a new previewing ladder: {text}"

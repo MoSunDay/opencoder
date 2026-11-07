@@ -180,6 +180,21 @@ pub(crate) fn render<B: Backend + 'static>(
             .saturating_sub(text_h.saturating_sub(1))
             .min(max_scroll);
 
+        // TURN LIVE REGION — its OWN layout area between the transcript
+        // and the queue/composer, NEVER part of the transcript scroll
+        // region (`chat_live_turn.rs`): while the admitted turn runs, its
+        // CURRENT step streams here; settle clears it. Zero coupling with
+        // any ladder's disclosure state AND with transcript line math.
+        let live_lines = if plan_active {
+            Vec::new()
+        } else {
+            crate::chat::live_turn::active_steps(&chat.blocks, chat.turn_block_start)
+                .map(|steps| crate::chat::live_turn::render_lines(steps, anim_tick))
+                .unwrap_or_default()
+        };
+        // Cap the region's height (the same one-third budget the composer
+        // uses) and keep the TAIL — the newest lines matter while streaming.
+        let live_h = (live_lines.len() as u16).min(draw_area.height / 3);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -188,6 +203,7 @@ pub(crate) fn render<B: Backend + 'static>(
                 } else {
                     Constraint::Min(3)
                 },
+                Constraint::Length(live_h),
                 Constraint::Length(queue_h),
                 Constraint::Length(skill_h),
                 Constraint::Length(composer_h),
@@ -228,6 +244,17 @@ pub(crate) fn render<B: Backend + 'static>(
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
+        }
+        ci += 1;
+        // The live region renders render-only: no targets, no scroll, no
+        // selection — streaming can never move transcript state.
+        if live_h > 0 {
+            let skip = live_lines.len().saturating_sub(live_h as usize);
+            f.render_widget(
+                ratatui::widgets::Paragraph::new(live_lines[skip..].to_vec())
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
+                chunks[ci],
+            );
         }
         ci += 1;
         // Clamp a stale queue scroll every frame (entries deleted/consumed

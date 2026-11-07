@@ -12,6 +12,19 @@ use super::super::*;
 use crate::session_ui::replay_messages;
 use opencoder_core::{ContentBlock, Message, Role};
 
+/// The TURN LIVE REGION's rendered rows (`chat_live_turn.rs`): the running
+/// turn's current step streamed in its OWN area between the transcript and
+/// the composer — `flatten`/`lines` (the transcript) never contain these
+/// lines. Shared by the live tests here and sibling chat_tests modules.
+pub(crate) fn live_lines(view: &ChatView) -> Vec<String> {
+    crate::chat::live_turn::active_steps(&view.blocks, view.turn_block_start)
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .unwrap_or_default()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect()
+}
+
 fn lines(v: &ChatView) -> Vec<String> {
     v.flatten()
         .iter()
@@ -363,14 +376,14 @@ fn expanded_step_keeps_streaming_new_thinking_deltas() {
     // `thinking_dirty` — the state the freeze regression starts from.
     v.toggle_tool_call_at(0, 1); // StepTarget::Step(0) → folded (pinned)
     v.toggle_tool_call_at(0, 1); // StepTarget::Step(0) → reopened (pinned)
-    let expanded = lines(&v).join("\n");
+    let expanded = live_lines(&v).join("\n");
     assert!(
         expanded.contains("first chunk"),
-        "expanded step renders the streamed thinking: {expanded:?}"
+        "the live region renders the streamed thinking: {expanded:?}"
     );
     // More of the SAME reasoning run arrives while the step is open.
     v.apply(&SessionEvent::ReasoningDelta("second chunk".into()));
-    let streamed = lines(&v).join("\n");
+    let streamed = live_lines(&v).join("\n");
     assert!(
         streamed.contains("second chunk"),
         "post-expand deltas must keep rendering: {streamed:?}"
@@ -378,6 +391,10 @@ fn expanded_step_keeps_streaming_new_thinking_deltas() {
     assert!(
         streamed.find("first chunk") < streamed.find("second chunk"),
         "thinking renders in stream order: {streamed:?}"
+    );
+    assert!(
+        !lines(&v).join("\n").contains("second chunk"),
+        "the transcript stays ladder-only while the region streams"
     );
 }
 
@@ -389,24 +406,26 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "solo");
-    // Pre-Say, while the turn runs: the ladder stays FOLDED (group row +
-    // its trailing blank) and the current step streams in the SEPARATE TURN
-    // LIVE AREA at the transcript tail (forced-open step row, its thinking,
-    // the calls aggregate and the call row) — ending on exactly one blank.
+    // Pre-Say, while the turn runs: the TRANSCRIPT holds only the FOLDED
+    // ladder (group row + its trailing blank) — the current step streams in
+    // the separate TURN LIVE REGION between transcript and composer, never
+    // in these lines.
     assert_eq!(
         lines(&v),
+        vec!["\u{25b8} 1 Step  \u{280b} running ", ""],
+        "folded ladder only — the live region is a different area"
+    );
+    assert_eq!(
+        live_lines(&v),
         vec![
-            "\u{25b8} 1 Step  \u{280b} running ",
-            "",
+            "\u{2b25} live",
             "  \u{276f} Step(1)",
             "    \u{1f4ad} Thinking",
             "        think",
             "    \u{276f} 1 Function call",
             "      \u{25b8} bash echo x",
-            "",
         ],
-        "folded ladder + live area tail: every streamed row visible, one \
-trailing blank each"
+        "the live region streams the forced-open step"
     );
     v.apply(&SessionEvent::TextDelta("spoken".into()));
     assert_eq!(

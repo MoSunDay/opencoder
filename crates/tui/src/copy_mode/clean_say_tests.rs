@@ -144,8 +144,9 @@ fn running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_t
     // A call whose `ToolEnd` has not arrived renders its header with a
     // trailing `" ⠋"` motion span (chat_step_render: `elapsed_ms` unset).
     // While the turn runs that row lives ONLY in the TURN LIVE REGION (its
-    // own area — the transcript holds just the folded ladder row), so copy
-    // mode over the transcript can never pick up the spinner glyph.
+    // own area) — the transcript carries NO row for the running group at
+    // all, so copy mode over the transcript can never pick up the spinner
+    // glyph.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("thinking".into()));
     v.apply(&SessionEvent::ToolStart {
@@ -174,14 +175,17 @@ fn running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_t
 spinner glyph: {live_text:?}"
     );
     assert!(
-        !row_texts(&v).iter().any(|l| l.contains("bash")),
-        "the transcript holds only the folded ladder while the region streams"
+        row_texts(&v).is_empty(),
+        "the running group has NO transcript row at all — the live region is \
+its only surface: {:?}",
+        row_texts(&v)
     );
 
     let text = copy_text(&v);
     assert!(
-        !text.contains('\u{280b}') && !text.contains("bash echo x"),
-        "copy text stays transcript-only: no spinner, no live-region rows: {text}"
+        !text.contains('\u{280b}') && !text.contains("bash"),
+        "copy text stays transcript-only: the running hint row no longer \
+exists in the transcript, so neither the spinner nor the call can leak: {text}"
     );
 }
 

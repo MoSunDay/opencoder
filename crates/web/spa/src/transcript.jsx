@@ -30,7 +30,7 @@ import { Bubble } from '@ant-design/x';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import { Avatar, Empty, Tag, Typography } from 'antd';
 import { isEmptyTranscript, itemsFromTurns, usageLine } from './bubbleItems.js';
-import { StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
+import { isStepsTurnRunning, StepsContent, ThinkContent, ToolContent } from './stepsBlock.jsx';
 import { sayPresentation } from './transcript/markdown.js';
 import { AssistantText, TextRows } from './transcript/text.jsx';
 import { Markdown } from './project/markdown.jsx';
@@ -84,7 +84,10 @@ function TextContent({ turn }) {
 /// Say. The WHOLE content (including the Say segment, sayActive and
 /// progressActive) travels into StepsContent: the Say header reads its
 /// single-line preview and the Say-row running tag from it, while the Say
-/// BODY still renders below as sibling nodes.
+/// BODY still renders below as sibling nodes. WHILE THE TURN RUNS (shared
+/// `isStepsTurnRunning` predicate) the ladder renders null here — the
+/// running turn's only surface is the pinned TurnLiveRegion (chat.jsx); the
+/// Say body/presentation logic below is untouched (pre-Say it is empty).
 function AssistantTurnContent({ turn }) {
   const say = turn && Array.isArray(turn.say) ? turn.say : [];
   // Streaming keeps the compact raw preview. Completed answers render the
@@ -98,7 +101,9 @@ function AssistantTurnContent({ turn }) {
   const body = presentation.other;
   return (
     <div>
-      <StepsContent turn={turn} preview={presentation.preview} />
+      {isStepsTurnRunning(turn) ? null : (
+        <StepsContent turn={turn} preview={presentation.preview} />
+      )}
       {body.length > 0 || presentation.rows.length > 0 || presentation.markdown ? (
         // Keep the answer body separate from the expandable step summary.
         <div style={{ marginTop: 16 }}>
@@ -170,11 +175,12 @@ const BUBBLE_ROLES = {
   },
   // Defensive standalone step ladder. Normal steps+Say runs are grouped by
   // itemsFromTurns into assistantTurn above; this only fires for turns the
-  // grouping walk cannot attach (e.g. non-assistant role).
+  // grouping walk cannot attach (e.g. non-assistant role). Same shared
+  // running gate: a running turn renders only in the turn live region.
   steps: {
     placement: 'start',
     variant: 'borderless',
-    contentRender: (content) => <StepsContent turn={content} />,
+    contentRender: (content) => (isStepsTurnRunning(content) ? null : <StepsContent turn={content} />),
   },
   tool: {
     placement: 'start',
@@ -231,6 +237,16 @@ export function EmptyHint({ text }) {
   return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} style={{ marginBlock: 24 }} />;
 }
 
+/// Bubble items minus any still-running steps turn: while a turn runs its
+/// ladder lives ONLY in the pinned turn live region (chat.jsx), so the
+/// message list drops the item entirely. @ant-design/x renders the bubble
+/// frame (avatar + content box) even for null content, so gating the
+/// contentRender alone would leave an empty shell behind — the SAME
+/// `isStepsTurnRunning` predicate drives both gates, so they never drift.
+function messageListItems(turns) {
+  return itemsFromTurns(turns).filter((item) => !isStepsTurnRunning(item && item.content));
+}
+
 export function TranscriptView({ turns, usage, status, error, emptyText, active = true, autoScroll = true }) {
   const empty = isEmptyTranscript(turns, usage);
   // Collapse-all epoch: Ctrl/Cmd+L (or the ⤒ link) bumps the key on
@@ -264,7 +280,7 @@ export function TranscriptView({ turns, usage, status, error, emptyText, active 
               ⤒ 收起
             </Typography.Link>
           </div>
-          <Bubble.List key={epoch} items={itemsFromTurns(turns)} role={BUBBLE_ROLES} autoScroll={autoScroll} />
+          <Bubble.List key={epoch} items={messageListItems(turns)} role={BUBBLE_ROLES} autoScroll={autoScroll} />
         </>
       )}
       <UsageFooter usage={usage} />

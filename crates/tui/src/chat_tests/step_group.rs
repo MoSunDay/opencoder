@@ -102,8 +102,8 @@ fn trailing_thinking_folds_into_the_step_not_the_flow() {
         .collect::<String>();
     assert!(body.contains("reading the layout"));
 
-    // Settled turn (Done retires the live auto-open): only the closed group
-    // row renders, with no running hint.
+    // Settled turn (Done settles the running group back into the
+    // transcript): only the closed group row renders, with no running hint.
     v.apply(&SessionEvent::Done);
     let flat = lines(&v);
     assert_eq!(flat.len(), 2, "closed group = group row + blank: {flat:?}");
@@ -406,14 +406,14 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "solo");
-    // Pre-Say, while the turn runs: the TRANSCRIPT holds only the FOLDED
-    // ladder (group row + its trailing blank) — the current step streams in
-    // the separate TURN LIVE REGION between transcript and composer, never
-    // in these lines.
+    // Pre-Say, while the turn runs: the TRANSCRIPT holds NOTHING for the
+    // running group (no `N Steps` row, no blank, no hit target) — the turn
+    // streams ONLY in the separate TURN LIVE REGION between transcript and
+    // composer; on settle the group re-enters the transcript below.
     assert_eq!(
         lines(&v),
-        vec!["\u{25b8} 1 Step  \u{280b} running ", ""],
-        "folded ladder only — the live region is a different area"
+        Vec::<String>::new(),
+        "the running turn is absent from the transcript — live region only"
     );
     assert_eq!(
         live_lines(&v),

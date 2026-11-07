@@ -106,7 +106,20 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::StepGroup { steps, open, .. } => {
+                ChatBlock::StepGroup {
+                    steps,
+                    open,
+                    progress_active,
+                    ..
+                } => {
+                    // A RUNNING group contributes ZERO transcript lines (it
+                    // streams only in the TURN LIVE REGION, see the tail
+                    // note) — no targets and no line accounting;
+                    // `flatten_with` skips the block identically, so
+                    // hit-rects stay aligned with the live render.
+                    if *progress_active {
+                        continue;
+                    }
                     // Mirrors `flatten_step_group` exactly (three-level
                     // ladder): the turn row always (a clickable target);
                     // while the turn is open, per step the step row (target),
@@ -222,10 +235,11 @@ impl ChatView {
             }
         }
         // TURN LIVE AREA mirror-note: while the admitted turn runs, its
-        // CURRENT step streams at the transcript tail (`chat_live_turn.rs`),
-        // zero-coupled from any ladder's disclosure state. It is render-only
-        // and nothing follows it in the transcript, so no targets and no
-        // line accounting are needed here.
+        // StepGroup contributes ZERO lines here (skipped above) and its
+        // CURRENT step streams in the separate TURN LIVE REGION
+        // (`chat_live_turn.rs`), zero-coupled from any ladder's disclosure
+        // state. It is render-only, so no targets and no line accounting
+        // are needed here.
         (think, sub, compaction, tool_calls)
     }
 }

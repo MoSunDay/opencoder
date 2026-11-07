@@ -5,27 +5,31 @@
 // Interaction model — USER-CONTROLLED ladder, FOLDED by default (Say stays
 // the primary output; the ladder is a drill-down, not the reading surface):
 //   L0  ❯ 2 Steps [running|error]  ← TURN Collapse (ghost), CLOSED by
-//         default and the ONLY thing a folded steps bubble renders; running
-//         from reasoning/tool activity until Say begins, then red on any
-//         error. L0 is fully UNCONTROLLED (no useState, no auto effects):
-//         antd keeps its own open state across streaming rerenders, so a
-//         user-opened ladder survives them.
+//         default and the ONLY thing a folded steps bubble renders once the
+//         turn settles; running from reasoning/tool activity until Say
+//         begins, then red on any error. L0 is fully UNCONTROLLED (no
+//         useState, no auto effects): antd keeps its own open state across
+//         streaming rerenders, so a user-opened ladder survives them.
 //         With the turn's own Say: the header becomes the Say row
 //           `❯ N Steps: {first-line preview}` and the running tag
 //           rides THERE (driven by sayActive, the sayStreaming ladder flag)
 //           until the sub-turn's ladder ends.
-//   TURN LIVE REGION — NOT part of this bubble at all: while a turn runs
-//         (`ladderRunning`), its LAST step streams in a SEPARATE pinned
-//         region outside the transcript scroll area (its own panel between
-//         the message list and the input, mounted by chat.jsx via
+//   TURN LIVE REGION — the running turn's ONLY surface: while a turn runs
+//         (`isStepsTurnRunning` below), its LAST step streams in a SEPARATE
+//         pinned region outside the transcript scroll area (its own panel
+//         between the message list and the input, mounted by chat.jsx via
 //         `TurnLiveRegion` below): `Step(k)` header + thinking + call rows
 //         (the same ToolContent rows as L3, so per-call `running` tags
-//         stream in place). When running retires (Say begins / the turn
-//         settles) the region clears and the step lives only inside the
-//         turn's folded ladder; if the next turn is already running the
-//         region simply shows it. Gated ONLY on running state — zero
-//         coupling with any ladder's disclosure (opening L0 never changes
-//         it; TUI parity with chat_live_turn.rs).
+//         stream in place). While running, the message list renders
+//         NOTHING of the turn's ladder — no `❯ N Step(s)` L0 row, no steps
+//         bubble content, not even an empty shell: transcript.jsx gates
+//         StepsContent on the SAME predicate and drops the bubble item.
+//         When running retires (Say begins / the turn settles) the region
+//         clears and the folded ladder RETURNS inside the message list; if
+//         the next turn is already running the region simply shows it.
+//         Gated ONLY on running state — zero coupling with any ladder's
+//         disclosure (opening L0 never changes it; TUI parity with
+//         chat_live_turn.rs).
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (uncontrolled);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
@@ -261,29 +265,40 @@ export function TurnLiveRegion({ turns }) {
   );
 }
 
-/// The newest steps turn that is still running its ladder (no Say yet,
-/// `progressActive` true — falling back to the open-call test for older
-/// hand-built turns), if any. Mirrors StepsContent's `ladderRunning` logic;
-/// kept beside it so the two can never drift apart.
+/// Shared per-turn running test — the ONE predicate behind both surfaces
+/// (the turn live region below and transcript.jsx's message-list gate), so
+/// they can never drift: a turn runs while its ladder is still active
+/// pre-Say (`progressActive === true`, falling back to the open-call test
+/// for older hand-built turns without the field); any Say settles it.
+/// Accepts both the raw `steps` turn and the merged `assistant_turn`
+/// bubble content (bubbleItems.js) — same question, same answer on either
+/// surface.
+export function isStepsTurnRunning(turn) {
+  if (!turn) return false;
+  if (turn.kind !== 'steps' && turn.kind !== 'assistant_turn') return false;
+  const say = Array.isArray(turn.say) ? turn.say : [];
+  const hasSay = say.some((part) => (
+    part && part.kind === 'text' && !part.image
+      && typeof part.text === 'string' && part.text.trim().length > 0
+  ));
+  if (hasSay) return false; // a Say already settled this turn
+  const calls = (Array.isArray(turn.steps) ? turn.steps : [])
+    .flatMap((st) => ((st && Array.isArray(st.calls)) ? st.calls : []));
+  const openCall = calls.some((c) => c && c.output === null);
+  return typeof turn.progressActive === 'boolean'
+    ? turn.progressActive === true
+    : openCall;
+}
+
+/// The newest steps turn that is still running its ladder, if any — a
+/// back-scan that hands the newest steps turn to `isStepsTurnRunning`
+/// above (the shared predicate, also consulted by the message-list gate).
 function findRunningStepsTurn(turns) {
   if (!Array.isArray(turns)) return null;
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
     if (!turn || turn.kind !== 'steps') continue;
-    const say = Array.isArray(turn.say) ? turn.say : [];
-    const hasSay = say.some((part) => (
-      part && part.kind === 'text' && !part.image
-        && typeof part.text === 'string' && part.text.trim().length > 0
-    ));
-    if (hasSay) return null; // the newest turn already settled
-    const calls = (Array.isArray(turn.steps) ? turn.steps : [])
-      .flatMap((st) => ((st && Array.isArray(st.calls)) ? st.calls : []));
-    const openCall = calls.some((c) => c && c.output === null);
-    const running = typeof turn.progressActive === 'boolean'
-      ? turn.progressActive === true
-      : openCall;
-    if (running) return turn;
-    return null; // newest steps turn exists but is not running
+    return isStepsTurnRunning(turn) ? turn : null;
   }
   return null;
 }
@@ -296,10 +311,12 @@ function findRunningStepsTurn(turns) {
 /// empty/whitespace Say leaves the preview empty (bare colon).
 
 /// Turn row (L0): ONE ghost Collapse for the whole turn — default CLOSED,
-/// so a collapsed steps bubble shows only this row — while the ladder runs
-/// its current step additionally streams in the SEPARATE turn live area
-/// below (see header comment). L0 is fully UNCONTROLLED: plain user toggles,
-/// NOT an auto-managed policy. Two label modes:
+/// so a collapsed steps bubble shows only this row. WHILE THE TURN RUNS
+/// this component is not mounted by the message list at all (transcript.jsx
+/// gates it on `isStepsTurnRunning` — the running turn renders only in the
+/// SEPARATE turn live area); on settle the folded ladder returns here. L0
+/// is fully UNCONTROLLED: plain user toggles, NOT an auto-managed policy.
+/// Two label modes:
 ///   * no Say yet: `❯ N Step(s)`; `running` while `progressActive` stays
 ///     true from reasoning/tool activity until Say begins (older hand-built
 ///     turns without that field fall back to the open-call test);
@@ -327,7 +344,7 @@ export function StepsContent({ turn, preview }) {
   // The TURN LIVE REGION rides the ladder's OWN pre-Say activity (TUI
   // parity: Say's first chunk settles the ladder even while the running tag
   // rides the Say row), so `sayActive` must NOT keep it alive — its running
-  // scan lives in `findRunningStepsTurn` above, NOT in this bubble.
+  // test lives in `isStepsTurnRunning` above, NOT in this bubble.
   // L0/L1/L2/L3 are ALL uncontrolled: folded by default, antd's own state
   // survives streaming rerenders, and Ctrl+L / ⤒ 收起 remounts the bubble
   // (epoch key in transcript.jsx) to reset. No auto effects, no overrides.

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-// StepsBlock DOM drill-down: Turn → Step → Function call. Zero clicks render
-// the collapsed `2 Steps` (or, once the turn has its own Say, the
-// `2 Steps: {preview}` header) summary plus Say in ONE assistant
-// bubble. Opening
+// StepsBlock DOM drill-down: Turn → Step → Function call. A SETTLED turn
+// renders the collapsed `2 Steps` (or, once the turn has its own Say, the
+// `2 Steps: {preview}` header) summary plus Say in ONE assistant bubble;
+// while the turn still runs the message list shows NOTHING of its ladder —
+// the pinned TURN LIVE REGION is its only surface. Opening
 // the Turn reveals Steps; opening a Step reveals Thinking + N Function calls;
 // opening that aggregate reveals call rows, and a call reveals its result.
 // Collapse-all works both ways: Ctrl+L on window and the `⤒ 收起`
@@ -186,14 +187,16 @@ describe('StepsContent three-level drill-down', () => {
     expect(screen.queryByText(/🔧 read/)).toBeNull();
   });
 
-  it('shows progress with a 12px gap even after calls finish, until Say starts', () => {
+  it('a running turn (all calls finished, no Say yet) leaves the message list EMPTY', () => {
     const running = stepsTurn();
     running.progressActive = true;
-    mount([running]);
-    const tag = screen.getByText('running');
-    expect(tag).toBeTruthy();
-    expect(tag.style.marginLeft).toBe('12px');
-    expect(screen.queryByText('error')).toBeNull();
+    const { container } = mount([running]);
+    // Every call landed but the turn is still pre-Say running: the L0 row
+    // and the whole ladder stay OUT of the message list — no empty bubble
+    // shell either (the pinned live region is the turn's only surface).
+    expect(screen.queryByText('2 Steps')).toBeNull();
+    expect(screen.queryByText('running')).toBeNull();
+    expect(container.querySelectorAll('.ant-bubble')).toHaveLength(0);
   });
 
   it('a Say without sayActive retires the running tag and the header becomes the Say row', () => {
@@ -318,16 +321,16 @@ describe('StepsContent three-level drill-down', () => {
 });
 
 describe('turn live region (its own area, outside the message list)', () => {
-  // The ladder is user-controlled and folded by default: antd keeps closed
-  // panels mounted once opened, so folded state is asserted through the
-  // item's active class — never through text absence alone. The TURN LIVE
-  // REGION is a SEPARATE pinned area (never inside a bubble, never inside
-  // the scroll list) rendered while the turn runs — gated only on running
-  // state, never on any ladder's disclosure (TUI parity with
-  // chat_live_turn.rs).
+  // While a turn runs the message list shows NOTHING of its ladder — no L0
+  // row, no steps content, no empty bubble shell: the TURN LIVE REGION is
+  // its ONLY surface, a SEPARATE pinned area (never inside a bubble, never
+  // inside the scroll list) gated only on running state, never on any
+  // ladder's disclosure (TUI parity with chat_live_turn.rs). On settle the
+  // folded ladder RETURNS inside the message list; it is user-controlled
+  // and folded by default, so folded state is asserted through the item's
+  // active class — never through text absence alone.
   const itemActive = (matcher) => screen.getByText(matcher)
     .closest('.ant-collapse-item').classList.contains('ant-collapse-item-active');
-  const summaryHeader = (matcher) => screen.getByText(matcher).closest('.ant-collapse-header');
   const runningTurn = () => {
     const turn = stepsTurn();
     turn.progressActive = true;
@@ -335,13 +338,14 @@ describe('turn live region (its own area, outside the message list)', () => {
     return turn;
   };
 
-  it('running turn streams the last step in the separate live region, not the transcript', () => {
-    mountWithLiveRegion([runningTurn()]);
-    // The summary stays folded and keeps its own running tag.
-    expect(itemActive('2 Steps')).toBe(false);
-    expect(within(summaryHeader('2 Steps')).getByText('running')).toBeTruthy();
+  it('running turn streams ONLY in the live region — the message list shows nothing of its ladder', () => {
+    const { container } = mountWithLiveRegion([runningTurn()]);
+    // No L0 row, no ladder content, no leftover empty bubble shell.
+    expect(screen.queryByText('2 Steps')).toBeNull();
+    expect(screen.queryByText('running')).toBeNull();
+    expect(container.querySelectorAll('.ant-bubble')).toHaveLength(0);
     // The LAST step's header + thinking + call row stream in the LIVE
-    // REGION without a click; the transcript keeps ONLY the folded ladder.
+    // REGION without a click.
     const region = screen.getByText('Step(2)').closest('[data-turn-live-region]');
     expect(region).toBeTruthy();
     expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
@@ -351,13 +355,14 @@ describe('turn live region (its own area, outside the message list)', () => {
     expect(screen.queryByText('look at the repo first')).toBeNull();
     // The region is NOT inside any transcript bubble.
     expect(region.closest('.ant-bubble')).toBeNull();
-    // The region sits AFTER the transcript's summary row in document order.
-    const summary = screen.getByText('2 Steps');
-    const step2 = screen.getByText('Step(2)');
-    expect(summary.compareDocumentPosition(step2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The region sits BELOW the (now ladder-less) message list in document
+    // order.
+    const list = container.querySelector('.ant-bubble-list');
+    expect(list).toBeTruthy();
+    expect(list.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('live region advances to the newest step while the ladder stays folded', () => {
+  it('live region advances to the newest step; the message list still shows nothing', () => {
     const mounted = mountWithLiveRegion([runningTurn()]);
     expect(screen.getByText('Step(2)')).toBeTruthy();
     const grown = runningTurn();
@@ -369,64 +374,75 @@ describe('turn live region (its own area, outside the message list)', () => {
       }],
     });
     rerenderWithLiveRegion(mounted, [grown]);
-    expect(screen.getByText('3 Steps')).toBeTruthy();
-    expect(itemActive('3 Steps')).toBe(false);
+    // Still running: no `3 Steps` L0 row returns to the message list.
+    expect(screen.queryByText('3 Steps')).toBeNull();
     const region = screen.getByText('Step(3)').closest('[data-turn-live-region]');
+    expect(region).toBeTruthy();
     expect(within(region).getByText('fresh reasoning')).toBeTruthy();
     expect(within(region).getByText(/🔧 grep/)).toBeTruthy();
     // Only the LAST step streams: the previous one folded away.
     expect(within(region).queryByText('Step(2)')).toBeNull();
-    expect(within(region).queryByText('reading the entrypoint')).toBeNull();
+    expect(screen.queryByText('reading the entrypoint')).toBeNull();
   });
 
   it('streams the running step via the open-call fallback without a progress flag', () => {
     const fallback = stepsTurn();
     fallback.steps[1].thinking = 'reading the entrypoint';
     fallback.steps[1].calls[0].output = null;
-    mountWithLiveRegion([fallback]);
-    expect(itemActive('2 Steps')).toBe(false);
-    expect(screen.getByText('Step(2)')).toBeTruthy();
-    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
-    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+    const { container } = mountWithLiveRegion([fallback]);
+    // Derived running (open call, no progressActive field) drives BOTH
+    // surfaces through the same predicate: message list empty, region on.
+    expect(container.querySelectorAll('.ant-bubble')).toHaveLength(0);
+    expect(screen.queryByText('2 Steps')).toBeNull();
+    const region = screen.getByText('Step(2)').closest('[data-turn-live-region]');
+    expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
+    expect(within(region).getByText(/🔧 read/)).toBeTruthy();
   });
 
-  it('settle clears the live region and the ladder stays folded', () => {
+  it('settle rerender returns the folded ladder to the message list and clears the region', () => {
     const mounted = mountWithLiveRegion([runningTurn()]);
+    expect(screen.queryByText('2 Steps')).toBeNull();
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
-    rerenderWithLiveRegion(mounted, [stepsTurn()]);
-    expect(itemActive('2 Steps')).toBe(false);
+    // The Say's first chunk settles the turn: rerender in Say-preview label
+    // mode (sayStreaming) — the folded ladder is BACK inside the message
+    // list as the `N Steps: {preview}` Say row.
+    rerenderWithLiveRegion(mounted, [
+      { ...stepsTurn(), sayStreaming: true },
+      { kind: 'text', role: 'assistant', text: 'all wrapped up' },
+    ]);
+    const header = screen.getByText('2 Steps: all wrapped up');
+    expect(header.closest('.ant-bubble')).toBeTruthy();
+    expect(itemActive('2 Steps: all wrapped up')).toBe(false);
     expect(screen.queryByText(/Step\(2\)/)).toBeNull();
     expect(screen.queryByText('reading the entrypoint')).toBeNull();
     expect(screen.queryByText(/🔧 read/)).toBeNull();
-    expect(screen.queryByText('running')).toBeNull();
     expect(screen.queryByText(/live/)).toBeNull();
+    expect(document.querySelector('[data-turn-live-region]')).toBeNull();
   });
 
-  it('opening the ladder keeps the live region and the open state survives streaming rerenders', () => {
+  it('after settle the ladder opens/closes on pure user control and the state survives rerenders', () => {
     const mounted = mountWithLiveRegion([runningTurn()]);
+    // While running there is no L0 row in the message list to click — the
+    // live region is the only surface.
+    expect(screen.queryByText('2 Steps')).toBeNull();
+    rerenderWithLiveRegion(mounted, [stepsTurn()]);
+    // Fresh mount of the settled ladder: folded, step rows not even mounted.
+    expect(screen.queryByText(/Step\(2\)/)).toBeNull();
     fireEvent.click(screen.getByText('2 Steps'));
     expect(itemActive('2 Steps')).toBe(true);
-    // TWO SEPARATE AREAS coexisting: the ladder's own Step(2) row renders
-    // in the transcript bubble AND the pinned live region outside it still
-    // streams the same running step (thinking + call row — nothing is
-    // suppressed in either direction).
-    expect(screen.getAllByText(/Step\(2\)/)).toHaveLength(2);
-    const region = screen.getAllByText(/Step\(2\)/)
-      .map((n) => n.closest('[data-turn-live-region]'))
-      .find(Boolean);
-    expect(region).toBeTruthy();
-    expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
-    expect(within(region).getByText(/🔧 read/)).toBeTruthy();
-
-    const still = runningTurn();
-    still.steps[1].calls[0].output = 'updated streamed output';
-    rerenderWithLiveRegion(mounted, [still]);
-    // The user's open state survives the streaming rerender AND the live
-    // region keeps streaming — no coupling in either direction.
+    expect(screen.getByText(/Step\(1\)/)).toBeTruthy();
+    expect(screen.getByText(/Step\(2\)/)).toBeTruthy();
+    // Uncontrolled L0: a rerender of the settled turn leaves the user's
+    // open state alone, and the live region stays gone (no coupling).
+    const updated = stepsTurn();
+    updated.steps[0].calls[0].output = 'later output';
+    rerenderWithLiveRegion(mounted, [updated]);
     expect(itemActive('2 Steps')).toBe(true);
-    expect(screen.getAllByText(/Step\(2\)/)).toHaveLength(2);
-    expect(screen.getByText('reading the entrypoint')).toBeTruthy();
-    expect(screen.getByText(/🔧 read/)).toBeTruthy();
+    expect(document.querySelector('[data-turn-live-region]')).toBeNull();
+    // Closing is plain user control too (antd keeps once-opened panels
+    // mounted, so folded state reads from the item's active class).
+    fireEvent.click(screen.getByText('2 Steps'));
+    expect(itemActive('2 Steps')).toBe(false);
   });
 
   it('running tag appears on live region call rows, not on finished ones', () => {
@@ -436,8 +452,9 @@ describe('turn live region (its own area, outside the message list)', () => {
       input: 'pattern', output: null, isError: false, durationMs: 0, startedAt: 0,
     });
     mountWithLiveRegion([running]);
-    // Two running texts now: the L0 summary tag and the open call row tag.
-    expect(screen.getAllByText('running')).toHaveLength(2);
+    // No L0 row exists in the message list while the turn runs, so the ONLY
+    // running tag is the open call row inside the live region.
+    expect(screen.getAllByText('running')).toHaveLength(1);
     const grepRow = screen.getByText(/🔧 grep/).closest('.ant-collapse-item');
     expect(within(grepRow).getByText('running')).toBeTruthy();
     const readRow = screen.getByText(/🔧 read/).closest('.ant-collapse-item');

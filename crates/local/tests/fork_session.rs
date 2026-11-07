@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message};
 use opencoder_session::fork::fork_session;
-use opencoder_store::{SessionMeta, Store, TursoStore};
+use opencoder_store::{RdbStore, SessionMeta, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
+    Arc::new(RdbStore::open_memory().await.unwrap())
 }
 
 fn assistant_with_text(id: &str, text: &str) -> Message {

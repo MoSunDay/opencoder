@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 
-use opencoder_store::{Store, TsRecord, TsRegistry, TursoStore};
+use opencoder_store::{RdbStore, Store, TsRecord, TsRegistry};
 
 use crate::Cli;
 
@@ -366,46 +366,76 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     let mut swept_seeds = 0u32;
     let mut kept = Vec::<String>::new();
     for (dir, entries) in targets {
-        let db = dir.join("opencoder.db");
-        let store = TursoStore::open(&db)
-            .await
-            .with_context(|| format!("open store for cleanup: {}", db.display()))?;
-        for entry in entries {
-            let decision = if entry.has_content {
-                SweepDecision::Purge
-            } else {
-                match store.last_message_seq(&entry.id).await {
-                    Ok(messages) => sweep_decision(false, messages),
-                    Err(error) => {
-                        tracing::warn!(
-                            session = %entry.id,
-                            error = %error,
-                            "ts: cleanup cannot probe store content; keeping row"
-                        );
+        match store_target(&dir) {
+            StoreTarget::Rdb(db) => {
+                let store = RdbStore::open(&db)
+                    .await
+                    .with_context(|| format!("open store for cleanup: {}", db.display()))?;
+                for entry in entries {
+                    let decision = if entry.has_content {
+                        SweepDecision::Purge
+                    } else {
+                        match store.last_message_seq(&entry.id).await {
+                            Ok(messages) => sweep_decision(false, messages),
+                            Err(error) => {
+                                tracing::warn!(
+                                    session = %entry.id,
+                                    error = %error,
+                                    "ts: cleanup cannot probe store content; keeping row"
+                                );
+                                kept.push(entry.id.clone());
+                                continue;
+                            }
+                        }
+                    };
+                    if decision == SweepDecision::Keep {
+                        // The row lost its recorded task but the store session still
+                        // holds messages. Keep both so the user can resume or delete
+                        // it deliberately instead of losing unmirrored work.
                         kept.push(entry.id.clone());
                         continue;
                     }
+                    store.delete_session(&entry.id).await.with_context(|| {
+                        format!(
+                            "delete stopped ts session {} from {}",
+                            entry.id,
+                            db.display()
+                        )
+                    })?;
+                    registry.delete(&entry.id).await?;
+                    if entry.has_content {
+                        removed_stopped += 1;
+                    } else {
+                        swept_seeds += 1;
+                    }
                 }
-            };
-            if decision == SweepDecision::Keep {
-                // The row lost its recorded task but the store session still
-                // holds messages. Keep both so the user can resume or delete
-                // it deliberately instead of losing unmirrored work.
-                kept.push(entry.id.clone());
-                continue;
             }
-            store.delete_session(&entry.id).await.with_context(|| {
-                format!(
-                    "delete stopped ts session {} from {}",
-                    entry.id,
-                    db.display()
-                )
-            })?;
-            registry.delete(&entry.id).await?;
-            if entry.has_content {
-                removed_stopped += 1;
-            } else {
-                swept_seeds += 1;
+            StoreTarget::LegacyFileOnly => {
+                // Only the legacy plain SQLite file remains (legacy/
+                // migratable, never an rdb directory): its content cannot be
+                // purged through the rdb store, so keep and report every row
+                // rather than failing (or orphaning) the cleanup.
+                for entry in entries {
+                    tracing::warn!(
+                        session = %entry.id,
+                        store = %dir.display(),
+                        "ts: cleanup keeps row backed only by a legacy sqlite store \
+                         (migratable via `opencoder session migrate-legacy`)"
+                    );
+                    kept.push(entry.id.clone());
+                }
+            }
+            StoreTarget::Missing => {
+                // Store content already gone: unregister the rows so cleanup
+                // still converges (no store is created for the probe).
+                for entry in entries {
+                    registry.delete(&entry.id).await?;
+                    if entry.has_content {
+                        removed_stopped += 1;
+                    } else {
+                        swept_seeds += 1;
+                    }
+                }
             }
         }
     }
@@ -463,13 +493,30 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
     }
     if let Some(record) = record {
         if let Some(dir) = &record.store_dir {
-            let db = dir.join("opencoder.db");
-            let store = TursoStore::open(&db)
-                .await
-                .with_context(|| format!("open session store for delete: {}", db.display()))?;
-            store.delete_session(&record.id).await.with_context(|| {
-                format!("delete global tmux session {id} from {}", db.display())
-            })?;
+            match store_target(dir) {
+                StoreTarget::Rdb(db) => {
+                    let store = RdbStore::open(&db).await.with_context(|| {
+                        format!("open session store for delete: {}", db.display())
+                    })?;
+                    store.delete_session(&record.id).await.with_context(|| {
+                        format!("delete global tmux session {id} from {}", db.display())
+                    })?;
+                }
+                StoreTarget::LegacyFileOnly => {
+                    // Content lives only in the legacy plain SQLite file:
+                    // keep the registry row and report it (legacy/migratable,
+                    // not an rdb directory) rather than delete a row whose
+                    // content cannot be purged — or fail.
+                    println!(
+                        "kept global tmux session {id}: its content is in a legacy \
+                         sqlite store at {}; migrate it with `opencoder session \
+                         migrate-legacy` before deleting; not deleting the registry row",
+                        dir.join("opencoder.db").display()
+                    );
+                    return Ok(());
+                }
+                StoreTarget::Missing => {}
+            }
         }
         registry.delete(&record.id).await?;
     }
@@ -535,6 +582,36 @@ fn resolve_managed_id(
 pub(crate) struct TsSweepTarget {
     pub id: String,
     pub has_content: bool,
+}
+
+/// Pure classification of one registered store dir for cleanup/delete: the
+/// RocksDB directory the session-store path policy resolves to, or why there
+/// is none to open. A legacy plain `opencoder.db` SQLite file is classified
+/// as legacy/migratable content — it is never mistaken for (or opened as) an
+/// rdb directory; callers keep/report rows and point at
+/// `opencoder session migrate-legacy`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StoreTarget {
+    /// Openable rdb directory (`.rdb` layout or the development-layout
+    /// directory variant).
+    Rdb(PathBuf),
+    /// Only the legacy plain `opencoder.db` SQLite file remains — migratable
+    /// via `opencoder session migrate-legacy`; callers keep/report rows
+    /// instead of failing or orphaning content.
+    LegacyFileOnly,
+    /// Nothing store-shaped exists (content already removed).
+    Missing,
+}
+
+fn store_target(store_dir: &Path) -> StoreTarget {
+    let db = opencoder_core::session_store_rdb_dir(store_dir);
+    if db.is_dir() {
+        StoreTarget::Rdb(db)
+    } else if store_dir.join("opencoder.db").is_file() {
+        StoreTarget::LegacyFileOnly
+    } else {
+        StoreTarget::Missing
+    }
 }
 
 /// Pure sweep decision shared by the cleanup implementation and tests.

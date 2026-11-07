@@ -333,3 +333,34 @@ fn now_ms_is_milliseconds() {
         "now_ms should be in milliseconds, got {t}"
     );
 }
+
+/// `store_target` distinguishes rdb directories from legacy SQLite files so
+/// cleanup/delete never call `RdbStore::open` on a plain file.
+#[test]
+fn store_target_classifies_rdb_legacy_and_missing() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // Nothing store-shaped: content already gone.
+    assert_eq!(store_target(&tmp.path().join("gone")), StoreTarget::Missing);
+
+    // Only a legacy plain SQLite file: never openable as an rdb store.
+    let legacy = tmp.path().join("h1");
+    std::fs::create_dir_all(&legacy).unwrap();
+    std::fs::write(legacy.join("opencoder.db"), b"legacy sqlite bytes").unwrap();
+    assert_eq!(store_target(&legacy), StoreTarget::LegacyFileOnly);
+
+    // Canonical `.rdb` directory (preferred even beside a legacy file).
+    std::fs::create_dir_all(legacy.join("opencoder.db.rdb")).unwrap();
+    assert_eq!(
+        store_target(&legacy),
+        StoreTarget::Rdb(legacy.join("opencoder.db.rdb"))
+    );
+
+    // Development layout: a directory named after the legacy stem.
+    let dev = tmp.path().join("h2");
+    std::fs::create_dir_all(dev.join("opencoder.db")).unwrap();
+    assert_eq!(
+        store_target(&dev),
+        StoreTarget::Rdb(dev.join("opencoder.db"))
+    );
+}

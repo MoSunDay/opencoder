@@ -34,13 +34,13 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
   流结束后合并执行结果与会话快照
 - [stepsBlock.jsx](../../../crates/web/spa/src/stepsBlock.jsx) — Step 阶梯
   三级展开：纯用户控制、默认折叠（L0–L3 全部非受控）；运行中
-  （`ladderRunning`，Say 之前）的最后一步由 **`TurnLiveRegion` 固定面板**
-  流式渲染（头部仅 `⏺ live`，主体渲染 thinking + 与阶梯 L3 同款的
-  `ToolContent` 调用行（input/result 均收在默认关闭的折叠内）+
-  流式 Say `💬 Say` 块（`say` prop = `state.pendingSay`，text_delta 只
-  累积不动 turns，flush 边界才落地），无
-  Step(k) 计数——计数归消息列表阶梯）——面板在滚动区外
-  （transcript 滚动 div 与 QueuePanel 之间），绝不出现在气泡内；
+  （`ladderRunning`，Say 之前）的最后一步由 **`TurnLiveRegion`** 流式
+  渲染（头部 `⬥ live`，主体仅 thinking + 与阶梯 L3 同款的
+  `ToolContent` 调用行，无 Step(k) 计数、无 Say 块）——面板在
+  transcript 滚动容器**内**、消息列表之下，与消息共用滚动条；流式
+  Say 由 `StreamingSay`（`state.pendingSay` 原文、无标记）渲染在同一
+  滚动流的列表与面板之间，flush 边界落地为消息（text_delta 只累积
+  不动 turns）；auto-stick 仅在贴近底部时跟随（手动上滚优先）；
   `findRunningStepsTurn` 从最新 turn 往回找 running steps turn（最新已
   settle 即无），settle 后实时区清空；与 TUI `chat_live_turn.rs` 同契约
 - [chat/inputAttempt.js](../../../crates/web/spa/src/chat/inputAttempt.js) — 人工输入 ID

@@ -15,17 +15,17 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染与渲染入口
 - `src/chat_step_render.rs` — Step 阶梯渲染：阶梯纯用户控制、默认折叠；
   运行中（`progress_active`，Say 之前）的当前 step 在**独立布局的 turn
-  实时区**（transcript 框内底部条：Say 行下方、`[tok cost]` 边框上方，
+  实时区**（transcript 框内底部条：`[tok cost]` 边框上方，
   `chat_live_turn.rs` 提供 live_data/render_lines、`render_live.rs`
-  渲染）流式渲染 —— 实时区渲染当前 step 的 thinking + 与阶梯同款的
-  调用行（`push_step_details(…, show_results=false)`：聚合行 + 单行
-  头，结果永不渲染）+ 流式
-  Say（`💬 Say` + 全文，open Say 不入转录、seal 才落地合并头行），无
-  step 计数行（计数归 transcript 阶梯）、永不渲染调用结果（阶梯独占
-  下钻）；条**紧贴转录最后一行**、高度不设上限（`render_live::
-  strip_rect`）；flatten 永不产
-  出 live 行，滚动/选择/复制不受流式影响；settle 后实时区清空、step 只
-  存在于折叠阶梯（与 SPA `stepsBlock.jsx` 同契约）
+  渲染）流式渲染 —— 实时区**只有**当前 step 的 thinking + 与阶梯同款
+  的调用行（`push_step_details(…, show_results=false)`），**无 step 计
+  数行、无 Say**；open Say 是转录内容：流式即渲染最终形态（合并
+  `❯ Say(n steps)` 头行 + running 提示 + raw body，共享滚动/复制，
+  seal 仅去提示零跳变）；条贴**可见**内容窗下一行（溢出不外推，
+  `strip_rect` 拿 `min(总行数, 框内高)`），保尾按 wrapped 行数精确
+  （`render_viewport::wrapped_rows`）；Say 开始（progress 解除）或
+  turn 结束（Done/Error）实时区即刻清空，settle 后 step 只存在于折
+  叠阶梯（与 SPA `stepsBlock.jsx` 同契约）
 - [chat_steps_replay.rs](../../../crates/tui/src/chat_steps_replay.rs) — 回放侧
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
   `chat_steps.rs` 共用阶梯语义）

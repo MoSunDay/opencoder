@@ -56,13 +56,11 @@ impl ChatView {
         let mut tool_calls = Vec::new();
         let mut line_idx = 0usize;
         let merged_say = |i: usize| -> bool {
-            // Only a SEALED follower merges (`done == true`): an open Say
-            // is not transcript content and keeps the group standalone —
-            // mirrors `flatten_with`'s StepGroup adjacency lookup.
-            matches!(
-                self.blocks.get(i + 1),
-                Some(ChatBlock::Assistant { done: true, .. })
-            )
+            // ANY Assistant follower merges (open or sealed): an open Say
+            // is transcript content now (it streams under the merged
+            // header) — mirrors `flatten_with`'s StepGroup adjacency
+            // lookup.
+            matches!(self.blocks.get(i + 1), Some(ChatBlock::Assistant { .. }))
         };
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
@@ -73,13 +71,11 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
-                    // STREAMING Say mirror: an open Say (`done == false`)
-                    // renders NOTHING in the transcript (it streams in the
-                    // TURN LIVE REGION), so it accounts for ZERO lines —
-                    // mirrors `flatten_with`'s skip arm exactly.
-                    if !*done {
-                        continue;
-                    }
+                    // The Say is transcript content BOTH while streaming
+                    // and once sealed — mirrors `flatten_with`'s Assistant
+                    // arm line for line (raw rows while open, rendered
+                    // rows once sealed). `merged` looks at the PRECEDING
+                    // block (a StepGroup), mirroring flatten's adjacency.
                     let merged = matches!(
                         block_idx.checked_sub(1).and_then(|i| self.blocks.get(i)),
                         Some(ChatBlock::StepGroup { .. })
@@ -93,12 +89,18 @@ impl ChatView {
                     }
                     // 合并对正文行数镜像：跳过与 preview 重复的首个非空行
                     // （单行 Say / 空正文整块隐藏）—— 与 `flatten_with` 的
-                    // Assistant 分支逐行同步，hit-rect 才能对齐。
+                    // Assistant 分支逐行同步（含流式 raw 行），hit-rect 才
+                    // 能对齐。
+                    let rows_len = if *done {
+                        rendered.len()
+                    } else {
+                        super::assistant_rows(raw).len()
+                    };
                     line_idx += if merged {
                         step_render::merged_say_body_decision(raw, rendered, *done)
-                            .visible_len(rendered.len())
+                            .visible_len(rows_len)
                     } else {
-                        rendered.len()
+                        rows_len
                     };
                 }
                 ChatBlock::Thinking {
@@ -230,12 +232,12 @@ impl ChatView {
             }
         }
         // TURN LIVE AREA mirror-note: while the admitted turn runs, its
-        // CURRENT step — and, once a Say opens, that Say's RAW text —
-        // streams at the transcript tail (`chat_live_turn.rs`),
-        // zero-coupled from any ladder's disclosure state. Both are
-        // render-only and produce no transcript lines (an open Say is
-        // skipped above), so no targets and no line accounting are needed
-        // here.
+        // CURRENT step streams at the transcript tail
+        // (`chat_live_turn.rs`), zero-coupled from any ladder's disclosure
+        // state. It is render-only and produces no transcript lines, so no
+        // targets and no line accounting are needed here. The open Say, by
+        // contrast, IS transcript content (accounted above — raw rows
+        // while it streams, rendered rows once sealed).
         (think, sub, compaction, tool_calls)
     }
 }

@@ -38,22 +38,15 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
-                    // STREAMING Say: an open Say (`done == false`) is NOT
-                    // transcript content — it streams in the TURN LIVE
-                    // REGION (`chat_live_turn.rs`: marker + raw text) and
-                    // only lands here once sealed (`done == true`, set by
-                    // the existing finalize points). Emit NOTHING while
-                    // open: no `say:` header, no body, no preview.
-                    if !done {
-                        continue;
-                    }
-                    // Visual `say:` header — mirrors the `user:` marker on
-                    // prompts. When this Say sits ADJACENT to a `StepGroup`
-                    // (previous block), the group row already renders the
-                    // merged `❯ Say(n steps): <preview>` header, so the
-                    // standalone header row is dropped here — the Say body
-                    // follows the merged header (plus its separator blank)
-                    // below.
+                    // The Say is TRANSCRIPT CONTENT both while streaming
+                    // and once sealed: an open Say (`done == false`)
+                    // streams its RAW body rows right here (same shape as
+                    // sealed), sharing the transcript's scroll. It renders
+                    // in its FINAL shape immediately — under a preceding
+                    // StepGroup the merged `❯ Say(n steps)` header row
+                    // (spinner running), else the standalone `say:`
+                    // header — so sealing (raw rows swap for the rendered
+                    // ones) causes zero visual jump.
                     let merged = matches!(
                         bi.checked_sub(1).and_then(|i| self.blocks.get(i)),
                         Some(ChatBlock::StepGroup { .. })
@@ -68,15 +61,24 @@ impl ChatView {
                     }
                     // 合并对正文去重：头部行的 preview 已展示正文首个非空
                     // 行，正文不再重复输出该行；单行 Say 则整块不渲染。
+                    // 流式时 preview/正文都取 raw（`done == false` 路径）。
                     let decision = if merged {
                         step_render::merged_say_body_decision(raw, rendered, *done)
                     } else {
                         step_render::SayBody::Full
                     };
+                    let rows: Vec<Line<'static>> = if *done {
+                        rendered.clone()
+                    } else {
+                        assistant_rows(raw)
+                            .into_iter()
+                            .map(|l| Line::from(l.to_string()))
+                            .collect()
+                    };
                     let visible: &[Line<'static>] = match decision {
                         step_render::SayBody::Hidden => &[],
-                        step_render::SayBody::Skip(n) => &rendered[n..],
-                        step_render::SayBody::Full => rendered.as_slice(),
+                        step_render::SayBody::Skip(n) => &rows[n.min(rows.len())..],
+                        step_render::SayBody::Full => rows.as_slice(),
                     };
                     out.extend(types::indented(visible, 4));
                 }
@@ -113,26 +115,26 @@ impl ChatView {
                     ..
                 } => {
                     // Adjacent-pair merge: when the block right below this
-                    // group is the turn's SEALED Say (`Assistant` with
-                    // `done == true`), the two render as one clickable
-                    // header row — pass the Say so `flatten_step_group`
-                    // can fold the `N Steps` row into it. An OPEN follower
-                    // is not transcript content (it streams in the TURN
-                    // LIVE REGION), so it keeps the standalone `N Steps`
-                    // row exactly like any other follower
-                    // (Marker/Subagent/...).
+                    // group is the turn's Say (ANY `Assistant`, open or
+                    // sealed), the two render as one clickable header row —
+                    // pass the Say so `flatten_step_group` can fold the
+                    // `N Steps` row into it. An OPEN follower is transcript
+                    // content now too: the merged `❯ Say(n steps)` header
+                    // forms IMMEDIATELY with the running spinner, its raw
+                    // body rows stream below (emitted by the Assistant
+                    // arm), and it seals in place with zero visual jump.
                     let say = match self.blocks.get(bi + 1) {
                         Some(ChatBlock::Assistant {
                             raw,
-                            done: true,
                             rendered,
+                            done,
+                            ..
                         }) => Some(SayHeader {
-                            preview: step_render::say_preview_for(raw, rendered, true),
-                            // The merged follower is always sealed here, so
-                            // the live `running` hint can never ride this
-                            // header — streaming Says live only in the
-                            // TURN LIVE REGION (`chat_live_turn.rs`).
-                            streaming: false,
+                            preview: step_render::say_preview_for(raw, rendered, *done),
+                            // `running` rides the merged header exactly
+                            // while the Say streams (`done == false`);
+                            // sealing drops the hint, nothing else moves.
+                            streaming: !*done,
                         }),
                         _ => None,
                     };

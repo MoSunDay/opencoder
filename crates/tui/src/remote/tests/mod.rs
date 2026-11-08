@@ -227,24 +227,12 @@ async fn remote_resume_replays_tools_and_user_boundaries_without_recreating_or_m
         .collect::<Vec<_>>()
         .join("\n");
     assert!(text.contains("remote input"));
-    // The snapshot's round is still streaming: the open Say renders in the
-    // TURN LIVE REGION (flatten skips open Says).
-    let live = crate::chat::live_turn::live_data(&chat.blocks, chat.turn_block_start)
-        .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
-        .unwrap_or_default();
-    let live_text = live
-        .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    // The snapshot's round is still streaming: the open Say streams in the
+    // TRANSCRIPT under its merged `Say(n steps)` header (the live region
+    // is steps-only).
     assert!(
-        live_text.contains("remote output"),
-        "the streaming remote output lives in the live region: {live_text:?}"
+        text.contains("remote output"),
+        "the streaming remote output renders in the transcript: {text:?}"
     );
     tx.send(UiCmd::Quit).await.unwrap();
     worker.await.unwrap();

@@ -89,9 +89,10 @@ fn subagent_dispatch_header_renders_markdown_and_body_does_not_repeat() {
     );
 }
 
-/// 流式窗口（`ToolStart(task)` 已到、`SubagentStart` 未到）：开口
-/// Say 不进转录，只在 TURN LIVE REGION 按 raw 行流式渲染——转录无
-/// 复述，无半渲染正文。
+/// 流式窗口（`ToolStart(task)` 已到、`SubagentStart` 未到）：开口 Say
+/// 就是转录内容——在合并头行（raw preview + running 提示）下方按 raw
+/// 行流式渲染，正文不复述首行、不做半渲染；实时区只剩步骤本身
+///（本窗口无 armed 步骤，实时区为空）。
 #[test]
 fn subagent_dispatch_live_window_streams_raw_without_duplication() {
     let mut v = ChatView::default();
@@ -100,29 +101,23 @@ fn subagent_dispatch_live_window_streams_raw_without_duplication() {
     task_start(&mut v, "t1");
 
     let flat = lines(&v);
+    // 头部 = raw preview（流式口径，不露渲染差异）+ running 提示；正文
+    // 从 raw 行跳过与 preview 重复的首行，只留其余行。
     assert_eq!(
         flat,
-        vec!["\u{25b8} 1 Step", ""],
-        "open Say renders NOTHING in the transcript (ladder row only): {flat:?}"
-    );
-    let lv = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
-        .map(|lt| crate::chat::live_turn::render_lines(lt.steps, lt.say, 0))
-        .unwrap_or_default();
-    let lv_text: Vec<String> = lv
-        .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
-        .collect();
-    assert_eq!(
-        lv_text,
         vec![
-            "\u{2b25} live",
-            "    \u{1f4ad} Thinking",
-            "        think",
-            "    \u{1f4ac} Say",
-            "        **去查**",
-            "        - item2",
+            "\u{25b8} Say(1 step): **去查**  \u{280b} running ",
+            "",
+            "    - item2",
         ],
-        "the live region streams the raw Say (all lines, marker shown): {lv_text:?}"
+        "open Say streams as transcript content (merged header, no echo): {flat:?}"
+    );
+    let live = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .unwrap_or_default();
+    assert!(
+        live.is_empty(),
+        "the live region holds only the running step — never the Say"
     );
 }
 

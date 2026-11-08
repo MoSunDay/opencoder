@@ -213,25 +213,12 @@ fn snapshot_echo_uses_event_boundary_and_does_not_duplicate_a_later_admission() 
         .collect::<Vec<_>>()
         .join("\n");
     assert!(text.contains("first input"));
-    // The snapshot's round is still STREAMING: the open Say renders in the
-    // TURN LIVE REGION (flatten skips open Says), so the streaming text is
-    // checked through the live-region sourcing, not the transcript.
-    let live = crate::chat::live_turn::live_data(&chat.blocks, chat.turn_block_start)
-        .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
-        .unwrap_or_default();
-    let live_text = live
-        .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    // The snapshot's round is still STREAMING: the open Say streams in the
+    // TRANSCRIPT under its `say:` header (the live region is steps-only),
+    // so the streaming text is checked straight from the transcript.
     assert!(
-        live_text.contains("first answer"),
-        "the streaming answer lives in the live region: {live_text:?}"
+        text.contains("first answer"),
+        "the streaming answer renders in the transcript: {text:?}"
     );
     assert!(!text.contains("later input"));
     assert!(!text.contains("model preamble"));
@@ -368,24 +355,17 @@ fn compaction_resume_preserves_the_current_streaming_round_without_repeating_a_p
         frame(3, SessionEvent::TextDelta("partial answer".into())),
     ];
     let chat = transcript::replay("agent:act", std::slice::from_ref(&user), &events);
-    // The round is still STREAMING (no round_end/done): the open Say lives
-    // in the TURN LIVE REGION, not the transcript.
-    let live = crate::chat::live_turn::live_data(&chat.blocks, chat.turn_block_start)
-        .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
-        .unwrap_or_default();
-    let live_text = live
-        .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
-        })
+    // The round is still STREAMING (no round_end/done): the open Say
+    // streams in the TRANSCRIPT (the live region is steps-only).
+    let text = chat
+        .flatten()
+        .into_iter()
+        .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        live_text.contains("partial answer"),
-        "the streaming round is preserved in the live region: {live_text:?}"
+        text.contains("partial answer"),
+        "the streaming round renders in the transcript: {text:?}"
     );
     let mut assistant = Message::assistant("a");
     assistant.created_at = start + 1;

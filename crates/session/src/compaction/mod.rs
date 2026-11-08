@@ -147,7 +147,7 @@ pub async fn compact(
         session.harness.harness != opencoder_core::harness::Harness::Codex,
         "Codex manages its own context; OpenCoder compaction is unavailable for this harness"
     );
-    let tail = session.config.compaction.tail_turns.max(1) as usize;
+    let tail = session.config.compaction.tail_turns as usize;
     let Some(split) = compaction_split(&session.messages, tail) else {
         // Genuinely nothing to summarize (empty or single-message transcript).
         on_event(SessionEvent::Status("nothing to compact yet".into()));
@@ -269,9 +269,15 @@ fn turn_start_indices(messages: &[Message]) -> Vec<usize> {
 /// Ideal split point: keep `tail_turns` recent turns as the tail. Returns 0
 /// when there are too few turns to split while preserving any tail — the
 /// caller (`compact`) applies a progress-guaranteeing fallback via
-/// `compaction_split` in that case.
+/// `compaction_split` in that case. `tail_turns == 0` keeps no tail at all:
+/// the ideal split summarizes the entire transcript.
 #[cfg_attr(not(test), allow(dead_code))]
 fn split_index(messages: &[Message], tail_turns: usize) -> usize {
+    // `tail_turns == 0`: nothing is retained, so the whole transcript is the
+    // summarizable head.
+    if tail_turns == 0 {
+        return messages.len();
+    }
     let turn_starts = turn_start_indices(messages);
     if turn_starts.len() <= tail_turns {
         return 0;
@@ -285,18 +291,31 @@ fn split_index(messages: &[Message], tail_turns: usize) -> usize {
 /// instead of bailing out it falls back to summarizing the oldest turn (or,
 /// for a single conversation turn, everything except the most recent message),
 /// so an oversized short-turn conversation is still compressed rather than
-/// shipped to the model verbatim.
+/// shipped to the model verbatim. `tail_turns == 0` skips the fallbacks and
+/// the boundary search entirely: nothing is retained, everything is summarized.
 ///
 /// Returns `None` only when there is genuinely nothing to summarize — an
 /// empty transcript or a single message.
 fn compaction_split(messages: &[Message], tail_turns: usize) -> Option<usize> {
     let desired = preferred_split(messages, tail_turns)?;
+    // An empty retained tail trivially satisfies the tool_use/tool_result
+    // pairing constraint: every pair (answered or not) rides the summarized
+    // head together, so no boundary backtrack is needed.
+    if desired >= messages.len() {
+        return Some(desired);
+    }
     boundary::tool_safe_split(messages, desired)
 }
 
 mod boundary;
 
 fn preferred_split(messages: &[Message], tail_turns: usize) -> Option<usize> {
+    // `tail_turns == 0`: retain nothing — the whole transcript is summarized
+    // into the summary message. A single-message (or empty) transcript still
+    // has nothing to compact.
+    if tail_turns == 0 {
+        return (messages.len() >= 2).then_some(messages.len());
+    }
     let turn_starts = turn_start_indices(messages);
     if turn_starts.is_empty() {
         return None;

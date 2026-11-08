@@ -329,19 +329,23 @@ async fn compaction_fires_with_real_default_config() {
     let _home = ScopedHome::new();
     // End-to-end proof that compaction triggers and actually executes under the
     // REAL default config (no overrides): context_limit=128_000, threshold=80_000,
-    // reserved=20_000, tail_turns=2. budget = min(80_000, 128_000 - 20_000) = 80_000.
+    // reserved=20_000. budget = min(80_000, 128_000 - 20_000) = 80_000.
     // Three 200k-char user messages (~150k tokens) vastly exceed that budget.
-    let config = base_config(); // Config::default() except model for the test
-    let (_dir, mut s) = session_with(config, client_with_default_done("unused")).await;
+    // `tail_turns` is pinned to 2 (the pre-summary-only default) so this test
+    // keeps exercising the retained-tail path; the shipped default is 0
+    // (summary-only compaction, covered in src/compaction/tests.rs).
+    let mut config = base_config(); // Config::default() except model for the test
+    config.compaction.tail_turns = 2;
+    let (_dir, mut s) = session_with(config.clone(), client_with_default_done("unused")).await;
 
-    // Assert the real defaults (no compaction field was overridden).
+    // Assert the real defaults (no threshold/reserved override; tail pinned).
     assert_eq!(s.config.context_limit(), 128_000, "default context window");
     assert_eq!(
         s.config.compaction.context_threshold, 80_000,
         "default threshold"
     );
     assert_eq!(s.config.compaction.reserved, 20_000, "default reserved");
-    assert_eq!(s.config.compaction.tail_turns, 2, "default tail_turns");
+    assert_eq!(s.config.compaction.tail_turns, 2, "tail_turns pinned to 2");
     let budget = s.config.compaction.context_threshold.min(
         s.config
             .context_limit()
@@ -368,15 +372,16 @@ async fn compaction_fires_with_real_default_config() {
             .with_default(vec![done_event("done")]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
-    let (_dir2, mut s) = session_with(base_config(), client).await;
+    let (_dir2, mut s) = session_with(config, client).await;
     s.messages.push(big_user_message("u1", 200_000));
     s.messages.push(big_user_message("u2", 200_000));
     s.messages.push(big_user_message("u3", 200_000));
 
     let chars_before: usize = s.messages.iter().map(|m| m.estimate_chars().len()).sum();
 
-    // run() adds a 4th user turn ("go"): u1,u2,u3,go -> 4 turns, tail_turns=2
-    // -> split_index=2 -> u1+u2 get summarized, u3 retained.
+    // run() adds a 4th user turn ("go"): u1,u2,u3,go -> 4 turns,
+    // tail_turns=2 (pinned above) -> split_index=2 -> u1+u2 get
+    // summarized, u3 retained.
     run(&mut s, "go".into(), |_| {}).await.unwrap();
 
     // Layer 2: compaction actually executed end-to-end.

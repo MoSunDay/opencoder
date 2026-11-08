@@ -45,6 +45,8 @@ fn marker_n(n: usize) -> ChatBlock {
 fn tool_call(id: &str, out_lines: usize) -> ToolCall {
     ToolCall {
         id: id.into(),
+        name: id.into(),
+        input: String::new(),
         header: Line::from(Span::raw(format!("\u{25b8} {id}"))),
         output: (0..out_lines)
             .map(|_| Line::from(Span::raw("out")))

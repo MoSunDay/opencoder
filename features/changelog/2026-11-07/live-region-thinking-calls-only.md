@@ -6,6 +6,11 @@
 > 实时区改为 transcript **框内**底部条（Say 行下方、`[tok cost]` 边框
 > 上方，`render_live.rs` 渲染），不再位于框外独立布局块；其余口径
 > （内容、高度、settle）不变。SPA 落位维持本条描述。
+>
+> **内容已细化**：本条「实时区只渲染 thinking + call 行」中的 call 行
+> 已被 `2026-11-08/live-region-calls-expanded-input.md` 细化 —— 实时区
+> 调用行展开为 `❯ name` + 完整输入，结果一律收起（TUI 不渲染 output，
+> SPA 收在默认关闭的 `result` 折叠）；「无 Step(k) 计数行」口径不变。
 
 一句话：本条同时落定两件事。(1) **回退** `f6c97ef20`
 （`2026-11-07/running-turn-only-in-live-region.md`）把运行中 turn 从

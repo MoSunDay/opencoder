@@ -35,8 +35,9 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - [stepsBlock.jsx](../../../crates/web/spa/src/stepsBlock.jsx) — Step 阶梯
   三级展开：纯用户控制、默认折叠（L0–L3 全部非受控）；运行中
   （`ladderRunning`，Say 之前）的最后一步由 **`TurnLiveRegion` 固定面板**
-  流式渲染（头部仅 `⏺ live`，主体只渲染 thinking + call 行，无 Step(k)
-  计数——计数归消息列表阶梯）——面板在滚动区外
+  流式渲染（头部仅 `⏺ live`，主体渲染 thinking + 展开的调用行
+  `LiveCallRow`：名称行 + input 免点击展开、result 默认收起的折叠，无
+  Step(k) 计数——计数归消息列表阶梯）——面板在滚动区外
   （transcript 滚动 div 与 QueuePanel 之间），绝不出现在气泡内；
   `findRunningStepsTurn` 从最新 turn 往回找 running steps turn（最新已
   settle 即无），settle 后实时区清空；与 TUI `chat_live_turn.rs` 同契约

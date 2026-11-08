@@ -122,8 +122,16 @@ fn running_calls_stream_with_spinner_and_the_ladder_stays_folded() {
         "a joining call opens nothing — the live area renders it instead"
     );
     let lv = live(&v);
-    assert!(lv.contains("1 Function call"), "calls aggregate: {lv}");
-    assert!(lv.contains("bash"), "running call row renders: {lv}");
+    assert!(
+        lv.contains("bash"),
+        "the running call's name row renders (NO aggregate row — the \
+ladder owns it): {lv}"
+    );
+    assert!(
+        lv.contains("\"command\": \"echo x\""),
+        "the call's input renders EXPANDED under the name row (the strip \
+lives outside flatten): {lv}"
+    );
     assert!(
         flat_first(&v).starts_with("\u{25b8} 1 Step"),
         "the transcript's folded group row still carries its own running hint"
@@ -136,8 +144,56 @@ fn running_calls_stream_with_spinner_and_the_ladder_stays_folded() {
         "call completion is not a Step boundary: the live area keeps streaming"
     );
     assert!(
-        live(&v).contains("Function call"),
+        live(&v).contains("bash"),
         "the step's rows stay streaming in the live region after its call ends: {}",
+        live(&v)
+    );
+}
+
+/// Results stay COLLAPSED in the TURN LIVE REGION — `output` is never
+/// rendered there, no matter what the ladder does. The ladder (and ONLY
+/// the ladder) owns the result drill-down: expanding the call's row in the
+/// transcript makes the output appear in `flatten` while the live strip
+/// keeps rendering just the name row + input.
+#[test]
+fn live_results_stay_collapsed_the_ladder_owns_drilldown() {
+    let mut v = ChatView::default();
+    reasoning(&mut v, "thinking");
+    start_call(&mut v, "c1");
+    end_call(&mut v, "c1", "SECRET-OUT-TEXT");
+    // Folded ladder: the output is nowhere — not in the transcript, not in
+    // the live strip.
+    assert!(
+        !live(&v).contains("SECRET-OUT-TEXT"),
+        "the live region NEVER renders call results: {}",
+        live(&v)
+    );
+    assert!(
+        !flat(&v).contains("SECRET-OUT-TEXT"),
+        "the folded ladder hides the result too: {}",
+        flat(&v)
+    );
+    // Expand the call through the user toggle walk (group → step → calls
+    // aggregate → the call's own row) — the ladder's flatten now carries
+    // the output ...
+    v.toggle_tool_call_at(0, 0);
+    v.toggle_tool_call_at(0, 1);
+    v.toggle_tool_call_at(0, 2);
+    v.toggle_tool_call_at(0, 3);
+    assert!(
+        flat(&v).contains("SECRET-OUT-TEXT"),
+        "the expanded ladder owns the drill-down: {}",
+        flat(&v)
+    );
+    // ... while the live strip STILL does not — disclosure never leaks in.
+    assert!(
+        !live(&v).contains("SECRET-OUT-TEXT"),
+        "even an expanded ladder never pushes results into the live region: {}",
+        live(&v)
+    );
+    assert!(
+        live(&v).contains("bash") && live(&v).contains("echo x"),
+        "the strip keeps streaming the name row + input: {}",
         live(&v)
     );
 }

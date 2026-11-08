@@ -45,7 +45,7 @@ pub use types::*;
 #[path = "chat_helpers.rs"]
 mod helpers;
 pub use helpers::block_text;
-pub(crate) use helpers::{push_duration_span, short, summarize, tool_output_lines};
+pub(crate) use helpers::{fmt_input, push_duration_span, short, summarize, tool_output_lines};
 
 #[path = "chat_step_render.rs"]
 mod step_render;
@@ -144,6 +144,8 @@ impl ChatView {
                 let thinking = steps::absorb_pending_thinking(&mut self.blocks);
                 let call = ToolCall {
                     id: id.clone(),
+                    name: sanitize_single_line(name).into_owned(),
+                    input: fmt_input(input),
                     header: Line::from(vec![
                         Span::styled(
                             format!("\u{25b8} {} ", sanitize_single_line(name)),
@@ -222,6 +224,10 @@ impl ChatView {
                         // identically before and after resume.
                         let call = ToolCall {
                             id: id.clone(),
+                            // Orphan ToolEnd: the ToolStart (name/input) was
+                            // lost, so only the output survives to render.
+                            name: "(output)".to_string(),
+                            input: String::new(),
                             header: Line::from(Span::styled(
                                 "\u{25b8} (output)",
                                 Style::default().fg(theme::accent()),

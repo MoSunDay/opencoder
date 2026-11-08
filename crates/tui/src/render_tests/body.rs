@@ -39,6 +39,8 @@ fn body_follow_indicator_when_not_following() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -94,6 +96,8 @@ fn body_follow_label_when_following() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -148,6 +152,8 @@ fn body_top_arrow_when_scrolled_down() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -202,6 +208,8 @@ fn body_no_top_arrow_when_at_top() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -256,6 +264,8 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -300,6 +310,8 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -354,6 +366,8 @@ fn empty_child_view_does_not_show_tutorial() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -406,6 +420,8 @@ fn body_title_row_shows_full_top_composition() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -458,6 +474,8 @@ fn submitted_hides_tutorial_even_with_empty_blocks() {
                 0,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();

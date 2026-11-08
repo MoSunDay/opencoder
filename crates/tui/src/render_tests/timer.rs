@@ -33,6 +33,8 @@ fn render_body_with_tail(content: &str, tail_ms: u64, width: u16, height: u16) -
                 tail_ms,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -177,6 +179,8 @@ fn body_call_cost_timer_not_mixed_into_tool_output() {
                 30000,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();
@@ -243,6 +247,8 @@ fn body_timer_visible_when_scrolled_away_from_tail() {
                 30000,
                 false,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();

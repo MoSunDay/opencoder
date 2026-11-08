@@ -196,3 +196,73 @@ fn streaming_say_renders_in_the_strip_until_sealed() {
         "the sealed Say lands in the transcript as the merged header: {flat:?}"
     );
 }
+
+/// The live content can grow past the frame (untruncated thinking + input
+/// + streaming Say). The strip must then take the WHOLE inner area,
+/// tail-kept — never blank the body (the content_h == 0 regression).
+#[test]
+fn huge_live_takes_the_whole_frame_tail_kept_instead_of_blanking() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::QueueConsumed {
+        seq: 1,
+        text: "go".into(),
+    });
+    v.apply(&SessionEvent::ReasoningDelta(
+        "think line\n".repeat(20).into(),
+    ));
+    v.apply(&SessionEvent::ToolStart {
+        id: "c1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo x"}),
+    });
+    v.apply(&SessionEvent::TextDelta(
+        "say text streaming along\n".repeat(5).into(),
+    ));
+    let live_lines = crate::render_live::region(&v, false, 0);
+    assert!(
+        live_lines.len() > 10,
+        "fixture: live exceeds the 10-row inner area"
+    );
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut scroll = 0u32;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                &Line::raw("test"),
+                &mut scroll,
+                true,
+                0,
+                0,
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut None,
+                true,
+                0,
+                false,
+                None,
+                &live_lines,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    // The inner area is NOT blank: the tail-kept strip fills it, newest
+    // rows (the streaming Say) visible, above the `[tok cost]` border.
+    let say = row_of(buf, "say text", 60).expect("streaming Say visible");
+    let tok = row_of(buf, "tok", 60).expect("tok cost border");
+    assert!(say < tok, "say row {say} above tok border {tok}");
+    for y in 1..11u16 {
+        assert!(
+            !row_text(buf, y, 60).trim().is_empty(),
+            "row {y} must not be blank while live overflows the frame"
+        );
+    }
+}

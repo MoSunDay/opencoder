@@ -21,6 +21,9 @@ streaming 全部交给实时区。**TUI 事件状态机零改动**（仅渲染/f
 
 - 实时条贴合：短转录时条紧跟最后一行内容（无空行间隙）；满转录/
   滚动时条在内容区底（= 框内底部）；高度不设上限，物理溢出才保尾。
+- 溢出回归（修复）：live 行数 ≥ 框内高时，条**占满整个框内区**（保
+  尾、最新行可见），绝不因 `content_h == 0` 早退把 body 渲染成空白
+  框 —— 转录随 live 回落到框高以下自动回归。
 - 流式 Say 三阶段（TUI `say_streams_in_the_live_region_and_lands_in_
   the_transcript_on_seal`）：流式中 = 实时区 `💬 Say` + 全文、转录无
   Say 行且阶梯独立组行；seal = Say 落地成合并头行、实时区清空；
@@ -36,6 +39,7 @@ streaming 全部交给实时区。**TUI 事件状态机零改动**（仅渲染/f
 | 功能 | 测试 |
 | --- | --- |
 | 条贴合最后一行内容（上方无空隙）、输入行不截断、Say 下方/tok 上方排序不变 | `live_strip_sits_below_say_rows_and_above_tok_cost_border` |
+| live 超过框高时条占满框内区保尾（不空白 body） | `huge_live_takes_the_whole_frame_tail_kept_instead_of_blanking` |
 | Say 流式在实时区、seal 才落地合并头行（三阶段） | `say_streams_in_the_live_region_and_lands_in_the_transcript_on_seal` |
 | running 标记只出现在实时区（Say 流式期间转录无 say 行） | `running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_text`（含 live_text 扩展） |
 | SPA text_delta 只累积 pendingSay、turns 不动 | `reduce.test.js` watermark/delta 组 |

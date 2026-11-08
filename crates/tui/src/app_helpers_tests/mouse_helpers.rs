@@ -151,5 +151,12 @@ pub fn parent_with_long_subagent() -> ChatView {
         id: "s1".into(),
         ev: Box::new(SessionEvent::TextDelta(child_text)),
     });
+    // Seal the child view's Say: an OPEN Say streams only in the TURN LIVE
+    // REGION (flatten skips it), while this fixture needs the child's rows
+    // as TRANSCRIPT content for the scroll-clamp math below.
+    chat.apply(&SessionEvent::SubagentChild {
+        id: "s1".into(),
+        ev: Box::new(SessionEvent::Done),
+    });
     chat
 }

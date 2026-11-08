@@ -1,10 +1,10 @@
-//! The TURN LIVE REGION renders as the transcript frame's bottom strip:
+//! The TURN LIVE REGION rides the TAIL of the transcript's scroll window:
 //! BELOW the Say/ladder rows, ABOVE the `[tok cost]` bottom-border row —
-//! and never inside the transcript's own line flow (flatten stays clean).
-//! The strip HUGS the transcript's last rendered row (no blank gap when
-//! the transcript is shorter than the frame) and is never truncated by a
-//! height cap: the ladder-identical step rows render in full unless the
-//! frame itself overflows.
+//! one scrollbar shared with the transcript (`render.rs::render_body`),
+//! never truncated (scrolling up reveals the region's start). It is never
+//! inside the transcript's own line flow (flatten stays clean): the
+//! ladder-identical step rows render in full unless the frame itself
+//! overflows (tail-kept).
 
 use super::*;
 use crate::chat::ChatView;
@@ -13,6 +13,17 @@ use ratatui::Terminal;
 
 fn row_of(buf: &ratatui::buffer::Buffer, needle: &str, w: u16) -> Option<u16> {
     (0..buf.area.height).find(|&y| row_text(buf, y, w).contains(needle))
+}
+
+/// The unified scrollbar occupies the inner area's rightmost column; its
+/// track/thumb are blank cells with a non-default background, so a painted
+/// column proves the scrollbar was drawn.
+fn scrollbar_painted(buf: &ratatui::buffer::Buffer, area: ratatui::layout::Rect) -> bool {
+    let x = area.right().saturating_sub(2); // inner.right()-1
+    (area.y + 1..area.bottom().saturating_sub(1)).any(|y| {
+        buf.cell((x, y))
+            .is_some_and(|c| c.bg != ratatui::style::Color::Reset)
+    })
 }
 
 #[test]
@@ -115,12 +126,14 @@ inserted gap): {above:?}"
 }
 
 #[test]
-fn streaming_say_renders_in_the_strip_until_sealed() {
-    // The OPEN Say is TRANSCRIPT content now: it renders in its FINAL
-    // shape while streaming — the merged `❯ Say(1 step)` group row forms
-    // IMMEDIATELY with the running hint, its RAW body rows streaming below
-    // — and the live region holds NO Say at all (it cleared the moment
-    // the Say began: progress disarmed). Sealing only drops the hint.
+fn streaming_say_renders_standalone_in_the_transcript_until_sealed() {
+    // The OPEN Say is TRANSCRIPT content streaming STANDALONE: while it
+    // runs the ladder above stays FOLDED in its settled counting shape
+    // (`▸ 1 Step`, NO merged `Say(n steps)` row), the `say:` header
+    // carries the running spinner, and the RAW body rows render below it
+    // in full (no preview dedup) — and the live region holds NO Say at
+    // all (it cleared the moment the Say began: progress disarmed).
+    // Sealing merges the pair and dedups the body against the preview.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("pondering".into()));
     v.apply(&SessionEvent::ToolStart {
@@ -164,9 +177,9 @@ fn streaming_say_renders_in_the_strip_until_sealed() {
 
     let buf = terminal.backend().buffer();
     let w = buf.area.width;
-    // The strip carries NO Say marker and no say text — only the step
-    // rows would render there, and the Say disarmed progress, so it is
-    // empty entirely.
+    // The live region carries NO Say marker and no say text — only the
+    // step rows would render there, and the Say disarmed progress, so it
+    // is empty entirely.
     assert!(
         live_lines.is_empty(),
         "the live region cleared when the Say began: {live_lines:?}"
@@ -175,22 +188,36 @@ fn streaming_say_renders_in_the_strip_until_sealed() {
         row_of(buf, "\u{1f4ac}", w).is_none(),
         "no Say marker anywhere in the frame"
     );
-    // The TRANSCRIPT carries the merged group row with the running hint,
-    // and the RAW body rows stream below it (first line deduped into the
-    // header preview).
-    let merged = row_of(buf, "Say(1 step): the answer", w)
-        .expect("the open Say merges onto the group row immediately");
-    let running = row_of(buf, "running", w).expect("the merged row carries the running hint");
-    assert_eq!(merged, running, "the hint rides the merged header row");
-    let body = row_of(buf, "and more", w).expect("the raw body rows stream below");
-    assert!(merged < body, "the Say body follows its merged header");
+    // The TRANSCRIPT carries the folded ladder (NO merged Say row yet)…
+    let group = row_of(buf, "1 Step", w).expect("the folded group row renders");
+    let group_row = row_text(buf, group, w);
+    assert!(
+        !group_row.contains("Say("),
+        "no merge while the Say streams — settled counting shape: {group_row:?}"
+    );
+    // …then the standalone `say:` header with the running spinner…
+    let say = row_of(buf, "Say:", w).expect("the standalone say: header renders");
+    let say_row = row_text(buf, say, w);
+    assert!(
+        say_row.contains("\u{280b}"),
+        "the say: header carries the running spinner: {say_row:?}"
+    );
+    // …and the FULL raw body below it (no preview dedup while streaming).
+    let first = row_of(buf, "the answer", w).expect("the raw first body row renders");
+    let rest = row_of(buf, "and more", w).expect("the raw second body row renders");
+    assert!(
+        group < say && say < first && first < rest,
+        "folded row, say: \
+header, raw body — in order: {group} {say} {first} {rest}"
+    );
     let tok = row_of(buf, "tok", w).expect("[tok cost] border renders");
-    assert!(body < tok, "the streaming Say scrolls inside the frame");
+    assert!(rest < tok, "the streaming Say scrolls inside the frame");
 
-    // Seal: the shape is IDENTICAL minus the running hint.
+    // Seal: the pair MERGES — folded row + say: header collapse into the
+    // `Say(n steps)` header and the body dedups its preview line away.
     v.apply(&SessionEvent::Done);
     let live_lines = crate::render_live::region(&v, false, 0);
-    assert!(live_lines.is_empty(), "the strip stays empty once sealed");
+    assert!(live_lines.is_empty(), "the region stays empty once sealed");
     let backend = TestBackend::new(40, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut scroll = 0u32;
@@ -228,17 +255,18 @@ fn streaming_say_renders_in_the_strip_until_sealed() {
     let body = row_of(buf, "and more", w).expect("the sealed body keeps its rows");
     assert!(merged < body, "the body still follows the merged header");
     assert!(
-        row_of(buf, "running", w).is_none(),
-        "sealing drops the running hint — the only visual delta"
+        row_of(buf, "running", w).is_none() && row_of(buf, "\u{280b}", w).is_none(),
+        "sealing drops the spinner — the only visual delta"
     );
 }
 
-/// The live content can grow past the frame (untruncated thinking + call
-/// rows — steps only, the Say never rides the strip). The strip must then
-/// take the WHOLE inner area, tail-kept — never blank the body (the
-/// content_h == 0 regression).
+/// The live content can grow past the frame on its own (untruncated
+/// thinking + call rows). The unified scroll window must then keep the
+/// TAIL while following (newest rows visible, a scrollbar drawn) AND stay
+/// scrollable to the region's START — scroll=0 reveals `⬥ live` and the
+/// first thinking rows: never truncated, never blanked.
 #[test]
-fn huge_live_takes_the_whole_frame_tail_kept_instead_of_blanking() {
+fn huge_live_rides_the_scroll_window_tail_kept_and_start_reachable() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::QueueConsumed {
         seq: 1,
@@ -262,6 +290,7 @@ fn huge_live_takes_the_whole_frame_tail_kept_instead_of_blanking() {
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut scroll = 0u32;
+    let area = terminal.get_frame().area();
     terminal
         .draw(|f| {
             render_body(
@@ -290,26 +319,66 @@ fn huge_live_takes_the_whole_frame_tail_kept_instead_of_blanking() {
         })
         .unwrap();
     let buf = terminal.backend().buffer();
-    // The inner area is NOT blank: the tail-kept strip fills it — the
-    // NEWEST rows (the running call's header) visible, above the
-    // `[tok cost]` border.
+    // Following pins the window to the TAIL: the newest rows (the running
+    // call's header) visible, above the `[tok cost]` border — and the
+    // unified scrollbar is drawn because content+live overflow the frame.
     let call = row_of(buf, "bash", 60).expect("running call header visible");
     let tok = row_of(buf, "tok", 60).expect("tok cost border");
     assert!(call < tok, "call row {call} above tok border {tok}");
-    for y in 1..11u16 {
-        assert!(
-            !row_text(buf, y, 60).trim().is_empty(),
-            "row {y} must not be blank while live overflows the frame"
-        );
-    }
+    assert!(
+        scrollbar_painted(buf, area),
+        "content + live overflow the frame — one scrollbar for the window"
+    );
+    assert!(
+        row_of(buf, "live", 60).is_none(),
+        "the live START is scrolled off while pinned to the tail"
+    );
+
+    // Scroll all the way up: the window's very first rows are the
+    // transcript head, then the live region's START — `⬥ live` and the
+    // first thinking rows render un-truncated.
+    let mut scroll = 0u32;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                &Line::raw("test"),
+                &mut scroll,
+                false,
+                0,
+                0,
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut None,
+                true,
+                0,
+                false,
+                None,
+                &live_lines,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let live = row_of(buf, "live", 60).expect("scroll=0 reveals the live start");
+    let think = row_of(buf, "think line", 60).expect("the first thinking rows render");
+    let tok = row_of(buf, "tok", 60).expect("tok cost border");
+    assert!(
+        live < think && think < tok,
+        "live start, thinking rows in order"
+    );
 }
 
-/// Regression: the strip must stay VISIBLE when the transcript overflows
-/// the frame. `strip_rect` used to receive TOTAL flattened rows: once
-/// `total_rows >= inner.height` the strip's y landed on the frame bottom,
-/// avail became 0 and the strip vanished. It must receive the VISIBLE
-/// content rows instead, so the strip hugs the bottom of the visible
-/// window — above the `[tok cost]` border.
+/// Regression: the live region must stay VISIBLE when the transcript
+/// overflows the frame. The tail of the unified scroll window carries it:
+/// following pins the window to the bottom, so the live rows always land
+/// in view — hugging the frame's tail, above the `[tok cost]` border.
 #[test]
 fn live_strip_stays_visible_when_transcript_overflows() {
     let mut v = ChatView::default();
@@ -369,4 +438,80 @@ fn live_strip_stays_visible_when_transcript_overflows() {
     // The transcript above the strip is the scrolled content window.
     let user = row_of(buf, "user line", w).expect("transcript rows fill the frame");
     assert!(user < live, "transcript {user} above the strip {live}");
+}
+
+/// ONE scrollbar for content + live: when the transcript and the live
+/// tail TOGETHER overflow the frame, the unified window draws a scrollbar
+/// sized over `total_rows + live_rows`, and following shows the live tail
+/// rows above the `[tok cost]` border.
+#[test]
+fn unified_scrollbar_covers_content_and_live_tail() {
+    let mut v = ChatView::default();
+    for i in 0..12 {
+        v.blocks.push(ChatBlock::User {
+            rendered: vec![Line::from(format!("user line {i}"))],
+        });
+    }
+    v.apply(&SessionEvent::ReasoningDelta("pondering".into()));
+    v.apply(&SessionEvent::ToolStart {
+        id: "c1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo x"}),
+    });
+    let live_lines = crate::render_live::region(&v, false, 0);
+    assert!(!live_lines.is_empty(), "a running turn arms the strip");
+
+    let backend = TestBackend::new(40, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut scroll = 0u32;
+    let area = terminal.get_frame().area();
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                &Line::raw("test"),
+                &mut scroll,
+                true,
+                0,
+                0,
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut None,
+                true,
+                0,
+                false,
+                None,
+                &live_lines,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let w = buf.area.width;
+    // One scrollbar over the unified window: the transcript alone fills
+    // the 10-row inner area, the live tail extends it further — without
+    // counting the live rows no scrollbar (or a wrong-sized one) drew.
+    assert!(
+        scrollbar_painted(buf, area),
+        "content + live overflow → scrollbar drawn over the unified window"
+    );
+    // Following shows the live TAIL rows, hugging the frame bottom —
+    // above the `[tok cost]` border.
+    let live = row_of(buf, "live", w).expect("the live header stays visible");
+    let call = row_of(buf, "bash", w).expect("the live call header renders");
+    let tok = row_of(buf, "tok", w).expect("[tok cost] border renders");
+    assert!(
+        live < call && call < tok,
+        "live rows ride the window tail: {live} {call} {tok}"
+    );
+    // The window above the live tail is the transcript's OLDEST-scrolled
+    // rows: following pins the unified window to its very bottom.
+    let user = row_of(buf, "user line", w).expect("transcript rows fill the rest");
+    assert!(user < live, "transcript {user} above the live tail {live}");
 }

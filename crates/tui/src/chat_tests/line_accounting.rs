@@ -87,11 +87,14 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
     let mut expected = 0usize;
     for (bi, block) in view.blocks.iter().enumerate() {
         // ADJACENT-pair merge (see flatten_with): a StepGroup whose NEXT
-        // block is the turn's Say (ANY Assistant, open or sealed) renders
-        // one merged header row and the Say renders body only — both sides
-        // of the pair lose one line. An open Say IS transcript content now.
-        let say_merged_after_group =
-            matches!(view.blocks.get(bi + 1), Some(ChatBlock::Assistant { .. }));
+        // block is the turn's SEALED Say (`done: true`) renders one merged
+        // header row and the Say renders body only — both sides of the
+        // pair lose one line. An OPEN Say renders standalone (the group
+        // keeps its plain row, the Say its `say:` header + raw rows).
+        let say_merged_after_group = matches!(
+            view.blocks.get(bi + 1),
+            Some(ChatBlock::Assistant { done: true, .. })
+        );
         let say_merged_into_group = bi
             .checked_sub(1)
             .and_then(|i| view.blocks.get(i))
@@ -104,26 +107,24 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                 rendered,
                 done,
             } => {
-                // The Say is transcript content BOTH while streaming and
-                // once sealed — raw rows while open, rendered rows once
-                // sealed (mirrors `flatten_with`'s Assistant arm).
-                if !say_merged_into_group {
-                    expected += 1;
+                // While the Say STREAMS it renders standalone: the `say:`
+                // header plus every RAW body row (no merge, no preview
+                // dedup). Once sealed, the merged pair skips the header
+                // row and dedups the body against the preview (mirrors
+                // `flatten_with`'s Assistant arm).
+                if !*done {
+                    expected += 1 + crate::chat::assistant_rows(raw).len();
+                } else {
+                    if !say_merged_into_group {
+                        expected += 1;
+                    }
+                    expected += if say_merged_into_group {
+                        super::super::step_render::merged_say_body_decision(rendered)
+                            .visible_len(rendered.len())
+                    } else {
+                        rendered.len()
+                    };
                 }
-                // 合并对正文行数：跳过与 preview 重复的首个非空行（单行
-                // Say / 空正文整块隐藏）—— 与 flatten_with 同口径（含
-                // 流式 raw 行）。
-                let rows_len = if *done {
-                    rendered.len()
-                } else {
-                    crate::chat::assistant_rows(raw).len()
-                };
-                expected += if say_merged_into_group {
-                    super::super::step_render::merged_say_body_decision(raw, rendered, *done)
-                        .visible_len(rows_len)
-                } else {
-                    rows_len
-                };
             }
             ChatBlock::Thinking {
                 text, collapsed, ..

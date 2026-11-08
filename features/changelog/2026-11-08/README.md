@@ -6,7 +6,8 @@
 2. [live-region-calls-expanded-input.md](live-region-calls-expanded-input.md)(已取代)
 3. [live-region-hugs-content-say-deferred.md](live-region-hugs-content-say-deferred.md)(已取代)
 4. [live-region-calls-match-ladder.md](live-region-calls-match-ladder.md)
-5. [live-region-steps-only-say-in-transcript.md](live-region-steps-only-say-in-transcript.md)(现行口径)
+5. [live-region-steps-only-say-in-transcript.md](live-region-steps-only-say-in-transcript.md)(已取代,Say 入转录共享滚动仍现行)
+6. [live-region-one-scrollbar-folded-say-ladder.md](live-region-one-scrollbar-folded-say-ladder.md)(现行口径)
 
 ## 独立条目
 

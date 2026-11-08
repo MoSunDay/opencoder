@@ -4,13 +4,13 @@
 //! (chat_headers.rs) mirrors this line accounting exactly so hit-rects stay
 //! aligned with the live render.
 //!
-//! Say pairing: a ladder whose ADJACENT lower block is its `Assistant` Say
-//! renders as ONE header row `{glyph} Say(n steps): <say first line>` that
+//! Say pairing: a ladder whose ADJACENT lower block is its SEALED `Assistant`
+//! Say renders as ONE header row `{glyph} Say(n steps): <say first line>` that
 //! both carries the step count and toggles the steps on click; the
-//! standalone `{glyph} N Steps` row disappears into it. The live `running`
-//! hint survives the Say: it rides the merged header while the Say itself
-//! streams and nothing was appended after it, then moves on (Done, or the
-//! next ladder's own group row).
+//! standalone `{glyph} N Steps` row disappears into it. While the Say still
+//! STREAMS the merge is off (the group keeps its plain folded `N Steps` row
+//! and the Say renders standalone below — see `chat_flatten.rs`); the merge
+//! forms only on seal.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -43,41 +43,28 @@ use super::{
 /// them; the Say body below (emitted by the Assistant block) skips its first
 /// non-empty line when it duplicates the header preview (see
 /// [`merged_say_body_decision`]).
-/// Render-time view of the group's ADJACENT Say (the `Assistant` block
-/// immediately below the group). When present, the pair renders as ONE
-/// clickable header row `{glyph} Say(n steps): <say first line>`: the step
-/// count folds into the Say header, the standalone `N Steps` row disappears,
-/// and clicking the row toggles the ladder (the Say body always stays
-/// visible below). `streaming` keeps the `running` hint alive on this row
-/// while the Say itself streams with nothing appended after it — the hint
-/// leaves the pre-Say group row only to move here, not to vanish.
+/// Render-time view of the group's ADJACENT Say (the sealed `Assistant`
+/// block immediately below the group — an open Say keeps the group's plain
+/// `N Steps` row; see `flatten_with`). When present, the pair renders as
+/// ONE clickable header row `{glyph} Say(n steps): <say first line>`: the
+/// step count folds into the Say header, the standalone `N Steps` row
+/// disappears, and clicking the row toggles the ladder (the Say body
+/// always stays visible below).
 pub(crate) struct SayHeader {
     /// Header inline preview, computed once via [`say_preview_for`]: the
-    /// first non-empty line RENDERED (markdown applied) once the Say is
-    /// done, the raw first line while it streams. The body dedup compares
-    /// against the same text. Keep the styled spans: this header is the
-    /// ONLY rendering of the first line once body dedup removes it.
+    /// first non-empty line RENDERED (markdown applied). The body dedup
+    /// compares against the same text. Keep the styled spans: this header
+    /// is the ONLY rendering of the first line once body dedup removes it.
     pub preview: Line<'static>,
-    pub streaming: bool,
-}
-
-/// First non-empty line of the Say's raw text, trimmed — the inline preview
-/// on the merged header (empty for a whitespace-only Say).
-pub(crate) fn say_preview(raw: &str) -> &str {
-    raw.lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or("")
 }
 
 /// The preview and body dedup share the first visible line. Trim only its
 /// outside whitespace, preserving every inline style and internal space.
 /// Empty rendered output (e.g. a reference definition) stays empty instead
 /// of exposing Markdown source that intentionally has no visible content.
-pub(crate) fn say_preview_for(raw: &str, rendered: &[Line<'static>], done: bool) -> Line<'static> {
-    if !done {
-        return Line::from(say_preview(raw).to_string());
-    }
+/// Only the SEALED Say has a merged header, so the preview is always the
+/// RENDERED first line (the raw stream never reaches here).
+pub(crate) fn say_preview_for(rendered: &[Line<'static>]) -> Line<'static> {
     let Some(line) = rendered.iter().find(|line| {
         line.spans
             .iter()
@@ -162,27 +149,20 @@ fn line_text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.clone()).collect()
 }
 
-/// 合并对正文的去重判定入口：done 时逐行取 markdown 渲染文本，流式时
-/// 取原始行（与 `flatten_with` 两条正文路径一一对应），再交给
-/// [`merged_say_body`]。渲染与行数统计都从这里走，保证两端口径一致。
-pub(crate) fn merged_say_body_decision(
-    raw: &str,
-    rendered: &[Line<'static>],
-    done: bool,
-) -> SayBody {
-    let preview = line_text(&say_preview_for(raw, rendered, done));
-    if done {
-        let texts: Vec<String> = rendered.iter().map(line_text).collect();
-        merged_say_body(&preview, &texts)
-    } else {
-        merged_say_body(&preview, &super::assistant_rows(raw))
-    }
+/// 合并对正文的去重判定入口（仅 done 的 Say 会构成合并对）：逐行取
+/// markdown 渲染文本，再交给 [`merged_say_body`]。渲染与行数统计都从
+/// 这里走，保证两端口径一致。
+pub(crate) fn merged_say_body_decision(rendered: &[Line<'static>]) -> SayBody {
+    let preview = line_text(&say_preview_for(rendered));
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    merged_say_body(&preview, &texts)
 }
 
-/// The merged pair header: `{glyph} Say(n step{s}): <preview>` plus the live
-/// spinner while the Say streams. Same glyph grammar as the group row
-/// (`❯` open / `▸` closed) so every collapsible row reads alike.
-fn say_header_line(open: bool, n: usize, say: &SayHeader, anim_tick: u32) -> Line<'static> {
+/// The merged pair header: `{glyph} Say(n step{s}): <preview>`. Same glyph
+/// grammar as the group row (`❯` open / `▸` closed) so every collapsible
+/// row reads alike. Only the SEALED Say rides this row (the merge happens
+/// on seal), so no live spinner hint ever appears here.
+fn say_header_line(open: bool, n: usize, say: &SayHeader) -> Line<'static> {
     let mut spans = vec![Span::styled(
         format!(
             "{}Say({} step{}): ",
@@ -202,15 +182,6 @@ fn say_header_line(open: bool, n: usize, say: &SayHeader, anim_tick: u32) -> Lin
         span.style = say.preview.style.patch(span.style);
         span
     }));
-    if say.streaming {
-        spans.push(Span::styled(
-            format!(
-                "  {} running ",
-                SPINNER[(anim_tick as usize) % SPINNER.len()]
-            ),
-            Style::default().fg(theme::warn_color()),
-        ));
-    }
     Line::from(spans)
 }
 
@@ -230,7 +201,7 @@ pub(crate) fn flatten_step_group(
         // plus the Say body (emitted by the Assistant block right below) is
         // the whole pair — no extra blank row.
         Some(say) => {
-            out.push(say_header_line(open, steps.len(), &say, anim_tick));
+            out.push(say_header_line(open, steps.len(), &say));
             // 头部行之后必须空出一行再接下方内容：preview 行不与正文
             // （或展开的 ladder）挤在一起。闭合时这一个空行兼任整对的
             // 尾部空行 —— 正文若整块隐藏（单行 Say），绝不叠加第二个

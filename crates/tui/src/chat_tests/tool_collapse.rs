@@ -269,32 +269,43 @@ fn running_hint_persists_until_say_begins() {
         "ToolEnd must keep progress alive while waiting for Say: {line:?}"
     );
     v.apply(&SessionEvent::TextDelta("final answer".into()));
-    let line = &flatten_text(&v)[0];
+    let text = flatten_text(&v);
     // The first non-empty Say chunk RETIRES the hint from the pre-Say
-    // group row — and the Say is transcript content NOW: the row merges
-    // into `❯ Say(1 step): final answer` immediately, the running hint
-    // riding the merged header while it streams (the TURN LIVE REGION
-    // carries only the running step, never the Say).
-    assert!(
-        line.contains("Say(1 step): final answer") && line.contains("running"),
-        "the Say merges onto the group row at its first chunk, hint riding the header: {line:?}"
+    // group row — and while the Say streams the ladder stays FOLDED in
+    // its settled counting shape: the plain `▸ 1 Step` row (no hint), the
+    // standalone `say:` header carrying the spinner, and the FULL raw
+    // body below (no merge, no preview dedup — that happens on seal).
+    assert_eq!(
+        text[0], "\u{25b8} 1 Step",
+        "the group row stays folded: {text:?}"
     );
+    let say_header = &text[2];
     assert!(
-        !line.contains("1 Step"),
-        "the standalone step-count row is folded into the merged header: {line:?}"
+        say_header.starts_with("\u{276f} Say: ") && say_header.contains('\u{280b}'),
+        "the standalone say: header carries the running spinner: {say_header:?}"
     );
+    assert_eq!(text[3], "    final answer", "the raw body streams in full");
     assert!(
         live_text(&v).is_empty(),
         "the open Say never streams in the live region: {}",
         live_text(&v)
     );
 
-    // Say is terminal for the ladder: the merged header keeps its running
-    // hint exactly as long as the Say stays open; a ToolStart (new ladder
-    // below the Say) seals it — the hint retires with the seal, and Done
-    // settles the new ladder's hint the same way.
+    // Say is terminal for the ladder: the standalone header keeps its
+    // spinner exactly as long as the Say stays open; a ToolStart (new
+    // ladder below the Say) opens turn 2 — the OPEN first Say keeps its
+    // standalone shape (no merge yet) while the new ladder runs its own
+    // hint, and Done seals everything (the pair merges, hints retire).
     v.apply(&SessionEvent::ReasoningDelta("one more check".into()));
-    assert!(flatten_text(&v)[0].contains("running"));
+    let text = flatten_text(&v);
+    assert_eq!(
+        text[0], "\u{25b8} 1 Step",
+        "the open Say keeps the ladder folded"
+    );
+    assert!(
+        text.iter().any(|l| l.contains("running")),
+        "the new ladder's group row carries its own running hint: {text:?}"
+    );
     v.apply(&SessionEvent::ToolStart {
         id: "after-say".into(),
         name: "bash".into(),
@@ -302,7 +313,12 @@ fn running_hint_persists_until_say_begins() {
     });
     assert!(!flatten_text(&v)[0].contains("running"));
     v.apply(&SessionEvent::Done);
-    assert!(!flatten_text(&v).iter().any(|l| l.contains("running")));
+    let sealed = flatten_text(&v);
+    assert_eq!(
+        sealed[0], "\u{25b8} Say(1 step): final answer",
+        "Done seals the Say — the pair merges: {sealed:?}"
+    );
+    assert!(!sealed.iter().any(|l| l.contains("running")));
 }
 
 #[test]

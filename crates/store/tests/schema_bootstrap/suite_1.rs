@@ -39,8 +39,9 @@ async fn fresh_open_then_reopen_is_idempotent() {
             .unwrap();
     }
 
-    // Two re-opens on the same path: each re-runs the (single-transaction)
-    // bootstrap. A nested BEGIN would fail the whole open loudly.
+    // Two re-opens on the same path: each takes the warm fast path (no
+    // bootstrap writes at all); a forced re-run stays idempotent, and a
+    // nested BEGIN would fail the whole open loudly.
     for reopen in 1..=2 {
         let store = TursoStore::open(&path).await.unwrap();
         let conn = store.conn().await.unwrap();
@@ -241,7 +242,8 @@ async fn checkpoint_gate_existing_path_reopen_converges() {
             .await
             .unwrap();
     }
-    // The file now pre-exists: the reopen below takes the checkpoint branch.
+    // The file now pre-exists (the slow-path checkpoint input); the reopen
+    // below takes the warm fast path and must still converge.
     assert!(path.exists(), "gate input must be true for the reopen");
 
     let store = TursoStore::open(&path).await.unwrap();

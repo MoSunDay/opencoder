@@ -5,16 +5,18 @@
 //! - synchronous_is_full_after_open: the connection uses FULL (2) and WAL.
 //!   Turso does not support NORMAL; durability is verified on the live connection.
 //! - fresh_open_then_reopen_is_idempotent: fresh open -> one session via the
-//!   Store trait -> drop -> two re-opens on the same path. Every re-open
-//!   re-runs bootstrap, which must be idempotent: the session survives, the
+//!   Store trait -> drop -> two re-opens on the same path. A schema-current
+//!   re-open skips bootstrap on the warm fast path (a forced re-run stays
+//!   idempotent): the session survives, the
 //!   `schema_version` table still holds exactly one row, and the database
 //!   passes `PRAGMA integrity_check`. Running bootstrap inside a single
 //!   `BEGIN IMMEDIATE` transaction must not leave nested-transaction debris
 //!   (a broken wrapper surfaces as "cannot start a transaction within a
 //!   transaction" on the second open).
 //! - second_open_on_live_path_succeeds: opening the same path a second time
-//!   *while the first store is still alive* - the concurrent-open path whose
-//!   `BEGIN IMMEDIATE` queues on the write lock held by busy_timeout.
+//!   *while the first store is still alive* - the concurrent-open path (both
+//!   handles share one live database; a cold second bootstrap would queue its
+//!   `BEGIN IMMEDIATE` on the write lock behind busy_timeout).
 //! - legacy_tables_without_version_row_converge_on_open: a pre-versioning
 //!   database (tables present, no schema_version row) is detected before the
 //!   DDL batch and upgraded via a full migrate-from-v0 pass - open succeeds,
@@ -27,8 +29,11 @@
 //!   repaired.
 //! - checkpoint_gate_existing_path_reopen_converges: the `if existed` gate in
 //!   `TursoStore::open` (fresh file skips the checkpoint, existing file runs
-//!   it) - decision unit-pinned on `should_checkpoint_wal`, here the
+//!   it) - a busy checkpoint no longer fails the open (best-effort), and the
 //!   existing-path reopen converges with integrity_check ok.
+//! - current_schema_opens_while_an_external_writer_holds_the_lock (suite_2):
+//!   the warm fast path opens a schema-current database from reads alone
+//!   while another database handle pins the write lock.
 
 use opencoder_store::{SessionMeta, Store, TursoStore, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT};
 
@@ -244,3 +249,6 @@ async fn seed_legacy_db(db_path: &std::path::Path, inputs_without_promoted_seq: 
 
 #[path = "schema_bootstrap/suite_1.rs"]
 mod suite_1;
+
+#[path = "schema_bootstrap/suite_2.rs"]
+mod suite_2;

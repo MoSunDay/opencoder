@@ -413,8 +413,7 @@ fn render_body(
     live_lines: &[Line<'static>],
 ) {
     *body_out = Some(area);
-    // Copy mode: undecorated full-width view so terminal-native selection
-    // spans clean text (no border/scrollbar/timer/indicator rows).
+    // Copy mode: undecorated full-width view for terminal-native selection.
     if copy_mode {
         crate::copy_mode::render_clean(
             f, area, chat, scroll, follow, anim_tick, now_ms, viewport, wrap_plan,
@@ -432,15 +431,13 @@ fn render_body(
     let inner = block.inner(area);
     let text_w = inner.width.saturating_sub(1);
 
-    // B5: Early exit for degenerate terminal sizes — prevents division-by-zero
-    // and empty-paragraph panics in a 1x1 terminal.
+    // B5: degenerate width guard (1x1 terminal panics).
     if text_w == 0 {
         f.render_widget(block, area);
         return;
     }
 
-    // Empty session: show the in-body tutorial instead of a blank transcript.
-    // It vanishes automatically once the first block appears.
+    // Empty session: in-body tutorial; vanishes once the first block lands.
     if is_top_level && chat.blocks.is_empty() && !chat.submitted {
         f.render_widget(block, area);
         if chat.remote {
@@ -451,11 +448,9 @@ fn render_body(
         return;
     }
 
-    // A1: Build or refresh the viewport cache (rebuilt on first frame,
-    // body-refresh invalidation, or width change). Cached lines/offsets
-    // make per-frame cost O(visible_h) instead of O(total_content). The
-    // cache only needs `text_w`, so it is built BEFORE any content-area
-    // splitting.
+    // A1: build/refresh the viewport cache (first frame, body refresh, or
+    // width change) — O(visible_h) per frame. Needs only `text_w`, so it
+    // is built before any content-area splitting.
     let needs_rebuild = viewport.as_ref().is_none_or(|v| v.width() != text_w);
     if needs_rebuild {
         *viewport = Some(ViewportCache::build(chat, text_w, anim_tick, now_ms));
@@ -463,10 +458,8 @@ fn render_body(
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
 
-    // TURN LIVE REGION geometry: the strip HUGS the transcript's last
-    // rendered row — no reserved slice, no height cap. The content window
-    // shrinks ONLY when content + live would overflow the frame; physical
-    // frame overflow still clips the strip, tail-kept (`render_live`).
+    // TURN LIVE REGION geometry: hug the last rendered row, no cap; the
+    // content window shrinks only on content+live overflow (`render_live`).
     let live_len = live_lines.len();
     let content_h: u16 = if total_rows.saturating_add(live_len) > inner.height as usize {
         inner
@@ -476,9 +469,15 @@ fn render_body(
         inner.height
     };
 
-    // B5 (height half): degenerate frame after the live strip claimed it.
+    // B5 (height half): the live content alone fills (or overflows) the
+    // frame — the strip takes the WHOLE inner area, tail-kept (newest
+    // rows), instead of blanking the body. The transcript returns as soon
+    // as the live lines shrink back below the frame height.
     if content_h == 0 {
         f.render_widget(block, area);
+        if let Some(rect) = render_live::strip_rect(inner, 0, live_len) {
+            render_live::render_strip(f, live_lines, rect);
+        }
         return;
     }
     let visible_h = content_h as usize;

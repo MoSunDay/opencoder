@@ -20,7 +20,7 @@ import { useNodes } from './fleet/useNodes.js';
 import { useTranscriptStream } from './chat/useTranscriptStream.js';
 import { consumedEchoText, emptyStream, turnsFromMessages, usageFromMessages } from './reduce.js';
 import { TranscriptView } from './transcript.jsx';
-import { TurnLiveRegion } from './stepsBlock.jsx';
+import { StreamingSay, TurnLiveRegion } from './stepsBlock.jsx';
 import { DialogSidebar } from './chatSidebar.jsx';
 import { postSessionInput } from './chat/inputAttempt.js';
 import { QueuePanel } from './queuePanel.jsx';
@@ -71,6 +71,8 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
   const [mode, setMode] = useLocalStorage(CHAT_MODE_STORAGE_KEY, 'operator');
 
   const streamRef = useRef(null);
+  // Transcript scroll container (streaming Say + live region ride below the list).
+  const transcriptScrollRef = useRef(null);
   const createAttempt = useRef(null);
   const inputAttempt = useRef(null);
   const sendingRef = useRef(false);
@@ -327,6 +329,14 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.status]);
+
+  // Auto-stick: Bubble.List autoScroll only covers the list itself — follow
+  // the container bottom while the streaming Say / running turn grow below
+  // it, but ONLY near the bottom (< 80px slack) so scroll-up always wins.
+  useEffect(() => {
+    const el = transcriptScrollRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight;
+  }, [stream.pendingSay, stream.turns]);
 
   const interrupt = async () => {
     if (!dialogSel) return;
@@ -681,7 +691,13 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
         </div>
 
         {!nodeReady && <Alert type="info" showIcon style={{ marginBottom: 12 }} title={nodesError || (nodeSel ? '所选节点当前不可执行，请选择可用节点' : '请先选择执行节点')} />}
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--oc-border)', borderRadius: 10, padding: '12px 16px' }}>
+        {/* Transcript scroll container: the STREAMING Say (raw text, no marker)
+            and the TURN LIVE REGION (running step only) render below the list
+            in this same flow — they scroll WITH the messages (TUI parity). */}
+        <div
+          ref={transcriptScrollRef}
+          style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--oc-border)', borderRadius: 10, padding: '12px 16px' }}
+        >
           <Spin spinning={connecting} description="等待首个事件…">
             <TranscriptView
               turns={stream.turns}
@@ -691,15 +707,10 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
               emptyText={dialogSel ? '该对话暂无消息，输入提示词开始' : '选中节点后输入提示词，即新建对话'}
             />
           </Spin>
+          {/* STREAMING SAY → live region — both ride the transcript scroll. */}
+          <StreamingSay text={stream.pendingSay} />
+          <TurnLiveRegion turns={stream.turns} />
         </div>
-
-        {/* TURN LIVE REGION — pinned OUTSIDE the transcript scroll area: a
-            different thing from the Say/Step message area; it streams the
-            running turn's current step AND the STREAMING Say (pendingSay —
-            a Say is not transcript content while it streams; it lands in
-            the message list at the flush boundary) and clears on settle,
-            never coupled to any ladder's disclosure (TUI parity). */}
-        <TurnLiveRegion turns={stream.turns} say={stream.pendingSay} />
 
         <QueuePanel sessionId={hasNode ? dialogSel : null} refreshSignal={queueVersion} />
 

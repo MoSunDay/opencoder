@@ -1,3 +1,10 @@
+> **已取代**：本条的「流式 Say 只进实时区（💬 Say 标记 + 全文）、
+> seal 才入转录」已被
+> [live-region-steps-only-say-in-transcript.md](live-region-steps-only-say-in-transcript.md)
+> 取代 —— open Say 即时以最终形态进转录（合并头行 + running 提示 +
+> raw body，共享滚动），实时区只留运行中 step（thinking + 调用行）。
+> 贴合/不截断的几何口径仍有效（可见行定位 + wrapped 保尾为后续修正）。
+
 # 实时区紧贴转录内容且不截断；流式 Say 只进实时区，落定才进转录（TUI + SPA）
 
 一句话：两条口径。(1) **贴合 + 不截断**：实时条不再钉在 transcript

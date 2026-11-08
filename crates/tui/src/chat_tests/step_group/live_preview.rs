@@ -242,37 +242,38 @@ fn say_streams_in_the_live_region_and_lands_in_the_transcript_on_seal() {
     end_call(&mut v, "c1", "out");
     assert!(live(&v).contains("think"));
 
-    // MID-STREAM: the open Say is NOT transcript content. The ladder row
-    // stands alone in the transcript (its own running hint retired on the
-    // first chunk), and the live region carries BOTH the current step and
-    // the raw Say text.
+    // MID-STREAM: the open Say IS transcript content — the pair merges
+    // into the `Say(n steps)` header IMMEDIATELY (running hint riding it),
+    // the raw body rows stream below it in the transcript, and the live
+    // region holds NO Say at all (it cleared when the Say began).
     v.apply(&SessionEvent::TextDelta("the answer".into()));
     let text = flat(&v);
     assert!(
-        !text.contains("the answer") && !text.contains("Say("),
-        "an open Say renders nothing in the transcript: {text}"
+        text.contains("Say(1 step): the answer") && text.contains("running"),
+        "the open Say merges onto the group row at its first chunk: {text}"
     );
     assert!(
-        text.contains("1 Step"),
-        "the ladder row stands alone below the open Say: {text}"
+        !text.contains("1 Step"),
+        "the standalone step-count row is gone while the Say streams: {text}"
     );
     let lv = live(&v);
     assert!(
-        lv.contains("\u{1f4ac} Say") && lv.contains("the answer"),
-        "the live region streams the open Say (marker + raw text): {lv}"
+        !lv.contains("\u{1f4ac} Say") && !lv.contains("the answer"),
+        "the live region never carries the Say (marker or text): {lv}"
     );
     assert!(
-        lv.contains("think") && !lv.contains("Step("),
-        "and still carries the running step: {lv}"
+        !lv.contains("think"),
+        "the Say disarmed progress — the region shows no step either: {lv}"
     );
 
-    // SEAL: Done finalizes the Say — the pair settles into the merged
-    // header and the live region clears.
+    // SEAL: Done finalizes the Say — the pair keeps the merged header minus
+    // the running hint; the live region stays empty.
     v.apply(&SessionEvent::Done);
     let text = flat(&v);
     assert!(
-        text.contains("Say(1 step): the answer"),
-        "sealing merges the pair into one header row: {text}"
+        text.contains("Say(1 step): the answer") && !text.contains("running"),
+        "sealing keeps the merged header and drops the hint — zero shape \
+jump: {text}"
     );
     assert!(
         live_lines(&v).is_empty(),
@@ -381,9 +382,15 @@ different area, untouched by the ladder's disclosure: {lv}"
         "settle never closes a level the user opened"
     );
     let lv = live(&v);
+    let text = flat(&v);
     assert!(
-        lv.contains("\u{1f4ac} Say") && lv.contains("answer"),
-        "while the Say is open the region streams it (marker + raw text): {lv}"
+        !lv.contains("\u{1f4ac} Say") && !lv.contains("answer"),
+        "the Say began — the live region disarmed and carries no Say rows: {lv}"
+    );
+    assert!(
+        text.contains("Say(2 steps): answer") && text.contains("running"),
+        "the open Say streams as transcript content under the merged header \
+of the user-open ladder: {text}"
     );
     v.apply(&SessionEvent::Done);
     assert!(

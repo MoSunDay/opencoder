@@ -554,9 +554,9 @@ fn render_body(
         draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y);
     }
 
-    // The TURN LIVE strip, HUGGING the last rendered row (right below the
-    // visible content; untruncated — only physical overflow clips).
-    if let Some(rect) = render_live::strip_rect(inner, total_rows, live_len) {
+    // The TURN LIVE strip, HUGGING the last VISIBLE content row — it
+    // always fits: content_h above already reserved live_len rows for it.
+    if let Some(rect) = render_live::strip_rect(inner, total_rows.min(visible_h), live_len) {
         render_live::render_strip(f, live_lines, rect);
     }
 

@@ -26,6 +26,7 @@ vi.mock('./api.js', () => ({
 import './test/setup-dom.js';
 import { TranscriptView } from './transcript.jsx';
 import { TurnLiveRegion } from './stepsBlock.jsx';
+import { MONO_VAR } from './ui/mono.js';
 
 const stepsTurn = () => ({
   kind: 'steps',
@@ -50,15 +51,24 @@ const mount = (turns) => render(
   <TranscriptView turns={turns || [stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />,
 );
 
-/// Live tests mount BOTH surfaces the chat page shows: the transcript AND
-/// the TURN LIVE REGION pinned outside the message area (chat.jsx mounts it
-/// between the scroll container and the input — a different thing from the
-/// Say/Step bubbles). `say` feeds the reducer's pendingSay prop (the
-/// STREAMING Say renders ONLY here — it lands in the message list at flush).
+/// Live tests mount the transcript scroll flow EXACTLY as chat.jsx orders
+/// it inside the scroll container: the message list (TranscriptView), then
+/// the STREAMING Say (the reducer's pendingSay — RAW text in the flow, no
+/// 💬 Say marker; it lands as a message at flush), then the TURN LIVE
+/// REGION (steps ONLY; it clears on settle). The Say block mirrors
+/// chat.jsx's `data-turn-streaming-say` div — it NEVER enters the region.
 const mountWithLiveRegion = (turns, say) => render(
   <>
     <TranscriptView turns={turns || [stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />
-    <TurnLiveRegion turns={turns || [stepsTurn()]} say={say} />
+    {say ? (
+      <div
+        data-turn-streaming-say
+        style={{ marginTop: 8, fontFamily: MONO_VAR, fontSize: 12, whiteSpace: 'pre-wrap', color: 'var(--oc-text-tertiary)', marginBottom: 0 }}
+      >
+        {say}
+      </div>
+    ) : null}
+    <TurnLiveRegion turns={turns || [stepsTurn()]} />
   </>,
 );
 
@@ -66,7 +76,15 @@ const mountWithLiveRegion = (turns, say) => render(
 const rerenderWithLiveRegion = (mounted, turns, say) => mounted.rerender(
   <>
     <TranscriptView turns={turns} usage={null} status="streaming" error={null} emptyText="无" />
-    <TurnLiveRegion turns={turns} say={say} />
+    {say ? (
+      <div
+        data-turn-streaming-say
+        style={{ marginTop: 8, fontFamily: MONO_VAR, fontSize: 12, whiteSpace: 'pre-wrap', color: 'var(--oc-text-tertiary)', marginBottom: 0 }}
+      >
+        {say}
+      </div>
+    ) : null}
+    <TurnLiveRegion turns={turns} />
   </>,
 );
 
@@ -318,14 +336,15 @@ describe('StepsContent three-level drill-down', () => {
   });
 });
 
-describe('turn live region (its own area, outside the message list)', () => {
+describe('turn live region (below the list, inside the transcript scroll flow)', () => {
   // The ladder is user-controlled and folded by default: antd keeps closed
   // panels mounted once opened, so folded state is asserted through the
   // item's active class — never through text absence alone. The TURN LIVE
-  // REGION is a SEPARATE pinned area (never inside a bubble, never inside
-  // the scroll list) rendered while the turn runs — gated only on running
-  // state, never on any ladder's disclosure (TUI parity with
-  // chat_live_turn.rs).
+  // REGION rides the SAME scrollbar as the transcript (chat.jsx mounts it
+  // in the scroll container, right after the list — never inside a bubble,
+  // never inside the ladder) and is rendered while the turn runs — gated
+  // only on running state, never on any ladder's disclosure (TUI parity
+  // with chat_live_turn.rs).
   const itemActive = (matcher) => screen.getByText(matcher)
     .closest('.ant-collapse-item').classList.contains('ant-collapse-item-active');
   const summaryHeader = (matcher) => screen.getByText(matcher).closest('.ant-collapse-header');
@@ -336,7 +355,7 @@ describe('turn live region (its own area, outside the message list)', () => {
     return turn;
   };
 
-  it('running turn streams the last step in the separate live region, not the transcript', () => {
+  it('running turn streams the last step in the live region below the list, not in a bubble', () => {
     mountWithLiveRegion([runningTurn()]);
     // The summary stays folded and keeps its own running tag.
     expect(itemActive('2 Steps')).toBe(false);
@@ -390,34 +409,44 @@ describe('turn live region (its own area, outside the message list)', () => {
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
-  it('live region streams the pending Say under the 💬 Say marker, with no running steps turn at all', () => {
-    // TUI live-region parity: a STREAMING Say is NOT transcript content —
-    // while pendingSay holds it, it renders ONLY in the pinned region (full
-    // text under the 💬 Say marker), even before/without any ladder.
-    render(<TurnLiveRegion turns={[]} say="streaming answer" />);
-    const region = screen.getByText('streaming answer')
-      .closest('[data-turn-live-region]');
-    expect(region).toBeTruthy();
-    expect(within(region).getByText('💬 Say')).toBeTruthy();
-    expect(within(region).getByText(/live/)).toBeTruthy();
-    // No running steps turn → no step body, only the live Say block.
-    expect(within(region).queryByText(/🔧/)).toBeNull();
-    expect(within(region).queryByText('💭 Thinking')).toBeNull();
-    // The Say is NOT in any transcript surface — only here.
-    expect(document.querySelectorAll('.ant-bubble').length).toBe(0);
+  it('streaming Say rides the transcript flow BELOW the list — never inside the live region', () => {
+    // The Say STREAMS in the transcript scroll flow (chat.jsx's sibling
+    // block): RAW text, NO 💬 Say marker (banned from live surfaces), with
+    // no running steps turn at all the region renders NOTHING.
+    mountWithLiveRegion([], 'streaming answer');
+    expect(screen.getByText('streaming answer')).toBeTruthy();
+    expect(screen.getByText('streaming answer').closest('[data-turn-streaming-say]')).toBeTruthy();
+    expect(screen.queryByText('💬 Say')).toBeNull();
+    // No running steps turn → no region at all (steps only, never Say).
+    expect(screen.queryByText(/live/)).toBeNull();
+    expect(screen.queryByText(/🔧/)).toBeNull();
+    expect(screen.queryByText('💭 Thinking')).toBeNull();
   });
 
-  it('the running step renders FIRST, then the live Say block under it', () => {
+  it('the running step body is the region\'s ONLY content — the streaming Say stays in the flow above it', () => {
     mountWithLiveRegion([runningTurn()], 'answering while the call runs');
-    const region = screen.getByText('💬 Say')
+    const region = screen.getByText('reading the entrypoint')
       .closest('[data-turn-live-region]');
     expect(region).toBeTruthy();
-    expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
-    expect(within(region).getByText('answering while the call runs')).toBeTruthy();
-    // Body order: the running turn's step body, THEN the live Say block.
-    const stepBody = screen.getByText('reading the entrypoint');
+    expect(within(region).getByText(/🔧 read/)).toBeTruthy();
+    // Steps ONLY: neither the Say text nor the 💬 Say marker ever enters.
+    expect(within(region).queryByText('answering while the call runs')).toBeNull();
+    expect(within(region).queryByText('💬 Say')).toBeNull();
+    // Flow order: the streaming Say block FIRST, the live region UNDER it
+    // (chat.jsx: TranscriptView → streaming Say → TurnLiveRegion).
     const sayText = screen.getByText('answering while the call runs');
-    expect(stepBody.compareDocumentPosition(sayText) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const stepBody = screen.getByText('reading the entrypoint');
+    expect(sayText.compareDocumentPosition(stepBody) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('the region ignores a leftover `say` prop — steps only, no Say marker anywhere', () => {
+    const { container } = render(<TurnLiveRegion turns={[runningTurn()]} say="leftover say text" />);
+    const region = container.querySelector('[data-turn-live-region]');
+    expect(region).toBeTruthy();
+    expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
+    expect(within(region).queryByText('leftover say text')).toBeNull();
+    expect(container.textContent).not.toContain('leftover say text');
+    expect(container.textContent).not.toContain('💬 Say');
   });
 
   it('settle clears the live region and the ladder stays folded', () => {
@@ -425,7 +454,8 @@ describe('turn live region (its own area, outside the message list)', () => {
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
     expect(screen.getByText('partial answer')).toBeTruthy();
     // Terminal settle: the turns settled AND pendingSay flushed — the Say
-    // landed in the transcript, so the region empties completely.
+    // block leaves the transcript flow (it lands as a message in the list)
+    // and the region empties completely: steps only, cleared on settle.
     rerenderWithLiveRegion(mounted, [stepsTurn()]);
     expect(itemActive('2 Steps')).toBe(false);
     expect(screen.queryByText(/Step\(2\)/)).toBeNull();

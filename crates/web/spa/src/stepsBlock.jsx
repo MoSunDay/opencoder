@@ -15,23 +15,23 @@
 //           rides THERE (driven by sayActive, the sayStreaming ladder flag)
 //           until the sub-turn's ladder ends.
 //   TURN LIVE REGION — NOT part of this bubble at all: while a turn runs
-//         (`ladderRunning`), its LAST step streams in a SEPARATE pinned
-//         region outside the transcript scroll area (its own panel between
-//         the message list and the input, mounted by chat.jsx via
-//         `TurnLiveRegion` below): thinking + this step's call rows,
+//         (`ladderRunning`), its LAST step streams in a SEPARATE live
+//         region chat.jsx mounts INSIDE the transcript scroll container,
+//         right after the message list (SAME scrollbar, plain transcript
+//         flow — still never inside a bubble, never inside the ladder),
+//         via `TurnLiveRegion` below: thinking + this step's call rows,
 //         rendered by the SAME `ToolContent` rows as the ladder's L3
 //         (aggregate row skipped so the rows list directly; per-call
 //         `running` tags stream in place; input AND result both behind the
-//         call's default-closed collapse — 收起, ladder-identical). While a
-//         Say STREAMS it renders there too (the reducer's pendingSay,
-//         passed as the `say` prop):
-//         a Say is NOT transcript content while streaming (TUI live-region
-//         parity) — full text under a `💬 Say` marker until the flush lands
-//         it in the message list. When running retires (the turn settles)
-//         the region clears and the step lives
+//         call's default-closed collapse — 收起, ladder-identical). STEPS
+//         ONLY: the STREAMING Say never enters the region — chat.jsx
+//         renders the reducer's pendingSay as RAW text in the same
+//         transcript flow above it (it lands as a message at flush; the
+//         `💬 Say` marker is banned from live surfaces). When running
+//         retires (the turn settles) the region clears and the step lives
 //         only inside the turn's folded ladder; if the next turn is already
-//         running the region simply shows it. Gated ONLY on running state or
-//         a streaming Say — zero coupling with any ladder's disclosure
+//         running the region simply shows it. Gated ONLY on running state —
+//         zero coupling with any ladder's disclosure
 //         (opening L0 never changes it; TUI parity with chat_live_turn.rs).
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (uncontrolled);
 //         red tag when any of THIS step's calls failed
@@ -232,27 +232,48 @@ function StepCollapse({ step, index }) {
   );
 }
 
-/// LIVE preview under the folded L0 summary: the LAST step's header + body
-/// The TURN LIVE REGION component — chat.jsx pins it BETWEEN the transcript
-/// scroll area and the input, so it is visibly a DIFFERENT thing from the
-/// Say/Step message area (never inside a bubble, never inside the ladder).
-/// Two payloads, in order:
-///   * the NEWEST still-running steps turn's current (last) step (thinking +
-///     its call rows laid out flat, so the running call and its `running`
-///     tag stream in place);
-///   * the STREAMING Say (the reducer's `pendingSay` prop): a Say is NOT
-///     transcript content while it streams (TUI live-region parity) — it
-///     renders here ONLY, untruncated, under a `💬 Say` marker, and lands in
-///     the message list at FLUSH time (round end / next tool or thinking
-///     activity / terminal settle / new input), when the region drops it.
-/// The region clears on settle. Gated ONLY on running state or a non-empty
-/// Say — it never reacts to any ladder's opening or folding.
-export function TurnLiveRegion({ turns, say = '' }) {
+/// The STREAMING SAY — the reducer's pendingSay rendered INSIDE the
+/// transcript scroll flow (BEFORE the live region): plain raw text (mono 12,
+/// pre-wrap, tertiary), no marker; the flush boundary turns it into a message
+/// in the list above and drops this block. Shares the scrollbar by living in
+/// the same scroll container (chat.jsx).
+export function StreamingSay({ text }) {
+  if (!text) return null;
+  return (
+    <div
+      data-turn-streaming-say
+      style={{
+        marginTop: 8,
+        fontFamily: MONO_VAR,
+        fontSize: 12,
+        whiteSpace: 'pre-wrap',
+        color: 'var(--oc-text-tertiary)',
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+/// The TURN LIVE REGION component — chat.jsx mounts it INSIDE the transcript
+/// scroll container, right AFTER the message list, so it SHARES the scrollbar
+/// with the transcript (plain flow below the bubbles: visibly a DIFFERENT
+/// thing from the Say/Step messages, yet not a separate panel — never inside
+/// a bubble, never inside the ladder).
+/// ONE payload: the NEWEST still-running steps turn's current (last) step —
+/// thinking + its call rows laid out flat, so the running call and its
+/// `running` tag stream in place. STEPS ONLY: the STREAMING Say never enters
+/// the region — it streams as RAW text in the transcript flow above it
+/// (chat.jsx renders the reducer's pendingSay as a sibling block) and lands
+/// in the message list at FLUSH time (round end / next tool or thinking
+/// activity / terminal settle / new input).
+/// The region clears on settle. Gated ONLY on running state — it never
+/// reacts to any ladder's opening or folding.
+export function TurnLiveRegion({ turns }) {
   const running = findRunningStepsTurn(turns);
-  const liveSay = typeof say === 'string' ? say : '';
   const steps = running && Array.isArray(running.steps) ? running.steps : [];
   const step = steps.length > 0 ? steps[steps.length - 1] : null;
-  if (!step && !liveSay) {
+  if (!step) {
     return null;
   }
   const list = (step && Array.isArray(step.calls)) ? step.calls : [];
@@ -272,20 +293,7 @@ export function TurnLiveRegion({ turns, say = '' }) {
         <span style={{ opacity: 0.65 }}>{'\u{2B25} live'}</span>
         {failed ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
       </div>
-      {step ? <StepBody step={step} flatCalls /> : null}
-      {liveSay ? (
-        <div>
-          <div style={{ fontFamily: MONO_VAR, fontSize: 12, color: 'var(--oc-text-tertiary)', marginBottom: 4 }}>💬 Say</div>
-          <Paragraph
-            style={{
-              fontFamily: MONO_VAR, fontSize: 12,
-              whiteSpace: 'pre-wrap', color: 'var(--oc-text-tertiary)', marginBottom: 0,
-            }}
-          >
-            {liveSay}
-          </Paragraph>
-        </div>
-      ) : null}
+      <StepBody step={step} flatCalls />
     </div>
   );
 }

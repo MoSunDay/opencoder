@@ -23,10 +23,15 @@ use opencoder_session::resume;
 use opencoder_store::{SessionMeta, Store, TursoStore};
 
 fn cfg() -> Config {
-    Config {
+    let mut c = Config {
         model: "m/g".into(),
         ..Config::default()
-    }
+    };
+    // Pin the tail (shipped default is 0 = summary-only) so the compaction
+    // below keeps its head/tail shape: head (plan_instr + u3..a4) summarized,
+    // last two turns (u5..a6) retained — the OFFSET arithmetic under test.
+    c.compaction.tail_turns = 2;
+    c
 }
 
 fn user(id: &str, text: &str) -> Message {

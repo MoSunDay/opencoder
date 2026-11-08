@@ -12,10 +12,15 @@ use opencoder_session::SessionState;
 use opencoder_store::{SessionMeta, Store, TursoStore};
 
 fn cfg() -> Config {
-    Config {
+    let mut c = Config {
         model: "main/glm-5.2".into(),
         ..Config::default()
-    }
+    };
+    // Pin the tail (the shipped default is 0 = summary-only) so this test
+    // keeps its head/tail shape: head (u1+a1) summarized, tail (u2+a2)
+    // retained verbatim and reloaded on resume.
+    c.compaction.tail_turns = 1;
+    c
 }
 
 fn meta(id: &str) -> SessionMeta {
@@ -51,7 +56,8 @@ async fn compaction_persists_surviving_images_to_store() {
     let mut s = SessionState::new("cp1", agent, cfg(), mock, std::env::temp_dir())
         .with_store(store.clone());
 
-    // Two turns; head (u1+a1) carries an image, tail (u2+a2) does not.
+    // Two turns (tail_turns=1, see cfg()); head (u1+a1) carries an image,
+    // tail (u2+a2) does not.
     let mut u1 = Message::user("u1", "look at this");
     u1.blocks.push(ContentBlock::Image {
         url: "data:image/png;base64,AAAA".into(),

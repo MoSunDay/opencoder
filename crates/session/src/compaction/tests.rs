@@ -232,6 +232,98 @@ fn compaction_split_matches_ideal_when_enough_turns() {
     assert_eq!(compaction_split(&msgs, 2).unwrap(), split_index(&msgs, 2));
 }
 
+#[test]
+fn split_index_zero_tail_returns_full_length() {
+    // tail_turns=0 retains no tail: the ideal split summarizes everything.
+    let msgs = vec![
+        Message::user("u1", "first"),
+        Message::assistant("a1"),
+        Message::user("u2", "second"),
+        Message::assistant("a2"),
+    ];
+    assert_eq!(split_index(&msgs, 0), msgs.len());
+}
+
+#[test]
+fn compaction_split_zero_tail_summarizes_everything() {
+    // tail_turns=0: the split lands at messages.len() even with an answered
+    // tool roundtrip AND a dangling (unanswered) tool_use — with an empty
+    // retained tail there is nothing to keep pairs together for, so the
+    // boundary search must not backtrack and shrink the head.
+    let mut dangling = Message::assistant("a3");
+    dangling.blocks.push(ContentBlock::ToolUse {
+        id: "dangling".into(),
+        name: "bash".into(),
+        input: serde_json::json!({}),
+    });
+    let msgs = vec![
+        Message::user("u1", "task"),
+        assistant_with_tool("a1"), // tool_use "tc"
+        tool_msg("t1", "tc"),      // answered roundtrip
+        Message::user("u2", "more"),
+        dangling, // unanswered tool_use — no tool_result follows
+    ];
+    assert_eq!(compaction_split(&msgs, 0), Some(msgs.len()));
+    // A single-message (or empty) transcript still has nothing to compact.
+    let lone = vec![Message::user("u1", "big paste")];
+    assert_eq!(compaction_split(&lone, 0), None);
+    assert_eq!(compaction_split(&[], 0), None);
+}
+
+/// Default config (`tail_turns = 0`): compaction keeps ONLY the synthetic
+/// summary message — no retained tail of recent turns survives.
+#[tokio::test]
+async fn compact_default_keeps_only_summary() {
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, Config};
+    use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
+
+    let mock: Arc<dyn ChatStream> =
+        Arc::new(
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "SUMMARY".into(),
+                tool_calls: Vec::<CompletedToolCall>::new(),
+                usage: None,
+            }]),
+        );
+    let agent = resolve_agent("act").expect("act agent");
+    let mut s = SessionState::new(
+        "compact-default",
+        agent,
+        Config {
+            model: "main/glm-5.2".into(),
+            ..Config::default()
+        },
+        mock,
+        std::env::temp_dir(),
+    );
+    s.messages.push(Message::user("u1", "first turn"));
+    s.messages.push(Message::assistant("a1"));
+    s.messages.push(Message::user("u2", "second turn"));
+    s.messages.push(Message::assistant("a2"));
+
+    let outcome = compact(&mut s, &HashMap::new(), &mut |_| {}).await;
+
+    let summary = outcome.expect("default compaction must summarize");
+    assert_eq!(summary.as_deref(), Some("SUMMARY"));
+    assert_eq!(
+        s.messages.len(),
+        1,
+        "only the summary message may be retained"
+    );
+    assert!(s.messages[0].synthetic, "the retained message is synthetic");
+    assert!(
+        s.messages[0].text().starts_with(SUMMARY_PREFIX),
+        "retained message must carry the compaction-summary prefix"
+    );
+    assert_eq!(
+        s.summary_seq,
+        Some(4),
+        "the full head (4 messages) is soft-deleted in summary_seq"
+    );
+}
+
 /// Issue #3 (root cause A): the compaction-summary LLM stream must honor
 /// the session cancel token. A double-Esc / web interrupt mid-compaction
 /// must abort promptly and leave the transcript untouched (compaction only

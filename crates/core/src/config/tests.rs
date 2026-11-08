@@ -273,6 +273,16 @@ fn enable_tmux_session_defaults_to_none() {
 }
 
 #[test]
+fn compaction_tail_turns_defaults_to_zero() {
+    // 0 = keep no tail: after compaction the transcript holds only the
+    // synthetic summary message. The serde default fn must agree with the
+    // Default impl so config files without the key get the same value.
+    assert_eq!(Config::default().compaction.tail_turns, 0);
+    let from_json: Config = serde_json::from_str("{}").unwrap();
+    assert_eq!(from_json.compaction.tail_turns, 0);
+}
+
+#[test]
 fn merge_into_applies_enable_tmux_session() {
     let mut c = Config::default();
     super::merge::merge_into(&mut c, serde_json::json!({ "enable_tmux_session": true }));

@@ -64,7 +64,8 @@ async fn compact_with_summary_emits_done() {
         std::env::temp_dir(),
     );
     sess.store = Some(store.clone());
-    // Two turns so compaction_split finds a real head/tail split.
+    // Four messages: any >=2-message transcript is summarizable (with the
+    // default tail_turns=0 the whole thing folds into the summary).
     sess.messages
         .push(opencoder_core::Message::user("u1", "first turn"));
     sess.messages.push(opencoder_core::Message::assistant("a1"));

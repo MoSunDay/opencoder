@@ -12,6 +12,9 @@ pub struct CompactionConfig {
     pub auto: bool,
     #[serde(default = "default_threshold")]
     pub context_threshold: u64,
+    /// Turns kept verbatim after compaction. 0 (the default) keeps no tail:
+    /// the transcript after compaction is only the synthetic summary message.
+    /// N > 0 keeps the N most recent turns verbatim after the summary.
     #[serde(default = "default_tail_turns")]
     pub tail_turns: u32,
     #[serde(default = "default_reserved")]
@@ -24,7 +27,7 @@ impl Default for CompactionConfig {
         CompactionConfig {
             auto: true,
             context_threshold: 80_000,
-            tail_turns: 2,
+            tail_turns: 0,
             reserved: 20_000,
             buffer: None,
         }
@@ -76,7 +79,7 @@ fn default_threshold() -> u64 {
     80_000
 }
 fn default_tail_turns() -> u32 {
-    2
+    0
 }
 fn default_reserved() -> u64 {
     20_000

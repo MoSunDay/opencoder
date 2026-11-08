@@ -76,11 +76,15 @@ fn streaming_delta_self_heals_missing_round_start() {
         v.llm_round_started_at_ms.is_some(),
         "TextDelta must self-heal a missing round anchor; still None"
     );
-    // The open Say streams in the TURN LIVE REGION (flatten skips it).
+    // The open Say IS transcript content now (raw rows under `say:`); the
+    // live region holds only the running step — never the Say.
     assert!(
-        super::step_group::live_lines(&v).join("\n").contains("hi"),
+        v.flatten()
+            .iter()
+            .any(|l| l.spans.iter().any(|s| s.content.contains("hi"))),
         "delta text must still be appended alongside self-heal"
     );
+    assert!(!super::step_group::live_lines(&v).join("\n").contains("hi"));
 }
 
 /// A genuine `LlmRoundStart` (runner timestamp) must NOT be overwritten by the

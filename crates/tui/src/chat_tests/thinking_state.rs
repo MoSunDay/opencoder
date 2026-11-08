@@ -275,9 +275,9 @@ fn interleaved_reasoning_opens_a_new_turn_under_each_say() {
     );
 
     // Each Say merges into its preceding group: `{glyph} Say(n step{s}):`
-    // — one merged header per turn pair. While the SECOND Say is still
-    // open only the first pair is sealed (its Say landed); the open one
-    // streams in the TURN LIVE REGION and its group renders standalone.
+    // — one merged header per turn pair. The merge forms IMMEDIATELY now
+    // (the open Say is transcript content), so mid-stream BOTH pairs carry
+    // their merged headers; only the SECOND still rides the running hint.
     let say_headers = |v: &ChatView| {
         v.flatten()
             .iter()
@@ -286,14 +286,14 @@ fn interleaved_reasoning_opens_a_new_turn_under_each_say() {
     };
     assert_eq!(
         say_headers(&v),
-        1,
-        "mid-stream only the sealed pair renders its merged header"
+        2,
+        "mid-stream both pairs render their merged headers (the open Say too)"
     );
     v.apply(&SessionEvent::Done);
     assert_eq!(
         say_headers(&v),
         2,
-        "each Say of the pairing contract renders its own merged header once sealed"
+        "sealing changes nothing shape-wise — the headers merely settle"
     );
 }
 

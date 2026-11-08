@@ -39,9 +39,10 @@ fn llm_round_lifecycle_is_display_only_and_resets_at_boundary() {
     });
     v.apply(&SessionEvent::TextDelta("working".into()));
     assert_eq!(v.llm_round_started_at_ms, Some(1000));
-    // The open Say streams in the TURN LIVE REGION, not the transcript.
+    // The open Say IS transcript content now (raw rows under `say:`), and
+    // the TURN LIVE REGION holds only the running step — never the Say.
     let live = step_group::live_lines(&v).join("\n");
-    assert!(live.contains("working"), "live region: {live:?}");
+    assert!(!live.contains("working"), "live region: {live:?}");
     assert!(!live.contains("call cost"), "live region: {live:?}");
     let before = block_text(&v);
 
@@ -76,16 +77,21 @@ fn text_delta_appends_to_assistant_block() {
     v.apply(&SessionEvent::TextDelta("hello ".into()));
     v.apply(&SessionEvent::TextDelta("world".into()));
     // The Say is OPEN: its text accumulates in the block's raw and streams
-    // in the TURN LIVE REGION (the transcript gains it only when sealed).
+    // as TRANSCRIPT content (raw rows); the TURN LIVE REGION stays empty —
+    // it holds only the running step, never the Say.
     let live = step_group::live_lines(&v).join("\n");
     assert!(
-        live.contains("hello") && live.contains("world"),
-        "deltas append and stream in the live region: {live:?}"
+        !live.contains("hello") && !live.contains("world"),
+        "the live region never carries the Say: {live:?}"
+    );
+    assert!(
+        block_text(&v).contains("hello") && block_text(&v).contains("world"),
+        "deltas append and stream in the transcript"
     );
     v.apply(&SessionEvent::Done);
     assert!(
         block_text(&v).contains("hello") && block_text(&v).contains("world"),
-        "the sealed Say lands in the transcript"
+        "the sealed Say stays in the transcript"
     );
 }
 
@@ -198,13 +204,15 @@ fn text_after_tool_starts_fresh_block() {
     });
     v.apply(&SessionEvent::TextDelta("done".into()));
     // ToolStart SEALED the first Say ("result:" is transcript content);
-    // the second Say ("done") is OPEN and streams in the TURN LIVE REGION
-    // until the run settles.
+    // the second Say ("done") is OPEN and streams as transcript content
+    // too (raw rows), while the TURN LIVE REGION stays Say-free until the
+    // run settles.
     assert!(block_text(&v).contains("result:"));
+    assert!(block_text(&v).contains("done"));
     let live = step_group::live_lines(&v).join("\n");
     assert!(
-        live.contains("done"),
-        "the open Say streams in the live region: {live:?}"
+        !live.contains("done"),
+        "the live region never carries the Say: {live:?}"
     );
     v.apply(&SessionEvent::Done);
     assert!(block_text(&v).contains("done"));
@@ -217,11 +225,12 @@ fn push_marker_separates_from_assistant() {
     v.push_marker(Line::from("[queued] foo"));
     v.apply(&SessionEvent::TextDelta("more".into()));
     // The marker SEALed the first Say (push_marker finalizes), so it is
-    // transcript content; the second Say is OPEN and streams in the live
-    // region only.
+    // transcript content; the second Say is OPEN and streams as transcript
+    // content too (raw rows) — the live region stays Say-free.
     assert!(block_text(&v).contains("[queued] foo"));
     assert!(block_text(&v).contains("streaming"));
-    assert!(step_group::live_lines(&v).join("\n").contains("more"));
+    assert!(block_text(&v).contains("more"));
+    assert!(!step_group::live_lines(&v).join("\n").contains("more"));
     v.apply(&SessionEvent::Done);
     assert!(block_text(&v).contains("more"));
 }
@@ -230,11 +239,13 @@ fn push_marker_separates_from_assistant() {
 fn multiline_delta_splits_lines() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("line1\nline2".into()));
-    // While the Say streams, its RAW lines render in the TURN LIVE REGION
-    // (one row per line, indented under the `💬 Say` marker).
-    let live = step_group::live_lines(&v);
-    assert!(live.iter().any(|t| t.contains("line1")), "got {live:?}");
-    assert!(live.iter().any(|t| t.contains("line2")), "got {live:?}");
+    // While the Say streams, its RAW lines render as TRANSCRIPT content
+    // (one row per line, indented under the `say:` header) — the live
+    // region carries no Say rows at all.
+    let streaming = block_text(&v);
+    assert!(streaming.contains("line1"), "got {streaming:?}");
+    assert!(streaming.contains("line2"), "got {streaming:?}");
+    assert!(step_group::live_lines(&v).is_empty());
     v.apply(&SessionEvent::Done);
     // Sealed: the rendered body splits into indented lines under `say:`.
     let flat = v.flatten();
@@ -251,10 +262,14 @@ fn streaming_trailing_newline_does_not_add_blank_line() {
     let mut v = ChatView::default();
     // A stream chunk ending in a newline must not render an extra trailing
     // blank body line — consistency with `flush_code` in markdown.rs. The
-    // streaming surface is the TURN LIVE REGION (`💬 Say` raw rows).
+    // streaming surface is the TRANSCRIPT (raw Say rows under `say:`).
     v.apply(&SessionEvent::TextDelta("only\n".into()));
-    let joined = step_group::live_lines(&v);
-    // The final live row is the last Say body row; it must carry real
+    let joined: Vec<String> = v
+        .flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
+    // The final transcript row is the last Say body row; it must carry real
     // content, not be empty.
     let last = joined.last().expect("at least one line");
     assert!(
@@ -268,10 +283,14 @@ fn streaming_trailing_newline_does_not_add_blank_line() {
 fn streaming_interior_blank_line_is_preserved() {
     let mut v = ChatView::default();
     // An interior blank line is genuine content and must be kept — only the
-    // single *trailing* empty split element is dropped (live-region Say
-    // rows split the raw stream the same way).
+    // single *trailing* empty split element is dropped (the transcript's
+    // streaming Say rows split the raw stream the same way).
     v.apply(&SessionEvent::TextDelta("a\n\nb".into()));
-    let joined = step_group::live_lines(&v);
+    let joined: Vec<String> = v
+        .flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
     // Exactly two content lines (a, b) plus one interior blank line.
     let content: Vec<&String> = joined
         .iter()

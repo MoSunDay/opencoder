@@ -46,10 +46,11 @@ fn flatten_text(v: &ChatView) -> Vec<String> {
 }
 
 /// The turn live region's rows joined (`live_turn::live_data` +
-/// `render_lines`), for asserting on the streaming surface.
+/// `render_lines`), for asserting on the streaming surface. The open Say
+/// is NOT here anymore — it streams as transcript content.
 fn live_text(v: &ChatView) -> String {
     crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
-        .map(|lt| crate::chat::live_turn::render_lines(lt.steps, lt.say, 0))
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
         .map(|rows| {
             rows.iter()
                 .map(|l| {
@@ -270,30 +271,38 @@ fn running_hint_persists_until_say_begins() {
     v.apply(&SessionEvent::TextDelta("final answer".into()));
     let line = &flatten_text(&v)[0];
     // The first non-empty Say chunk RETIRES the hint from the pre-Say
-    // group row: while the Say streams it is not transcript content (it
-    // lives in the TURN LIVE REGION, which has its own live marker), so
-    // the ladder row stands alone with no running hint.
+    // group row — and the Say is transcript content NOW: the row merges
+    // into `❯ Say(1 step): final answer` immediately, the running hint
+    // riding the merged header while it streams (the TURN LIVE REGION
+    // carries only the running step, never the Say).
     assert!(
-        line.contains("1 Step") && !line.contains("running"),
-        "the first non-empty Say chunk retires the ladder row's hint: {line:?}"
+        line.contains("Say(1 step): final answer") && line.contains("running"),
+        "the Say merges onto the group row at its first chunk, hint riding the header: {line:?}"
     );
     assert!(
-        live_text(&v).contains("\u{1f4ac} Say") && live_text(&v).contains("final answer"),
-        "the open Say streams in the live region: {}",
+        !line.contains("1 Step"),
+        "the standalone step-count row is folded into the merged header: {line:?}"
+    );
+    assert!(
+        live_text(&v).is_empty(),
+        "the open Say never streams in the live region: {}",
         live_text(&v)
     );
 
-    // Say is terminal for the ladder: later frames cannot re-arm it —
-    // post-Say activity (new ladder below the Say) retires the hint for
-    // good, exactly like the old pre-Say row.
+    // Say is terminal for the ladder: the merged header keeps its running
+    // hint exactly as long as the Say stays open; a ToolStart (new ladder
+    // below the Say) seals it — the hint retires with the seal, and Done
+    // settles the new ladder's hint the same way.
     v.apply(&SessionEvent::ReasoningDelta("one more check".into()));
-    assert!(!flatten_text(&v)[0].contains("running"));
+    assert!(flatten_text(&v)[0].contains("running"));
     v.apply(&SessionEvent::ToolStart {
         id: "after-say".into(),
         name: "bash".into(),
         input: serde_json::json!({"command": "true"}),
     });
     assert!(!flatten_text(&v)[0].contains("running"));
+    v.apply(&SessionEvent::Done);
+    assert!(!flatten_text(&v).iter().any(|l| l.contains("running")));
 }
 
 #[test]

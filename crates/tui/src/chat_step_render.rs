@@ -305,7 +305,9 @@ pub(crate) fn flatten_step_group(
 /// carries the spinner) plus its expanded result (indent 6). Used by the
 /// open-ladder loop here and — forced open, without mutating the stored
 /// flags — by the independent turn live area (`chat_live_turn.rs`), so the
-/// ladder and the live area render identical shapes.
+/// ladder and the live area render identical shapes (the one difference:
+/// the live area passes `show_results = false` — results drill-down
+/// belongs to the ladder only).
 /// `steps_len` drives the "final expanded call suppresses its separator"
 /// rule — the group's trailing blank provides it.
 pub(crate) fn push_step_body(
@@ -321,7 +323,7 @@ pub(crate) fn push_step_body(
     if !step_open {
         return;
     }
-    push_step_details(out, si, step, steps_len, anim_tick, calls_open);
+    push_step_details(out, si, step, steps_len, anim_tick, calls_open, true);
 }
 
 /// The ladder's step counter row (open `\u{276f} Step(k)` / folded `\u{25b8} Step(k)`).
@@ -347,7 +349,10 @@ pub(crate) fn push_step_row(out: &mut Vec<Line<'static>>, si: usize, step_open: 
 
 /// The OPEN step's detail rows — thinking block + call rows. Shared by the
 /// ladder body and the turn live region (`chat_live_turn.rs`), which renders
-/// these WITHOUT the step counter row.
+/// these WITHOUT the step counter row. `show_results` gates the per-call
+/// output drill-down: the ladder passes `true` (a toggled call shows its
+/// result); the live region passes `false` — results NEVER render there,
+/// the ladder owns every drill-down.
 pub(crate) fn push_step_details(
     out: &mut Vec<Line<'static>>,
     si: usize,
@@ -355,6 +360,7 @@ pub(crate) fn push_step_details(
     steps_len: usize,
     anim_tick: u32,
     calls_open: bool,
+    show_results: bool,
 ) {
     push_thinking(out, step);
     if step.calls.is_empty() {
@@ -394,11 +400,13 @@ pub(crate) fn push_step_details(
             ));
         }
         out.extend(super::types::indented(std::slice::from_ref(&header), 6));
-        // Per-call expansion: only the toggled call shows its output.
-        // Exactly one blank follows the result: for the group's final
-        // visible row the group's trailing blank below already provides
-        // it, so the per-call separator is skipped instead of doubling.
-        if c.expanded {
+        // Per-call expansion: only the toggled call shows its output, and
+        // only where results render at all (`show_results` — the live
+        // region never does). Exactly one blank follows the result: for
+        // the group's final visible row the group's trailing blank below
+        // already provides it, so the per-call separator is skipped
+        // instead of doubling.
+        if show_results && c.expanded {
             out.extend(super::types::indented(&c.output, 6));
             let group_final = si + 1 == steps_len && ci + 1 == step.calls.len();
             if !group_final {

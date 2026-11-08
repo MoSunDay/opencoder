@@ -147,8 +147,6 @@ fn replay_one_prefetched_tool_image_renders() {
             thinking_dirty: false,
             calls: vec![crate::chat::ToolCall {
                 id: "t1".into(),
-                name: "test".to_string(),
-                input: String::new(),
                 header: Line::from("test"),
                 output: Vec::new(),
                 started_at_ms: Some(0),

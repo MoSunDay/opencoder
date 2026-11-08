@@ -15,8 +15,6 @@ fn out_row(text: &str) -> Line<'static> {
 fn expanded_call(id: &str, out_lines: usize) -> ToolCall {
     ToolCall {
         id: id.into(),
-        name: id.into(),
-        input: String::new(),
         header: Line::from(Span::raw(format!("\u{25b8} {id}"))),
         output: (0..out_lines).map(|_| out_row("out")).collect(),
         started_at_ms: Some(0),

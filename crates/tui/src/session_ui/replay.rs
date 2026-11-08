@@ -15,8 +15,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::chat::{
-    coalesce_steps, fmt_input, short, single_step_group, summarize, tool_output_lines, ChatBlock,
-    ChatView, Step, ToolCall,
+    coalesce_steps, short, single_step_group, summarize, tool_output_lines, ChatBlock, ChatView,
+    Step, ToolCall,
 };
 use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
 use crate::theme;
@@ -217,8 +217,6 @@ pub(super) fn replay_one(
                     ContentBlock::ToolUse { id, name, input } if name != "task" => {
                         seg_calls.push(ToolCall {
                             id: id.clone(),
-                            name: sanitize_single_line(name).into_owned(),
-                            input: fmt_input(input),
                             header: Line::from(vec![
                                 Span::styled(
                                     format!("\u{25b8} {} ", sanitize_single_line(name)),
@@ -294,8 +292,6 @@ pub(super) fn replay_one(
                                     // Orphan ToolResult: the matching ToolUse
                                     // (name/input) never replayed, so only
                                     // the output survives to render.
-                                    name: "(output)".to_string(),
-                                    input: String::new(),
                                     header: Line::from(Span::styled(
                                         "\u{25b8} (output)",
                                         Style::default().fg(theme::accent()),

@@ -471,37 +471,46 @@ describe('turn live region (its own area, outside the message list)', () => {
     mountWithLiveRegion([running]);
     // Two running texts now: the L0 summary tag and the open call row tag.
     expect(screen.getAllByText('running')).toHaveLength(2);
-    // The live rows are LiveCallRow (input expanded, result collapsed) —
-    // plain rows, not ToolContent collapses; the running tag rides the
-    // label row of the running call only.
-    const grepRow = screen.getByText(/🔧 grep/).closest('[data-live-call-row]');
+    // The live rows are the SAME ToolContent collapses as the ladder's L3;
+    // the running tag rides the label row of the running call only.
+    const grepRow = screen.getByText(/🔧 grep/).closest('.ant-collapse-item');
     expect(within(grepRow).getByText('running')).toBeTruthy();
-    const readRow = screen.getByText(/🔧 read/).closest('[data-live-call-row]');
+    const readRow = screen.getByText(/🔧 read/).closest('.ant-collapse-item');
     expect(readRow.textContent).not.toContain('running');
   });
 
-  it('live call rows show the input expanded without clicking', () => {
+  it('live call rows render identical to the ladder L3 rows', () => {
     const running = runningTurn();
     running.steps[1].calls.push({
       kind: 'tool', role: 'assistant', id: 'c9', name: 'bash',
       input: 'DISTINCTIVE-LIVE-INPUT', output: null, isError: false, durationMs: 0, startedAt: 0,
     });
     mountWithLiveRegion([running]);
-    // Zero clicks: the running call's input is already visible inside the
-    // live region (the region is a reading surface, not a drill-down).
+    // The running call renders the SAME 🔧 collapse row as the ladder's L3,
+    // inside the live region — and its input is NOT visible until the user
+    // opens the row (consistency with the ladder: nothing auto-expands).
     const region = screen.getByText('reading the entrypoint')
       .closest('[data-turn-live-region]');
-    expect(within(region).getByText('DISTINCTIVE-LIVE-INPUT')).toBeTruthy();
+    expect(region).toBeTruthy();
+    const bashRow = screen.getByText(/🔧 bash/).closest('.ant-collapse-item');
+    expect(region.contains(bashRow)).toBeTruthy();
+    expect(within(region).queryByText('DISTINCTIVE-LIVE-INPUT')).toBeNull();
+    expect(
+      bashRow.classList.contains('ant-collapse-item-active'),
+    ).toBe(false);
+    fireEvent.click(screen.getByText(/🔧 bash/));
+    expect(screen.getByText('DISTINCTIVE-LIVE-INPUT')).toBeTruthy();
   });
 
   it('live call results stay collapsed until opened', () => {
     const running = runningTurn();
     running.steps[1].calls[0].output = 'SECRET-LIVE-OUT';
     mountWithLiveRegion([running]);
-    // The finished call's result stays COLLAPSED in the live region — the
-    // output is not in the DOM until the user opens the `result` row.
+    // The call's result (and input) stay behind the DEFAULT-CLOSED
+    // ToolContent collapse in the live region — ladder L3 parity; the
+    // output is not in the DOM until the user opens the call's row.
     expect(screen.queryByText(/SECRET-LIVE-OUT/)).toBeNull();
-    fireEvent.click(screen.getByText('result'));
+    fireEvent.click(screen.getByText(/🔧 read/));
     expect(screen.getByText(/SECRET-LIVE-OUT/)).toBeTruthy();
   });
 

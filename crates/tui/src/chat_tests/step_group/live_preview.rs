@@ -123,14 +123,12 @@ fn running_calls_stream_with_spinner_and_the_ladder_stays_folded() {
     );
     let lv = live(&v);
     assert!(
-        lv.contains("bash"),
-        "the running call's name row renders (NO aggregate row — the \
-ladder owns it): {lv}"
+        lv.contains("1 Function call"),
+        "the running call's aggregate row renders (LADDER-IDENTICAL shape): {lv}"
     );
     assert!(
-        lv.contains("\"command\": \"echo x\""),
-        "the call's input renders EXPANDED under the name row (the strip \
-lives outside flatten): {lv}"
+        lv.contains("bash") && lv.contains("echo x"),
+        "the call's header row (name + summary) renders like the ladder's: {lv}"
     );
     assert!(
         flat_first(&v).starts_with("\u{25b8} 1 Step"),
@@ -144,7 +142,7 @@ lives outside flatten): {lv}"
         "call completion is not a Step boundary: the live area keeps streaming"
     );
     assert!(
-        live(&v).contains("bash"),
+        live(&v).contains("Function call"),
         "the step's rows stay streaming in the live region after its call ends: {}",
         live(&v)
     );
@@ -154,7 +152,7 @@ lives outside flatten): {lv}"
 /// rendered there, no matter what the ladder does. The ladder (and ONLY
 /// the ladder) owns the result drill-down: expanding the call's row in the
 /// transcript makes the output appear in `flatten` while the live strip
-/// keeps rendering just the name row + input.
+/// keeps rendering only the ladder-identical aggregate + header rows.
 #[test]
 fn live_results_stay_collapsed_the_ladder_owns_drilldown() {
     let mut v = ChatView::default();
@@ -193,7 +191,7 @@ fn live_results_stay_collapsed_the_ladder_owns_drilldown() {
     );
     assert!(
         live(&v).contains("bash") && live(&v).contains("echo x"),
-        "the strip keeps streaming the name row + input: {}",
+        "the strip keeps streaming the ladder-identical header row: {}",
         live(&v)
     );
 }

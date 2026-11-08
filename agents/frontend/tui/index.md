@@ -17,8 +17,9 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   运行中（`progress_active`，Say 之前）的当前 step 在**独立布局的 turn
   实时区**（transcript 框内底部条：Say 行下方、`[tok cost]` 边框上方，
   `chat_live_turn.rs` 提供 active_steps/render_lines、`render_live.rs`
-  渲染）流式渲染 —— 实时区渲染当前 step 的 thinking + 展开的调用行
-  （`❯ name` + 完整输入，`ToolCall.name/input` + `fmt_input`）+ 流式
+  渲染）流式渲染 —— 实时区渲染当前 step 的 thinking + 与阶梯同款的
+  调用行（`push_step_details(…, show_results=false)`：聚合行 + 单行
+  头，结果永不渲染）+ 流式
   Say（`💬 Say` + 全文，open Say 不入转录、seal 才落地合并头行），无
   step 计数行（计数归 transcript 阶梯）、永不渲染调用结果（阶梯独占
   下钻）；条**紧贴转录最后一行**、高度不设上限（`render_live::

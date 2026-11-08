@@ -308,15 +308,6 @@ pub struct Step {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolCall {
     pub id: String,
-    /// Tool name, rendered by the TURN LIVE REGION's expanded call row
-    /// (`chat_live_turn.rs`). The ladder's own rows never read it — they
-    /// keep the one-line `header` summary below.
-    pub name: String,
-    /// The call's FULL input text: string inputs verbatim, other JSON
-    /// values pretty-printed (`fmt_input`, SPA `fmtValue` parity). Only the
-    /// TURN LIVE REGION renders it (expanded under the name row); the
-    /// ladder keeps its one-line `header` summary for drill-down.
-    pub input: String,
     /// `▸ name args` header line, shown on the call's row.
     pub header: Line<'static>,
     /// Sanitized output lines, shown while the call is expanded.

@@ -4,9 +4,8 @@
 //! text, image, marker, and subagent presentation do not split it. Within a
 //! group a step is one Thinking run plus every function call that follows;
 //! sequential and parallel calls both accumulate until new Thinking opens
-//! the next step. While the turn runs (`progress_active`) the ladder is
-//! ABSENT from the transcript — the turn streams only in the TURN LIVE
-//! REGION (`chat_live_turn.rs`); once it settles the default
+//! the next step. While the turn runs the ladder auto-opens at its running
+//! position (`step_group/live_disclosure.rs`); once it settles the default
 //! render is ONE clickable group row `▸ N Steps`; clicking it lists the
 //! step rows, clicking a step row reveals its thinking + `N Function
 //! calls`, opening that aggregate lists calls, and clicking a call row
@@ -174,9 +173,8 @@ fn collapsed_by_default_renders_single_group_row() {
             images: Vec::new(),
         });
     }
-    // `Done` settles the turn: the running group (absent from the
-    // transcript while it ran) re-enters it as the folded single group row
-    // this test pins.
+    // `Done` retires the live auto-open: the settled default is the folded
+    // single group row this test pins.
     v.apply(&SessionEvent::Done);
     let lines = flatten_text(&v);
     // Group row + trailing blank: the whole ladder is one clickable row.
@@ -222,23 +220,21 @@ fn collapsed_by_default_renders_single_group_row() {
 }
 
 #[test]
-fn running_turn_lives_only_in_the_live_region_until_say_begins() {
+fn running_hint_persists_until_say_begins() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ToolStart {
         id: "slow".into(),
         name: "bash".into(),
         input: serde_json::json!({"command": "sleep 5"}),
     });
+    let line = &flatten_text(&v)[0];
     assert!(
-        flatten_text(&v).is_empty(),
-        "while the turn runs the transcript holds NO group row — the live \
-region is the turn's only surface: {:?}",
-        flatten_text(&v)
+        line.contains("running"),
+        "unfinished call must show the running hint: {line:?}"
     );
-    let live = super::step_group::live_lines(&v).join("\n");
     assert!(
-        live.contains('\u{280b}') && live.contains("bash"),
-        "the running hint (spinner span) lives in the live region: {live:?}"
+        line.contains("Step  \u{280b} running"),
+        "the animation must keep a two-column gap: {line:?}"
     );
     v.apply(&SessionEvent::ToolEnd {
         id: "slow".into(),
@@ -247,19 +243,19 @@ region is the turn's only surface: {:?}",
         is_error: false,
         images: Vec::new(),
     });
+    let line = &flatten_text(&v)[0];
     assert!(
-        flatten_text(&v).is_empty(),
-        "ToolEnd keeps progress armed — still nothing in the transcript: {:?}",
-        flatten_text(&v)
+        line.contains("running"),
+        "ToolEnd must keep progress alive while waiting for Say: {line:?}"
     );
     v.apply(&SessionEvent::TextDelta("final answer".into()));
     let line = &flatten_text(&v)[0];
-    // The first non-empty Say chunk SETTLES the group: it re-enters the
-    // transcript folded, merged into the Say header, and the running hint
-    // rides that merged header while the Say streams last.
+    // The running hint MOVES onto the merged Say header while the Say
+    // streams last — it retires from the pre-Say group row, it does not
+    // vanish: the pair header now carries the live indicator.
     assert!(
         line.contains("Say(1 step): final answer") && line.contains("running"),
-        "the first non-empty Say chunk settles the pair and hands the hint to the merged header: {line:?}"
+        "the first non-empty Say chunk hands the hint to the merged header: {line:?}"
     );
 
     // Say is terminal for the ladder: later frames cannot re-arm it —
@@ -290,33 +286,15 @@ fn terminal_event_clears_progress_when_no_say_arrives() {
         is_error: false,
         images: Vec::new(),
     });
-    assert!(
-        flatten_text(&v).is_empty(),
-        "while the turn runs the transcript holds no ladder row: {:?}",
-        flatten_text(&v)
-    );
+    assert!(flatten_text(&v)[0].contains("running"));
     v.apply(&SessionEvent::Done);
-    assert_eq!(
-        flatten_text(&v),
-        vec!["\u{25b8} 1 Step", ""],
-        "Done settles the group into the transcript, no running hint: {:?}",
-        flatten_text(&v)
-    );
+    assert!(!flatten_text(&v)[0].contains("running"));
 
     let mut failed = ChatView::default();
     failed.apply(&SessionEvent::ReasoningDelta("will fail".into()));
-    assert!(
-        flatten_text(&failed).is_empty(),
-        "running turn: no transcript rows: {:?}",
-        flatten_text(&failed)
-    );
+    assert!(flatten_text(&failed)[0].contains("running"));
     failed.apply(&SessionEvent::Error("boom".into()));
-    assert_eq!(
-        flatten_text(&failed)[0],
-        "\u{25b8} 1 Step",
-        "Error settles the group, no running hint: {:?}",
-        flatten_text(&failed)
-    );
+    assert!(!flatten_text(&failed)[0].contains("running"));
 
     let mut recovered = ChatView::default();
     recovered.apply(&SessionEvent::ToolStart {
@@ -332,12 +310,7 @@ fn terminal_event_clears_progress_when_no_say_arrives() {
         images: Vec::new(),
     });
     recovered.reconcile_completed_assistant("reliable answer");
-    assert_eq!(
-        flatten_text(&recovered)[0],
-        "\u{25b8} Say(1 step): reliable answer",
-        "reconcile settles the group into the merged header, no running hint: {:?}",
-        flatten_text(&recovered)
-    );
+    assert!(!flatten_text(&recovered)[0].contains("running"));
 }
 
 #[test]

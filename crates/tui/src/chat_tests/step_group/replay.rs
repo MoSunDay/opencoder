@@ -157,9 +157,6 @@ fn copy_mode_drops_ladder_chrome_but_keeps_call_content() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("copy me".into()));
     call_tool(&mut v, "t1");
-    // Settle the turn first: while it runs the group is absent from the
-    // transcript (TURN LIVE REGION only), so there is no ladder to walk.
-    v.apply(&SessionEvent::Done);
     // Open the whole ladder: turn → step/calls aggregate → call result.
     if let ChatBlock::StepGroup { open, steps, .. } = &mut v.blocks[0] {
         *open = true;

@@ -16,11 +16,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/chat_step_render.rs` — Step 阶梯渲染：阶梯纯用户控制、默认折叠；
   运行中（`progress_active`，Say 之前）的当前 step 在**独立布局的 turn
   实时区**（transcript 与输入区之间，`chat_live_turn.rs` 提供
-  active_steps/render_lines、`render.rs` 渲染）流式渲染 —— 运行中 turn
-  在 transcript **零行**（`chat_flatten.rs`/`chat_headers.rs` 跳过该
-  组），实时区是唯一展示面；flatten 永不产
-  出 live 行，滚动/选择/复制不受流式影响；settle 后实时区清空、折叠
-  阶梯回归 transcript（相邻时并入 Say 头行）、step 只
+  active_steps/render_lines、`render.rs` 渲染）流式渲染 —— 实时区只渲染
+  当前 step 的 thinking + call 行（`push_step_details`），无 step 计数行
+  （计数归 transcript 阶梯），仅保留 `⏺ live` 暗色标记行；flatten 永不产
+  出 live 行，滚动/选择/复制不受流式影响；settle 后实时区清空、step 只
   存在于折叠阶梯（与 SPA `stepsBlock.jsx` 同契约）
 - [chat_steps_replay.rs](../../../crates/tui/src/chat_steps_replay.rs) — 回放侧
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与

@@ -189,16 +189,12 @@ fn step_row_line_index_lands_on_the_step_row() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
-    // While the new turn runs its ladder is ABSENT from the transcript (no
-    // rows, no hit target — the TURN LIVE REGION is its only surface).
-    assert!(
-        v.tool_call_headers().is_empty(),
-        "the running group has no targets"
-    );
-    v.apply(&SessionEvent::Done);
     // Collapsed ladder: exactly one target — the group row. The Say closed
-    // the previous sub-turn, so this call opened a NEW ladder below it; the
-    // ladder is born folded, so the single-row default needs no toggling.
+    // the previous sub-turn, so this call opens a NEW ladder below it whose
+    // spinner is legitimately armed while the tool runs. The ladder is born
+    // folded (the running step streams as the render-only preview below the
+    // group row, which adds no targets), so the single-row default needs no
+    // toggling.
     let block_idx = groups(&v)[0].0;
     let (group_idx, group_line) = {
         let headers = v.tool_call_headers();
@@ -211,9 +207,9 @@ fn step_row_line_index_lands_on_the_step_row() {
         (headers[0].header_line_idx, line)
     };
     assert!(
-        group_line.contains("1 Step") && !group_line.contains("running"),
-        "header_line_idx must land on the settled group row (no running \
-         hint — the running turn rendered only in the live region); got: {group_line:?}"
+        group_line.contains("1 Step") && group_line.contains("running"),
+        "header_line_idx must land on the group row with the re-armed \
+         new-turn spinner; got: {group_line:?}"
     );
 
     // Open the group: the step row becomes the second target and must land

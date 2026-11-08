@@ -1,5 +1,11 @@
 # 运行中 turn 只在实时区：settle 前完全不进 Steps 折叠与消息列表（TUI + SPA）
 
+> **已取代**：本条的「运行中 turn 不进 Steps 折叠/消息列表」口径已被
+> `2026-11-07/live-region-thinking-calls-only.md` 取代 —— Say/阶梯区域
+> 已完整恢复 `13875137f` 计数样式（运行中折叠阶梯行 + running 提示
+> 回归），运行中 turn 不再从 transcript 隐藏；实时区改为只渲染当前
+> step 的 thinking + call 行（无 step 计数行）。本条保留为历史记录。
+
 一句话：运行中 turn（Say 未开始，`progress_active` 仍置位）**只**渲染在
 独立 turn 实时区 —— TUI 的 transcript **完全不包含**它：无
 `▸ N Steps ⠋ running` 折叠组行、无尾随空行、无 hit target

@@ -181,10 +181,10 @@ pub(crate) fn render<B: Backend + 'static>(
             .saturating_sub(text_h.saturating_sub(1))
             .min(max_scroll);
 
-        // TURN LIVE REGION — the bottom strip INSIDE the transcript frame,
-        // hugging the transcript's last rendered row, above the `[tok cost]`
-        // border (`render_live`). Untruncated: `render_body` only shrinks
-        // the content window when content + live overflow the frame.
+        // TURN LIVE REGION — the TAIL of the transcript's scroll window
+        // (`render_live`): rides the SAME scrollbar as the Say/transcript
+        // rows, above the `[tok cost]` bottom border, never truncated —
+        // scrolling up reveals the region's start.
         let live_lines = render_live::region(chat, plan_active, anim_tick);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -458,36 +458,23 @@ fn render_body(
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
 
-    // TURN LIVE REGION geometry: hug the last rendered row, no cap; the
-    // content window shrinks only on content+live overflow (`render_live`).
-    let live_len = live_lines.len();
-    let content_h: u16 = if total_rows.saturating_add(live_len) > inner.height as usize {
-        inner
-            .height
-            .saturating_sub(live_len.min(inner.height as usize) as u16)
-    } else {
-        inner.height
-    };
+    // TURN LIVE REGION rides the scroll-window TAIL: transcript + live
+    // rows form ONE scrollable window (`render_live`) — a single scrollbar
+    // for both, never truncated (scrolling up reveals the region's start).
+    let live_rows = render_live::wrapped_total(live_lines, text_w);
+    let total_all = total_rows + live_rows;
+    let visible_h = inner.height as usize;
 
-    // B5 (height half): the live content alone fills (or overflows) the
-    // frame — the strip takes the WHOLE inner area, tail-kept (newest
-    // rows), instead of blanking the body. The transcript returns as soon
-    // as the live lines shrink back below the frame height.
-    if content_h == 0 {
-        f.render_widget(block, area);
-        if let Some(rect) = render_live::strip_rect(inner, 0, live_len) {
-            render_live::render_strip(f, live_lines, rect);
-        }
-        return;
-    }
-    let visible_h = content_h as usize;
-
-    let max_rows = total_rows.saturating_sub(visible_h);
+    let max_rows = total_all.saturating_sub(visible_h);
     if follow {
         *scroll = max_rows as u32;
     }
     *scroll = (*scroll as usize).min(max_rows) as u32;
     let scroll_y = *scroll as usize;
+
+    // Content rows visible in THIS window — hit-rects exist only there
+    // (the live tail carries no click targets).
+    let content_vis = visible_h.min(total_rows.saturating_sub(scroll_y));
 
     // Record click hit-rects using cached row offsets — O(headers), not O(n).
     hit_records::record_thinking_hits(
@@ -495,7 +482,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        visible_h,
+        content_vis,
         inner.x,
         inner.y,
         thinking_btns,
@@ -505,7 +492,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        visible_h,
+        content_vis,
         inner.x,
         inner.y,
         subagent_btns,
@@ -515,7 +502,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        visible_h,
+        content_vis,
         inner.x,
         inner.y,
         tool_call_btns,
@@ -525,7 +512,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        visible_h,
+        content_vis,
         inner.x,
         inner.y,
         compaction_btns,
@@ -533,31 +520,38 @@ fn render_body(
 
     f.render_widget(block, area);
     let content_area = Rect {
-        height: content_h,
+        height: inner.height,
         width: text_w,
         ..inner
     };
 
-    // A1: Virtualization — slice only the visible window from cached lines
-    // instead of passing the entire transcript to Paragraph. This avoids
-    // ratatui internally processing all lines for wrapping/rendering.
-    let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
-    let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
-    let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+    // A1: Virtualization over the unified window — slice only the visible
+    // CONTENT rows from the cached lines, then fill the window's remaining
+    // rows with the live tail, so one wrapping Paragraph renders both.
+    let mut top_skip = 0usize;
+    let mut window_lines: Vec<Line<'static>> = Vec::new();
+    if content_vis > 0 {
+        let (start, end, skip) = cache.visible_window(scroll_y, content_vis);
+        top_skip = skip;
+        window_lines = cache.lines()[start..end].to_vec();
+    }
+    let (live_slice, live_top_skip) = render_live::slice_window(
+        live_lines,
+        text_w,
+        scroll_y.saturating_sub(total_rows),
+        visible_h - content_vis,
+    );
+    if content_vis == 0 {
+        // The window starts inside the live region: its partial first row
+        // is what the paragraph scroll must skip past.
+        top_skip = live_top_skip as usize;
+    }
+    window_lines.extend(live_slice);
+    let para = Paragraph::new(window_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), content_area);
 
-    if total_rows > visible_h {
-        let scroll_area = Rect {
-            height: content_h,
-            ..inner
-        };
-        draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y);
-    }
-
-    // The TURN LIVE strip, HUGGING the last VISIBLE content row — it
-    // always fits: content_h above already reserved live_len rows for it.
-    if let Some(rect) = render_live::strip_rect(inner, total_rows.min(visible_h), live_len) {
-        render_live::render_strip(f, live_lines, rect);
+    if total_all > visible_h {
+        draw_scrollbar(f, inner, total_all, visible_h, scroll_y);
     }
 
     // Follow indicator on the body's bottom-border row, right-aligned.

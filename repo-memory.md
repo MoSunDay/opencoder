@@ -1,4 +1,4 @@
-Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
+Commit: cea9499682d959503567277918b3f8da3d8115ba
 
 # OpenCoder 逻辑地图
 
@@ -25,8 +25,8 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 **frontend**
 
 - [agents/local](agents/frontend/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
-- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区为 transcript 框内底部条（`[tok cost]` 边框上方，`render_live.rs`）不随开合、只渲染当前 step 的 thinking + 阶梯同款调用行（结果不渲染；无 step 计数、无 Say），贴可见内容行不外推、wrapped 保尾精确，Say 开始/turn 结束即清空：`chat_live_turn`；open Say 即时以最终形态入转录（合并头行 + running 提示 + raw body，共享滚动，seal 仅去提示）（已上线 `3e609c7ef`，实时条贴可见行 + wrapped 保尾两不变量见 features/changelog/2026-11-08/final-live-region-steps-only-say-in-transcript.md）；一次性 `@capability` 子任务派发）。
-- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区为滚动区外固定面板（`TurnLiveRegion`）不随开合、实时区 thinking + L3 同款调用行 + 流式 Say（`pendingSay`，flush 才入列表）无 step 计数：`stepsBlock.jsx`）。
+- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区并入转录滚动窗尾部、与转录共用一条滚动条（`render_live.rs` region/wrapped_total/slice_window 拼一个 wrapping Paragraph）不随开合、只渲染当前 step 的 thinking + 阶梯同款调用行（结果不渲染；无 step 计数、无 Say），live 永不截断、上滚可达其开头，Say 开始/turn 结束即清空：`chat_live_turn`；open Say 流式期间以独立形态入转录（`say:` 头行 + running 提示 + raw body 全量，共享滚动），seal 后才合并为 `Say(n steps)` 头行（见 features/changelog/2026-11-08/live-region-one-scrollbar-folded-say-ladder.md）；一次性 `@capability` 子任务派发）。
+- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区 `TurnLiveRegion` 位于 transcript 滚动容器内、消息列表之下、与消息共用滚动条：主体仅 thinking + 与阶梯 L3 同款调用行（无 Step(k) 计数、无 Say 块）；流式 Say 由 `StreamingSay`（`pendingSay` 原文）渲染在同一滚动流、flush 边界落地为消息，auto-stick 仅贴底跟随；settle 后实时区清空（`findRunningStepsTurn`）：`stepsBlock.jsx`）。
 
 **ontology**
 

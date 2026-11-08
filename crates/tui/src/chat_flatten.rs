@@ -39,14 +39,41 @@ impl ChatView {
                     done,
                 } => {
                     // The Say is TRANSCRIPT CONTENT both while streaming
-                    // and once sealed: an open Say (`done == false`)
-                    // streams its RAW body rows right here (same shape as
-                    // sealed), sharing the transcript's scroll. It renders
-                    // in its FINAL shape immediately — under a preceding
-                    // StepGroup the merged `❯ Say(n steps)` header row
-                    // (spinner running), else the standalone `say:`
-                    // header — so sealing (raw rows swap for the rendered
-                    // ones) causes zero visual jump.
+                    // and once sealed. While it STREAMS (`done == false`)
+                    // the ladder above stays FOLDED in its settled counting
+                    // shape (the merge happens only on seal), so the Say
+                    // renders STANDALONE here: the `say:` header row + the
+                    // running spinner hint, then its RAW body rows indented
+                    // 4 — full, no preview dedup. Sealing swaps the raw
+                    // rows for the rendered ones and merges the pair under
+                    // a preceding StepGroup (`done == true` path below).
+                    if !*done {
+                        out.push(Line::from(vec![
+                            Span::styled(
+                                ROLE_SAY_HEADER,
+                                Style::default()
+                                    .fg(theme::ok_color())
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!(" {} ", SPINNER[(anim_tick as usize) % SPINNER.len()]),
+                                Style::default().fg(theme::warn_color()),
+                            ),
+                        ]));
+                        let raw_rows: Vec<Line<'static>> = assistant_rows(raw)
+                            .into_iter()
+                            .map(|l| Line::from(l.to_string()))
+                            .collect();
+                        out.extend(types::indented(&raw_rows, 4));
+                        continue;
+                    }
+                    // Visual `say:` header — mirrors the `user:` marker on
+                    // prompts. When this Say sits ADJACENT to a `StepGroup`
+                    // (previous block), the group row already renders the
+                    // merged `❯ Say(n steps): <preview>` header, so the
+                    // standalone header row is dropped here — the Say body
+                    // follows the merged header (plus its separator blank)
+                    // below.
                     let merged = matches!(
                         bi.checked_sub(1).and_then(|i| self.blocks.get(i)),
                         Some(ChatBlock::StepGroup { .. })
@@ -61,24 +88,16 @@ impl ChatView {
                     }
                     // 合并对正文去重：头部行的 preview 已展示正文首个非空
                     // 行，正文不再重复输出该行；单行 Say 则整块不渲染。
-                    // 流式时 preview/正文都取 raw（`done == false` 路径）。
                     let decision = if merged {
-                        step_render::merged_say_body_decision(raw, rendered, *done)
+                        step_render::merged_say_body_decision(rendered)
                     } else {
                         step_render::SayBody::Full
                     };
-                    let rows: Vec<Line<'static>> = if *done {
-                        rendered.clone()
-                    } else {
-                        assistant_rows(raw)
-                            .into_iter()
-                            .map(|l| Line::from(l.to_string()))
-                            .collect()
-                    };
+                    let rows: &[Line<'static>] = rendered.as_slice();
                     let visible: &[Line<'static>] = match decision {
                         step_render::SayBody::Hidden => &[],
                         step_render::SayBody::Skip(n) => &rows[n.min(rows.len())..],
-                        step_render::SayBody::Full => rows.as_slice(),
+                        step_render::SayBody::Full => rows,
                     };
                     out.extend(types::indented(visible, 4));
                 }
@@ -115,26 +134,20 @@ impl ChatView {
                     ..
                 } => {
                     // Adjacent-pair merge: when the block right below this
-                    // group is the turn's Say (ANY `Assistant`, open or
-                    // sealed), the two render as one clickable header row —
-                    // pass the Say so `flatten_step_group` can fold the
-                    // `N Steps` row into it. An OPEN follower is transcript
-                    // content now too: the merged `❯ Say(n steps)` header
-                    // forms IMMEDIATELY with the running spinner, its raw
-                    // body rows stream below (emitted by the Assistant
-                    // arm), and it seals in place with zero visual jump.
+                    // group is the turn's SEALED Say (`done == true`), the
+                    // two render as one clickable header row — pass the Say
+                    // so `flatten_step_group` can fold the `N Steps` row
+                    // into it. While the follower STREAMS (`done == false`)
+                    // the group keeps its plain folded `▸ N Steps` row (the
+                    // Say renders standalone below — see the Assistant arm);
+                    // the merge forms only when the Say seals.
                     let say = match self.blocks.get(bi + 1) {
                         Some(ChatBlock::Assistant {
-                            raw,
                             rendered,
-                            done,
+                            done: true,
                             ..
                         }) => Some(SayHeader {
-                            preview: step_render::say_preview_for(raw, rendered, *done),
-                            // `running` rides the merged header exactly
-                            // while the Say streams (`done == false`);
-                            // sealing drops the hint, nothing else moves.
-                            streaming: !*done,
+                            preview: step_render::say_preview_for(rendered),
                         }),
                         _ => None,
                     };
@@ -266,15 +279,12 @@ impl ChatView {
         fn blank_line(l: &Line<'static>) -> bool {
             l.spans.iter().all(|s| s.content.trim().is_empty())
         }
-        // 合并对（上一个块是 StepGroup）且正文整块隐藏（单行 Say / 空正文）
-        // 时，整对以头部后的空行（闭合）或 ladder 尾部空行（展开）收尾，
-        // 已经是 blank —— 边界不得再叠加第二个空行。
-        if let Some(ChatBlock::Assistant {
-            raw,
-            rendered,
-            done,
-        }) = self.blocks.last()
-        {
+        // 合并对（上一个块是 StepGroup 且 Say 已 seal）且正文整块隐藏
+        // （单行 Say / 空正文）时，整对以头部后的空行（闭合）或 ladder
+        // 尾部空行（展开）收尾，已经是 blank —— 边界不得再叠加第二个
+        // 空行。流式中的 Say 渲染 standalone 行（见 Assistant arm），
+        // 不构成合并对，落到下方按 raw 尾行判定。
+        if let Some(ChatBlock::Assistant { rendered, .. }) = self.blocks.last() {
             let merged = matches!(
                 self.blocks
                     .len()
@@ -283,8 +293,7 @@ impl ChatView {
                 Some(ChatBlock::StepGroup { .. })
             );
             if merged
-                && step_render::merged_say_body_decision(raw, rendered, *done)
-                    == step_render::SayBody::Hidden
+                && step_render::merged_say_body_decision(rendered) == step_render::SayBody::Hidden
             {
                 return true;
             }

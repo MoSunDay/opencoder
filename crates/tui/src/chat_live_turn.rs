@@ -1,15 +1,15 @@
-//! The TURN LIVE REGION — the bottom strip INSIDE the transcript frame
-//! (`render.rs`), hugging the transcript's last VISIBLE content row and
-//! ABOVE the `[tok cost]` bottom border, deliberately OUTSIDE the
+//! The TURN LIVE REGION — the TAIL of the transcript's scroll window
+//! (`render.rs`): rides the SAME scrollbar as the Say/transcript rows, one
+//! window above the `[tok cost]` bottom border, deliberately OUTSIDE the
 //! transcript content: while the admitted turn runs (`progress_active` on
 //! its group, i.e. no Say has begun yet), this region streams the CURRENT
 //! (last) step ONLY — its thinking header + text and the function-call
 //! rows. NO step counter row, NO Say: the moment a Say BEGINS the group's
 //! `progress_active` disarms (see the stream layer) and the region
 //! CLEARS; the open Say itself is TRANSCRIPT CONTENT while it streams
-//! (raw body rows under the merged `❯ Say(n steps)` group header — or the
-//! standalone `say:` header — sharing the transcript's scroll) and simply
-//! seals in place at turn end, where the region has already cleared.
+//! (raw body rows under the standalone `say:` header, the ladder folded —
+//! the merge happens only on seal) and simply seals in place at turn end,
+//! where the region has already cleared.
 //!
 //! Call rendering here is IDENTICAL to the transcript ladder
 //! (`chat_step_render.rs` — shared `push_step_details`, calls forced open):

@@ -3,8 +3,8 @@
 //! and never inside the transcript's own line flow (flatten stays clean).
 //! The strip HUGS the transcript's last rendered row (no blank gap when
 //! the transcript is shorter than the frame) and is never truncated by a
-//! height cap: the expanded call input renders in full unless the frame
-//! itself overflows.
+//! height cap: the ladder-identical step rows render in full unless the
+//! frame itself overflows.
 
 use super::*;
 use crate::chat::ChatView;
@@ -25,10 +25,10 @@ fn live_strip_sits_below_say_rows_and_above_tok_cost_border() {
         input: serde_json::json!({"command": "echo x"}),
     });
 
-    // 24 rows: with no cap the strip renders its FULL 7 rows (header +
-    // thinking header/body + name row + 3 input lines) directly below the
-    // transcript's last content row — only physical frame overflow would
-    // clip (tail-kept).
+    // 24 rows: with no cap the strip renders its FULL 5 rows (header +
+    // thinking header/body + the calls aggregate row + the call's header
+    // row) directly below the transcript's last content row — only
+    // physical frame overflow would clip (tail-kept).
     let backend = TestBackend::new(40, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let live_lines = crate::render_live::region(&v, false, 0);
@@ -85,17 +85,22 @@ inserted gap): {above:?}"
         ladder,
         "the strip hugs the transcript: ladder row, its trailing blank, strip"
     );
-    // The call's name row + EXPANDED input stream in the strip — the
-    // input line present IN FULL (no one-third cap truncates it).
+    // The strip's call rows are LADDER-IDENTICAL (`push_step_details`,
+    // calls forced open, results never): the aggregate row plus the call's
+    // header row (name + one-line summary).
+    assert!(
+        row_of(buf, "Function call", w).is_some(),
+        "the strip carries the calls aggregate row (ladder-identical shape)"
+    );
     assert!(
         row_of(buf, "bash", w).is_some(),
-        "the strip carries the running call's name row"
+        "the strip carries the running call's header row"
     );
-    let input = row_of(buf, "echo x", w).expect("the strip carries the input EXPANDED");
-    let input_row = row_text(buf, input, w);
+    let header = row_of(buf, "echo x", w).expect("the strip carries the call header summary");
+    let header_row = row_text(buf, header, w);
     assert!(
-        input_row.contains("\"command\": \"echo x\""),
-        "the expanded input line is not truncated: {input_row:?}"
+        header_row.contains("bash") && header_row.contains("echo x"),
+        "the header row renders name + one-line summary: {header_row:?}"
     );
     // Render-only: the transcript's own flatten never carries strip rows.
     let flat: Vec<String> = v
@@ -197,8 +202,8 @@ fn streaming_say_renders_in_the_strip_until_sealed() {
     );
 }
 
-/// The live content can grow past the frame (untruncated thinking + input
-/// + streaming Say). The strip must then take the WHOLE inner area,
+/// The live content can grow past the frame (untruncated thinking + call
+/// rows + streaming Say). The strip must then take the WHOLE inner area,
 /// tail-kept — never blank the body (the content_h == 0 regression).
 #[test]
 fn huge_live_takes_the_whole_frame_tail_kept_instead_of_blanking() {
@@ -207,16 +212,14 @@ fn huge_live_takes_the_whole_frame_tail_kept_instead_of_blanking() {
         seq: 1,
         text: "go".into(),
     });
-    v.apply(&SessionEvent::ReasoningDelta(
-        "think line\n".repeat(20).into(),
-    ));
+    v.apply(&SessionEvent::ReasoningDelta("think line\n".repeat(20)));
     v.apply(&SessionEvent::ToolStart {
         id: "c1".into(),
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
     v.apply(&SessionEvent::TextDelta(
-        "say text streaming along\n".repeat(5).into(),
+        "say text streaming along\n".repeat(5),
     ));
     let live_lines = crate::render_live::region(&v, false, 0);
     assert!(

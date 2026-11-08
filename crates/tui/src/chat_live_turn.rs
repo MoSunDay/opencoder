@@ -12,12 +12,13 @@
 //! FOLDED ladder; if the next turn immediately starts running, the region
 //! simply shows that turn's current step.
 //!
-//! Call rendering here is DELIBERATELY asymmetric with the transcript
-//! ladder (`chat_step_render.rs`): every call renders a name row with the
-//! call's FULL input text EXPANDED below it (the live region is a reading
-//! surface, not a drill-down), while call RESULTS stay COLLAPSED —
-//! `output` is NEVER rendered here and `expanded` is ignored entirely; the
-//! ladder owns every result drill-down.
+//! Call rendering here is IDENTICAL to the transcript ladder
+//! (`chat_step_render.rs` — shared `push_step_details`, calls forced open):
+//! the `N Function call(s)` aggregate row plus each call's header row (a
+//! still-running call carries the spinner), the exact shape of the
+//! ladder's open step. The ONE difference: results NEVER render here
+//! (`show_results = false`) — `output` and `expanded` are both ignored;
+//! the ladder owns every result drill-down.
 //!
 //! Zero coupling with ladder disclosure AND with the transcript itself:
 //! `flatten_with` does NOT emit these lines (the transcript only ever
@@ -30,7 +31,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{step_render, theme, ChatBlock, Step, GROUP_ROW_OPEN_PREFIX, SPINNER};
+use super::{step_render, theme, ChatBlock, Step};
 
 /// The live region's data snapshot: the running turn's steps (if any) plus
 /// the open Say's RAW text (if any). Both are optional and independent —
@@ -106,12 +107,14 @@ pub(crate) fn live_data<'a>(blocks: &'a [ChatBlock], turn_start: usize) -> Optio
 
 /// The live region's full line buffer: a dim header rule that marks the
 /// region's start (it is NOT transcript content), then — when the turn has
-/// steps — ONLY the current step's detail rows — the thinking block plus
-/// per-call name rows with each call's FULL input expanded below (NO step
-/// counter row, NO calls aggregate row, NO call results: the transcript
-/// ladder owns all three) — and then, while a Say streams (`done: false`),
-/// its `💬 Say` marker row plus the RAW text lines below (the Say lands in
-/// the transcript only once sealed). Render-only: NO click targets.
+/// steps — ONLY the current step's detail rows, rendered by the SAME
+/// `push_step_details` as the ladder's open step (thinking block, the
+/// `N Function call(s)` aggregate row, each call's header row — NO step
+/// counter row, and `show_results = false`: call results NEVER render
+/// here, the ladder owns the drill-down) — and then, while a Say streams
+/// (`done: false`), its `💬 Say` marker row plus the RAW text lines below
+/// (the Say lands in the transcript only once sealed). Render-only: NO
+/// click targets.
 pub(crate) fn render_lines(
     steps: Option<&[Step]>,
     say: Option<&str>,
@@ -123,48 +126,20 @@ pub(crate) fn render_lines(
             .fg(theme::warn_color())
             .add_modifier(Modifier::DIM),
     ))];
-    if let Some(step) = steps
-        .filter(|steps| !steps.is_empty())
-        .map(|steps| &steps[steps.len() - 1])
-    {
-        step_render::push_thinking(&mut out, step);
-        for c in &step.calls {
-            // Name row: 4-space indent + the open glyph + the tool name, the
-            // same accent-bold style as the ladder's call header rows. A still
-            // running call (`ToolEnd` not yet seen) carries the motion spinner.
-            let mut spans = vec![
-                Span::raw("    "),
-                Span::styled(
-                    format!("{GROUP_ROW_OPEN_PREFIX}{}", c.name),
-                    Style::default()
-                        .fg(theme::accent())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ];
-            if c.elapsed_ms.is_none() {
-                spans.push(Span::styled(
-                    format!(" {}", SPINNER[(anim_tick as usize) % SPINNER.len()]),
-                    Style::default().fg(theme::warn_color()),
-                ));
-            }
-            out.push(Line::from(spans));
-            // The call's FULL input, EXPANDED below the name row. Results stay
-            // COLLAPSED here — `c.output` is never rendered and `c.expanded`
-            // is ignored: the ladder owns the result drill-down.
-            if !c.input.is_empty() {
-                let input_lines = c
-                    .input
-                    .lines()
-                    .map(|l| {
-                        Line::from(Span::styled(
-                            l.to_string(),
-                            Style::default().fg(theme::muted()),
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                out.extend(super::types::indented(&input_lines, 8));
-            }
-        }
+    if let Some(steps) = steps.filter(|steps| !steps.is_empty()) {
+        let si = steps.len() - 1;
+        // Ladder-identical call rendering: the aggregate row + header rows
+        // come straight from the shared step renderer (calls forced open);
+        // `show_results = false` keeps every result out of this region.
+        step_render::push_step_details(
+            &mut out,
+            si,
+            &steps[si],
+            steps.len(),
+            anim_tick,
+            true,
+            false,
+        );
     }
     // The STREAMING Say: a marker row styled like the step's thinking
     // header (`STEP_THINKING_HEADER`: pink + bold), then the RAW text

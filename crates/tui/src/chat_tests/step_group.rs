@@ -423,13 +423,11 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
             "\u{2b25} live",
             "    \u{1f4ad} Thinking",
             "        think",
-            "    \u{276f} bash",
-            "        {",
-            "          \"command\": \"echo x\"",
-            "        }",
+            "    \u{276f} 1 Function call",
+            "      \u{25b8} bash echo x",
         ],
-        "the live region streams the step with the call's input EXPANDED — \
-NO aggregate row, NO result (the ladder owns both)"
+        "the live region streams the step LADDER-IDENTICAL — aggregate row + \
+header row, NO result (the ladder owns the drill-down)"
     );
     v.apply(&SessionEvent::TextDelta("spoken".into()));
     assert_eq!(
@@ -444,10 +442,8 @@ ladder row (its running hint retired on the first chunk)"
             "\u{2b25} live",
             "    \u{1f4ad} Thinking",
             "        think",
-            "    \u{276f} bash",
-            "        {",
-            "          \"command\": \"echo x\"",
-            "        }",
+            "    \u{276f} 1 Function call",
+            "      \u{25b8} bash echo x",
             "    \u{1f4ac} Say",
             "        spoken",
         ],

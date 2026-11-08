@@ -18,14 +18,16 @@
 //         (`ladderRunning`), its LAST step streams in a SEPARATE pinned
 //         region outside the transcript scroll area (its own panel between
 //         the message list and the input, mounted by chat.jsx via
-//         `TurnLiveRegion` below): `Step(k)` header + thinking + call rows
-//         (the same ToolContent rows as L3, so per-call `running` tags
-//         stream in place). When running retires (Say begins / the turn
-//         settles) the region clears and the step lives only inside the
-//         turn's folded ladder; if the next turn is already running the
-//         region simply shows it. Gated ONLY on running state — zero
-//         coupling with any ladder's disclosure (opening L0 never changes
-//         it; TUI parity with chat_live_turn.rs).
+//         `TurnLiveRegion` below): thinking + one LiveCallRow per call —
+//         the label row (same visuals as L3, per-call `running` tags stream
+//         in place) with the call's input EXPANDED directly below and its
+//         result COLLAPSED behind a default-closed `result` collapse (the
+//         ladder owns the output drill-down). When running retires (Say
+//         begins / the turn settles) the region clears and the step lives
+//         only inside the turn's folded ladder; if the next turn is already
+//         running the region simply shows it. Gated ONLY on running state —
+//         zero coupling with any ladder's disclosure (opening L0 never
+//         changes it; TUI parity with chat_live_turn.rs).
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (uncontrolled);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
@@ -44,9 +46,10 @@
 // Turn, transcript.jsx renders the full text below this component.
 // ThinkContent stays exported for
 // transcript.jsx's independent `think` turns (history/defense only — the
-// live path streams reasoning straight into steps); ToolContent is shared
-// by the L3 rows, the live preview, and flat `tool` turns (task handles).
-// The import is one-way (transcript → stepsBlock), no cycle.
+// live path streams reasoning straight into steps); ToolContent remains
+// for the L3 rows and flat `tool` turns (task handles) — the live preview
+// renders its own LiveCallRow rows instead (input expanded, result
+// collapsed). The import is one-way (transcript → stepsBlock), no cycle.
 
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
@@ -154,13 +157,65 @@ function StepThinking({ text }) {
   );
 }
 
-/// The call rows shared by the L2 aggregate and the live preview: one
-/// uncontrolled ToolContent per call (input/result on drill-down, plus the
-/// per-call `running` tag while `output === null`).
-function CallRows({ calls }) {
-  return calls.map((call, ci) => (
+/// One call row in the TURN LIVE REGION: the label row (same visuals as
+/// ToolContent's — 🔧 name · duration, error/running tags) with the call's
+/// input EXPANDED directly below (the live region is a reading surface,
+/// not a drill-down), while the RESULT stays COLLAPSED behind a default-
+/// closed ghost `result` collapse — the ladder owns the output drill-down
+/// (TUI parity with chat_live_turn.rs: output never renders here).
+function LiveCallRow({ turn }) {
+  const dur = fmtDuration(turn.durationMs);
+  return (
+    <div data-live-call-row style={{ marginBottom: 4 }}>
+      <div style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
+        🔧 {turn.name || 'tool'}
+        {dur ? <Text type="secondary"> · {dur}</Text> : null}
+        {turn.isError ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
+        {turn.output === null ? <Tag color="processing" style={{ marginLeft: 8 }}>running</Tag> : null}
+      </div>
+      {turn.input ? (
+        <Paragraph style={{ fontFamily: MONO_VAR, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 4 }}>
+          <Text type="secondary">input:</Text>
+          {'\n'}
+          {turn.input}
+        </Paragraph>
+      ) : null}
+      {turn.output ? (
+        <Collapse
+          expandIcon={disclosureIcon}
+          size="small"
+          ghost
+          items={[{
+            key: 'result',
+            label: (
+              <span style={{ fontFamily: MONO_VAR, fontSize: 12 }}>
+                <Text type="secondary">result</Text>
+              </span>
+            ),
+            children: (
+              <Paragraph style={{ fontFamily: MONO_VAR, fontSize: 12, whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+                <Text type="secondary">output:</Text>
+                {'\n'}
+                {turn.output}
+              </Paragraph>
+            ),
+          }]}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/// The call rows: one row per call — `ToolContent` (input/result on
+/// drill-down, plus the per-call `running` tag while `output === null`)
+/// for the ladder's L2 aggregate, or `LiveCallRow` (input expanded,
+/// result collapsed) for the TURN LIVE REGION's flat preview.
+function CallRows({ calls, live = false }) {
+  return calls.map((call, ci) => (live ? (
+    <LiveCallRow key={(call && call.id) || 'call:' + ci} turn={call} />
+  ) : (
     <ToolContent key={(call && call.id) || 'call:' + ci} turn={call} />
-  ));
+  )));
 }
 
 /// The step BODY shared by the L1 row and the live preview: the step's
@@ -175,7 +230,7 @@ function StepBody({ step, flatCalls = false }) {
     <>
       {thinking ? <StepThinking text={thinking} /> : null}
       {list.length ? (flatCalls ? (
-        <CallRows calls={list} />
+        <CallRows calls={list} live />
       ) : (
         <Collapse
           expandIcon={disclosureIcon}

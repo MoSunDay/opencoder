@@ -32,6 +32,22 @@ pub(crate) fn summarize(input: &serde_json::Value) -> String {
     }
 }
 
+/// The call's FULL input text for the TURN LIVE REGION's expanded call row
+/// (string inputs verbatim, other JSON values pretty-printed — the exact
+/// shape the SPA's `fmtValue` produces, `JSON.stringify(v, null, 2)`
+/// parity). The ladder keeps its one-line `summarize` header instead.
+pub(crate) fn fmt_input(input: &serde_json::Value) -> String {
+    match input {
+        serde_json::Value::String(s) => sanitize_multiline(s.trim()).into_owned(),
+        other => sanitize_multiline(
+            serde_json::to_string_pretty(other)
+                .unwrap_or_default()
+                .trim(),
+        )
+        .into_owned(),
+    }
+}
+
 /// Truncate `s` to at most `n` *display columns* (not characters), appending
 /// an ellipsis when trimmed. Uses composer's width-aware truncation so CJK /
 /// emoji text no longer overflows its visual budget.
@@ -157,6 +173,8 @@ impl ChatView {
                 thinking_dirty: false,
                 calls: vec![crate::chat::ToolCall {
                     id: format!("bash-{}", now_ms()),
+                    name: "bash".to_string(),
+                    input: fmt_input(&serde_json::json!({ "command": cmd })),
                     header: Line::from(Span::styled(
                         format!("\u{25b8} {}", sanitize_single_line(cmd)),
                         Style::default()

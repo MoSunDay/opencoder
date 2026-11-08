@@ -36,6 +36,7 @@ mod compaction;
 mod composer;
 mod cursor;
 mod cursor_popup;
+mod live;
 mod queue_panel;
 mod status_bar;
 mod status_ctx;

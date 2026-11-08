@@ -1,5 +1,12 @@
 # 实时区只渲染 thinking + calls：Say/阶梯计数样式完整回归（TUI + SPA）
 
+> **位置已细化（TUI）**：本条「位置不变：TUI transcript 与 composer
+> 之间的自有布局块」已被
+> `2026-11-08/live-region-below-say-above-tok-cost.md` 取代 —— TUI
+> 实时区改为 transcript **框内**底部条（Say 行下方、`[tok cost]` 边框
+> 上方，`render_live.rs` 渲染），不再位于框外独立布局块；其余口径
+> （内容、高度、settle）不变。SPA 落位维持本条描述。
+
 一句话：本条同时落定两件事。(1) **回退** `f6c97ef20`
 （`2026-11-07/running-turn-only-in-live-region.md`）把运行中 turn 从
 transcript/消息列表隐藏的口径：Say/阶梯转录区**逐字节**回到

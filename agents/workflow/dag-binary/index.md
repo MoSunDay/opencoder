@@ -1,4 +1,4 @@
-Commit: f9e0147d717d65dc90df6d0b6d83e5360a81fcb7
+Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
 
 # dag-binary 模块
 

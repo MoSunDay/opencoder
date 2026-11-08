@@ -1,4 +1,4 @@
-Commit: 5afb497be53de0f763f06c26a1eb57709198874d
+Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
 
 # tui 模块
 
@@ -16,7 +16,7 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/chat_step_render.rs` — Step 阶梯渲染：阶梯纯用户控制、默认折叠；
   运行中（`progress_active`，Say 之前）的当前 step 在**独立布局的 turn
   实时区**（transcript 框内底部条：Say 行下方、`[tok cost]` 边框上方，
-  `chat_live_turn.rs` 提供 active_steps/render_lines、`render_live.rs`
+  `chat_live_turn.rs` 提供 live_data/render_lines、`render_live.rs`
   渲染）流式渲染 —— 实时区渲染当前 step 的 thinking + 与阶梯同款的
   调用行（`push_step_details(…, show_results=false)`：聚合行 + 单行
   头，结果永不渲染）+ 流式

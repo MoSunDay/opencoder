@@ -1,4 +1,4 @@
-Commit: 5afb497be53de0f763f06c26a1eb57709198874d
+Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
 
 # ontology 模块
 
@@ -44,7 +44,7 @@ Commit: 5afb497be53de0f763f06c26a1eb57709198874d
 - [control](../platform/control/index.md) 初始化与角色门禁、就绪和退休生命周期；
   [core](../foundation/core/index.md) 提供配置与平台身份
 - `crates/control/src/ontology.rs` — 正文根校验与 `ontology` 只读 NFS 导出
-- [Web 页面](../frontend/web/index.md) — 类型与表单位于 `spa/src/ontology/`，图谱用 G6
+- [Web 页面](../frontend/web/index.md) — 类型与表单位于 `spa/src/ontology/`，图谱用 react-force-graph-3d/Three.js 3D 力导图
 - [Server 与备份](../platform/server/index.md) 同时保存数据库和正文；维护升级见
   [发布约定](../../scripts/acceptance/smooth_release/main.py)
 - `crates/database/src/lib.rs` — `opencoder-database` 独立读写执行器

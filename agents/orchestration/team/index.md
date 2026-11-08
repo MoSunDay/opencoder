@@ -1,8 +1,8 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
 
 # team 模块
 
-团队目录与消息扇出运行时；captain 是唯一规划者，成员恒 act 模式。
+团队目录与消息扇出运行时；captain 是唯一规划者，成员仅产出 answer/alignment 应答，不参与规划。
 权威进度在 worker 本地团队目录，成员以 agent 名标识。
 
 ## 索引

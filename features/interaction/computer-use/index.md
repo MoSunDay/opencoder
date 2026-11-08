@@ -1,4 +1,4 @@
-Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
+Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
 
 # Computer use
 
@@ -26,7 +26,3 @@ Commit: a8a742ba7c4b952173e1403d3e11da809d3f80cf
   Windows 服务安装
 - [computer-use 模块](../../../agents/execution/computer-use/index.md) — 实现索引域卡
 
-## 相关
-
-- [使用文档](../../../tools/computer-use/README.md)、
-  [实现索引](../../../agents/execution/computer-use/index.md)

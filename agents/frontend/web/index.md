@@ -1,4 +1,4 @@
-Commit: 5afb497be53de0f763f06c26a1eb57709198874d
+Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
 
 # web 模块
 
@@ -25,7 +25,7 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - [check-spa-drift.sh](../../../scripts/check-spa-drift.sh) — SPA 产物漂移检查
 - [access/useServerAuth.js](../../../crates/web/spa/src/access/useServerAuth.js) —
   公开鉴权状态读取
-- `admin/` — 后台管理页（用户、节点）
+- `admin/` — 后台管理页（用户；节点面板在 `fleet/nodes.jsx`）
 - [login.jsx](../../../crates/web/spa/src/login.jsx)、`main.jsx`) — 登录与身份确认挂载
 - [chat.jsx](../../../crates/web/spa/src/chat.jsx)、`chat/`、
   [conversationInput.jsx](../../../crates/web/spa/src/chat/conversationInput.jsx) —

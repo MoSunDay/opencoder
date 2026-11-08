@@ -1,8 +1,8 @@
-Commit: 5afb497be53de0f763f06c26a1eb57709198874d
+Commit: 573bb2e48fa20832a47b7bec8adc8ee3c08e8e78
 
 # ctl 模块
 
-`opencode-cli`：Server API 远程管理客户端，输出 JSON。
+`opencoder-cli`：Server API 远程管理客户端，输出 JSON。
 
 ## 索引
 

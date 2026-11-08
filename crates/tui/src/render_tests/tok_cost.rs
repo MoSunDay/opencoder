@@ -41,6 +41,8 @@ fn draw(
                 tail_ms,
                 copy_mode,
                 None,
+                &[],
+                0,
             );
         })
         .unwrap();

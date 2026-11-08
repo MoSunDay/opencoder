@@ -22,6 +22,7 @@ use crate::keymap_menu::KeymapMenu;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::queue_panel::QueueBtn;
+use crate::render_live;
 use crate::render_viewport::ViewportCache;
 use crate::task::TaskPicker;
 use crate::theme;
@@ -180,21 +181,10 @@ pub(crate) fn render<B: Backend + 'static>(
             .saturating_sub(text_h.saturating_sub(1))
             .min(max_scroll);
 
-        // TURN LIVE REGION — its OWN layout area between the transcript
-        // and the queue/composer, NEVER part of the transcript scroll
-        // region (`chat_live_turn.rs`): while the admitted turn runs, its
-        // CURRENT step streams here; settle clears it. Zero coupling with
-        // any ladder's disclosure state AND with transcript line math.
-        let live_lines = if plan_active {
-            Vec::new()
-        } else {
-            crate::chat::live_turn::active_steps(&chat.blocks, chat.turn_block_start)
-                .map(|steps| crate::chat::live_turn::render_lines(steps, anim_tick))
-                .unwrap_or_default()
-        };
-        // Cap the region's height (the same one-third budget the composer
-        // uses) and keep the TAIL — the newest lines matter while streaming.
-        let live_h = (live_lines.len() as u16).min(draw_area.height / 3);
+        // TURN LIVE REGION — the bottom strip INSIDE the transcript frame,
+        // below the Say rows, above the `[tok cost]` border (`render_live`).
+        let (live_lines, live_h) =
+            render_live::region(chat, plan_active, anim_tick, draw_area.height);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -203,7 +193,6 @@ pub(crate) fn render<B: Backend + 'static>(
                 } else {
                     Constraint::Min(3)
                 },
-                Constraint::Length(live_h),
                 Constraint::Length(queue_h),
                 Constraint::Length(skill_h),
                 Constraint::Length(composer_h),
@@ -241,20 +230,11 @@ pub(crate) fn render<B: Backend + 'static>(
                 tail_ms,
                 copy_mode,
                 wrap_plan.as_ref(),
+                &live_lines,
+                live_h,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
-        }
-        ci += 1;
-        // The live region renders render-only: no targets, no scroll, no
-        // selection — streaming can never move transcript state.
-        if live_h > 0 {
-            let skip = live_lines.len().saturating_sub(live_h as usize);
-            f.render_widget(
-                ratatui::widgets::Paragraph::new(live_lines[skip..].to_vec())
-                    .wrap(ratatui::widgets::Wrap { trim: false }),
-                chunks[ci],
-            );
         }
         ci += 1;
         // Clamp a stale queue scroll every frame (entries deleted/consumed
@@ -430,6 +410,8 @@ fn render_body(
     tail_ms: u64,
     copy_mode: bool,
     wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
+    live_lines: &[Line<'static>],
+    live_h: u16,
 ) {
     *body_out = Some(area);
     // Copy mode: undecorated full-width view so terminal-native selection
@@ -449,8 +431,12 @@ fn render_body(
         chat.subtask_total,
     );
     let inner = block.inner(area);
-    let visible_h = inner.height as usize;
-    let text_w = inner.width.saturating_sub(1);
+    // The TURN LIVE REGION rides as the frame's bottom strip: below the
+    // Say rows, above the `[tok cost]` border. Still render-only — NOT
+    // transcript content (flatten/scroll/selection never see it).
+    let (content_inner, live_area) = render_live::split_inner(inner, live_h);
+    let visible_h = content_inner.height as usize;
+    let text_w = content_inner.width.saturating_sub(1);
 
     // B5: Early exit for degenerate terminal sizes — prevents division-by-zero
     // and empty-paragraph panics in a 1x1 terminal.
@@ -538,7 +524,7 @@ fn render_body(
     let content_area = Rect {
         height: content_h as u16,
         width: text_w,
-        ..inner
+        ..content_inner
     };
 
     // A1: Virtualization — slice only the visible window from cached lines
@@ -552,9 +538,14 @@ fn render_body(
     if total_rows > visible_h {
         let scroll_area = Rect {
             height: visible_h as u16,
-            ..inner
+            ..content_inner
         };
         draw_scrollbar(f, scroll_area, total_rows, content_h, scroll_y);
+    }
+
+    // The live strip, tail-kept: the newest lines matter while streaming.
+    if let Some(live_area) = live_area {
+        render_live::render_strip(f, live_lines, live_area);
     }
 
     // Follow indicator on the body's bottom-border row, right-aligned.

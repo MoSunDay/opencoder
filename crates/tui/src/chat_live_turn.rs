@@ -1,5 +1,6 @@
-//! The TURN LIVE REGION — its OWN layout area between the transcript and
-//! the composer (`render.rs`), deliberately OUTSIDE the transcript content:
+//! The TURN LIVE REGION — the bottom strip INSIDE the transcript frame
+//! (`render.rs`), directly below the Say rows and ABOVE the `[tok cost]`
+//! bottom border, deliberately OUTSIDE the transcript content:
 //! while the admitted turn runs (`progress_active` on its group, i.e. no
 //! Say has begun yet), this region streams the CURRENT (last) step (step
 //! row + thinking + calls, running calls carry the spinner). When the turn

@@ -1,5 +1,10 @@
 # 实时区 function call 展开展示：名称 + 完整输入，结果收起（TUI + SPA）
 
+> **已取代**：本条的「名称行 + 完整输入展开」形态已被
+> `live-region-calls-match-ladder.md` 取代 —— 实时区调用行改为与阶梯
+> step 完全一致的共享渲染（聚合行 + 单行头）；「结果收起」口径保留
+> （TUI `show_results=false` / SPA 默认关闭折叠）。
+
 > **内容已扩展**：实时区此后还渲染**流式 Say**（`💬 Say` 标记 +
 > 全文；Say seal 前不进转录），见 `live-region-hugs-content-say-deferred.md`。
 

@@ -25,8 +25,8 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 **frontend**
 
 - [agents/local](agents/frontend/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
-- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区为 transcript 框内底部条（Say 下方、`[tok cost]` 边框上方，`render_live.rs`）不随开合、实时区紧贴内容不截断、thinking + 展开调用行 + 流式 Say（`💬 Say`，seal 才入转录）、无 step 计数：`chat_live_turn`；一次性 `@capability` 子任务派发）。
-- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区为滚动区外固定面板（`TurnLiveRegion`）不随开合、实时区 thinking + 展开调用行 + 流式 Say（`pendingSay`，flush 才入列表）无 step 计数：`stepsBlock.jsx`）。
+- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区为 transcript 框内底部条（Say 下方、`[tok cost]` 边框上方，`render_live.rs`）不随开合、实时区紧贴内容不截断、thinking + 阶梯同款调用行（结果不渲染）+ 流式 Say（`💬 Say`，seal 才入转录）、无 step 计数：`chat_live_turn`；一次性 `@capability` 子任务派发）。
+- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区为滚动区外固定面板（`TurnLiveRegion`）不随开合、实时区 thinking + L3 同款调用行 + 流式 Say（`pendingSay`，flush 才入列表）无 step 计数：`stepsBlock.jsx`）。
 
 **ontology**
 

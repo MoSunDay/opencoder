@@ -695,9 +695,11 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
 
         {/* TURN LIVE REGION — pinned OUTSIDE the transcript scroll area: a
             different thing from the Say/Step message area; it streams the
-            running turn's current step and clears on settle, never coupled
-            to any ladder's disclosure (TUI parity). */}
-        <TurnLiveRegion turns={stream.turns} />
+            running turn's current step AND the STREAMING Say (pendingSay —
+            a Say is not transcript content while it streams; it lands in
+            the message list at the flush boundary) and clears on settle,
+            never coupled to any ladder's disclosure (TUI parity). */}
+        <TurnLiveRegion turns={stream.turns} say={stream.pendingSay} />
 
         <QueuePanel sessionId={hasNode ? dialogSel : null} refreshSignal={queueVersion} />
 

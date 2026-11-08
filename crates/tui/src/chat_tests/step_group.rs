@@ -13,12 +13,14 @@ use crate::session_ui::replay_messages;
 use opencoder_core::{ContentBlock, Message, Role};
 
 /// The TURN LIVE REGION's rendered rows (`chat_live_turn.rs`): the running
-/// turn's current step streamed in its OWN area between the transcript and
-/// the composer — `flatten`/`lines` (the transcript) never contain these
-/// lines. Shared by the live tests here and sibling chat_tests modules.
+/// turn's current step AND — once a Say opens — that Say's RAW text,
+/// streamed in its OWN area right below the transcript — `flatten`/`lines`
+/// (the transcript) never contain these lines (an open Say is skipped by
+/// the flatten until sealed). Shared by the live tests here and sibling
+/// chat_tests modules.
 pub(crate) fn live_lines(view: &ChatView) -> Vec<String> {
-    crate::chat::live_turn::active_steps(&view.blocks, view.turn_block_start)
-        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+    crate::chat::live_turn::live_data(&view.blocks, view.turn_block_start)
+        .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
         .unwrap_or_default()
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
@@ -432,8 +434,25 @@ NO aggregate row, NO result (the ladder owns both)"
     v.apply(&SessionEvent::TextDelta("spoken".into()));
     assert_eq!(
         lines(&v),
-        vec!["\u{25b8} Say(1 step): spoken  \u{280b} running ", ""],
-        "the Say streams under the merged header (body first line deduped), spinner moved onto it"
+        vec!["\u{25b8} 1 Step", ""],
+        "while the Say is open the transcript keeps only the standalone \
+ladder row (its running hint retired on the first chunk)"
+    );
+    assert_eq!(
+        live_lines(&v),
+        vec![
+            "\u{2b25} live",
+            "    \u{1f4ad} Thinking",
+            "        think",
+            "    \u{276f} bash",
+            "        {",
+            "          \"command\": \"echo x\"",
+            "        }",
+            "    \u{1f4ac} Say",
+            "        spoken",
+        ],
+        "the open Say streams in the live region (marker + raw text) while \
+the transcript stays ladder-only"
     );
     v.apply(&SessionEvent::Done);
     assert_eq!(

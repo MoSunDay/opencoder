@@ -182,9 +182,10 @@ pub(crate) fn render<B: Backend + 'static>(
             .min(max_scroll);
 
         // TURN LIVE REGION — the bottom strip INSIDE the transcript frame,
-        // below the Say rows, above the `[tok cost]` border (`render_live`).
-        let (live_lines, live_h) =
-            render_live::region(chat, plan_active, anim_tick, draw_area.height);
+        // hugging the transcript's last rendered row, above the `[tok cost]`
+        // border (`render_live`). Untruncated: `render_body` only shrinks
+        // the content window when content + live overflow the frame.
+        let live_lines = render_live::region(chat, plan_active, anim_tick);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -231,7 +232,6 @@ pub(crate) fn render<B: Backend + 'static>(
                 copy_mode,
                 wrap_plan.as_ref(),
                 &live_lines,
-                live_h,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -411,7 +411,6 @@ fn render_body(
     copy_mode: bool,
     wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
     live_lines: &[Line<'static>],
-    live_h: u16,
 ) {
     *body_out = Some(area);
     // Copy mode: undecorated full-width view so terminal-native selection
@@ -431,16 +430,11 @@ fn render_body(
         chat.subtask_total,
     );
     let inner = block.inner(area);
-    // The TURN LIVE REGION rides as the frame's bottom strip: below the
-    // Say rows, above the `[tok cost]` border. Still render-only — NOT
-    // transcript content (flatten/scroll/selection never see it).
-    let (content_inner, live_area) = render_live::split_inner(inner, live_h);
-    let visible_h = content_inner.height as usize;
-    let text_w = content_inner.width.saturating_sub(1);
+    let text_w = inner.width.saturating_sub(1);
 
     // B5: Early exit for degenerate terminal sizes — prevents division-by-zero
     // and empty-paragraph panics in a 1x1 terminal.
-    if text_w == 0 || visible_h == 0 {
+    if text_w == 0 {
         f.render_widget(block, area);
         return;
     }
@@ -459,7 +453,9 @@ fn render_body(
 
     // A1: Build or refresh the viewport cache (rebuilt on first frame,
     // body-refresh invalidation, or width change). Cached lines/offsets
-    // make per-frame cost O(visible_h) instead of O(total_content).
+    // make per-frame cost O(visible_h) instead of O(total_content). The
+    // cache only needs `text_w`, so it is built BEFORE any content-area
+    // splitting.
     let needs_rebuild = viewport.as_ref().is_none_or(|v| v.width() != text_w);
     if needs_rebuild {
         *viewport = Some(ViewportCache::build(chat, text_w, anim_tick, now_ms));
@@ -467,11 +463,27 @@ fn render_body(
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
 
-    // The [call cost] timer lives on the bottom border (after [tok cost], see
-    // rounded_block_line_tok), so the content window takes the full height.
-    let content_h = visible_h;
+    // TURN LIVE REGION geometry: the strip HUGS the transcript's last
+    // rendered row — no reserved slice, no height cap. The content window
+    // shrinks ONLY when content + live would overflow the frame; physical
+    // frame overflow still clips the strip, tail-kept (`render_live`).
+    let live_len = live_lines.len();
+    let content_h: u16 = if total_rows.saturating_add(live_len) > inner.height as usize {
+        inner
+            .height
+            .saturating_sub(live_len.min(inner.height as usize) as u16)
+    } else {
+        inner.height
+    };
 
-    let max_rows = total_rows.saturating_sub(content_h);
+    // B5 (height half): degenerate frame after the live strip claimed it.
+    if content_h == 0 {
+        f.render_widget(block, area);
+        return;
+    }
+    let visible_h = content_h as usize;
+
+    let max_rows = total_rows.saturating_sub(visible_h);
     if follow {
         *scroll = max_rows as u32;
     }
@@ -484,7 +496,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        content_h,
+        visible_h,
         inner.x,
         inner.y,
         thinking_btns,
@@ -494,7 +506,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        content_h,
+        visible_h,
         inner.x,
         inner.y,
         subagent_btns,
@@ -504,7 +516,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        content_h,
+        visible_h,
         inner.x,
         inner.y,
         tool_call_btns,
@@ -514,7 +526,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        content_h,
+        visible_h,
         inner.x,
         inner.y,
         compaction_btns,
@@ -522,30 +534,31 @@ fn render_body(
 
     f.render_widget(block, area);
     let content_area = Rect {
-        height: content_h as u16,
+        height: content_h,
         width: text_w,
-        ..content_inner
+        ..inner
     };
 
     // A1: Virtualization — slice only the visible window from cached lines
     // instead of passing the entire transcript to Paragraph. This avoids
     // ratatui internally processing all lines for wrapping/rendering.
-    let (start, end, top_skip) = cache.visible_window(scroll_y, content_h);
+    let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
     let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
     let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), content_area);
 
     if total_rows > visible_h {
         let scroll_area = Rect {
-            height: visible_h as u16,
-            ..content_inner
+            height: content_h,
+            ..inner
         };
-        draw_scrollbar(f, scroll_area, total_rows, content_h, scroll_y);
+        draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y);
     }
 
-    // The live strip, tail-kept: the newest lines matter while streaming.
-    if let Some(live_area) = live_area {
-        render_live::render_strip(f, live_lines, live_area);
+    // The TURN LIVE strip, HUGGING the last rendered row (right below the
+    // visible content; untruncated — only physical overflow clips).
+    if let Some(rect) = render_live::strip_rect(inner, total_rows, live_len) {
+        render_live::render_strip(f, live_lines, rect);
     }
 
     // Follow indicator on the body's bottom-border row, right-aligned.

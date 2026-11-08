@@ -107,9 +107,25 @@ fn sidecar_child_text_streams_into_block_not_parent() {
         SessionEvent::TextDelta("旁路回答 alpha".into()),
     ));
     let p = panel(&v).expect("panel present");
+    // The child's Say is OPEN inside the nested view: it streams in that
+    // view's TURN LIVE REGION (flatten skips open Says), never as parent
+    // transcript content.
+    let child_live = crate::chat::live_turn::live_data(&p.view.blocks, p.view.turn_block_start)
+        .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
+        .unwrap_or_default();
+    let child_text = child_live
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.clone())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        block_text(&p.view).contains("旁路回答 alpha"),
-        "child delta must land in the panel's nested view"
+        child_text.contains("旁路回答 alpha"),
+        "child delta must stream in the panel's nested view: {child_text:?}"
     );
     assert_eq!(p.view.blocks.len(), 1, "delta creates exactly one block");
     assert!(!p.done, "no Turn yet");

@@ -140,17 +140,25 @@ describe('turnsFromMessages', () => {
 });
 
 describe('reduceFrame', () => {
-  it('accumulates assistant text deltas, accepting text and delta fields', () => {
+  it('accumulates assistant text deltas into pendingSay, accepting text and delta fields', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'he' } }, 0);
     s = reduceFrame(s, { event: 'text_delta', data: { delta: 'llo' } }, 1);
+    // A STREAMING Say is NOT transcript content (TUI live-region parity):
+    // only the pendingSay buffer accumulates; it renders in the turn live
+    // region and lands in `turns` at the next boundary (flush).
+    expect(s.turns).toEqual([]);
+    expect(s.pendingSay).toBe('hello');
+    s = reduceFrame(s, { event: 'llm_round_end', data: {} }, 2);
     expect(s.turns).toEqual([{ kind: 'text', role: 'assistant', text: 'hello', open: true }]);
+    expect(s.pendingSay).toBe('');
   });
 
   it('starts a new text turn after a closed one', () => {
     let s = reduceFrame(emptyStream(), { event: 'text_delta', data: { text: 'a' } }, 0);
     s = reduceFrame(s, { event: 'done', data: {} }, 1);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'b' } }, 2);
+    s = reduceFrame(s, { event: 'done', data: {} }, 3);
     expect(s.turns.map((t) => t.text)).toEqual(['a', 'b']);
   });
 
@@ -162,7 +170,7 @@ describe('reduceFrame', () => {
     expect(s.turns[0].steps[0].calls[0]).toMatchObject({ kind: 'tool', name: 'bash', output: 'ok', durationMs: 1500 });
   });
 
-  it('keeps step progress after ToolEnd and settles it on the first Say chunk', () => {
+  it('keeps step progress after ToolEnd and settles it when the Say lands (flush at the next activity)', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'x', name: 'bash', input: {} } }, 1);
     expect(s.turns[0].progressActive).toBe(true);
@@ -170,10 +178,17 @@ describe('reduceFrame', () => {
     expect(s.turns[0].progressActive).toBe(true);
     const unchanged = reduceFrame(s, { event: 'text_delta', data: { text: '' } }, 3);
     expect(unchanged).toBe(s);
+    // Streaming chunks alone never touch the ladder: the Say streams in the
+    // live region (pendingSay) while progress stays armed.
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'Say starts' } }, 4);
-    expect(s.turns[0].progressActive).toBe(false);
+    expect(s.pendingSay).toBe('Say starts');
+    expect(s.turns[0].progressActive).toBe(true);
+    // The next activity flushes: the ladder settles and the Say lands
+    // together — the say segment sits BEFORE the new ladder's step.
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'another phase' } }, 5);
     expect(s.turns[0].progressActive).toBe(false);
+    expect(s.turns.map((t) => t.kind)).toEqual(['steps', 'text', 'steps']);
+    expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'Say starts' });
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'y', name: 'bash', input: {} } }, 6);
     expect(s.turns[0].progressActive).toBe(false);
   });
@@ -466,10 +481,11 @@ describe('applySeq watermark (resync dedup)', () => {
   it('drops a seq-carrying frame at/below applySeq, folds and stamps above it; live frames never move it', () => {
     let s = emptyStream();
     expect(s.applySeq).toBe(null);
-    // Replayed frame with seq folds and sets the watermark.
+    // Replayed frame with seq folds and sets the watermark (a streaming Say
+    // accumulates in pendingSay, not turns).
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'a' }, seq: 12 }, 1);
     expect(s.applySeq).toBe(12);
-    expect(s.turns.at(-1).text).toBe('a');
+    expect(s.pendingSay).toBe('a');
     // Same-seq repeat (replay overlap): dropped verbatim.
     const dup = reduceFrame(s, { event: 'text_delta', data: { text: 'b' }, seq: 12 }, 2);
     expect(dup).toBe(s);
@@ -478,11 +494,14 @@ describe('applySeq watermark (resync dedup)', () => {
     // Above-watermark frame folds and advances.
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'd' }, seq: 13 }, 4);
     expect(s.applySeq).toBe(13);
-    expect(s.turns.at(-1).text).toBe('ad');
+    expect(s.pendingSay).toBe('ad');
     // Live broadcast (no seq — emitted before the flusher persists): always
     // folds, watermark untouched.
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'e' } }, 5);
     expect(s.applySeq).toBe(13);
+    expect(s.pendingSay).toBe('ade');
+    // The flush lands the whole buffered Say as one text turn.
+    s = reduceFrame(s, { event: 'done', data: {} }, 6);
     expect(s.turns.at(-1).text).toBe('ade');
   });
 
@@ -491,7 +510,7 @@ describe('applySeq watermark (resync dedup)', () => {
     // states — undefined watermark must not drop anything.
     const bare = { turns: [], usage: null, status: 'streaming', error: null };
     const s = reduceFrame(bare, { event: 'text_delta', data: { text: 'x' }, seq: 7 }, 1);
-    expect(s.turns.at(-1).text).toBe('x');
+    expect(s.pendingSay).toBe('x');
     expect(s.applySeq).toBe(7);
   });
 });

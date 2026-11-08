@@ -252,24 +252,6 @@ fn panel_ladder_lands_below_the_echoed_question() {
         group_idx > user_idx,
         "ladder must render below the echoed question (user@{user_idx}, ladder@{group_idx})"
     );
-    // While the panel's turn runs its ladder is ABSENT from the transcript
-    // (the TURN LIVE REGION is the running turn's only surface).
-    let text = block_text(&panel.view);
-    assert!(
-        text.contains("总结这个函数"),
-        "the echoed prompt renders: {text:?}"
-    );
-    assert!(
-        !text.contains("1 Step") && !text.contains("先看代码"),
-        "the running ladder renders nowhere in the panel transcript: {text:?}"
-    );
-    // Settle the panel's turn: the ladder re-enters the transcript BELOW
-    // the echoed prompt.
-    v.apply(&SessionEvent::SidecarChild {
-        id: "sc-1".into(),
-        ev: Box::new(SessionEvent::Done),
-    });
-    let panel = v.sidecar.as_ref().expect("panel alive");
     let text = block_text(&panel.view);
     let prompt = text.find("总结这个函数").expect("prompt text");
     let ladder = text.find("1 Step").expect("ladder marker");

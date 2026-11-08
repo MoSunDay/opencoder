@@ -56,11 +56,13 @@ impl ChatView {
         let mut tool_calls = Vec::new();
         let mut line_idx = 0usize;
         let merged_say = |i: usize| -> bool {
-            // ANY Assistant follower merges (open or sealed): an open Say
-            // is transcript content now (it streams under the merged
-            // header) — mirrors `flatten_with`'s StepGroup adjacency
-            // lookup.
-            matches!(self.blocks.get(i + 1), Some(ChatBlock::Assistant { .. }))
+            // Only a SEALED follower merges (`done == true`): an open Say
+            // renders standalone (the group keeps its plain `N Steps` row)
+            // — mirrors `flatten_with`'s StepGroup adjacency lookup.
+            matches!(
+                self.blocks.get(i + 1),
+                Some(ChatBlock::Assistant { done: true, .. })
+            )
         };
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
@@ -73,9 +75,16 @@ impl ChatView {
                 } => {
                     // The Say is transcript content BOTH while streaming
                     // and once sealed — mirrors `flatten_with`'s Assistant
-                    // arm line for line (raw rows while open, rendered
-                    // rows once sealed). `merged` looks at the PRECEDING
+                    // arm line for line. While it streams (`done == false`)
+                    // the Say renders STANDALONE: +1 for the `say:` header
+                    // row plus every raw body row (no merge, no preview
+                    // dedup). Once sealed, `merged` looks at the PRECEDING
                     // block (a StepGroup), mirroring flatten's adjacency.
+                    if !*done {
+                        line_idx += 1; // standalone `say:` header row
+                        line_idx += super::assistant_rows(raw).len();
+                        continue;
+                    }
                     let merged = matches!(
                         block_idx.checked_sub(1).and_then(|i| self.blocks.get(i)),
                         Some(ChatBlock::StepGroup { .. })
@@ -89,18 +98,11 @@ impl ChatView {
                     }
                     // 合并对正文行数镜像：跳过与 preview 重复的首个非空行
                     // （单行 Say / 空正文整块隐藏）—— 与 `flatten_with` 的
-                    // Assistant 分支逐行同步（含流式 raw 行），hit-rect 才
-                    // 能对齐。
-                    let rows_len = if *done {
-                        rendered.len()
-                    } else {
-                        super::assistant_rows(raw).len()
-                    };
+                    // Assistant 分支逐行同步，hit-rect 才能对齐。
                     line_idx += if merged {
-                        step_render::merged_say_body_decision(raw, rendered, *done)
-                            .visible_len(rows_len)
+                        step_render::merged_say_body_decision(rendered).visible_len(rendered.len())
                     } else {
-                        rows_len
+                        rendered.len()
                     };
                 }
                 ChatBlock::Thinking {

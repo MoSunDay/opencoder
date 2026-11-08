@@ -1,5 +1,7 @@
 # 实时区只渲染运行中 step；流式 Say 即时进转录（TUI + SPA）
 
+> **已取代（部分）**：实时区**几何**（底部条 → 并入转录滚动窗尾部、共一条滚动条）与 Say **合并时序**（`Say(n steps)` 合并头行改到 seal 后才成立，流式期间阶梯保持折叠 `▸ N Steps`、Say 独立 `say:` 形态）见 [live-region-one-scrollbar-folded-say-ladder.md](live-region-one-scrollbar-folded-say-ladder.md)。本文的 **Say 入转录、共享滚动** 口径仍现行。
+
 一句话：两条口径，取代此前「流式 Say 只进实时区」的安排（见
 live-region-hugs-content-say-deferred.md）。(1) **实时区瘦身**：turn
 live region 只渲染**当前（最后一个）step** 的 thinking 文本 + function

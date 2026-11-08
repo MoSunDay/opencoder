@@ -242,19 +242,25 @@ fn say_streams_in_the_live_region_and_lands_in_the_transcript_on_seal() {
     end_call(&mut v, "c1", "out");
     assert!(live(&v).contains("think"));
 
-    // MID-STREAM: the open Say IS transcript content — the pair merges
-    // into the `Say(n steps)` header IMMEDIATELY (running hint riding it),
-    // the raw body rows stream below it in the transcript, and the live
-    // region holds NO Say at all (it cleared when the Say began).
+    // MID-STREAM: the open Say IS transcript content — but the ladder
+    // stays FOLDED in its settled counting shape (the merge happens only
+    // on seal): the plain `▸ 1 Step` group row, then the standalone
+    // `say:` header carrying the spinner, with the raw body rows below it
+    // in the transcript. The live region holds NO Say at all (it cleared
+    // when the Say began).
     v.apply(&SessionEvent::TextDelta("the answer".into()));
     let text = flat(&v);
     assert!(
-        text.contains("Say(1 step): the answer") && text.contains("running"),
-        "the open Say merges onto the group row at its first chunk: {text}"
+        text.contains("\u{25b8} 1 Step"),
+        "the group row keeps its plain folded counting shape: {text}"
     );
     assert!(
-        !text.contains("1 Step"),
-        "the standalone step-count row is gone while the Say streams: {text}"
+        text.contains("\u{276f} Say: \u{280b}"),
+        "the standalone say: header carries the running spinner: {text}"
+    );
+    assert!(
+        text.contains("the answer"),
+        "the open Say's raw body streams in the transcript: {text}"
     );
     let lv = live(&v);
     assert!(
@@ -266,14 +272,18 @@ fn say_streams_in_the_live_region_and_lands_in_the_transcript_on_seal() {
         "the Say disarmed progress — the region shows no step either: {lv}"
     );
 
-    // SEAL: Done finalizes the Say — the pair keeps the merged header minus
-    // the running hint; the live region stays empty.
+    // SEAL: Done finalizes the Say — the pair MERGES here (the folded row
+    // disappears into `Say(1 step)`), the raw rows swap for the rendered
+    // ones and the spinner hint is gone; the live region stays empty.
     v.apply(&SessionEvent::Done);
     let text = flat(&v);
     assert!(
         text.contains("Say(1 step): the answer") && !text.contains("running"),
-        "sealing keeps the merged header and drops the hint — zero shape \
-jump: {text}"
+        "sealing merges the pair and drops the hint: {text}"
+    );
+    assert!(
+        !text.contains("\u{25b8} 1 Step"),
+        "the folded step-count row disappears into the merged header: {text}"
     );
     assert!(
         live_lines(&v).is_empty(),
@@ -388,14 +398,18 @@ different area, untouched by the ladder's disclosure: {lv}"
         "the Say began — the live region disarmed and carries no Say rows: {lv}"
     );
     assert!(
-        text.contains("Say(2 steps): answer") && text.contains("running"),
-        "the open Say streams as transcript content under the merged header \
-of the user-open ladder: {text}"
+        text.contains("\u{276f} Say: \u{280b}") && text.contains("answer"),
+        "the open Say streams standalone (say: header + spinner + raw body) \
+below the user-open ladder — the merge waits for seal: {text}"
     );
     v.apply(&SessionEvent::Done);
     assert!(
         live_lines(&v).is_empty(),
         "and clears the live region like every settle"
+    );
+    assert!(
+        flat(&v).contains("Say(2 steps): answer"),
+        "sealing merges the pair into the user-open ladder's header"
     );
 }
 

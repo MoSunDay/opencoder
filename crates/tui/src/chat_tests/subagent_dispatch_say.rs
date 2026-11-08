@@ -90,9 +90,10 @@ fn subagent_dispatch_header_renders_markdown_and_body_does_not_repeat() {
 }
 
 /// 流式窗口（`ToolStart(task)` 已到、`SubagentStart` 未到）：开口 Say
-/// 就是转录内容——在合并头行（raw preview + running 提示）下方按 raw
-/// 行流式渲染，正文不复述首行、不做半渲染；实时区只剩步骤本身
-///（本窗口无 armed 步骤，实时区为空）。
+/// 就是转录内容——ladder 保持折叠计数形态（合并只发生在 seal），Say 以
+/// standalone 形态流式：`say:` 头行 + running 提示，下方按 raw 行全文
+/// 渲染（不复述去重、不做半渲染）；实时区只剩步骤本身（本窗口无 armed
+/// 步骤，实时区为空）。
 #[test]
 fn subagent_dispatch_live_window_streams_raw_without_duplication() {
     let mut v = ChatView::default();
@@ -101,16 +102,19 @@ fn subagent_dispatch_live_window_streams_raw_without_duplication() {
     task_start(&mut v, "t1");
 
     let flat = lines(&v);
-    // 头部 = raw preview（流式口径，不露渲染差异）+ running 提示；正文
-    // 从 raw 行跳过与 preview 重复的首行，只留其余行。
+    // 组行保持 `▸ 1 Step`（未合并），Say standalone：头行 = `say:` +
+    // spinner，正文 = raw 行全文（含 `**` 的首行，不做 preview 去重）。
     assert_eq!(
         flat,
         vec![
-            "\u{25b8} Say(1 step): **去查**  \u{280b} running ",
+            "\u{25b8} 1 Step",
             "",
+            "\u{276f} Say: \u{280b} ",
+            "    **去查**",
             "    - item2",
         ],
-        "open Say streams as transcript content (merged header, no echo): {flat:?}"
+        "open Say streams standalone under the folded ladder (no echo dup, \
+no half-render): {flat:?}"
     );
     let live = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
         .map(|steps| crate::chat::live_turn::render_lines(steps, 0))

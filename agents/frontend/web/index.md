@@ -33,16 +33,13 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - [chat/useTranscriptStream.js](../../../crates/web/spa/src/chat/useTranscriptStream.js) —
   流结束后合并执行结果与会话快照
 - [stepsBlock.jsx](../../../crates/web/spa/src/stepsBlock.jsx) — Step 阶梯
-  三级展开：纯用户控制、默认折叠（L0–L3 全部非受控）；运行中（共享判定
-  `isStepsTurnRunning`：有 Say 即 settle，否则 `progressActive`、老 turn
-  回退 open-call）的 turn 由 **`TurnLiveRegion` 固定面板**流式渲染最后
-  一步（Step 头 + thinking + call 行 running tag）——面板在滚动区外
-  （transcript 滚动 div 与 QueuePanel 之间），是运行中 turn 的唯一
-  展示面：消息列表同判定门控（`AssistantTurnContent`/防御 steps
-  role/`messageListItems` 空壳过滤），`StepsContent` settle 后才渲染；
+  三级展开：纯用户控制、默认折叠（L0–L3 全部非受控）；运行中
+  （`ladderRunning`，Say 之前）的最后一步由 **`TurnLiveRegion` 固定面板**
+  流式渲染（头部仅 `⏺ live`，主体只渲染 thinking + call 行，无 Step(k)
+  计数——计数归消息列表阶梯）——面板在滚动区外
+  （transcript 滚动 div 与 QueuePanel 之间），绝不出现在气泡内；
   `findRunningStepsTurn` 从最新 turn 往回找 running steps turn（最新已
-  settle 即无），settle 后实时区清空、折叠阶梯回消息列表；
-  与 TUI `chat_live_turn.rs` 同契约
+  settle 即无），settle 后实时区清空；与 TUI `chat_live_turn.rs` 同契约
 - [chat/inputAttempt.js](../../../crates/web/spa/src/chat/inputAttempt.js) — 人工输入 ID
   的生成与重试规则
 - [nav.js](../../../crates/web/spa/src/nav.js)、

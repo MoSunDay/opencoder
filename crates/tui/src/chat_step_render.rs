@@ -356,18 +356,7 @@ pub(crate) fn push_step_details(
     anim_tick: u32,
     calls_open: bool,
 ) {
-    if !step.thinking.is_empty() {
-        out.push(Line::from(vec![
-            Span::raw("    "),
-            Span::styled(
-                STEP_THINKING_HEADER,
-                Style::default()
-                    .fg(theme::pink())
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        out.extend(super::types::indented(&step.thinking, 8));
-    }
+    push_thinking(out, step);
     if step.calls.is_empty() {
         return;
     }
@@ -416,6 +405,25 @@ pub(crate) fn push_step_details(
                 out.push(Line::from(""));
             }
         }
+    }
+}
+
+/// The step's `💭 Thinking` block — header row (indent 4) + body (indent
+/// 8), emitted only when the step carries thinking. Shared by the ladder's
+/// step body and the TURN LIVE REGION (`chat_live_turn.rs`), which renders
+/// it without the step counter row.
+pub(crate) fn push_thinking(out: &mut Vec<Line<'static>>, step: &Step) {
+    if !step.thinking.is_empty() {
+        out.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(
+                STEP_THINKING_HEADER,
+                Style::default()
+                    .fg(theme::pink())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        out.extend(super::types::indented(&step.thinking, 8));
     }
 }
 

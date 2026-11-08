@@ -164,6 +164,8 @@ fn step_group_running_call_keeps_alignment() {
                 thinking_dirty: false,
                 calls: vec![ToolCall {
                     id: "r".into(),
+                    name: "bash".to_string(),
+                    input: String::new(),
                     header: Line::from(Span::raw("\u{25b8} bash")),
                     output: Vec::new(),
                     started_at_ms: Some(0),

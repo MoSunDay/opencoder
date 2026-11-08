@@ -17,9 +17,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   运行中（`progress_active`，Say 之前）的当前 step 在**独立布局的 turn
   实时区**（transcript 框内底部条：Say 行下方、`[tok cost]` 边框上方，
   `chat_live_turn.rs` 提供 active_steps/render_lines、`render_live.rs`
-  渲染）流式渲染 —— 实时区只渲染
-  当前 step 的 thinking + call 行（`push_step_details`），无 step 计数行
-  （计数归 transcript 阶梯），仅保留 `⏺ live` 暗色标记行；flatten 永不产
+  渲染）流式渲染 —— 实时区渲染当前 step 的 thinking + 展开的调用行
+  （`❯ name` + 完整输入，`ToolCall.name/input` + `fmt_input`），无 step
+  计数行（计数归 transcript 阶梯）、永不渲染调用结果（阶梯独占下钻），
+  仅保留 `⏺ live` 暗色标记行；flatten 永不产
   出 live 行，滚动/选择/复制不受流式影响；settle 后实时区清空、step 只
   存在于折叠阶梯（与 SPA `stepsBlock.jsx` 同契约）
 - [chat_steps_replay.rs](../../../crates/tui/src/chat_steps_replay.rs) — 回放侧

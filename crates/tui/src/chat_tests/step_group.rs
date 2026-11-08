@@ -421,10 +421,13 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
             "\u{2b25} live",
             "    \u{1f4ad} Thinking",
             "        think",
-            "    \u{276f} 1 Function call",
-            "      \u{25b8} bash echo x",
+            "    \u{276f} bash",
+            "        {",
+            "          \"command\": \"echo x\"",
+            "        }",
         ],
-        "the live region streams the forced-open step"
+        "the live region streams the step with the call's input EXPANDED — \
+NO aggregate row, NO result (the ladder owns both)"
     );
     v.apply(&SessionEvent::TextDelta("spoken".into()));
     assert_eq!(

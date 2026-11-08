@@ -459,6 +459,8 @@ mod tests {
             calls: (0..calls)
                 .map(|i| ToolCall {
                     id: format!("c{i}"),
+                    name: format!("c{i}"),
+                    input: String::new(),
                     header: Line::from("h"),
                     output: Vec::new(),
                     started_at_ms: None,

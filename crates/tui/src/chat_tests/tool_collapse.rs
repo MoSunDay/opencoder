@@ -45,6 +45,25 @@ fn flatten_text(v: &ChatView) -> Vec<String> {
         .collect()
 }
 
+/// The turn live region's rows joined (`live_turn::live_data` +
+/// `render_lines`), for asserting on the streaming surface.
+fn live_text(v: &ChatView) -> String {
+    crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
+        .map(|lt| crate::chat::live_turn::render_lines(lt.steps, lt.say, 0))
+        .map(|rows| {
+            rows.iter()
+                .map(|l| {
+                    l.spans
+                        .iter()
+                        .map(|s| s.content.clone())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
 #[test]
 fn parallel_tool_calls_form_one_group_and_route_by_id() {
     // Regression: when two tools start before either ends (parallel bash
@@ -250,12 +269,18 @@ fn running_hint_persists_until_say_begins() {
     );
     v.apply(&SessionEvent::TextDelta("final answer".into()));
     let line = &flatten_text(&v)[0];
-    // The running hint MOVES onto the merged Say header while the Say
-    // streams last — it retires from the pre-Say group row, it does not
-    // vanish: the pair header now carries the live indicator.
+    // The first non-empty Say chunk RETIRES the hint from the pre-Say
+    // group row: while the Say streams it is not transcript content (it
+    // lives in the TURN LIVE REGION, which has its own live marker), so
+    // the ladder row stands alone with no running hint.
     assert!(
-        line.contains("Say(1 step): final answer") && line.contains("running"),
-        "the first non-empty Say chunk hands the hint to the merged header: {line:?}"
+        line.contains("1 Step") && !line.contains("running"),
+        "the first non-empty Say chunk retires the ladder row's hint: {line:?}"
+    );
+    assert!(
+        live_text(&v).contains("\u{1f4ac} Say") && live_text(&v).contains("final answer"),
+        "the open Say streams in the live region: {}",
+        live_text(&v)
     );
 
     // Say is terminal for the ladder: later frames cannot re-arm it —

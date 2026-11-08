@@ -15,7 +15,6 @@ import {
   clearSayStreaming,
   closeOpenText,
   flushPendingThink,
-  markSayStreaming,
   settleTurnProgress,
 } from './steps/reducer.js';
 
@@ -72,6 +71,13 @@ function subagentIndex(turns, id) {
 }
 
 export function emptyStream() {
+  // pendingSay: the STREAMING Say buffer (TUI live-region parity): while
+  // text_delta chunks arrive the Say is NOT transcript content — it renders
+  // ONLY in the turn live region (chat.jsx passes this field as TurnLiveRegion's
+  // `say` prop) and lands in `turns` at the next boundary (round end / next
+  // tool or thinking activity / terminal settle / new input) via
+  // flushPendingSay. The nested subagent fold carries the same field on the
+  // subagent turn so a child's streaming Say survives across frames.
   // pendingEcho: the in-flight turn's user echo (TUI chat_types.rs
   // pending_turn_echo parity) — remembered from submit/steer/queue echo until
   // done/error, kept across transcript_reset so the store-snapshot rebuild
@@ -81,7 +87,7 @@ export function emptyStream() {
   // yet). Resync (sse.js onResync → resyncState) sets it from the /seq head
   // so a replay at/below the watermark can never double-fold; live broadcast
   // frames carry no seq and never move it.
-  return { turns: [], usage: null, status: 'idle', error: null, pendingEcho: null, applySeq: null };
+  return { turns: [], usage: null, status: 'idle', error: null, pendingSay: '', pendingEcho: null, applySeq: null };
 }
 
 function blockToTurns(role, b) {
@@ -314,6 +320,24 @@ function appendDelta(state, kind, text) {
   return withTurns(state, turns);
 }
 
+// LAND the streaming Say (TUI live-region parity): while chunks arrived they
+// only accumulated in `pendingSay`; the next boundary (round end / next tool
+// or thinking activity / terminal settle / new input) seals the sub-turn, so
+// the ladder settles AND the FULL text lands in the transcript together, in
+// ONE shot, via exactly the old text_delta turn-effects (settleTurnProgress
+// then appendDelta — same append path). The landed Say is COMPLETE, not
+// streaming: markSayStreaming is deliberately NOT called (TUI parity — the
+// Say-row running hint never displays post-landing). Pure; no pending Say →
+// the input state is returned unchanged.
+function flushPendingSay(state) {
+  if (!state.pendingSay) {
+    return state;
+  }
+  const settled = withTurns(state, settleTurnProgress(state.turns));
+  const next = appendDelta(settled, 'text', state.pendingSay);
+  return { ...next, pendingSay: '' };
+}
+
 // Turn/Step transforms are isolated in `steps/reducer.js` and shared by
 // snapshot replay plus live SSE folding.
 
@@ -374,34 +398,61 @@ function foldFrame(state, frame, nowMs) {
   const event = frame && frame.event;
   const data = (frame && frame.data) || {};
   switch (event) {
-    case 'llm_round_start': return { ...state, attemptTurns: state.turns };
-    case 'llm_round_end': return { ...state, attemptTurns: null };
-    case 'llm_attempt_reset': return state.attemptTurns ? { ...state, turns: state.attemptTurns, error: null } : state;
+    case 'llm_round_start': {
+      // Flush the pending Say FIRST: the round boundary seals the previous
+      // sub-turn, so its Say lands BEFORE the snapshot is taken — a later
+      // attempt_reset rolls back to a state that already owns the sealed Say.
+      const flushed = flushPendingSay(state);
+      return { ...flushed, attemptTurns: flushed.turns };
+    }
+    case 'llm_round_end': {
+      // Round end seals the sub-turn: the streaming Say lands now (TUI
+      // parity — a Say reaches the transcript when its round ends).
+      const flushed = flushPendingSay(state);
+      return { ...flushed, attemptTurns: null };
+    }
+    case 'llm_attempt_reset': {
+      // Restore the round-start snapshot AND drop the discarded attempt's
+      // partial Say: it streamed only in the live region, so it vanishes
+      // with the attempt instead of ever landing in the transcript.
+      const restored = state.attemptTurns
+        ? { ...state, turns: state.attemptTurns, error: null }
+        : state;
+      return restored.pendingSay ? { ...restored, pendingSay: '' } : restored;
+    }
     case 'text_delta': {
       const text = deltaTextOf(data);
       if (!text) {
         return state;
       }
-      // Order invariant (reduce.order.test.js): the ladder settles BEFORE
-      // the Say lands; markSayStreaming then hands the "running" hint to the
-      // Say row (same target turn — it stays "running" until a fresh ladder
-      // opens below the Say or a terminal boundary arrives); appendDelta
-      // appends/extends the Say LAST.
-      return appendDelta(
-        withTurns(state, markSayStreaming(settleTurnProgress(state.turns))),
-        'text',
-        text,
-      );
+      // STREAMING Say (TUI live-region parity): a Say is NOT transcript
+      // content while it streams — the chunk accumulates in `pendingSay`
+      // (rendered ONLY in the turn live region) and the turn array is left
+      // untouched. Order invariant (reduce.order.test.js): the ladder
+      // settles and the Say lands TOGETHER at FLUSH time (the next round
+      // end / tool or thinking activity / terminal settle / new input — see
+      // flushPendingSay), not per-chunk: settleTurnProgress runs once, then
+      // appendDelta appends/extends the FULL Say.
+      return { ...state, pendingSay: (state.pendingSay || '') + text };
     }
     case 'reasoning_delta': {
       // Streams straight into the steps ladder (think-only step) — a
-      // top-level think turn no longer exists on the live path.
+      // top-level think turn no longer exists on the live path. The pending
+      // Say lands FIRST: the next ladder's thinking is the boundary that
+      // seals the previous sub-turn.
       const text = deltaTextOf(data);
-      return text ? withTurns(state, appendThinkDelta(state.turns, text)) : state;
+      if (!text) {
+        return state;
+      }
+      const flushed = flushPendingSay(state);
+      return withTurns(flushed, appendThinkDelta(flushed.turns, text));
     }
     case 'tool_start':
     case 'tool_update': {
-      const turns = closeOpenText(state.turns.slice());
+      // Tool activity seals the sub-turn: its streaming Say lands before the
+      // call joins (or opens) the ladder.
+      const flushed = flushPendingSay(state);
+      const turns = closeOpenText(flushed.turns.slice());
       const call = {
         kind: 'tool',
         role: 'assistant',
@@ -418,9 +469,9 @@ function foldFrame(state, frame, nowMs) {
         // block renders the child; task calls never join a step. The round's
         // pending think run folds into the ladder first (no ToolStart can
         // absorb it behind the flat row).
-        const flushed = flushPendingThink(turns);
-        flushed.push(call);
-        return withTurns(state, flushed);
+        const thinkFlushed = flushPendingThink(turns);
+        thinkFlushed.push(call);
+        return withTurns(flushed, thinkFlushed);
       }
       // Step-ladder fold: any legacy think turn above the last user echo
       // becomes the round's step thinking, then the call joins the ladder
@@ -430,7 +481,7 @@ function foldFrame(state, frame, nowMs) {
       // next Step.
       const thinking = absorbSegmentThinking(turns);
       appendStepCall(turns, thinking, call, true);
-      return withTurns(state, turns);
+      return withTurns(flushed, turns);
     }
     case 'tool_end': {
       const out = fmtValue(data.output !== undefined ? data.output : data.content);
@@ -481,9 +532,12 @@ function foldFrame(state, frame, nowMs) {
       if (!text) {
         return state;
       }
+      // New user input seals the sub-turn: the streaming Say lands FIRST,
+      // then the hard segment boundary applies.
+      const base = flushPendingSay(state);
       // Hard segment boundary: fold the pre-boundary think run into the
       // ladder before the echo lands (a later tool_start can never cross it).
-      const settled = closeOpenText(flushPendingThink(settleTerminal(state.turns)));
+      const settled = closeOpenText(flushPendingThink(settleTerminal(base.turns)));
       // Optimistic-echo dedup (TUI pending_turn_echo contract): a locally
       // predicted echo (chat.jsx's optimistic flag) and the server's echo
       // frame are the SAME user boundary — when the last turn is that
@@ -495,14 +549,14 @@ function foldFrame(state, frame, nowMs) {
         && last.text === text && last.optimistic === true) {
         const authoritative = { ...last };
         delete authoritative.optimistic;
-        return withTurns({ ...state, pendingEcho: text },
+        return withTurns({ ...base, pendingEcho: text },
           settled.slice(0, -1).concat([authoritative]));
       }
       const turns = settled.slice();
       turns.push({ kind: 'text', role: 'user', text });
       // Remember the echo (TUI pending_turn_echo): a mid-run transcript_reset
       // rebuilds from a store snapshot that has not recorded it yet.
-      return withTurns({ ...state, pendingEcho: text }, turns);
+      return withTurns({ ...base, pendingEcho: text }, turns);
     }
     case 'status': {
       const text = typeof data.status === 'string' ? data.status : '';
@@ -515,7 +569,10 @@ function foldFrame(state, frame, nowMs) {
     }
     case 'compaction': {
       const summary = typeof data.summary === 'string' ? data.summary : 'compacted';
-      return withTurns(state, closeOpenText(flushPendingThink(state.turns)).concat([{ kind: 'sys', text: '🗜 ' + summary }]));
+      // The compaction marker closes the open text: any streaming Say lands
+      // first so the sealed sub-turn precedes the 🗜 sys row.
+      const base = flushPendingSay(state);
+      return withTurns(base, closeOpenText(flushPendingThink(base.turns)).concat([{ kind: 'sys', text: '🗜 ' + summary }]));
     }
     case 'agent_switched':
       return withTurns(state, flushPendingThink(state.turns).concat([{ kind: 'sys', text: 'agent → ' + String(data.agent || '') }]));
@@ -537,7 +594,10 @@ function foldFrame(state, frame, nowMs) {
         usage: null,
         startedAt: nowMs,
       };
-      return withTurns(state, closeOpenText(flushPendingThink(state.turns)).concat([turn]));
+      // A new subagent block is a boundary too: the streaming Say lands
+      // before the 🤖 row, and closeOpenText below seals it.
+      const base = flushPendingSay(state);
+      return withTurns(base, closeOpenText(flushPendingThink(base.turns)).concat([turn]));
     }
     case 'subagent_child': {
       const idx = subagentIndex(state.turns, data.id);
@@ -550,8 +610,11 @@ function foldFrame(state, frame, nowMs) {
       }
       const turns = state.turns.slice();
       const t = turns[idx];
+      // The child folds through the same reduceFrame: its own pendingSay
+      // rides on the subagent turn so the child's STREAMING Say survives
+      // across frames (it lands on the child's own boundary frames).
       const child = reduceFrame(
-        { turns: t.events, usage: t.usage, status: t.status, error: null, attemptTurns: t.attemptTurns },
+        { turns: t.events, usage: t.usage, status: t.status, error: null, attemptTurns: t.attemptTurns, pendingSay: t.pendingSay || '' },
         nested,
         nowMs,
       );
@@ -559,6 +622,7 @@ function foldFrame(state, frame, nowMs) {
         ...t,
         events: child.turns,
         attemptTurns: child.attemptTurns,
+        pendingSay: child.pendingSay || '',
         usage: child.usage || t.usage,
         status: child.status === 'done' || child.status === 'error' ? child.status : t.status,
       };
@@ -570,8 +634,16 @@ function foldFrame(state, frame, nowMs) {
         return state;
       }
       const turns = state.turns.slice();
+      // The child's run ends here: land its still-streaming Say into the
+      // child transcript (the compact replay never renders a pending Say).
+      const sealed = flushPendingSay({
+        turns: turns[idx].events,
+        pendingSay: turns[idx].pendingSay,
+      });
       turns[idx] = {
         ...turns[idx],
+        events: sealed.turns,
+        pendingSay: sealed.pendingSay || '',
         status: data.cancelled ? 'cancelled' : (data.ok ? 'done' : 'error'),
         ok: !!data.ok && !data.cancelled,
         summary: typeof data.summary === 'string' ? data.summary : null,
@@ -587,33 +659,43 @@ function foldFrame(state, frame, nowMs) {
       const it = Number.isFinite(data.iteration) ? data.iteration : null;
       return withTurns(state, state.turns.concat([{ kind: 'sys', text: '🛸 autopilot ' + phase + (it !== null ? ' #' + it : '') }]));
     }
-    case 'interrupted':
+    case 'interrupted': {
+      // Terminal settle: the streaming Say lands first (flushPendingSay),
+      // then the boundary freezes the ladder and retires every running hint.
+      const flushed = flushPendingSay(state);
       return withTurns(
-        state,
-        settleTerminal(state.turns).concat([{ kind: 'sys', text: '⏹ interrupted' }]),
+        flushed,
+        settleTerminal(flushed.turns).concat([{ kind: 'sys', text: '⏹ interrupted' }]),
       );
-    case 'transcript_reset':
+    }
+    case 'transcript_reset': {
       // Wire payload is `{}` (runner/event.rs) — the collapsed transcript
       // cannot be rebuilt from the frame. chat.jsx reacts to this event by
-      // re-fetching the store snapshot (same path as `done`); here we only
-      // close the open text turn so a lost reload still renders sanely.
+      // re-fetching the store snapshot (same path as `done`); here the
+      // streaming Say lands (terminal settle = flush) and we close the open
+      // text turn so a lost reload still renders sanely.
       // pendingEcho is INTENTIONALLY preserved: the reset fires inside the
       // admitted turn (compound `/act_clear_context <tail>`), and the store
       // snapshot has not recorded the echo yet — the reload re-pushes it
       // (ensurePendingEcho, TUI rebuild_after_reset parity).
-      return { ...state, turns: closeOpenText(settleTerminal(state.turns)) };
-    case 'done':
+      const flushed = flushPendingSay(state);
+      return { ...flushed, turns: closeOpenText(settleTerminal(flushed.turns)) };
+    }
+    case 'done': {
       // A pure-text round (or the turn's final Say round) folds its think
       // turns into a call-less step — no think turn survives above the ladder.
+      // The Say lands here too (terminal settle = flush), closed.
       // Turn complete: its echo must never resurface on a later rebuild
       // (TUI parity — a bare /act_clear_context mid-run must not resurrect
       // the previous turn's prompt).
+      const flushed = flushPendingSay(state);
       return {
-        ...state,
+        ...flushed,
         status: 'done',
         pendingEcho: null,
-        turns: closeOpenText(flushPendingThink(settleTerminal(state.turns))),
+        turns: closeOpenText(flushPendingThink(settleTerminal(flushed.turns))),
       };
+    }
     case 'error': {
       // A lag-marked error (api.rs map_broadcast_result) is a consumer
       // re-sync signal, not a run failure: sse.js restarts from the persisted
@@ -623,12 +705,14 @@ function foldFrame(state, frame, nowMs) {
       if (data && Number.isFinite(data.lag)) {
         return state;
       }
+      // Terminal settle: the streaming Say lands first (flushPendingSay).
+      const flushed = flushPendingSay(state);
       return {
-        ...state,
+        ...flushed,
         status: 'error',
         error: String(data.error || data.message || 'error'),
         pendingEcho: null,
-        turns: closeOpenText(flushPendingThink(settleTerminal(state.turns))),
+        turns: closeOpenText(flushPendingThink(settleTerminal(flushed.turns))),
       };
     }
     default:

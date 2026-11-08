@@ -1,5 +1,8 @@
 # 实时区 function call 展开展示：名称 + 完整输入，结果收起（TUI + SPA）
 
+> **内容已扩展**：实时区此后还渲染**流式 Say**（`💬 Say` 标记 +
+> 全文；Say seal 前不进转录），见 `live-region-hugs-content-say-deferred.md`。
+
 一句话：实时区（thinking 下方）的 function call 行从「折叠单行」改为
 **展开**形态 —— 每个调用渲染为 `❯ name` 名称行（运行中带 spinner /
 running tag）+ 其**完整输入**（缩进 8，muted；字符串原样、其余 JSON

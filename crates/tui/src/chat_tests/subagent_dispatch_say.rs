@@ -89,8 +89,9 @@ fn subagent_dispatch_header_renders_markdown_and_body_does_not_repeat() {
     );
 }
 
-/// 流式窗口（`ToolStart(task)` 已到、`SubagentStart` 未到）：正文按
-/// raw 行流式渲染，首行与 raw preview 相等被跳过——同样没有复述。
+/// 流式窗口（`ToolStart(task)` 已到、`SubagentStart` 未到）：开口
+/// Say 不进转录，只在 TURN LIVE REGION 按 raw 行流式渲染——转录无
+/// 复述，无半渲染正文。
 #[test]
 fn subagent_dispatch_live_window_streams_raw_without_duplication() {
     let mut v = ChatView::default();
@@ -101,12 +102,27 @@ fn subagent_dispatch_live_window_streams_raw_without_duplication() {
     let flat = lines(&v);
     assert_eq!(
         flat,
+        vec!["\u{25b8} 1 Step", ""],
+        "open Say renders NOTHING in the transcript (ladder row only): {flat:?}"
+    );
+    let lv = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
+        .map(|lt| crate::chat::live_turn::render_lines(lt.steps, lt.say, 0))
+        .unwrap_or_default();
+    let lv_text: Vec<String> = lv
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
+    assert_eq!(
+        lv_text,
         vec![
-            "\u{25b8} Say(1 step): **去查**  \u{280b} running ",
-            "",
-            "    - item2",
+            "\u{2b25} live",
+            "    \u{1f4ad} Thinking",
+            "        think",
+            "    \u{1f4ac} Say",
+            "        **去查**",
+            "        - item2",
         ],
-        "live window keeps raw streaming rows, first line skipped: {flat:?}"
+        "the live region streams the raw Say (all lines, marker shown): {lv_text:?}"
     );
 }
 

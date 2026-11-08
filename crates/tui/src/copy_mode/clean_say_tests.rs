@@ -119,23 +119,43 @@ fn multi_line_say_shows_first_line_and_rest() {
 }
 
 #[test]
-fn streaming_say_preview_survives() {
-    // No final Done: the pair header still streams — label span + preview
-    // span + the `⠋ running ` spinner span. Only the label/spinner are
-    // chrome; the preview stays selectable mid-stream.
+fn streaming_say_streams_in_the_live_region_not_copy_text() {
+    // No final Done: the Say is still OPEN, so it is not transcript content
+    // at all — `flatten` skips it and it streams only in the TURN LIVE
+    // REGION. Copy mode copies the transcript, so neither the payload nor
+    // any spinner chrome may appear while it streams; the payload lands in
+    // copy text only once sealed (see `multi_line_say_shows_first_line_and_rest`).
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("thinking".into()));
     call_tool(&mut v, "t1");
     v.apply(&SessionEvent::TextDelta("the answer".into()));
 
+    let live = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
+        .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
+        .unwrap_or_default();
+    let live_text = live
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.clone())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        live_text.contains("\u{1f4ac} Say") && live_text.contains("the answer"),
+        "the open Say streams in the live region: {live_text:?}"
+    );
+
     let text = copy_text(&v);
     assert!(
-        text.contains("the answer"),
-        "the streaming preview must survive the spinner strip: {text}"
+        !text.contains("the answer"),
+        "an open Say never reaches the transcript copy text: {text}"
     );
     assert!(
         !text.contains("running "),
-        "the live spinner hint is chrome even while streaming: {text}"
+        "no live spinner hint leaks into copy text: {text}"
     );
 }
 
@@ -155,8 +175,8 @@ fn running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_t
     });
     // Precondition: the live region really carries the spinner span on the
     // running call's header row (tick 0 → first spinner frame).
-    let live_rows = crate::chat::live_turn::active_steps(&v.blocks, v.turn_block_start)
-        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+    let live_rows = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
+        .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
         .unwrap_or_default();
     let live_text = live_rows
         .iter()

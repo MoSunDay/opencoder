@@ -42,7 +42,6 @@ fn draw(
                 copy_mode,
                 None,
                 &[],
-                0,
             );
         })
         .unwrap();

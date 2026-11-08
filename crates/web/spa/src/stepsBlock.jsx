@@ -22,12 +22,16 @@
 //         the label row (same visuals as L3, per-call `running` tags stream
 //         in place) with the call's input EXPANDED directly below and its
 //         result COLLAPSED behind a default-closed `result` collapse (the
-//         ladder owns the output drill-down). When running retires (Say
-//         begins / the turn settles) the region clears and the step lives
+//         ladder owns the output drill-down). While a Say STREAMS it renders
+//         there too (the reducer's pendingSay, passed as the `say` prop):
+//         a Say is NOT transcript content while streaming (TUI live-region
+//         parity) — full text under a `💬 Say` marker until the flush lands
+//         it in the message list. When running retires (the turn settles)
+//         the region clears and the step lives
 //         only inside the turn's folded ladder; if the next turn is already
-//         running the region simply shows it. Gated ONLY on running state —
-//         zero coupling with any ladder's disclosure (opening L0 never
-//         changes it; TUI parity with chat_live_turn.rs).
+//         running the region simply shows it. Gated ONLY on running state or
+//         a streaming Say — zero coupling with any ladder's disclosure
+//         (opening L0 never changes it; TUI parity with chat_live_turn.rs).
 //   L1    ❯ Step(1) [error]        ← per-step Collapse (uncontrolled);
 //         red tag when any of THIS step's calls failed
 //   L2      💭 Thinking (text)      ← thinking renders DIRECTLY (mono grey
@@ -281,17 +285,25 @@ function StepCollapse({ step, index }) {
 /// The TURN LIVE REGION component — chat.jsx pins it BETWEEN the transcript
 /// scroll area and the input, so it is visibly a DIFFERENT thing from the
 /// Say/Step message area (never inside a bubble, never inside the ladder).
-/// It shows the NEWEST still-running steps turn's current (last) step
-/// (thinking + its call rows laid out flat, so the running call and its
-/// `running` tag stream in place) and clears on settle. Gated ONLY on
-/// running state — it never reacts to any ladder's opening or folding.
-export function TurnLiveRegion({ turns }) {
+/// Two payloads, in order:
+///   * the NEWEST still-running steps turn's current (last) step (thinking +
+///     its call rows laid out flat, so the running call and its `running`
+///     tag stream in place);
+///   * the STREAMING Say (the reducer's `pendingSay` prop): a Say is NOT
+///     transcript content while it streams (TUI live-region parity) — it
+///     renders here ONLY, untruncated, under a `💬 Say` marker, and lands in
+///     the message list at FLUSH time (round end / next tool or thinking
+///     activity / terminal settle / new input), when the region drops it.
+/// The region clears on settle. Gated ONLY on running state or a non-empty
+/// Say — it never reacts to any ladder's opening or folding.
+export function TurnLiveRegion({ turns, say = '' }) {
   const running = findRunningStepsTurn(turns);
-  if (!running || !Array.isArray(running.steps) || running.steps.length === 0) {
+  const liveSay = typeof say === 'string' ? say : '';
+  const steps = running && Array.isArray(running.steps) ? running.steps : [];
+  const step = steps.length > 0 ? steps[steps.length - 1] : null;
+  if (!step && !liveSay) {
     return null;
   }
-  const steps = running.steps;
-  const step = steps[steps.length - 1];
   const list = (step && Array.isArray(step.calls)) ? step.calls : [];
   const failed = list.some((c) => c && c.isError);
   return (
@@ -309,7 +321,20 @@ export function TurnLiveRegion({ turns }) {
         <span style={{ opacity: 0.65 }}>{'\u{2B25} live'}</span>
         {failed ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
       </div>
-      <StepBody step={step} flatCalls />
+      {step ? <StepBody step={step} flatCalls /> : null}
+      {liveSay ? (
+        <div>
+          <div style={{ fontFamily: MONO_VAR, fontSize: 12, color: 'var(--oc-text-tertiary)', marginBottom: 4 }}>💬 Say</div>
+          <Paragraph
+            style={{
+              fontFamily: MONO_VAR, fontSize: 12,
+              whiteSpace: 'pre-wrap', color: 'var(--oc-text-tertiary)', marginBottom: 0,
+            }}
+          >
+            {liveSay}
+          </Paragraph>
+        </div>
+      ) : null}
     </div>
   );
 }

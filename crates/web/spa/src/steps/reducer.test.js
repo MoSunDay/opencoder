@@ -77,14 +77,22 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     expect(s.turns.every((t) => t.kind !== 'think')).toBe(true);
   });
 
-  it('(c2d) a new Say freezes the ladder ABOVE it and the next round re-arms', () => {
+  it('(c2d) the Say lands at the flush and freezes the ladder ABOVE it; the next round re-arms', () => {
     let s = reduceFrame(emptyStream(), { event: 'steer_consumed', data: { text: 'go' } }, 0);
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'r1' } }, 1);
     expect(s.turns[1].progressActive).toBe(true);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'say one' } }, 2);
-    // The Say-opening delta settles the ladder it closes — permanently.
-    expect(s.turns[1].progressActive).toBe(false);
+    // Streaming chunks land only in pendingSay — the ladder keeps running
+    // while the Say renders in the turn live region.
+    expect(s.pendingSay).toBe('say one');
+    expect(s.turns.map((x) => x.kind)).toEqual(['text', 'steps']);
+    expect(s.turns[1].progressActive).toBe(true);
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'r2' } }, 3);
+    // The next thinking activity flushes: the Say lands BEFORE the new
+    // ladder and settles the ladder it closes — permanently.
+    expect(s.turns.map((x) => x.kind)).toEqual(['text', 'steps', 'text', 'steps']);
+    expect(s.turns[2]).toMatchObject({ kind: 'text', role: 'assistant', text: 'say one' });
+    expect(s.turns[1].progressActive).toBe(false);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'bash', input: {} } }, 4);
     expect(s.turns.map((x) => x.kind)).toEqual(['text', 'steps', 'text', 'steps']);
     expect(s.turns[1].progressActive).toBe(false);
@@ -176,24 +184,33 @@ describe('steps ladder (live, mirror of chat_steps.rs)', () => {
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'a', name: 'bash', input: {} } }, 1);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'a', name: 'bash', output: 'A', is_error: false } }, 2);
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'mid say' } }, 3);
-    // The first Say froze the ladder it closed…
-    expect(s.turns[0].progressActive).toBe(false);
+    // The Say streams in the live region only — the ladder keeps running.
+    expect(s.pendingSay).toBe('mid say');
+    expect(s.turns[0].progressActive).toBe(true);
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 4);
-    // …and round 2's call opened a FRESH ladder below the Say, progress
-    // re-armed: settle froze only the closing ladder, never the new one.
+    // …the flush at tool_start landed Say 1 BEFORE round 2's call: it froze
+    // the ladder it closed…
     expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
     expect(s.turns[0].steps[0].calls.map((call) => call.id)).toEqual(['a']);
     expect(s.turns[0].progressActive).toBe(false);
+    expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'mid say' });
+    // …and round 2's call opened a FRESH ladder below the Say, progress
+    // re-armed: the flush froze only the closing ladder, never the new one.
     expect(s.turns[2].progressActive).toBe(true);
     s = reduceFrame(s, { event: 'tool_end', data: { id: 'b', name: 'read', output: 'B', is_error: false } }, 5);
     expect(s.turns[2].progressActive).toBe(true); // alive through the inter-round gap
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'final say' } }, 6);
-    // …and frozen again exactly when ITS Say starts streaming.
+    // Still streaming: nothing landed yet, the round-2 ladder keeps running.
+    expect(s.pendingSay).toBe('final say');
+    expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps']);
+    expect(s.turns[2].progressActive).toBe(true);
+    s = reduceFrame(s, { event: 'done', data: {} }, 7);
+    // …and frozen again exactly when ITS Say lands (terminal settle = flush).
     expect(s.turns.map((x) => x.kind)).toEqual(['steps', 'text', 'steps', 'text']);
     expect(s.turns[2].steps[0].calls.map((call) => call.id)).toEqual(['b']);
     expect(s.turns[2].progressActive).toBe(false);
     expect(s.turns[0].progressActive).toBe(false);
-    expect(s.turns[3]).toMatchObject({ kind: 'text', role: 'assistant', text: 'final say' });
+    expect(s.turns[3]).toMatchObject({ kind: 'text', role: 'assistant', text: 'final say', open: false });
   });
 
   it('(e) orphan tool_end synthesizes a finished call folded into the ladder', () => {
@@ -404,7 +421,7 @@ it('live SSE and snapshot replay produce the same Turn/Step/call hierarchy', () 
   expect(live.turns.every((t) => t.progressActive !== true)).toBe(true);
 });
 
-describe('sayStreaming lifecycle (Say-row running ownership)', () => {
+describe('Say landing lifecycle (TUI live-region parity: no sayStreaming on the landed Say)', () => {
   const streamRound = () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'think' } }, 1);
@@ -413,46 +430,63 @@ describe('sayStreaming lifecycle (Say-row running ownership)', () => {
     return s;
   };
 
-  it('(s1) the first Say chunk marks the ladder it closes; later chunks keep the flag', () => {
+  it('(s1) streaming chunks only buffer; the flush lands the FULL say with NO running hint', () => {
     const s = streamRound();
     expect(s.turns[0].sayStreaming).toBeFalsy();
     let t = reduceFrame(s, { event: 'text_delta', data: { text: 'hello' } }, 4);
-    expect(t.turns[0].sayStreaming).toBe(true);
-    expect(t.turns[1].sayStreaming).toBeFalsy(); // the Say turn itself is not a steps turn
+    // A STREAMING Say is NOT transcript content: pendingSay accumulates and
+    // the turns array is untouched while the live region renders it.
+    expect(t.pendingSay).toBe('hello');
+    expect(t.turns).toBe(s.turns);
+    expect(t.turns).toHaveLength(1);
     t = reduceFrame(t, { event: 'text_delta', data: { text: ' world' } }, 5);
-    expect(t.turns[0].sayStreaming).toBe(true);
-    // Idempotent marking: no second write.
+    expect(t.pendingSay).toBe('hello world');
+    t = reduceFrame(t, { event: 'llm_round_end', data: {} }, 6);
+    expect(t.pendingSay).toBe('');
+    expect(t.turns).toHaveLength(2); // [steps, say]
+    expect(t.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'hello world' });
+    // TUI parity: the landed Say is complete, not streaming — the ladder
+    // froze but never took the sayStreaming running hint.
     expect(t.turns[0].progressActive).toBe(false);
+    expect(t.turns[0].sayStreaming).toBeUndefined();
   });
 
-  it('(s2) fresh-ladder reasoning below the Say clears the flag (appendThinkDelta new-turn branch)', () => {
+  it('(s2) fresh-ladder reasoning flushes the Say FIRST (say lands before the new ladder), no flag anywhere', () => {
     let s = streamRound();
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'first say' } }, 4);
-    expect(s.turns[0].sayStreaming).toBe(true);
+    expect(s.pendingSay).toBe('first say');
     s = reduceFrame(s, { event: 'reasoning_delta', data: { text: 'next ladder' } }, 5);
     expect(s.turns).toHaveLength(3); // [steps, say, steps]
-    expect(s.turns[0].sayStreaming).toBe(false);
+    expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'first say' });
+    expect(s.turns[2].steps[0]).toMatchObject({ thinking: 'next ladder' });
+    expect(s.turns[0].sayStreaming).toBeUndefined();
     expect(s.turns[2].sayStreaming).toBeFalsy();
   });
 
-  it('(s2b) a fresh ladder from a tool_start below the Say clears the flag too (appendStepCall)', () => {
+  it('(s2b) a fresh ladder from a tool_start flushes the Say first too (appendStepCall path)', () => {
     let s = streamRound();
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'first say' } }, 4);
-    expect(s.turns[0].sayStreaming).toBe(true);
+    expect(s.pendingSay).toBe('first say');
     s = reduceFrame(s, { event: 'tool_start', data: { id: 'b', name: 'read', input: {} } }, 5);
     expect(s.turns).toHaveLength(3);
-    expect(s.turns[0].sayStreaming).toBe(false);
+    expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'first say' });
+    expect(s.turns[0].sayStreaming).toBeUndefined();
     expect(s.turns[2].sayStreaming).toBeFalsy();
   });
 
-  it('(s3) done and error clear the flag — no running survives a terminal boundary', () => {
+  it('(s3) done and error flush the Say and settle — no running survives a terminal boundary', () => {
     let s = streamRound();
     s = reduceFrame(s, { event: 'text_delta', data: { text: 'first say' } }, 4);
-    expect(s.turns[0].sayStreaming).toBe(true);
+    expect(s.pendingSay).toBe('first say');
     let t = reduceFrame(s, { event: 'done', data: {} }, 5);
-    expect(t.turns[0].sayStreaming).toBe(false);
+    expect(t.pendingSay).toBe('');
+    expect(t.turns).toHaveLength(2);
+    expect(t.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'first say', open: false });
+    expect(t.turns[0].progressActive).toBe(false);
+    expect(t.turns[0].sayStreaming).toBeUndefined();
     t = reduceFrame(s, { event: 'error', data: { error: 'boom' } }, 5);
-    expect(t.turns[0].sayStreaming).toBe(false);
+    expect(t.turns[1]).toMatchObject({ kind: 'text', role: 'assistant', text: 'first say', open: false });
+    expect(t.turns[0].sayStreaming).toBeUndefined();
   });
 
   it('(s4) same-sub-turn appends without a Say never touch the flag', () => {

@@ -39,9 +39,11 @@ fn llm_round_lifecycle_is_display_only_and_resets_at_boundary() {
     });
     v.apply(&SessionEvent::TextDelta("working".into()));
     assert_eq!(v.llm_round_started_at_ms, Some(1000));
+    // The open Say streams in the TURN LIVE REGION, not the transcript.
+    let live = step_group::live_lines(&v).join("\n");
+    assert!(live.contains("working"), "live region: {live:?}");
+    assert!(!live.contains("call cost"), "live region: {live:?}");
     let before = block_text(&v);
-    assert!(before.contains("working"));
-    assert!(!before.contains("call cost"));
 
     v.apply(&SessionEvent::LlmRoundEnd);
     assert_eq!(v.llm_round_started_at_ms, None);
@@ -49,7 +51,13 @@ fn llm_round_lifecycle_is_display_only_and_resets_at_boundary() {
         v.frozen_round_ms.is_some(),
         "LlmRoundEnd must freeze the round cost"
     );
-    assert_eq!(block_text(&v), before, "timer data is not message text");
+    // The round boundary seals the open Say (it lands in the transcript);
+    // the timer data itself must never leak into message text.
+    let after = block_text(&v);
+    assert!(
+        after.contains("working") && !after.contains("cost") && !after.contains("ms"),
+        "timer data is not message text: {after:?} (before: {before:?})"
+    );
 }
 
 #[test]
@@ -67,8 +75,18 @@ fn text_delta_appends_to_assistant_block() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("hello ".into()));
     v.apply(&SessionEvent::TextDelta("world".into()));
-    assert!(block_text(&v).contains("hello"));
-    assert!(block_text(&v).contains("world"));
+    // The Say is OPEN: its text accumulates in the block's raw and streams
+    // in the TURN LIVE REGION (the transcript gains it only when sealed).
+    let live = step_group::live_lines(&v).join("\n");
+    assert!(
+        live.contains("hello") && live.contains("world"),
+        "deltas append and stream in the live region: {live:?}"
+    );
+    v.apply(&SessionEvent::Done);
+    assert!(
+        block_text(&v).contains("hello") && block_text(&v).contains("world"),
+        "the sealed Say lands in the transcript"
+    );
 }
 
 #[test]
@@ -179,6 +197,16 @@ fn text_after_tool_starts_fresh_block() {
         images: Vec::new(),
     });
     v.apply(&SessionEvent::TextDelta("done".into()));
+    // ToolStart SEALED the first Say ("result:" is transcript content);
+    // the second Say ("done") is OPEN and streams in the TURN LIVE REGION
+    // until the run settles.
+    assert!(block_text(&v).contains("result:"));
+    let live = step_group::live_lines(&v).join("\n");
+    assert!(
+        live.contains("done"),
+        "the open Say streams in the live region: {live:?}"
+    );
+    v.apply(&SessionEvent::Done);
     assert!(block_text(&v).contains("done"));
 }
 
@@ -188,7 +216,13 @@ fn push_marker_separates_from_assistant() {
     v.apply(&SessionEvent::TextDelta("streaming".into()));
     v.push_marker(Line::from("[queued] foo"));
     v.apply(&SessionEvent::TextDelta("more".into()));
+    // The marker SEALed the first Say (push_marker finalizes), so it is
+    // transcript content; the second Say is OPEN and streams in the live
+    // region only.
     assert!(block_text(&v).contains("[queued] foo"));
+    assert!(block_text(&v).contains("streaming"));
+    assert!(step_group::live_lines(&v).join("\n").contains("more"));
+    v.apply(&SessionEvent::Done);
     assert!(block_text(&v).contains("more"));
 }
 
@@ -196,12 +230,18 @@ fn push_marker_separates_from_assistant() {
 fn multiline_delta_splits_lines() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("line1\nline2".into()));
+    // While the Say streams, its RAW lines render in the TURN LIVE REGION
+    // (one row per line, indented under the `💬 Say` marker).
+    let live = step_group::live_lines(&v);
+    assert!(live.iter().any(|t| t.contains("line1")), "got {live:?}");
+    assert!(live.iter().any(|t| t.contains("line2")), "got {live:?}");
+    v.apply(&SessionEvent::Done);
+    // Sealed: the rendered body splits into indented lines under `say:`.
     let flat = v.flatten();
     let texts: Vec<String> = flat
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
-    // Assistant text is indented under the `say:` header
     assert!(texts.iter().any(|t| t.contains("line1")), "got {:?}", texts);
     assert!(texts.iter().any(|t| t.contains("line2")), "got {:?}", texts);
 }
@@ -210,15 +250,12 @@ fn multiline_delta_splits_lines() {
 fn streaming_trailing_newline_does_not_add_blank_line() {
     let mut v = ChatView::default();
     // A stream chunk ending in a newline must not render an extra trailing
-    // blank body line — consistency with `flush_code` in markdown.rs.
+    // blank body line — consistency with `flush_code` in markdown.rs. The
+    // streaming surface is the TURN LIVE REGION (`💬 Say` raw rows).
     v.apply(&SessionEvent::TextDelta("only\n".into()));
-    let joined: Vec<String> = v
-        .flatten()
-        .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
-        .collect();
-    // The final flattened line is the last assistant body line; it must carry
-    // real content, not be a bare indent.
+    let joined = step_group::live_lines(&v);
+    // The final live row is the last Say body row; it must carry real
+    // content, not be empty.
     let last = joined.last().expect("at least one line");
     assert!(
         last.trim_end().contains("only"),
@@ -231,14 +268,11 @@ fn streaming_trailing_newline_does_not_add_blank_line() {
 fn streaming_interior_blank_line_is_preserved() {
     let mut v = ChatView::default();
     // An interior blank line is genuine content and must be kept — only the
-    // single *trailing* empty split element is dropped.
+    // single *trailing* empty split element is dropped (live-region Say
+    // rows split the raw stream the same way).
     v.apply(&SessionEvent::TextDelta("a\n\nb".into()));
-    let joined: Vec<String> = v
-        .flatten()
-        .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
-        .collect();
-    // Exactly two content lines (a, b) plus one interior indent-only blank line.
+    let joined = step_group::live_lines(&v);
+    // Exactly two content lines (a, b) plus one interior blank line.
     let content: Vec<&String> = joined
         .iter()
         .filter(|t| t.trim_end().ends_with('a') || t.trim_end().ends_with('b'))

@@ -89,10 +89,13 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
     let mut expected = 0usize;
     for (bi, block) in view.blocks.iter().enumerate() {
         // ADJACENT-pair merge (see flatten_with): a StepGroup whose NEXT
-        // block is the turn's Say renders one merged header row and the Say
-        // renders body only — both sides of the pair lose one line.
-        let say_merged_after_group =
-            matches!(view.blocks.get(bi + 1), Some(ChatBlock::Assistant { .. }));
+        // block is the turn's SEALED Say renders one merged header row and
+        // the Say renders body only — both sides of the pair lose one line.
+        // An OPEN follower is not transcript content at all.
+        let say_merged_after_group = matches!(
+            view.blocks.get(bi + 1),
+            Some(ChatBlock::Assistant { done: true, .. })
+        );
         let say_merged_into_group = bi
             .checked_sub(1)
             .and_then(|i| view.blocks.get(i))
@@ -105,21 +108,21 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                 rendered,
                 done,
             } => {
+                // STREAMING Say mirror: an open Say renders NOTHING (it
+                // streams in the TURN LIVE REGION) — zero lines.
+                if !*done {
+                    continue;
+                }
                 if !say_merged_into_group {
                     expected += 1;
                 }
-                let total = if *done {
-                    rendered.len()
-                } else {
-                    assistant_rows(raw).len()
-                };
                 // 合并对正文行数：跳过与 preview 重复的首个非空行（单行
                 // Say / 空正文整块隐藏）—— 与 flatten_with 同口径。
                 expected += if say_merged_into_group {
                     super::super::step_render::merged_say_body_decision(raw, rendered, *done)
-                        .visible_len(total)
+                        .visible_len(rendered.len())
                 } else {
-                    total
+                    rendered.len()
                 };
             }
             ChatBlock::Thinking {
@@ -249,20 +252,23 @@ fn image_nonempty_alignment() {
 
 #[test]
 fn assistant_streaming_trailing_newline_a3() {
-    // Bug A3: `raw` ends with `\n`; collect_headers must NOT count the
-    // trailing empty split element as an extra body line.
+    // Bug A3 regression root: `raw` ends with `\n` and must not invent an
+    // extra empty split element. Since an OPEN Say renders nothing, the
+    // fixture still exercises the skip arm; the trailing-newline split is
+    // now pinned on the live-region surface (`chat_tests/mod.rs` streaming
+    // tests).
     let v = view_with(vec![assistant_streaming("only\n"), marker_n(1)]);
     assert_line_accounting_matches(&v);
-    // 1 (say header) + 1 (body "only") + 1 (marker) = 3
-    assert_eq!(v.flatten().len(), 3);
+    // 0 (open Say skipped) + 1 (marker) = 1
+    assert_eq!(v.flatten().len(), 1);
 }
 
 #[test]
 fn assistant_streaming_no_trailing_newline() {
     let v = view_with(vec![assistant_streaming("a\nb"), marker_n(1)]);
     assert_line_accounting_matches(&v);
-    // 1 header + 2 body + 1 marker = 4
-    assert_eq!(v.flatten().len(), 4);
+    // 0 (open Say skipped) + 1 (marker) = 1
+    assert_eq!(v.flatten().len(), 1);
 }
 
 #[test]
@@ -287,8 +293,8 @@ fn mixed_sequence_alignment() {
     let v = view_with(vec![
         image_empty("x.png"),        // 3 lines
         image_n("y.png", 2),         // 4 lines
-        assistant_streaming("p\n"),  // 2 lines
-        assistant_streaming("q\nr"), // 3 lines
+        assistant_streaming("p\n"),  // 0 lines (open Say → live region only)
+        assistant_streaming("q\nr"), // 0 lines (open Say → live region only)
         assistant_done(2),           // 3 lines
         marker_n(1),                 // 1 line
         step_group_closed(),         // 2 lines (group row + blank)
@@ -311,8 +317,8 @@ fn mixed_sequence_alignment() {
         "header_line_idx {idx} points at {:?}, expected the group row",
         line_text
     );
-    // Expected group-row position = 3 + 4 + 2 + 3 + 3 + 1 (marker) = 16.
-    assert_eq!(idx, 16, "group row should land at line 16");
+    // Expected group-row position = 3 + 4 + 0 + 0 + 3 + 1 (marker) = 11.
+    assert_eq!(idx, 11, "group row should land at line 11");
 }
 
 #[test]

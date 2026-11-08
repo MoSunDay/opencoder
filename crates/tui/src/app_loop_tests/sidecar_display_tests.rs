@@ -60,9 +60,23 @@ fn focused_sidecar_swaps_body_mode_and_title() {
         title.contains("这段代码做什么?"),
         "question echoed in title"
     );
+    // The nested view's Say is still OPEN — it streams in that view's TURN
+    // LIVE REGION (`flatten` skips open Says), so the body check goes
+    // through the live-region sourcing of the displayed (nested) view.
+    let live = crate::chat::live_turn::live_data(
+        &ds.display_chat.blocks,
+        ds.display_chat.turn_block_start,
+    )
+    .map(|live| crate::chat::live_turn::render_lines(live.steps, live.say, 0))
+    .unwrap_or_default();
+    let live_text = live
+        .iter()
+        .map(|l| line_text(l))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        block_text(ds.display_chat).contains("旁路答案内容"),
-        "body must be the sidecar block's nested view"
+        live_text.contains("旁路答案内容"),
+        "body must be the sidecar block's nested view: {live_text:?}"
     );
     assert_eq!(
         ds.display_ctx,

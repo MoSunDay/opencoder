@@ -12,6 +12,7 @@
 ## 独立条目
 
 - [compaction-tail-zero-default.md](compaction-tail-zero-default.md)
+- [turso-write-lock-contention-hardening.md](turso-write-lock-contention-hardening.md)
 
 ## 评审/收尾报告
 

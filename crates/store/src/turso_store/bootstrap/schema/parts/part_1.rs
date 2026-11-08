@@ -333,3 +333,43 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
 pub(super) async fn bootstrap_catalog(conn: &Connection) -> Result<()> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || bootstrap_tx(conn, false)).await
 }
+
+/// Whether this build's bootstrap would be a pure no-op on this database.
+///
+/// Read-only probe that lets warm opens skip the write-locked bootstrap
+/// transaction entirely: with the recorded watermark equal to
+/// [`SCHEMA_VERSION`] the DDL batch is all `IF NOT EXISTS` no-ops and every
+/// migration step is skipped, so re-running it would only contend for the
+/// cross-process write lock. A missing `schema_version` table (fresh or
+/// legacy database) or any other read failure reports "not skippable" and
+/// the full bootstrap path decides (including rejecting newer schemas).
+///
+/// Runtime opens additionally require the runtime-only tables to exist: a
+/// shared catalog database records the same watermark without installing
+/// them, and a later runtime open must still install them.
+pub async fn bootstrap_is_noop(conn: &Connection, runtime_reporting: bool) -> Result<bool> {
+    let version = match current_version(conn).await {
+        Ok(Some(version)) => version,
+        _ => return Ok(false),
+    };
+    if version != SCHEMA_VERSION {
+        return Ok(false);
+    }
+    if !runtime_reporting {
+        return Ok(true);
+    }
+    let mut rows = conn
+        .query(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN \
+             ('inventory_source_changes', 'execution_report_queue', 'execution_report_acks')",
+            (),
+        )
+        .await?;
+    let present = rows
+        .next()
+        .await?
+        .context("runtime table count row")?
+        .get::<i64>(0)?;
+    drop(rows);
+    Ok(present == 3)
+}

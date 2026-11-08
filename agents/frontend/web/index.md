@@ -36,7 +36,9 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
   三级展开：纯用户控制、默认折叠（L0–L3 全部非受控）；运行中
   （`ladderRunning`，Say 之前）的最后一步由 **`TurnLiveRegion` 固定面板**
   流式渲染（头部仅 `⏺ live`，主体渲染 thinking + 展开的调用行
-  `LiveCallRow`：名称行 + input 免点击展开、result 默认收起的折叠，无
+  `LiveCallRow`：名称行 + input 免点击展开、result 默认收起的折叠，+
+  流式 Say `💬 Say` 块（`say` prop = `state.pendingSay`，text_delta 只
+  累积不动 turns，flush 边界才落地），无
   Step(k) 计数——计数归消息列表阶梯）——面板在滚动区外
   （transcript 滚动 div 与 QueuePanel 之间），绝不出现在气泡内；
   `findRunningStepsTurn` 从最新 turn 往回找 running steps turn（最新已

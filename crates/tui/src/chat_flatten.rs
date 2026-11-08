@@ -38,6 +38,15 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
+                    // STREAMING Say: an open Say (`done == false`) is NOT
+                    // transcript content — it streams in the TURN LIVE
+                    // REGION (`chat_live_turn.rs`: marker + raw text) and
+                    // only lands here once sealed (`done == true`, set by
+                    // the existing finalize points). Emit NOTHING while
+                    // open: no `say:` header, no body, no preview.
+                    if !done {
+                        continue;
+                    }
                     // Visual `say:` header — mirrors the `user:` marker on
                     // prompts. When this Say sits ADJACENT to a `StepGroup`
                     // (previous block), the group row already renders the
@@ -64,30 +73,12 @@ impl ChatView {
                     } else {
                         step_render::SayBody::Full
                     };
-                    let indent = Span::raw("    ");
-                    if *done {
-                        let visible: &[Line<'static>] = match decision {
-                            step_render::SayBody::Hidden => &[],
-                            step_render::SayBody::Skip(n) => &rendered[n..],
-                            step_render::SayBody::Full => rendered.as_slice(),
-                        };
-                        out.extend(types::indented(visible, 4));
-                    } else {
-                        // Mirrors `flush_code` (markdown.rs) and
-                        // `collect_headers`: split the raw stream on `\n` and
-                        // drop only the single trailing empty element from a
-                        // terminating newline (interior blanks preserved).
-                        let rows = assistant_rows(raw);
-                        let visible: &[&str] = match decision {
-                            step_render::SayBody::Hidden => &[],
-                            step_render::SayBody::Skip(n) => &rows[n..],
-                            step_render::SayBody::Full => rows.as_slice(),
-                        };
-                        for l in visible {
-                            let l = l.strip_suffix('\r').unwrap_or(l);
-                            out.push(Line::from(vec![indent.clone(), Span::raw(l.to_string())]));
-                        }
-                    }
+                    let visible: &[Line<'static>] = match decision {
+                        step_render::SayBody::Hidden => &[],
+                        step_render::SayBody::Skip(n) => &rendered[n..],
+                        step_render::SayBody::Full => rendered.as_slice(),
+                    };
+                    out.extend(types::indented(visible, 4));
                 }
                 ChatBlock::Thinking {
                     text, collapsed, ..
@@ -122,22 +113,26 @@ impl ChatView {
                     ..
                 } => {
                     // Adjacent-pair merge: when the block right below this
-                    // group is the turn's Say (`Assistant`), the two render
-                    // as one clickable header row — pass the Say so
-                    // `flatten_step_group` can fold the `N Steps` row into
-                    // it. Any other follower (Marker/Subagent/...) keeps the
-                    // standalone layout.
+                    // group is the turn's SEALED Say (`Assistant` with
+                    // `done == true`), the two render as one clickable
+                    // header row — pass the Say so `flatten_step_group`
+                    // can fold the `N Steps` row into it. An OPEN follower
+                    // is not transcript content (it streams in the TURN
+                    // LIVE REGION), so it keeps the standalone `N Steps`
+                    // row exactly like any other follower
+                    // (Marker/Subagent/...).
                     let say = match self.blocks.get(bi + 1) {
                         Some(ChatBlock::Assistant {
                             raw,
-                            done,
+                            done: true,
                             rendered,
                         }) => Some(SayHeader {
-                            preview: step_render::say_preview_for(raw, rendered, *done),
-                            // Live `running` hint survives only while the Say
-                            // streams and nothing follows it: once Done (or
-                            // a new step ladder) lands the hint is over.
-                            streaming: !*done && bi + 2 == self.blocks.len(),
+                            preview: step_render::say_preview_for(raw, rendered, true),
+                            // The merged follower is always sealed here, so
+                            // the live `running` hint can never ride this
+                            // header — streaming Says live only in the
+                            // TURN LIVE REGION (`chat_live_turn.rs`).
+                            streaming: false,
                         }),
                         _ => None,
                     };

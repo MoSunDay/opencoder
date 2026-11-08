@@ -1,17 +1,17 @@
 //! Live (streaming) contract: disclosure NEVER moves on its own — every
 //! ladder is folded by default and no streaming event opens or closes a
-//! level. While the admitted turn runs (`progress_active`, i.e. no Say
-//! yet), the CURRENT (last) step streams in the TURN LIVE REGION — its OWN
-//! area between the transcript and the composer (`chat_live_turn.rs`), a
-//! DIFFERENT thing from the Say/Step transcript: `flatten` never emits
-//! these lines and no ladder block ever contains them. Say's first chunk,
-//! run end, Error, or a new turn clears the region, and the step then
-//! lives only inside that turn's folded ladder; if the next turn is
-//! already running the region simply shows it. An open ladder COEXISTS
-//! with the region (its rows plus the streaming panel), and the user's
-//! open state survives the settle; Ctrl+L folds levels but the
-//! render-only region keeps streaming. Replay/snapshot ladders never
-//! stream (`replay.rs`).
+//! level. While the admitted turn runs, the CURRENT (last) step streams in
+//! the TURN LIVE REGION — its OWN area between the transcript and the
+//! composer (`chat_live_turn.rs`), a DIFFERENT thing from the Say/Step
+//! transcript: `flatten` never emits these lines and no ladder block ever
+//! contains them. An OPEN Say streams in the same region (marker + raw
+//! text) and is NOT transcript content; sealing it (Done/Error/turn
+//! boundary) clears the region and lands the Say in the transcript merged
+//! into that turn's folded ladder; if the next turn is already running the
+//! region simply shows it. An open ladder COEXISTS with the region (its
+//! rows plus the streaming panel), and the user's open state survives the
+//! settle; Ctrl+L folds levels but the render-only region keeps streaming.
+//! Replay/snapshot ladders never stream (`replay.rs`).
 
 use super::*;
 
@@ -237,25 +237,49 @@ folded ladder: {lv}"
 }
 
 #[test]
-fn say_first_chunk_and_run_end_clear_the_live_area() {
+fn say_streams_in_the_live_region_and_lands_in_the_transcript_on_seal() {
     let mut v = ChatView::default();
     reasoning(&mut v, "think");
     start_call(&mut v, "c1");
     end_call(&mut v, "c1", "out");
     assert!(live(&v).contains("think"));
 
+    // MID-STREAM: the open Say is NOT transcript content. The ladder row
+    // stands alone in the transcript (its own running hint retired on the
+    // first chunk), and the live region carries BOTH the current step and
+    // the raw Say text.
     v.apply(&SessionEvent::TextDelta("the answer".into()));
     let text = flat(&v);
     assert!(
+        !text.contains("the answer") && !text.contains("Say("),
+        "an open Say renders nothing in the transcript: {text}"
+    );
+    assert!(
+        text.contains("1 Step"),
+        "the ladder row stands alone below the open Say: {text}"
+    );
+    let lv = live(&v);
+    assert!(
+        lv.contains("\u{1f4ac} Say") && lv.contains("the answer"),
+        "the live region streams the open Say (marker + raw text): {lv}"
+    );
+    assert!(
+        lv.contains("think") && !lv.contains("Step("),
+        "and still carries the running step: {lv}"
+    );
+
+    // SEAL: Done finalizes the Say — the pair settles into the merged
+    // header and the live region clears.
+    v.apply(&SessionEvent::Done);
+    let text = flat(&v);
+    assert!(
         text.contains("Say(1 step): the answer"),
-        "Say's first chunk settles the pair into the merged header: {text}"
+        "sealing merges the pair into one header row: {text}"
     );
     assert!(
         live_lines(&v).is_empty(),
         "the live region clears — the step lives only inside the folded pair"
     );
-
-    v.apply(&SessionEvent::Done);
     assert_eq!(
         disclosure(&v),
         (false, vec![(false, false)]),
@@ -358,6 +382,12 @@ different area, untouched by the ladder's disclosure: {lv}"
         (true, vec![(false, false), (false, false)]),
         "settle never closes a level the user opened"
     );
+    let lv = live(&v);
+    assert!(
+        lv.contains("\u{1f4ac} Say") && lv.contains("answer"),
+        "while the Say is open the region streams it (marker + raw text): {lv}"
+    );
+    v.apply(&SessionEvent::Done);
     assert!(
         live_lines(&v).is_empty(),
         "and clears the live region like every settle"

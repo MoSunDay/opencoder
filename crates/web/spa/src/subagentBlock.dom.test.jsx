@@ -140,9 +140,12 @@ describe('SubagentContent in the transcript', () => {
     expect(await screen.findByText(/子会话回放/)).toBeTruthy();
     expect(document.querySelector('.ant-modal .ant-bubble-list')).toBeNull();
     expect(screen.getByText('暂无子会话事件')).toBeTruthy();
-    // Folding a live child frame through reduceFrame updates the replay.
+    // Folding a live child frame through reduceFrame updates the replay. The
+    // streaming Say lives in the turn live region only — a boundary frame
+    // (round end) seals it into the transcript first.
     await act(async () => {
       cfg.onFrame({ event: 'text_delta', data: { text: 'replayed line' } });
+      cfg.onFrame({ event: 'llm_round_end', data: {} });
     });
     expect(screen.getByText('replayed line')).toBeTruthy();
     // Closing the modal aborts the replay stream.

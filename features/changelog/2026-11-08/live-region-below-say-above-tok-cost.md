@@ -1,5 +1,10 @@
 # TUI 实时区移入 transcript 框内：Say 行下方、[tok cost] 边框上方
 
+> **已细化**：本条的「框内底部条 + 高度上限 min(行数, 框高/3) + 尾部
+> 保留」已被 `live-region-hugs-content-say-deferred.md` 细化 —— 条改为
+> **紧贴转录最后一行**（不再固定框底，短内容无空隙）、取消 1/3 上限与
+> 裁剪策略（仅物理溢出保尾）；框内、Say 下方、`[tok cost]` 上方不变。
+
 一句话：修正 TUI 实时区的落位 —— 实时区必须在 **Say 行的下方**，
 此前它作为 transcript 外层的独立布局块渲染，落在了 `[tok cost]`
 底部边框**之下**；现在它成为 transcript **框内的底部条**：`render.rs`

@@ -53,19 +53,20 @@ const mount = (turns) => render(
 /// Live tests mount BOTH surfaces the chat page shows: the transcript AND
 /// the TURN LIVE REGION pinned outside the message area (chat.jsx mounts it
 /// between the scroll container and the input — a different thing from the
-/// Say/Step bubbles).
-const mountWithLiveRegion = (turns) => render(
+/// Say/Step bubbles). `say` feeds the reducer's pendingSay prop (the
+/// STREAMING Say renders ONLY here — it lands in the message list at flush).
+const mountWithLiveRegion = (turns, say) => render(
   <>
     <TranscriptView turns={turns || [stepsTurn()]} usage={null} status="streaming" error={null} emptyText="无" />
-    <TurnLiveRegion turns={turns || [stepsTurn()]} />
+    <TurnLiveRegion turns={turns || [stepsTurn()]} say={say} />
   </>,
 );
 
 /// Rerender BOTH surfaces together (same shape as mountWithLiveRegion).
-const rerenderWithLiveRegion = (mounted, turns) => mounted.rerender(
+const rerenderWithLiveRegion = (mounted, turns, say) => mounted.rerender(
   <>
     <TranscriptView turns={turns} usage={null} status="streaming" error={null} emptyText="无" />
-    <TurnLiveRegion turns={turns} />
+    <TurnLiveRegion turns={turns} say={say} />
   </>,
 );
 
@@ -389,9 +390,42 @@ describe('turn live region (its own area, outside the message list)', () => {
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
+  it('live region streams the pending Say under the 💬 Say marker, with no running steps turn at all', () => {
+    // TUI live-region parity: a STREAMING Say is NOT transcript content —
+    // while pendingSay holds it, it renders ONLY in the pinned region (full
+    // text under the 💬 Say marker), even before/without any ladder.
+    render(<TurnLiveRegion turns={[]} say="streaming answer" />);
+    const region = screen.getByText('streaming answer')
+      .closest('[data-turn-live-region]');
+    expect(region).toBeTruthy();
+    expect(within(region).getByText('💬 Say')).toBeTruthy();
+    expect(within(region).getByText(/live/)).toBeTruthy();
+    // No running steps turn → no step body, only the live Say block.
+    expect(within(region).queryByText(/🔧/)).toBeNull();
+    expect(within(region).queryByText('💭 Thinking')).toBeNull();
+    // The Say is NOT in any transcript surface — only here.
+    expect(document.querySelectorAll('.ant-bubble').length).toBe(0);
+  });
+
+  it('the running step renders FIRST, then the live Say block under it', () => {
+    mountWithLiveRegion([runningTurn()], 'answering while the call runs');
+    const region = screen.getByText('💬 Say')
+      .closest('[data-turn-live-region]');
+    expect(region).toBeTruthy();
+    expect(within(region).getByText('reading the entrypoint')).toBeTruthy();
+    expect(within(region).getByText('answering while the call runs')).toBeTruthy();
+    // Body order: the running turn's step body, THEN the live Say block.
+    const stepBody = screen.getByText('reading the entrypoint');
+    const sayText = screen.getByText('answering while the call runs');
+    expect(stepBody.compareDocumentPosition(sayText) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('settle clears the live region and the ladder stays folded', () => {
-    const mounted = mountWithLiveRegion([runningTurn()]);
+    const mounted = mountWithLiveRegion([runningTurn()], 'partial answer');
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
+    expect(screen.getByText('partial answer')).toBeTruthy();
+    // Terminal settle: the turns settled AND pendingSay flushed — the Say
+    // landed in the transcript, so the region empties completely.
     rerenderWithLiveRegion(mounted, [stepsTurn()]);
     expect(itemActive('2 Steps')).toBe(false);
     expect(screen.queryByText(/Step\(2\)/)).toBeNull();
@@ -399,6 +433,8 @@ describe('turn live region (its own area, outside the message list)', () => {
     expect(screen.queryByText(/🔧 read/)).toBeNull();
     expect(screen.queryByText('running')).toBeNull();
     expect(screen.queryByText(/live/)).toBeNull();
+    expect(screen.queryByText('💬 Say')).toBeNull();
+    expect(screen.queryByText('partial answer')).toBeNull();
   });
 
   it('opening the ladder keeps the live region and the open state survives streaming rerenders', () => {

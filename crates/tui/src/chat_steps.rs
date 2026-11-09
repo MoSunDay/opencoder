@@ -25,10 +25,11 @@
 //! Disclosure is ALWAYS user-controlled: every ladder is folded by default
 //! and no streaming event opens or closes a level. While a turn runs
 //! (`progress_active`) the renderer draws the CURRENT (last) step as a
-//! render-only TURN LIVE AREA at the transcript tail (see
-//! `chat_live_turn.rs`); the area retires when progress settles. This
-//! module only keeps the live area's thinking materialized while it is
-//! visible.
+//! render-only TURN LIVE AREA directly below the running ladder, inside
+//! the transcript window and above any subagent blocks (see
+//! `chat_live_turn.rs`); the ladder itself hides the in-flight step until
+//! it settles, and the area retires when progress settles. This module
+//! only keeps the live area's thinking materialized while it is visible.
 
 use ratatui::text::Line;
 
@@ -70,6 +71,21 @@ pub(crate) fn visible_targets(open: bool, steps: &[Step]) -> Vec<StepTarget> {
         }
     }
     out
+}
+
+/// The steps the LADDER renders. While the group runs (`progress_active`,
+/// i.e. no Say has begun) the LAST step is IN FLIGHT — it streams only in
+/// the TURN LIVE REGION below the ladder and enters the ladder (history)
+/// only once it settles (Say begins / turn ends). Render
+/// (`chat_step_render.rs`), hit accounting (`chat_headers.rs`) and click
+/// toggles (`ChatView::toggle_tool_call_at`) all slice through here — one
+/// gating, no drift.
+pub(crate) fn settled_steps(progress_active: bool, steps: &[Step]) -> &[Step] {
+    if progress_active {
+        &steps[..steps.len().saturating_sub(1)]
+    } else {
+        steps
+    }
 }
 
 /// A reasoning delta starts a new step after the previous step has already

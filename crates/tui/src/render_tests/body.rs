@@ -34,12 +34,12 @@ fn body_follow_indicator_when_not_following() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -90,12 +90,12 @@ fn body_follow_label_when_following() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -145,12 +145,12 @@ fn body_top_arrow_when_scrolled_down() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -200,12 +200,12 @@ fn body_no_top_arrow_when_at_top() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -255,12 +255,12 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -300,12 +300,12 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -355,12 +355,12 @@ fn empty_child_view_does_not_show_tutorial() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 false,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -408,12 +408,12 @@ fn body_title_row_shows_full_top_composition() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -461,12 +461,12 @@ fn submitted_hides_tutorial_even_with_empty_blocks() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();

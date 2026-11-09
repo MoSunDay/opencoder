@@ -1,12 +1,13 @@
 //! Header line-accounting for Thinking / Subagent / step-row / Compaction
-//! blocks.
+//! / turn-live-region blocks.
 //!
 //! Walks `ChatView.blocks` with the identical per-block line accounting that
 //! `flatten_with` emits, so click hit-rects stay aligned with the live render.
 //! Extracted from `chat.rs` for the line gate; behavior unchanged.
 
+use super::live_turn;
 use super::{
-    step_render, ChatBlock, ChatView, CompactionHeader, SubagentHeader, ThinkingHeader,
+    step_render, ChatBlock, ChatView, CompactionHeader, LiveHeader, SubagentHeader, ThinkingHeader,
     ToolCallHeader,
 };
 
@@ -36,6 +37,14 @@ impl ChatView {
         self.collect_headers().3
     }
 
+    /// Return the TURN LIVE REGION's header rows — one per RUNNING group
+    /// (`progress_active`, steps in flight) — in render order. Clicking one
+    /// toggles the region between its detail rows and the collapsed
+    /// `▸ live` header (`toggle_live_region`).
+    pub fn live_headers(&self) -> Vec<LiveHeader> {
+        self.collect_headers().4
+    }
+
     /// Single pass over all blocks computing the header line index of every
     /// Thinking / Subagent / step-row block, using the identical per-block
     /// line accounting that `flatten_with()` emits. Keeping the accounting in
@@ -49,11 +58,13 @@ impl ChatView {
         Vec<SubagentHeader>,
         Vec<CompactionHeader>,
         Vec<ToolCallHeader>,
+        Vec<LiveHeader>,
     ) {
         let mut think = Vec::new();
         let mut sub = Vec::new();
         let mut compaction = Vec::new();
         let mut tool_calls = Vec::new();
+        let mut live = Vec::new();
         let mut line_idx = 0usize;
         let merged_say = |i: usize| -> bool {
             // Only a SEALED follower merges (`done == true`): an open Say
@@ -118,7 +129,12 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::StepGroup { steps, open, .. } => {
+                ChatBlock::StepGroup {
+                    steps,
+                    open,
+                    progress_active,
+                    ..
+                } => {
                     // Mirrors `flatten_step_group` exactly (three-level
                     // ladder): the turn row always (a clickable target);
                     // while the turn is open, per step the step row (target),
@@ -136,69 +152,102 @@ impl ChatView {
                     // CLOSED pair (no ladder rows, no second trailing blank;
                     // the Say body follows with its first line deduped
                     // against the preview).
+                    //
+                    // Ladder gating mirror (`steps::settled_steps`): while
+                    // the group runs, the in-flight LAST step streams only
+                    // in the TURN LIVE REGION below the ladder — no ladder
+                    // rows and no targets for it here; the region's rows are
+                    // counted (and its header registered as a target) so
+                    // later blocks' header rows stay aligned with flatten.
                     let say_merged = merged_say(block_idx);
-                    let mut call_idx = 0usize;
-                    tool_calls.push(ToolCallHeader {
-                        block_idx,
-                        call_idx,
-                        header_line_idx: line_idx,
-                    });
-                    call_idx += 1;
-                    line_idx += 1; // group row (or merged Say header row)
-                    if say_merged {
-                        // 合并头部行之后的空行（与 `flatten_step_group` 同
-                        // 步）：闭合时兼任整对的尾部空行，展开时隔开头部
-                        // 与 ladder。
-                        line_idx += 1;
-                    }
-                    if *open {
-                        for step in steps.iter() {
-                            tool_calls.push(ToolCallHeader {
-                                block_idx,
-                                call_idx,
-                                header_line_idx: line_idx,
-                            });
-                            call_idx += 1;
-                            line_idx += 1; // step row
-                            if step.open {
-                                if !step.thinking.is_empty() {
-                                    line_idx += 1 + step.thinking.len();
-                                }
-                                if !step.calls.is_empty() {
-                                    tool_calls.push(ToolCallHeader {
-                                        block_idx,
-                                        call_idx,
-                                        header_line_idx: line_idx,
-                                    });
-                                    call_idx += 1;
-                                    line_idx += 1; // calls aggregation row
-                                    if step.calls_open {
-                                        for c in &step.calls {
-                                            tool_calls.push(ToolCallHeader {
-                                                block_idx,
-                                                call_idx,
-                                                header_line_idx: line_idx,
-                                            });
-                                            call_idx += 1;
-                                            line_idx +=
-                                                1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                    let ladder = super::steps::settled_steps(*progress_active, steps);
+                    let live_rows = if *progress_active && !steps.is_empty() {
+                        // `anim_tick` never changes the region's line count.
+                        live_turn::render_lines(steps, 0, self.live_collapsed).len()
+                    } else {
+                        0
+                    };
+                    if *progress_active && ladder.is_empty() {
+                        // First step still streaming: the block renders ONLY
+                        // the live region's rows (no group row, no blank).
+                    } else {
+                        let mut call_idx = 0usize;
+                        tool_calls.push(ToolCallHeader {
+                            block_idx,
+                            call_idx,
+                            header_line_idx: line_idx,
+                        });
+                        call_idx += 1;
+                        line_idx += 1; // group row (or merged Say header row)
+                        if say_merged {
+                            // 合并头部行之后的空行（与 `flatten_step_group` 同
+                            // 步）：闭合时兼任整对的尾部空行，展开时隔开头部
+                            // 与 ladder。
+                            line_idx += 1;
+                        }
+                        if *open {
+                            for step in ladder.iter() {
+                                tool_calls.push(ToolCallHeader {
+                                    block_idx,
+                                    call_idx,
+                                    header_line_idx: line_idx,
+                                });
+                                call_idx += 1;
+                                line_idx += 1; // step row
+                                if step.open {
+                                    if !step.thinking.is_empty() {
+                                        line_idx += 1 + step.thinking.len();
+                                    }
+                                    if !step.calls.is_empty() {
+                                        tool_calls.push(ToolCallHeader {
+                                            block_idx,
+                                            call_idx,
+                                            header_line_idx: line_idx,
+                                        });
+                                        call_idx += 1;
+                                        line_idx += 1; // calls aggregation row
+                                        if step.calls_open {
+                                            for c in &step.calls {
+                                                tool_calls.push(ToolCallHeader {
+                                                    block_idx,
+                                                    call_idx,
+                                                    header_line_idx: line_idx,
+                                                });
+                                                call_idx += 1;
+                                                line_idx += 1 + if c.expanded {
+                                                    1 + c.output.len()
+                                                } else {
+                                                    0
+                                                };
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                        // Exactly one blank after the group: when the last
+                        // visible row is an expanded call, its separator blank
+                        // (counted above) IS the trailing blank — don't add
+                        // another.
+                        let ends_on_expanded_call = *open
+                            && ladder.last().is_some_and(|s| {
+                                s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
+                            });
+                        if !ends_on_expanded_call && (!say_merged || *open) {
+                            line_idx += 1; // trailing blank
+                        }
                     }
-                    // Exactly one blank after the group: when the last
-                    // visible row is an expanded call, its separator blank
-                    // (counted above) IS the trailing blank — don't add
-                    // another.
-                    let ends_on_expanded_call = *open
-                        && steps.last().is_some_and(|s| {
-                            s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
+                    // The live region's rows ride right below the ladder's
+                    // trailing blank (or alone while the first step still
+                    // streams) — mirror of the flatten emission. Its header
+                    // row is the region's click target.
+                    if live_rows > 0 {
+                        live.push(LiveHeader {
+                            block_idx,
+                            header_line_idx: line_idx,
                         });
-                    if !ends_on_expanded_call && (!say_merged || *open) {
-                        line_idx += 1; // trailing blank
                     }
+                    line_idx += live_rows;
                 }
                 ChatBlock::Compaction {
                     text, collapsed, ..
@@ -233,13 +282,13 @@ impl ChatView {
                 }
             }
         }
-        // TURN LIVE AREA mirror-note: while the admitted turn runs, its
-        // CURRENT step streams at the transcript tail
-        // (`chat_live_turn.rs`), zero-coupled from any ladder's disclosure
-        // state. It is render-only and produces no transcript lines, so no
-        // targets and no line accounting are needed here. The open Say, by
-        // contrast, IS transcript content (accounted above — raw rows
-        // while it streams, rendered rows once sealed).
-        (think, sub, compaction, tool_calls)
+        // TURN LIVE REGION mirror-note: while the admitted turn runs, its
+        // CURRENT (in-flight) step streams in the region right below the
+        // running ladder (`chat_live_turn.rs`) — counted above (and its
+        // header registered as a click target) so hit-rects stay aligned
+        // with the flatten output. It retires when progress settles; the
+        // open Say, by contrast, IS transcript content (accounted above —
+        // raw rows while it streams, rendered rows once sealed).
+        (think, sub, compaction, tool_calls, live)
     }
 }

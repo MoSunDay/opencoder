@@ -14,13 +14,15 @@ use opencoder_core::{ContentBlock, Message, Role};
 
 /// The TURN LIVE REGION's rendered rows (`chat_live_turn.rs`): ONLY the
 /// running turn's CURRENT step (thinking + function calls, calls open,
-/// results never) — `flatten`/`lines` (the transcript) never contain these
-/// lines. The open Say, by contrast, IS transcript content (raw rows under
-/// the merged `Say(n steps)` header / `say:` header). Shared by the live
-/// tests here and sibling chat_tests modules.
+/// results never). The region streams INLINE below the running ladder, so
+/// `flatten`/`lines` DO contain these rows — this helper isolates the
+/// region's own slice for assertions. The open Say, by contrast, is plain
+/// transcript content (raw rows under the merged `Say(n steps)` header /
+/// `say:` header), never a region row. Shared by the live tests here and
+/// sibling chat_tests modules.
 pub(crate) fn live_lines(view: &ChatView) -> Vec<String> {
     crate::chat::live_turn::live_data(&view.blocks, view.turn_block_start)
-        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0, view.live_collapsed))
         .unwrap_or_default()
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
@@ -394,9 +396,17 @@ fn expanded_step_keeps_streaming_new_thinking_deltas() {
         streamed.find("first chunk") < streamed.find("second chunk"),
         "thinking renders in stream order: {streamed:?}"
     );
+    // The live region streams INLINE in the transcript (the step is still
+    // in flight — no ladder row exists for it), but never as LADDER rows:
+    // no step counter row appears anywhere in the flatten output.
+    let flat = lines(&v).join("\n");
     assert!(
-        !lines(&v).join("\n").contains("second chunk"),
-        "the transcript stays ladder-only while the region streams"
+        flat.contains("second chunk"),
+        "the region's rows ride inside flatten: {flat:?}"
+    );
+    assert!(
+        !flat.contains("Step("),
+        "the in-flight step stays out of the ladder's counting rows: {flat:?}"
     );
 }
 
@@ -408,19 +418,27 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     call_tool(&mut v, "solo");
-    // Pre-Say, while the turn runs: the TRANSCRIPT holds only the FOLDED
-    // ladder (group row + its trailing blank) — the current step streams in
-    // the separate TURN LIVE REGION between transcript and composer, never
-    // in these lines.
+    // Pre-Say, while the turn runs: the FIRST step is still in flight, so
+    // the ladder renders NOTHING (no group row, no trailing blank — the
+    // step settles into the ladder only when the Say begins) and the
+    // transcript's only rows ARE the TURN LIVE REGION's, streamed inline
+    // below where the ladder would sit.
     assert_eq!(
         lines(&v),
-        vec!["\u{25b8} 1 Step  \u{280b} running ", ""],
-        "folded ladder only — the live region is a different area"
+        vec![
+            "> live",
+            "    \u{1f4ad} Thinking",
+            "        think",
+            "    \u{276f} 1 Function call",
+            "      \u{25b8} bash echo x",
+        ],
+        "the live region is the running turn's ONLY surface while the first \
+step streams (no group row, no blank)"
     );
     assert_eq!(
         live_lines(&v),
         vec![
-            "\u{2b25} live",
+            "> live",
             "    \u{1f4ad} Thinking",
             "        think",
             "    \u{276f} 1 Function call",

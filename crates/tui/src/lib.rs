@@ -42,7 +42,6 @@ pub mod queue_admitter;
 pub mod queue_panel;
 pub mod remote;
 pub mod render;
-pub mod render_live;
 pub mod render_viewport;
 pub mod resize;
 pub mod scope_dialog;

@@ -351,6 +351,24 @@ async fn sidecar_step_row_click_toggles_the_panel_view_not_the_main_transcript()
             input: "echo panel".into(),
         }),
     });
+    // Settle the first step and start a second in-flight one: the ladder
+    // renders SETTLED steps only (the in-flight one streams in the turn
+    // live region), so the group row exists to click exactly when at
+    // least one step has settled.
+    chat.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ToolEnd {
+            id: "p1".into(),
+            name: "bash".into(),
+            output: "panel-out".into(),
+            is_error: false,
+            images: Vec::new(),
+        }),
+    });
+    chat.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ReasoningDelta("panel think more".into())),
+    });
 
     // Body hit map recorded against the RENDERED (panel) view: the group row
     // carries the panel-relative block index of the ladder (behind the echoed

@@ -44,7 +44,7 @@ use crate::copy_wrap::{
     soft_flags_from_cum_rows, soft_flags_from_row_texts, soft_flags_from_wrap_rows, WrapPlan,
 };
 use crate::keymap::KeyBindings;
-use crate::render_viewport::ViewportCache;
+use crate::render_viewport::{refresh_copy_cache, ViewportCache};
 use crate::terminal::{resume_mouse_capture, suspend_mouse_capture};
 
 /// Enter copy mode: suspend our mouse capture and turn off tmux mouse
@@ -186,10 +186,8 @@ pub(crate) fn render_clean(
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let needs_rebuild = viewport.as_ref().is_none_or(|v| v.width() != area.width);
-    if needs_rebuild {
-        *viewport = Some(ViewportCache::build(chat, area.width, anim_tick, now_ms));
-    }
+    // Copy-mode cache: excludes the transient turn live region.
+    refresh_copy_cache(viewport, chat, area.width, anim_tick, now_ms);
     let cache = viewport.as_mut().expect("viewport built above");
     let cleaned = cache.cleaned(area.width);
     let content_h = area.height as usize;

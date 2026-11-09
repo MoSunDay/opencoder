@@ -27,7 +27,10 @@ fn streaming_never_moves_user_set_levels() {
     // Disclosure is ALWAYS user-controlled: the ladder is born folded and
     // no streaming event opens or closes a level. Whatever state the user
     // sets — open or folded — persists through deltas, round finalization,
-    // tool output, a new running step, and even the Say settle.
+    // tool output, a new running step, and even the Say settle. While the
+    // FIRST step is still in flight the ladder has no rows at all (the
+    // turn live region is the turn's only surface), so every toggle is a
+    // no-op until a step settles.
     let mut view = ChatView::default();
     view.apply(&SessionEvent::ReasoningDelta("first thought".into()));
     assert_eq!(
@@ -36,22 +39,13 @@ fn streaming_never_moves_user_set_levels() {
         "the ladder is born folded; the running step only previews"
     );
 
-    view.toggle_tool_call_at(0, 0); // Turn -> open.
-    view.toggle_tool_call_at(0, 1); // Step(1) -> open.
-    assert_eq!(disclosure(&view), (true, vec![(true, false, vec![])]));
-
-    view.apply(&SessionEvent::ReasoningDelta(" grows".into()));
+    // Zero SETTLED steps: no ladder rows exist, so the toggle walk has
+    // nothing to hit — disclosure cannot move.
+    view.toggle_tool_call_at(0, 0);
     assert_eq!(
         disclosure(&view),
-        (true, vec![(true, false, vec![])]),
-        "deltas keep the user's state"
-    );
-
-    view.apply(&SessionEvent::LlmRoundEnd);
-    assert_eq!(
-        disclosure(&view),
-        (true, vec![(true, false, vec![])]),
-        "round finalization must not close the user-open turn or step"
+        (false, vec![(false, false, vec![])]),
+        "while the first step streams the ladder renders no rows — no toggle targets"
     );
 
     view.apply(&SessionEvent::ToolStart {
@@ -59,6 +53,45 @@ fn streaming_never_moves_user_set_levels() {
         name: "bash".into(),
         input: serde_json::json!({"command": "echo x"}),
     });
+    view.toggle_tool_call_at(0, 0);
+    assert_eq!(
+        disclosure(&view),
+        (false, vec![(false, false, vec![false])]),
+        "a joining call settles nothing — still no ladder rows to toggle"
+    );
+
+    view.apply(&SessionEvent::ReasoningDelta("next round".into()));
+    view.toggle_tool_call_at(0, 0); // Turn -> open.
+    view.toggle_tool_call_at(0, 1); // Step(1) -> open.
+    assert_eq!(
+        disclosure(&view),
+        (
+            true,
+            vec![(true, false, vec![false]), (false, false, vec![])]
+        ),
+        "once a step settles the ladder rows become toggleable"
+    );
+
+    view.apply(&SessionEvent::ReasoningDelta(" grows".into()));
+    assert_eq!(
+        disclosure(&view),
+        (
+            true,
+            vec![(true, false, vec![false]), (false, false, vec![])]
+        ),
+        "deltas keep the user's state"
+    );
+
+    view.apply(&SessionEvent::LlmRoundEnd);
+    assert_eq!(
+        disclosure(&view),
+        (
+            true,
+            vec![(true, false, vec![false]), (false, false, vec![])]
+        ),
+        "round finalization must not close the user-open turn or step"
+    );
+
     view.toggle_tool_call_at(0, 2); // Calls aggregate -> open.
     view.toggle_tool_call_at(0, 3); // Call row -> expanded.
     view.apply(&SessionEvent::ToolEnd {
@@ -70,15 +103,8 @@ fn streaming_never_moves_user_set_levels() {
     });
     assert_eq!(
         disclosure(&view),
-        (true, vec![(true, true, vec![true])]),
-        "tool output must preserve the user's levels and the result fold"
-    );
-
-    view.apply(&SessionEvent::ReasoningDelta("next round".into()));
-    assert_eq!(
-        disclosure(&view),
         (true, vec![(true, true, vec![true]), (false, false, vec![])]),
-        "the fresh running step opens NOTHING - it only takes the preview slot"
+        "tool output must preserve the user's levels and the result fold"
     );
 
     view.toggle_tool_call_at(0, 0); // User explicitly closes the Turn.

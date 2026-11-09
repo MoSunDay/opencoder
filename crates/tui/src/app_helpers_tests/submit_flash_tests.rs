@@ -29,6 +29,7 @@ fn steer_submit_flash_failure_sets_mode_flash() {
         &mut pending_images,
         "s",
         "stop",
+        0,
         TICK,
         &mut mode_flash,
     );
@@ -62,6 +63,7 @@ fn queue_submit_flash_failure_sets_mode_flash() {
         &mut queue_items,
         &mut pending_images,
         "s",
+        0,
         TICK,
         &mut mode_flash,
     );
@@ -94,6 +96,7 @@ fn submit_flash_helpers_keep_mode_flash_clear_on_success() {
         &mut pending_images,
         "s",
         "stop",
+        0,
         TICK,
         &mut mode_flash,
     );
@@ -107,6 +110,7 @@ fn submit_flash_helpers_keep_mode_flash_clear_on_success() {
         &mut queue_items,
         &mut pending_images,
         "s",
+        0,
         TICK,
         &mut mode_flash,
     );

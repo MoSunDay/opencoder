@@ -110,6 +110,7 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
             UiCmd::Prompt("plan a migration".into(), vec![]),
             &mut sess,
             &tx,
+            0,
         )
         .await;
         sess
@@ -213,6 +214,7 @@ async fn worker_waits_for_the_complete_question_batch_before_followup_context() 
             UiCmd::Prompt("plan deployment".into(), vec![]),
             &mut session,
             &tx,
+            0,
         )
         .await;
         session

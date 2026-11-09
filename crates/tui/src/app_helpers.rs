@@ -313,11 +313,17 @@ pub(crate) fn snapshot_image_uris(pending: &[(String, String)]) -> Vec<String> {
 pub(crate) async fn start_turn(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     cmd: UiCmd,
 ) -> bool {
+    *turn_gen = turn_gen.wrapping_add(1);
     let fresh = CancellationToken::new();
     *cancel = fresh.clone();
-    if cmd_tx.send(UiCmd::ResetCancel(fresh)).await.is_err() {
+    if cmd_tx
+        .send(UiCmd::ResetCancel(fresh, *turn_gen))
+        .await
+        .is_err()
+    {
         return false;
     }
     cmd_tx.send(cmd).await.is_ok()
@@ -525,10 +531,19 @@ pub(crate) fn queue_submit_flash(
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     session_id: &str,
+    turn: u64,
     anim_tick: u32,
     mode_flash: &mut Option<(String, u32)>,
 ) {
-    if !crate::queue_admitter::handle_queue(text, tx, st, queue_items, pending_images, session_id) {
+    if !crate::queue_admitter::handle_queue(
+        text,
+        tx,
+        st,
+        queue_items,
+        pending_images,
+        session_id,
+        turn,
+    ) {
         *mode_flash = Some((
             crate::queue_admitter::QUEUE_SUBMIT_FAILED_FLASH.to_string(),
             anim_tick,
@@ -549,10 +564,19 @@ pub(crate) fn steer_submit_flash(
     pending_images: &mut Vec<(String, String)>,
     session_id: &str,
     raw: &str,
+    turn: u64,
     anim_tick: u32,
     mode_flash: &mut Option<(String, u32)>,
 ) {
-    if !crate::steer_admit::submit_steer(tx, st, steer_items, pending_images, session_id, raw) {
+    if !crate::steer_admit::submit_steer(
+        tx,
+        st,
+        steer_items,
+        pending_images,
+        session_id,
+        raw,
+        turn,
+    ) {
         *mode_flash = Some((
             crate::steer_admit::STEER_SUBMIT_FAILED_FLASH.to_string(),
             anim_tick,

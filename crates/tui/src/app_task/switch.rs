@@ -53,7 +53,6 @@ async fn agent_self_detaches_remote_and_creates_an_empty_local_task_then_resumes
     let mut skill_handle = session.skill_prompt.clone();
     let mut hub = session.question_hub.clone();
     let mut sidecar = crate::sidecar_ui::spawn_actor(&session, _ui, Some(store.clone()));
-    let mut label = String::new();
     let mut snapshots = std::collections::HashMap::new();
     let mut running = true;
     let mut history = vec!["remote history".into()];
@@ -76,7 +75,6 @@ async fn agent_self_detaches_remote_and_creates_an_empty_local_task_then_resumes
         &config,
         &client,
         &store,
-        &mut label,
         &mut snapshots,
         &mut running,
         &mut chat,
@@ -132,7 +130,6 @@ async fn agent_self_detaches_remote_and_creates_an_empty_local_task_then_resumes
         &config,
         &client,
         &store,
-        &mut label,
         &mut snapshots,
         &mut running,
         &mut chat,

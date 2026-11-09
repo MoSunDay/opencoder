@@ -31,6 +31,7 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             "first".into(),
@@ -48,6 +49,7 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -65,6 +67,7 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
     // rendering (nothing to coalesce while the preview streams).
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             " second".into(),
@@ -82,6 +85,7 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -105,6 +109,7 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
     // round ends the ladder is folded with no preview and a further hidden
     // delta may skip repainting again.
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TextDelta("answer".into()))),
         &mut chat,
@@ -120,6 +125,7 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -152,6 +158,7 @@ async fn batched_reasoning_deltas_coalesce_into_one_step() {
         .unwrap();
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             "first".into(),
@@ -169,6 +176,7 @@ async fn batched_reasoning_deltas_coalesce_into_one_step() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -218,8 +226,9 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     let _flow = fold_ui_events(
-        Some(UiEvent::TurnDone("act".into())),
+        Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
         &store,
         "test-session",
@@ -233,6 +242,7 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,

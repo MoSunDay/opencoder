@@ -54,6 +54,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
     let mut cancel = CancellationToken::new();
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
 
     // 1) The worker's Compact arm ends the compaction turn with Done.
     let _flow = fold_ui_events(
@@ -71,6 +72,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -90,7 +92,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
 
     // 2) TurnDone consumes the arm and restarts the drain loop.
     let _flow = fold_ui_events(
-        Some(UiEvent::TurnDone("act".into())),
+        Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
         &store,
         sid,
@@ -104,6 +106,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -116,7 +119,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
     let mut saw_reset = false;
     let prompt_cmd = loop {
         match cmd_rx.try_recv() {
-            Ok(UiCmd::ResetCancel(_)) => saw_reset = true,
+            Ok(UiCmd::ResetCancel(_, _)) => saw_reset = true,
             Ok(UiCmd::Prompt(prompt, images)) => {
                 assert!(saw_reset, "ResetCancel must precede the drain prompt");
                 assert!(
@@ -147,7 +150,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
         std::env::temp_dir(),
     );
     sess.store = Some(store.clone());
-    assert!(!process_cmd(prompt_cmd, &mut sess, &evt_tx).await);
+    assert!(!process_cmd(prompt_cmd, &mut sess, &evt_tx, 0).await);
 
     let events: Vec<SessionEvent> = std::iter::from_fn(|| evt_rx.try_recv().ok())
         .filter_map(|e| match e {

@@ -41,12 +41,14 @@ async fn drive_mode_switch(
     let mut mode_flash: Option<(String, u32)> = None;
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let workdir = Path::new(".");
 
     let flow = dispatch_mode_switch(
         mode,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut chat,
@@ -101,7 +103,7 @@ async fn mode_switch_with_live_subagent_runs_at_parent_idle_boundary() {
             "the switch turn starts at the idle parent boundary"
         );
         let first = cmd_rx.try_recv().expect("the switch must be submitted");
-        assert!(matches!(first, UiCmd::ResetCancel(_)));
+        assert!(matches!(first, UiCmd::ResetCancel(_, _)));
         match cmd_rx.try_recv().unwrap() {
             UiCmd::Prompt(text, _) => assert_eq!(text, prompt),
             other => panic!("expected Prompt({prompt}), got {other:?}"),
@@ -130,7 +132,7 @@ async fn mode_switch_from_idle_submits_control_prompt() {
             flash.0
         );
         let first = cmd_rx.try_recv().unwrap();
-        assert!(matches!(first, UiCmd::ResetCancel(_)));
+        assert!(matches!(first, UiCmd::ResetCancel(_, _)));
         match cmd_rx.try_recv().unwrap() {
             UiCmd::Prompt(text, _) => assert_eq!(text, prompt),
             other => panic!("expected Prompt({prompt}), got {other:?}"),

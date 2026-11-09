@@ -67,7 +67,7 @@ async fn session_with_transcript(
 
 async fn clear(sess: &mut SessionState) -> Vec<UiEvent> {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/clear_context".into(), vec![]), sess, &tx).await;
+    let quit = process_cmd(UiCmd::Prompt("/clear_context".into(), vec![]), sess, &tx, 0).await;
     assert!(!quit);
     let mut events = Vec::new();
     let collect = async {

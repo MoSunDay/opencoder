@@ -6,7 +6,7 @@ fn fold(chat: &mut ChatView, event: UiEvent) {
     match event {
         UiEvent::Session(event) => chat.apply(&event),
         UiEvent::AssistantFinal(text) => chat.reconcile_completed_assistant(&text),
-        UiEvent::TurnDone(_) => chat.finalize_assistant(),
+        UiEvent::TurnDone(..) => chat.finalize_assistant(),
         UiEvent::RemoteSnapshot { chat: restored, .. } => *chat = *restored,
         // No transcript fold: subtask_events folds registry updates elsewhere.
         UiEvent::SubtaskUpdate { .. } => {}
@@ -51,7 +51,7 @@ async fn pressure_cannot_strip_markdown_delimiters_from_an_interim_say() {
     pending
         .send(UiEvent::AssistantFinal("**最后回复**".into()))
         .unwrap();
-    pending.send(UiEvent::TurnDone("act".into())).unwrap();
+    pending.send(UiEvent::TurnDone("act".into(), 0)).unwrap();
     drop(pending);
     while let Some(event) = rx.recv().await {
         fold(&mut chat, event);

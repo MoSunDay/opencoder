@@ -49,7 +49,6 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
     let mut model_menu = Some(ModelMenu::List(ProviderList::new(&config)));
     let mut client: std::sync::Arc<dyn opencoder_llm::ChatStream> =
         std::sync::Arc::new(MockChatClient::new());
-    let mut model_label = config.model.clone();
     let mut compaction_threshold = config.compaction.context_threshold;
     let mut context_limit = config.context_limit();
     let mut frame_ms = 25u64;
@@ -72,7 +71,6 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         enter,
         &mut client,
         &mut config,
-        &mut model_label,
         &mut compaction_threshold,
         &mut context_limit,
         &mut frame_ms,
@@ -90,7 +88,6 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         n_key,
         &mut client,
         &mut config,
-        &mut model_label,
         &mut compaction_threshold,
         &mut context_limit,
         &mut frame_ms,
@@ -108,7 +105,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
 
     // In-memory config updated to the new model.
     assert_eq!(config.model, "deepseek/deepseek-chat");
-    assert_eq!(model_label, "deepseek/deepseek-chat");
+    assert_eq!(chat.model, "deepseek/deepseek-chat");
 
     // ReloadConfig dispatched (worker persists to session store row).
     let cmd = cmd_rx.recv().await.expect("ReloadConfig must be sent");

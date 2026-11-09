@@ -103,7 +103,7 @@ async fn collect_turn(
     let _ = cmd_tx;
     let mut out = Vec::new();
     while let Some(ev) = evt_rx.recv().await {
-        let done = matches!(ev, UiEvent::TurnDone(_));
+        let done = matches!(ev, UiEvent::TurnDone(..));
         out.push(ev);
         if done {
             break;
@@ -174,7 +174,7 @@ async fn final_say_is_markdown_rendered_after_turn_done() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(4);
     let worker = tokio::spawn(async move {
         while let Some(cmd) = cmd_rx.recv().await {
-            if crate::worker::process_cmd(cmd, &mut sess, &evt_tx).await {
+            if crate::worker::process_cmd(cmd, &mut sess, &evt_tx, 0).await {
                 break;
             }
         }
@@ -187,7 +187,7 @@ async fn final_say_is_markdown_rendered_after_turn_done() {
     worker.abort();
 
     assert!(
-        events.iter().any(|e| matches!(e, UiEvent::TurnDone(_))),
+        events.iter().any(|e| matches!(e, UiEvent::TurnDone(..))),
         "turn must finish, got {events:?}"
     );
 
@@ -198,7 +198,7 @@ async fn final_say_is_markdown_rendered_after_turn_done() {
         match ev {
             UiEvent::Session(sev) => chat.apply(&sev),
             UiEvent::AssistantFinal(text) => chat.reconcile_completed_assistant(&text),
-            UiEvent::TurnDone(_) => chat.finalize_assistant(),
+            UiEvent::TurnDone(..) => chat.finalize_assistant(),
             UiEvent::RemoteSnapshot { chat: restored, .. } => chat = *restored,
             // No transcript fold: subtask_events folds registry updates elsewhere.
             UiEvent::SubtaskUpdate { .. } => {}

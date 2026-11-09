@@ -19,7 +19,7 @@ use opencoder_store::TursoStore;
 fn drain_cmd(cmd_rx: &mut mpsc::Receiver<UiCmd>) -> UiCmd {
     let first = cmd_rx.try_recv().unwrap();
     assert!(
-        matches!(first, UiCmd::ResetCancel(_)),
+        matches!(first, UiCmd::ResetCancel(_, _)),
         "expected ResetCancel preamble, got wrong variant"
     );
     cmd_rx.try_recv().unwrap()
@@ -49,6 +49,7 @@ async fn slash_action_compact_idle_starts_turn() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
 
     let flow = dispatch_slash_action(
         SlashAction::Compact,
@@ -78,6 +79,7 @@ async fn slash_action_compact_idle_starts_turn() {
         &mut None,
         &mut None,
         &mut None,
+        &mut turn_gen,
     )
     .await;
 
@@ -114,6 +116,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
 
     let flow = dispatch_slash_action(
         SlashAction::Compact,
@@ -143,6 +146,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         &mut None,
         &mut None,
         &mut None,
+        &mut turn_gen,
     )
     .await;
 
@@ -183,6 +187,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
 
     assert_eq!(crate::command::parse("/skill"), Some(SlashAction::Skill));
     assert_eq!(crate::command::parse("/sk"), Some(SlashAction::Skill));
@@ -215,6 +220,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         &mut None,
         &mut None,
         &mut None,
+        &mut turn_gen,
     )
     .await;
 
@@ -254,6 +260,7 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
 
     assert_eq!(crate::command::parse("/ap"), Some(SlashAction::Ap));
 
@@ -285,6 +292,7 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
         &mut None,
         &mut None,
         &mut None,
+        &mut turn_gen,
     )
     .await;
 
@@ -325,6 +333,7 @@ async fn slash_action_sidecar_idle_opens_fresh_panel() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (sidecar_tx, mut sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
 
     let flow = dispatch_slash_action(
         SlashAction::Sidecar,
@@ -354,6 +363,7 @@ async fn slash_action_sidecar_idle_opens_fresh_panel() {
         &mut None,
         &mut None,
         &mut None,
+        &mut turn_gen,
     )
     .await;
 
@@ -403,6 +413,7 @@ async fn slash_action_sidecar_running_still_opens_panel() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (sidecar_tx, mut sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
 
     let flow = dispatch_slash_action(
         SlashAction::Sidecar,
@@ -432,6 +443,7 @@ async fn slash_action_sidecar_running_still_opens_panel() {
         &mut None,
         &mut None,
         &mut None,
+        &mut turn_gen,
     )
     .await;
 

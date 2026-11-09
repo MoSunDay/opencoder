@@ -194,8 +194,10 @@ pub(crate) fn handle_key(
             return KeyAction::Quit;
         }
         if bindings.cancel.matches(&k) {
-            // Idle: quit like Ctrl+D. Running: cancel the in-flight turn.
-            return if running {
+            // Idle: quit like Ctrl+D. Busy (running turn OR live subagents —
+            // the parent may already report idle while its subagent batch
+            // still drains): cancel the in-flight work.
+            return if running || subagents_running {
                 KeyAction::Cancel
             } else {
                 KeyAction::Quit
@@ -265,8 +267,10 @@ pub(crate) fn handle_key(
         return KeyAction::Clip;
     }
     if bindings.cancel.matches(&k) {
-        // Idle: quit like Ctrl+D. Running: cancel the in-flight turn.
-        return if running {
+        // Idle: quit like Ctrl+D. Busy (running turn OR live subagents —
+        // the drain window reports the parent idle while work continues):
+        // cancel instead of quitting the app mid-flight.
+        return if running || subagents_running {
             KeyAction::Cancel
         } else {
             KeyAction::Quit
@@ -504,9 +508,13 @@ pub(crate) fn handle_key(
             )
         }
         KeyCode::Esc => {
-            // Double-Esc within the window while running => hard-abort.
+            // Double-Esc within the window while busy => hard-abort. Busy is
+            // `running || subagents_running`: during the subagent drain
+            // window (autopilot stage gap, cancel grace, reabsorb tail) the
+            // parent already reports idle — gating on `running` alone made
+            // the abort a silent no-op exactly when the user wanted to stop.
             let now = Instant::now();
-            let is_double = running
+            let is_double = (running || subagents_running)
                 && last_esc
                     .map(|t| now.duration_since(t) < Duration::from_millis(ESC_CANCEL_WINDOW_MS))
                     .unwrap_or(false);
@@ -730,3 +738,7 @@ mod sidecar_tests;
 #[cfg(test)]
 #[path = "key_handler_running_mode_tests.rs"]
 mod running_mode_tests;
+
+#[cfg(test)]
+#[path = "key_handler_cancel_busy_tests.rs"]
+mod cancel_busy_tests;

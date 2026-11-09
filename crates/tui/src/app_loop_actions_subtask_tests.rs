@@ -58,6 +58,7 @@ async fn terminal_entry_from_same_session_appends_to_queue_items() {
         &mut pending_images,
         &mut flash,
         0,
+        0,
     )
     .await;
     assert!(pick.is_none(), "parent is live: no switch requested");
@@ -100,6 +101,7 @@ async fn non_terminal_entry_flashes_and_does_not_append() {
         &mut pending_images,
         &mut flash,
         3,
+        0,
     )
     .await;
     assert!(pick.is_none());
@@ -137,6 +139,7 @@ async fn terminal_entry_from_child_session_returns_parent_pick() {
         &mut pending_images,
         &mut flash,
         7,
+        0,
     )
     .await;
     assert!(matches!(

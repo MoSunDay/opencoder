@@ -74,7 +74,7 @@ async fn compact_with_summary_emits_done() {
     sess.messages.push(opencoder_core::Message::assistant("a2"));
 
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Compact, &mut sess, &evt_tx).await;
+    let quit = process_cmd(UiCmd::Compact, &mut sess, &evt_tx, 0).await;
     assert!(!quit);
 
     let events: Vec<SessionEvent> = std::iter::from_fn(|| evt_rx.try_recv().ok())
@@ -134,7 +134,7 @@ async fn compact_noop_still_emits_done() {
     sess.store = Some(store.clone());
 
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
-    let _ = process_cmd(UiCmd::Compact, &mut sess, &evt_tx).await;
+    let _ = process_cmd(UiCmd::Compact, &mut sess, &evt_tx, 0).await;
 
     let events: Vec<SessionEvent> = std::iter::from_fn(|| evt_rx.try_recv().ok())
         .filter_map(|e| match e {
@@ -180,7 +180,7 @@ async fn compact_failure_emits_error_without_done() {
         .push(opencoder_core::Message::user("u2", "second turn"));
 
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
-    let _ = process_cmd(UiCmd::Compact, &mut sess, &evt_tx).await;
+    let _ = process_cmd(UiCmd::Compact, &mut sess, &evt_tx, 0).await;
 
     let events: Vec<SessionEvent> = std::iter::from_fn(|| evt_rx.try_recv().ok())
         .filter_map(|e| match e {

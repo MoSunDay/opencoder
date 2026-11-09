@@ -35,6 +35,7 @@ pub(crate) fn submit_steer(
     pending_images: &mut Vec<(String, String)>,
     session_id: &str,
     raw: &str,
+    turn: u64,
 ) -> bool {
     // Snapshot BEFORE submit: submit consumes pending_images into the
     // in-flight stash on the success path.
@@ -45,7 +46,15 @@ pub(crate) fn submit_steer(
         Some(raw.to_string()),
         &snapshot_image_uris(pending_images),
     );
-    submit(tx, st, steer_items, pending_images, input, raw.to_string())
+    submit(
+        tx,
+        st,
+        steer_items,
+        pending_images,
+        input,
+        raw.to_string(),
+        turn,
+    )
 }
 
 #[cfg(test)]
@@ -60,6 +69,7 @@ mod tests {
             display: "d".into(),
             session_id: session.into(),
             steer: true,
+            turn: 0,
         }
     }
 
@@ -77,7 +87,8 @@ mod tests {
             &mut steer_items,
             &mut pending_images,
             "s",
-            "stop exploring"
+            "stop exploring",
+            0
         ));
         assert_eq!(steer_items, vec![(-1, "stop exploring".to_string())]);
         assert!(pending_images.is_empty(), "images moved to the stash");
@@ -102,7 +113,8 @@ mod tests {
             &mut steer_items,
             &mut pending_images,
             "s",
-            "stop"
+            "stop",
+            0
         ));
         assert!(steer_items.is_empty(), "temp row rolled back");
         assert_eq!(
@@ -156,6 +168,7 @@ mod tests {
                 display: "d".into(),
                 session_id: "s".into(),
                 steer: true,
+                turn: 0,
             },
             &mut queue_items,
             &mut steer_items,
@@ -248,6 +261,7 @@ mod tests {
                 display: "d".into(),
                 session_id: "s".into(),
                 steer: false,
+                turn: 0,
             },
             &mut queue_items,
             &mut steer_items,

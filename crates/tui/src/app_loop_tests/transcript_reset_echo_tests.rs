@@ -86,6 +86,7 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
     let mut notepad: Option<crate::notepad::NotepadView> = None;
     let mut question_menu = None;
     let question_hub = std::sync::Arc::new(opencoder_session::QuestionHub::default());
+    let mut turn_gen = 0u64;
 
     let _ = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
@@ -102,6 +103,7 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut question_menu,
@@ -206,6 +208,7 @@ async fn done_clears_pending_echo_so_later_bare_reset_does_not_resurrect_it() {
     let mut notepad: Option<crate::notepad::NotepadView> = None;
     let mut question_menu = None;
     let question_hub = std::sync::Arc::new(opencoder_session::QuestionHub::default());
+    let mut turn_gen = 0u64;
     let _ = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
         &mut chat,
@@ -221,6 +224,7 @@ async fn done_clears_pending_echo_so_later_bare_reset_does_not_resurrect_it() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut question_menu,

@@ -43,8 +43,10 @@ pub enum UiCmd {
     /// `run_loop` break instantly at its top-of-loop `is_cancelled()` check,
     /// silently rejecting all subsequent submissions). The loop reassigns its
     /// own `cancel` handle to a clone of the same token so double-Esc still
-    /// targets the live turn.
-    ResetCancel(CancellationToken),
+    /// targets the live turn. The `u64` is the TUI's turn generation: echoed
+    /// back on the matching `TurnDone` so stale completions from a cancelled
+    /// turn are dropped by the UI.
+    ResetCancel(CancellationToken, u64),
     Quit,
 }
 
@@ -58,7 +60,9 @@ pub enum UiEvent {
     /// Authoritative completed parent answer. Ordered bridge delivery precedes
     /// TurnDone; every interim streaming answer is also delivered losslessly.
     AssistantFinal(String),
-    TurnDone(String),
+    /// The `u64` echoes the turn generation from the `ResetCancel` that armed
+    /// the turn; the UI drops `TurnDone`s whose generation no longer matches.
+    TurnDone(String, u64),
     /// Background subtask watcher progress. `session` is the parent session whose
     /// registry owns the subtask; delivered on a TUI-internal channel so it
     /// survives session switches (workers are quit on switch).
@@ -84,8 +88,12 @@ pub(crate) fn spawn_task(
         return crate::remote::spawn(session, commands, ui);
     }
     tokio::spawn(async move {
+        let mut turn = 0u64;
         while let Some(command) = commands.recv().await {
-            if process_cmd(command, &mut session, &ui).await {
+            if let UiCmd::ResetCancel(_, next) = &command {
+                turn = *next;
+            }
+            if process_cmd(command, &mut session, &ui, turn).await {
                 break;
             }
         }
@@ -269,6 +277,7 @@ pub async fn process_cmd(
     cmd: UiCmd,
     sess: &mut SessionState,
     evt_tx: &mpsc::Sender<UiEvent>,
+    turn: u64,
 ) -> bool {
     sess.harness.literal_mentions = true;
     let (ui_tx, ui_forwarder) = spawn_ui_event_forwarder(evt_tx.clone());
@@ -321,7 +330,7 @@ pub async fn process_cmd(
                 sess,
                 message_floor.load(std::sync::atomic::Ordering::Relaxed),
             );
-            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone()));
+            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone(), turn));
             false
         }
         UiCmd::Compact => {
@@ -373,7 +382,7 @@ pub async fn process_cmd(
             }
             drop(sink);
             let _ = flusher.await;
-            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone()));
+            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone(), turn));
             false
         }
         UiCmd::SetSkill(body) => {
@@ -530,7 +539,7 @@ pub async fn process_cmd(
             }
             false
         }
-        UiCmd::ResetCancel(c) => {
+        UiCmd::ResetCancel(c, _) => {
             sess.cancel = Some(c);
             false
         }

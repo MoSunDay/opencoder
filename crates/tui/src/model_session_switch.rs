@@ -30,6 +30,7 @@ pub(crate) async fn switch_session(
 ) {
     if let Some(m) = json.get("model").and_then(|v| v.as_str()) {
         config.model = m.to_string();
+        chat.model = m.to_string();
     }
     let new_config = config.clone();
     match new_config.resolve_endpoint() {

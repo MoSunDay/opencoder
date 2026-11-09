@@ -59,7 +59,7 @@ async fn tui_at_paths_are_literal_in_messages_requests_and_store() {
     // Hand-typed @ paths remain literal through the submit-time
     // expansion, non-path tokens stay verbatim.
     let prompt = "read @notes.md and @src/main.rs, mail a@b.com, see @nope.txt";
-    let quit = process_cmd(UiCmd::Prompt(prompt.into(), vec![]), &mut sess, &tx).await;
+    let quit = process_cmd(UiCmd::Prompt(prompt.into(), vec![]), &mut sess, &tx, 0).await;
     assert!(!quit, "Prompt must not break the worker loop");
 
     // In-memory recorded message: mentions literal, the rest verbatim.

@@ -83,10 +83,12 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
     let (admit_tx, mut admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let flow = crate::app::app_loop::fire_clear_confirm(
         crate::clear_confirm::arm(Some("finish the summary".into()), None),
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut chat,
@@ -136,10 +138,12 @@ async fn expired_guard_queues_compound_when_running() {
     let (admit_tx, mut admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let flow = crate::app::app_loop::fire_clear_confirm(
         crate::clear_confirm::arm(Some("then run checks".into()), None),
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut chat,
@@ -208,6 +212,7 @@ async fn manual_confirm_while_running_interrupts_and_fires_now() {
     let (admit_tx, mut admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let mut child_runtime = crate::worker::ChildRuntimeHandles {
         cancels: Default::default(),
         turn_cancels: Default::default(),
@@ -234,6 +239,7 @@ async fn manual_confirm_while_running_interrupts_and_fires_now() {
         &mut chat,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut sys_tokens,
@@ -340,6 +346,7 @@ async fn esc_cancel_drops_countdown_chip() {
     let (admit_tx, _admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let mut child_runtime = crate::worker::ChildRuntimeHandles {
         cancels: Default::default(),
         turn_cancels: Default::default(),
@@ -368,6 +375,7 @@ async fn esc_cancel_drops_countdown_chip() {
         &mut chat,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut sys_tokens,
@@ -429,6 +437,7 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
     let (admit_tx, mut admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let mut child_runtime = crate::worker::ChildRuntimeHandles {
         cancels: Default::default(),
         turn_cancels: Default::default(),
@@ -457,6 +466,7 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
             &mut chat,
             &cmd_tx,
             &mut cancel,
+            &mut turn_gen,
             &mut running,
             &mut follow,
             &mut sys_tokens,
@@ -489,6 +499,7 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
         &mut chat,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut sys_tokens,
@@ -544,6 +555,7 @@ async fn retyped_clear_command_supersedes_armed_rest() {
     let (admit_tx, _admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let mut child_runtime = crate::worker::ChildRuntimeHandles {
         cancels: Default::default(),
         turn_cancels: Default::default(),
@@ -571,6 +583,7 @@ async fn retyped_clear_command_supersedes_armed_rest() {
             &mut chat,
             &cmd_tx,
             &mut cancel,
+            &mut turn_gen,
             &mut running,
             &mut follow,
             &mut sys_tokens,
@@ -599,6 +612,7 @@ async fn retyped_clear_command_supersedes_armed_rest() {
         &mut chat,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut sys_tokens,
@@ -652,6 +666,7 @@ async fn shift_tab_repress_fires_armed_guard_now() {
     let (admit_tx, _admit_rx) = mpsc::channel(8);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let mut child_runtime = crate::worker::ChildRuntimeHandles {
         cancels: Default::default(),
         turn_cancels: Default::default(),
@@ -678,6 +693,7 @@ async fn shift_tab_repress_fires_armed_guard_now() {
         &mut chat,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut running,
         &mut follow,
         &mut sys_tokens,

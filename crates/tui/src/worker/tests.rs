@@ -62,6 +62,7 @@ async fn prompt_control_cmd_switches_agent_without_llm_turn() {
         UiCmd::Prompt("/plan".into(), Vec::new()),
         &mut sess,
         &evt_tx,
+        0,
     )
     .await;
     assert_eq!(sess.agent.name, "plan", "pure prompt switches the agent");
@@ -82,6 +83,7 @@ async fn prompt_clear_context_folds_transcript_and_emits_reset() {
         UiCmd::Prompt(crate::clear_confirm::CLEAR_CONTEXT_CMD.into(), Vec::new()),
         &mut sess,
         &evt_tx,
+        0,
     )
     .await;
     assert_eq!(sess.messages.len(), 1, "transcript folds to one seed");
@@ -198,7 +200,7 @@ async fn reset_cancel_replaces_with_fresh_uncancelled_token() {
 
     let fresh = CancellationToken::new();
     let fresh_probe = fresh.clone();
-    let should_break = process_cmd(UiCmd::ResetCancel(fresh), &mut sess, &evt_tx).await;
+    let should_break = process_cmd(UiCmd::ResetCancel(fresh, 0), &mut sess, &evt_tx, 0).await;
 
     assert!(!should_break, "ResetCancel must not break the worker loop");
     let active = sess.cancel.as_ref().expect("token present after reset");
@@ -252,6 +254,7 @@ async fn edit_plan_replaces_text_and_preserves_non_text_blocks() {
         UiCmd::EditPlan("edited plan text".to_string()),
         &mut sess,
         &evt_tx,
+        0,
     )
     .await;
     assert!(!should_break, "EditPlan must not break the worker loop");
@@ -296,6 +299,7 @@ async fn edit_annotation_sets_requirement() {
         UiCmd::EditAnnotation("需要 tab:\tand CR\r\nraw".to_string()),
         &mut sess,
         &evt_tx,
+        0,
     )
     .await;
     assert!(
@@ -321,6 +325,7 @@ async fn edit_annotation_blank_clears_requirement() {
         UiCmd::EditAnnotation("   \n\t ".to_string()),
         &mut sess,
         &evt_tx,
+        0,
     )
     .await;
     assert!(
@@ -395,7 +400,8 @@ async fn prompt_after_midrun_compaction_still_sends_completed_answer() {
         !process_cmd(
             UiCmd::Prompt("question".into(), Vec::new()),
             &mut sess,
-            &evt_tx
+            &evt_tx,
+            0
         )
         .await
     );
@@ -465,7 +471,8 @@ async fn prompt_sends_reliable_completed_answer_before_turn_done() {
         !process_cmd(
             UiCmd::Prompt("question".into(), Vec::new()),
             &mut sess,
-            &evt_tx
+            &evt_tx,
+            0
         )
         .await
     );
@@ -481,7 +488,7 @@ async fn prompt_sends_reliable_completed_answer_before_turn_done() {
         .expect("prompt must emit the reliable completed answer");
     let done_idx = events
         .iter()
-        .position(|event| matches!(event, UiEvent::TurnDone(_)))
+        .position(|event| matches!(event, UiEvent::TurnDone(..)))
         .expect("prompt must emit TurnDone");
     assert!(
         final_idx < done_idx,
@@ -493,7 +500,7 @@ async fn prompt_sends_reliable_completed_answer_before_turn_done() {
 async fn ordered_forwarder_backpressures_without_losing_reliable_events() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(UI_EVENT_CAPACITY);
     for index in 0..UI_EVENT_CAPACITY {
-        tx.try_send(UiEvent::TurnDone(format!("sentinel-{index}")))
+        tx.try_send(UiEvent::TurnDone(format!("sentinel-{index}"), 0))
             .unwrap();
     }
     let (pending, forwarder) = spawn_ui_event_forwarder(tx);
@@ -522,7 +529,7 @@ async fn ordered_forwarder_backpressures_without_losing_reliable_events() {
     for index in 0..UI_EVENT_CAPACITY {
         assert!(matches!(
             rx.recv().await,
-            Some(UiEvent::TurnDone(agent)) if agent == format!("sentinel-{index}")
+            Some(UiEvent::TurnDone(agent, _)) if agent == format!("sentinel-{index}")
         ));
     }
     assert!(matches!(

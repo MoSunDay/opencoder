@@ -88,10 +88,12 @@ async fn cancel_running_turn_keeps_pending_rows_in_store_and_mirrors() {
     let mut running = true;
     let mut cancelled = false;
     let mut follow = false;
+    let mut turn_gen = 0u64;
 
     cancel_running_turn(
         &mut chat,
         &mut cancel,
+        &mut turn_gen,
         &mut child_runtime,
         &mut running,
         &mut cancelled,
@@ -175,6 +177,7 @@ async fn fold_error_resyncs_steer_mirror_from_store() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
 
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Error("boom".into()))),
@@ -191,6 +194,7 @@ async fn fold_error_resyncs_steer_mirror_from_store() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -263,6 +267,7 @@ fn apply_done_reinserts_after_done_overwrite_race() {
             display: "queued-A".into(),
             session_id: "s".into(),
             steer: false,
+            turn: 0,
         },
         &mut queue_items,
         &mut vec![],

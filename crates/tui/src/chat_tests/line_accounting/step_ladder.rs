@@ -180,23 +180,27 @@ fn step_group_running_call_keeps_alignment() {
         marker_n(1),
     ]);
     assert_line_accounting_matches(&v);
-    // The folded-but-running ladder renders just its group row + blank;
-    // the running step streams in the separate TURN LIVE REGION, which is
-    // NOT part of flatten: group row + blank + marker = 3.
-    assert_eq!(v.flatten().len(), 2 + 1);
-    // The spinner hint rides on the group row itself.
-    let row: String = v.flatten()[0]
-        .spans
+    // The FIRST (and only) step is in flight: the ladder renders NOTHING
+    // (zero settled steps) and the TURN LIVE REGION is the turn's whole
+    // inline surface — region header + calls aggregate + the running
+    // call's row, then the marker.
+    assert_eq!(v.flatten().len(), 3 + 1, "flat: {:?}", v.flatten());
+    let rows: Vec<String> = v
+        .flatten()
         .iter()
-        .map(|s| s.content.clone())
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
+    assert_eq!(rows[0], "> live", "region header leads: {rows:?}");
     assert!(
-        row.contains("running"),
-        "group row should hint running: {row:?}"
+        rows.iter().any(|r| r.contains("1 Function call")),
+        "the calls aggregate row renders in the region: {rows:?}"
     );
+    // The spinner rides ON the running call's row (a SPAN, never an extra
+    // line) — same accounting as an ended call.
     assert!(
-        row.contains("Step  \u{280b} running"),
-        "group row should keep two spaces before the animation: {row:?}"
+        rows.iter()
+            .any(|r| r.contains("bash") && r.contains("\u{280b}")),
+        "the running call's row carries the spinner inline: {rows:?}"
     );
 }
 
@@ -240,39 +244,46 @@ fn auto_running_position_keeps_alignment() {
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
-    // The whole turn renders: finished steps as collapsed rows, the running
-    // step streaming its thinking.
+    // The ladder renders its SETTLED history (group row + Step(1) row) and
+    // the in-flight step streams in the region rows below it.
     assert!(
         flat.iter().any(|l| l.contains("Step(1)")),
         "finished step row renders: {flat:?}"
     );
     assert!(
-        flat.iter().any(|l| l.contains("Step(2)")),
-        "running step row renders: {flat:?}"
+        flat.iter().all(|l| !l.contains("Step(2)")),
+        "the in-flight step never renders as a ladder row (it streams in the \
+region below): {flat:?}"
     );
     assert!(
         flat.iter().any(|l| l.contains("working")),
-        "running thinking streams in place: {flat:?}"
+        "running thinking streams in the INLINE region rows: {flat:?}"
     );
-    // Ladder block only (the live region is NOT in flatten): group(1) + 1
-    // + (1+2+1+1) + trailing blank(1) = 8, marker(1) → 9.
+    // Ladder (group row + Step(1) row + blank = 3) + INLINE region
+    // (header + thinking hdr + body + calls aggregate + call row = 5)
+    // + marker(1) → 9.
     assert_eq!(v.flatten().len(), 9);
-    // Every rendered row is a clickable target in visual order: group,
-    // Step(1), Step(2), Calls(2), call b.
+    // Settled ladder targets in visual order: group, Step(1) (the in-flight
+    // step adds no ladder target — its surface is the region's own header).
     let headers = v.tool_call_headers();
-    assert_eq!(headers.len(), 5, "headers: {headers:?}");
+    assert_eq!(headers.len(), 2, "headers: {headers:?}");
     assert_eq!(headers[1].header_line_idx, headers[0].header_line_idx + 1);
-    assert_eq!(headers[2].header_line_idx, headers[0].header_line_idx + 2);
-    assert_eq!(headers[4].header_line_idx, headers[0].header_line_idx + 6);
+    assert_eq!(v.live_headers().len(), 1, "one live-region header target");
+    assert_eq!(
+        v.live_headers()[0].header_line_idx,
+        headers[0].header_line_idx + 3,
+        "region header sits below group row + step row + blank"
+    );
 }
 
-/// LIVE REGION detachment: a folded-but-running ladder keeps its two lines
-/// (group row + blank) and NOTHING else — the current step streams in the
-/// separate TURN LIVE REGION (own layout area), so flatten is identical to
-/// any settled folded ladder and the folded group row stays the only
-/// target.
+/// LIVE REGION INLINE: a folded-but-running ladder keeps its two lines
+/// (group row + blank) and the CURRENT step streams in the TURN LIVE
+/// REGION whose rows ride INLINE directly below the ladder (inside the
+/// same flatten window, above later blocks). The group row counts SETTLED
+/// steps only and stays the ladder's only click target; the region adds
+/// exactly one target of its own — its `> live` header row.
 #[test]
-fn live_region_stays_out_of_flatten_and_adds_no_targets() {
+fn live_region_rides_inline_below_the_ladder() {
     let mut expanded = tool_call("a", 3);
     expanded.expanded = true;
     let mut running = tool_call("b", 0);
@@ -315,13 +326,26 @@ fn live_region_stays_out_of_flatten_and_adds_no_targets() {
         "the finished step stays folded inside the ladder: {flat:?}"
     );
     assert!(
-        flat.iter()
-            .all(|l| !l.contains("Step(2)") && !l.contains("working")),
-        "the transcript carries NO live-region rows while the turn runs: {flat:?}"
+        flat[0].starts_with("\u{25b8} 1 Step") && flat[0].contains("running"),
+        "the group row counts SETTLED steps only, with the live hint: {:?}",
+        flat[0]
     );
-    // Folded block only: group row(1) + blank(1) + marker(1) = 3; the
-    // current step streams in the separate live region instead.
-    assert_eq!(v.flatten().len(), 3, "flat: {flat:?}");
+    assert!(
+        flat.iter().all(|l| !l.contains("Step(")),
+        "the in-flight step never renders as a ladder row: {flat:?}"
+    );
+    assert_eq!(
+        flat[2], "> live",
+        "region header right below the blank: {flat:?}"
+    );
+    assert!(
+        flat.iter().any(|l| l.contains("working")) && flat.iter().any(|l| l.contains("a")),
+        "the region's rows ride INLINE in flatten: {flat:?}"
+    );
+    // Folded ladder (2) + region (header + thinking hdr + body + calls
+    // aggregate + 2 call rows = 6) + marker (1) = 9; `a`'s expanded result
+    // NEVER renders in the region (the ladder owns the drill-down).
+    assert_eq!(flat.len(), 9, "flat: {flat:?}");
     let live = super::super::step_group::live_lines(&v);
     assert!(
         live.iter().any(|l| l.contains("working"))
@@ -329,13 +353,19 @@ fn live_region_stays_out_of_flatten_and_adds_no_targets() {
             && live.iter().all(|l| !l.contains("Step(")),
         "the live region streams the current step's rows, counter-less: {live:?}"
     );
-    // Render-only live area: the folded ladder keeps exactly ONE target —
-    // its group row.
+    // Folded block only: the ladder keeps exactly ONE target — its group
+    // row; the region contributes its own single header target.
     let headers = v.tool_call_headers();
     assert_eq!(headers.len(), 1, "headers: {headers:?}");
     let row = &flat[headers[0].header_line_idx];
     assert!(
-        row.contains("2 Steps"),
+        row.contains("1 Step"),
         "target lands on the group row: {row:?}"
+    );
+    let live_headers = v.live_headers();
+    assert_eq!(live_headers.len(), 1, "one live header target");
+    assert_eq!(
+        live_headers[0].header_line_idx, 2,
+        "it points at the rendered `> live` row (below group row + blank)"
     );
 }

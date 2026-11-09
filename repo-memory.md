@@ -25,7 +25,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 **frontend**
 
 - [agents/local](agents/frontend/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
-- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区并入转录滚动窗尾部、与转录共用一条滚动条（`render_live.rs` region/wrapped_total/slice_window 拼一个 wrapping Paragraph）不随开合、只渲染当前 step 的 thinking + 阶梯同款调用行（结果不渲染；无 step 计数、无 Say），live 永不截断、上滚可达其开头，Say 开始/turn 结束即清空：`chat_live_turn`；open Say 流式期间以独立形态入转录（`say:` 头行 + running 提示 + raw body 全量，共享滚动），seal 后才合并为 `Say(n steps)` 头行（见 features/changelog/2026-11-08/live-region-one-scrollbar-folded-say-ladder.md）；一次性 `@capability` 子任务派发）。
+- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区经 flatten 内联在运行中阶梯下方、Subagent 块之上（阶梯只渲染已落定 step，首个 in-flight step 期间阶梯零行），`> live` 头行默认展开、点击/Ctrl+L 可收起，与转录共用同一滚动窗，settle 后完整 step 落入阶梯：`chat_live_turn`（见 features/changelog/2026-11-09/live-region-inline-below-ladder-collapsible.md）；open Say 流式期间以独立形态入转录（`say:` 头行 + running 提示 + raw body 全量，共享滚动），seal 后才合并为 `Say(n steps)` 头行（见 features/changelog/2026-11-08/live-region-one-scrollbar-folded-say-ladder.md）；一次性 `@capability` 子任务派发）。
 - [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区 `TurnLiveRegion` 位于 transcript 滚动容器内、消息列表之下、与消息共用滚动条：主体仅 thinking + 与阶梯 L3 同款调用行（无 Step(k) 计数、无 Say 块）；流式 Say 由 `StreamingSay`（`pendingSay` 原文）渲染在同一滚动流、flush 边界落地为消息，auto-stick 仅贴底跟随；settle 后实时区清空（`findRunningStepsTurn`）：`stepsBlock.jsx`）。
 
 **ontology**

@@ -70,14 +70,18 @@ pub enum ChatBlock {
     /// user toggles persist exactly as clicked.
     /// `progress_active` drives the group-row animation until Say begins and
     /// cannot be reactivated after non-empty Say output exists.
-    /// LIVE PREVIEW: while the turn runs (`progress_active == true`) AND the
-    /// group is folded (`open == false`) AND it has steps, the CURRENT (last)
-    /// step renders expanded directly below the folded `N Steps` row — same
-    /// shapes as an open step (step row, thinking, calls aggregate, call
-    /// headers incl. running spinner, expanded call outputs). The preview is
-    /// render-only: it adds no click targets and disappears the moment
-    /// progress settles (Say's first chunk, run end, new turn), leaving the
-    /// step only inside the folded ladder.
+    /// TURN LIVE REGION: while the turn runs (`progress_active == true`) and
+    /// has steps, the CURRENT (last, in-flight) step is NOT part of the
+    /// ladder — the ladder renders SETTLED history only
+    /// (`steps::settled_steps`), and the in-flight step streams in the TURN
+    /// LIVE REGION emitted by `flatten_with` DIRECTLY BELOW the running
+    /// ladder (above any later blocks), as a `> live` header plus the
+    /// step's detail rows (`chat_live_turn.rs`). While the FIRST step is
+    /// still streaming the block itself renders ZERO rows — the region is
+    /// the turn's only surface. The region collapses to its `▸ live`
+    /// header on click / Ctrl+L (`ChatView::live_collapsed`) and disappears
+    /// the moment progress settles (Say's first chunk, run end, new turn),
+    /// leaving the step inside the ladder history.
     /// ADJACENT-pair merge: when this group's next block is its turn's Say,
     /// the standalone `N Steps` row is replaced by one merged header
     /// `{❯|▸} Say(n step{s}): <say first line>` that both toggles the
@@ -251,6 +255,14 @@ pub struct ChatView {
     /// (drives the `[sub x/x]` bottom-border badge; 0/0 hides it).
     pub subtask_done: u32,
     pub subtask_total: u32,
+    /// Whether this view's TURN LIVE REGION is collapsed to its header row
+    /// (`chat_live_turn.rs`). The region streams the running turn's current
+    /// step INLINE below the running ladder (inside `flatten_with`), so its
+    /// disclosure is view state, not block state: `false` (the `Default`)
+    /// renders the `> live` header plus the current step's detail rows;
+    /// `true` renders the `▸ live` header row only. Re-armed (`false`) on
+    /// every newly-admitted running turn; collapsed by click and Ctrl+L.
+    pub live_collapsed: bool,
     /// The `/sidecar` Q/A panel while it is open (never inside `blocks` —
     /// see `SidecarPanel`). Cleared on exit (ESC / Ctrl+L) and on `/task`
     /// switches; `None` plus `sidecar_focus == false` is the closed state.
@@ -273,15 +285,28 @@ pub struct SubagentHeader {
     pub header_line_idx: usize,
 }
 
+/// Locates the TURN LIVE REGION's `> live` / `▸ live` header line (the
+/// first row the region emits inside `flatten_with`, right below the
+/// running ladder) for mouse hit-testing: clicking it toggles the region
+/// between its detail rows and the collapsed header-only shape
+/// (`ChatView::toggle_live_region`). `block_idx` is the RUNNING
+/// `StepGroup`'s index in `ChatView::blocks`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LiveHeader {
+    pub block_idx: usize,
+    pub header_line_idx: usize,
+}
+
 /// One step inside a `ChatBlock::StepGroup`: one Thinking run (as rendered
 /// markdown lines) plus every function call before the next Thinking run.
 /// The step's row renders only while the enclosing turn is open; its
 /// content (thinking + calls aggregation row) is visible only while the
 /// step is open; individual call rows additionally require `calls_open`;
 /// a single call's result additionally requires `ToolCall::expanded`.
-/// While the turn runs and the group is folded, the LAST step is also
-/// rendered as a live preview with `open`/`calls_open` forced on — without
-/// mutating these flags.
+/// While the turn runs, the LAST (in-flight) step is rendered by the TURN
+/// LIVE REGION with its details forced open (`chat_live_turn.rs`) — without
+/// mutating these flags; the ladder itself hides it until it settles
+/// (`steps::settled_steps`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
     /// Sanitized source accumulated from live reasoning deltas. Keeping the
@@ -294,9 +319,9 @@ pub struct Step {
     /// `steps::absorb_pending_thinking`).
     pub thinking: Vec<Line<'static>>,
     /// Whether `thinking_raw` has advanced beyond `thinking`. Steps that are
-    /// not visible (folded ladder, no live preview) only append source;
-    /// materialization re-renders the markdown once, avoiding an O(n²) full
-    /// re-render on every hidden delta.
+    /// not visible (folded ladder, outside the live region) only append
+    /// source; materialization re-renders the markdown once, avoiding an
+    /// O(n²) full re-render on every hidden delta.
     pub thinking_dirty: bool,
     pub calls: Vec<ToolCall>,
     /// Whether this step's Thinking content + calls aggregation row render.

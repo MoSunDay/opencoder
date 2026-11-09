@@ -131,7 +131,7 @@ fn streaming_say_is_copyable_transcript_content_without_chrome() {
     v.apply(&SessionEvent::TextDelta("the answer".into()));
 
     let live = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
-        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0, v.live_collapsed))
         .unwrap_or_default();
     let live_text = live
         .iter()
@@ -159,13 +159,15 @@ fn streaming_say_is_copyable_transcript_content_without_chrome() {
     );
 }
 
+/// A call whose `ToolEnd` has not arrived renders its header with a
+/// trailing `" ⠋"` motion span (chat_step_render: `elapsed_ms` unset).
+/// While the turn runs that row lives ONLY in the TURN LIVE REGION — now
+/// INLINE in the transcript window, right below the (empty, first-step-
+/// streaming) ladder — so copy mode must exclude the region at the SOURCE
+/// (`flatten_for_copy`): copy text and copy-mode scroll geometry carry no
+/// spinner glyph and no live-region rows at all.
 #[test]
 fn running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_text() {
-    // A call whose `ToolEnd` has not arrived renders its header with a
-    // trailing `" ⠋"` motion span (chat_step_render: `elapsed_ms` unset).
-    // While the turn runs that row lives ONLY in the TURN LIVE REGION (its
-    // own area — the transcript holds just the folded ladder row), so copy
-    // mode over the transcript can never pick up the spinner glyph.
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("thinking".into()));
     v.apply(&SessionEvent::ToolStart {
@@ -176,7 +178,7 @@ fn running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_t
     // Precondition: the live region really carries the spinner span on the
     // running call's header row (tick 0 → first spinner frame).
     let live_rows = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
-        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0, v.live_collapsed))
         .unwrap_or_default();
     let live_text = live_rows
         .iter()
@@ -193,9 +195,26 @@ fn running_call_header_lives_only_in_the_live_region_and_never_leaks_into_copy_t
         "precondition: the live region's running call header carries the \
 spinner glyph: {live_text:?}"
     );
+    // The decorated flatten CARRIES the region inline (the region is the
+    // streaming turn's only surface — the first step still in flight means
+    // no settled ladder row at all), while the copy-mode flatten omits it.
+    let rows = row_texts(&v);
     assert!(
-        !row_texts(&v).iter().any(|l| l.contains("bash")),
-        "the transcript holds only the folded ladder while the region streams"
+        rows.iter().any(|l| l.contains("> live")),
+        "the live region rides inline in the transcript window: {rows:?}"
+    );
+    assert!(
+        rows.iter().any(|l| l.contains("bash echo x")),
+        "the running call header streams inside the region: {rows:?}"
+    );
+    assert!(
+        !rows.iter().any(|l| l.contains("Step")),
+        "first step still in flight: no settled ladder row exists: {rows:?}"
+    );
+    let copy_rows = v.flatten_for_copy(0, 0);
+    assert!(
+        copy_rows.is_empty(),
+        "copy-mode flatten drops the whole region: {copy_rows:?}"
     );
 
     let text = copy_text(&v);

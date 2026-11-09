@@ -40,6 +40,11 @@ pub struct ViewportCache {
     /// Terminal text width the layout was computed at. If the terminal is
     /// resized the cache must be rebuilt.
     width: u16,
+    /// Whether `lines` include the TURN LIVE REGION rows: `true` for the
+    /// decorated body render (`build`), `false` for the copy-mode cache
+    /// (`build_for_copy` flattens via `flatten_for_copy`). A mode mismatch
+    /// forces a rebuild, so toggling copy mode never renders stale lines.
+    include_live: bool,
     /// Copy-mode view over `lines`, built on first [`Self::cleaned`] call at
     /// a given width and rebuilt when that width changes.
     clean: Option<CleanModel>,
@@ -142,6 +147,28 @@ impl ViewportCache {
     /// A `width` of 0 (e.g. terminal too narrow) yields an empty cache so
     /// callers can short-circuit without dividing by zero.
     pub fn build(chat: &crate::chat::ChatView, width: u16, anim_tick: u32, now_ms: i64) -> Self {
+        Self::build_opts(chat, width, anim_tick, now_ms, true)
+    }
+
+    /// The copy-mode variant of [`Self::build`]: flattens WITHOUT the turn
+    /// live region (`ChatView::flatten_for_copy`) so copy text and copy-mode
+    /// scroll geometry exclude the transient streaming rows by construction.
+    pub fn build_for_copy(
+        chat: &crate::chat::ChatView,
+        width: u16,
+        anim_tick: u32,
+        now_ms: i64,
+    ) -> Self {
+        Self::build_opts(chat, width, anim_tick, now_ms, false)
+    }
+
+    fn build_opts(
+        chat: &crate::chat::ChatView,
+        width: u16,
+        anim_tick: u32,
+        now_ms: i64,
+        include_live: bool,
+    ) -> Self {
         if width == 0 {
             return ViewportCache {
                 lines: Vec::new(),
@@ -149,10 +176,15 @@ impl ViewportCache {
                 cum_rows: vec![0],
                 total_rows: 0,
                 width: 0,
+                include_live,
                 clean: None,
             };
         }
-        let lines = chat.flatten_with(anim_tick, now_ms);
+        let lines = if include_live {
+            chat.flatten_with(anim_tick, now_ms)
+        } else {
+            chat.flatten_for_copy(anim_tick, now_ms)
+        };
         // cum_rows[i] = rows consumed by lines[0..i]; cum_rows[0] == 0.
         let mut cum_rows = Vec::with_capacity(lines.len() + 1);
         cum_rows.push(0);
@@ -167,8 +199,16 @@ impl ViewportCache {
             cum_rows,
             total_rows,
             width,
+            include_live,
             clean: None,
         }
+    }
+
+    /// `true` when this cache carries the decorated (live-region-including)
+    /// line set — the body render's mode. Copy mode builds with
+    /// [`Self::build_for_copy`] and checks this to decide rebuilds.
+    pub fn includes_live(&self) -> bool {
+        self.include_live
     }
 
     /// The copy-mode (decoration-stripped) projection of this cache's lines,
@@ -256,6 +296,29 @@ impl ViewportCache {
             end = start + 1;
         }
         (start, end, top_skip)
+    }
+}
+
+/// Ensure `viewport` holds the COPY-MODE cache for `chat` at `width`:
+/// rebuilt when missing, resized, or still carrying the decorated
+/// (live-region-including) line set. Copy mode flattens WITHOUT the turn
+/// live region — the streaming rows are transient UI, never transcript
+/// content (`ChatView::flatten_for_copy`) — so copy text and copy-mode
+/// scroll geometry exclude them by construction.
+pub(crate) fn refresh_copy_cache(
+    viewport: &mut Option<ViewportCache>,
+    chat: &crate::chat::ChatView,
+    width: u16,
+    anim_tick: u32,
+    now_ms: i64,
+) {
+    if viewport
+        .as_ref()
+        .is_none_or(|v| v.width() != width || v.includes_live())
+    {
+        *viewport = Some(ViewportCache::build_for_copy(
+            chat, width, anim_tick, now_ms,
+        ));
     }
 }
 

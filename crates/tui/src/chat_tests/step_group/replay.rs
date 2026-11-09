@@ -158,8 +158,18 @@ fn copy_mode_drops_ladder_chrome_but_keeps_call_content() {
     v.apply(&SessionEvent::ReasoningDelta("copy me".into()));
     call_tool(&mut v, "t1");
     // Open the whole ladder: turn → step/calls aggregate → call result.
-    if let ChatBlock::StepGroup { open, steps, .. } = &mut v.blocks[0] {
+    // Settle the group in the same direct mutation: while the turn runs the
+    // ladder renders SETTLED steps only — an in-flight step yields no
+    // ladder rows to open or copy.
+    if let ChatBlock::StepGroup {
+        open,
+        steps,
+        progress_active,
+        ..
+    } = &mut v.blocks[0]
+    {
         *open = true;
+        *progress_active = false;
         steps[0].open = true;
         steps[0].calls_open = true;
     }

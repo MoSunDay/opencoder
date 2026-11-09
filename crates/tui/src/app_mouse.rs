@@ -170,6 +170,19 @@ pub(crate) async fn handle_mouse(
                     break;
                 }
             }
+            // Click the TURN LIVE REGION's `> live` / `▸ live` header (in
+            // the body, right below the running ladder): toggle the region
+            // between its detail rows and the collapsed header-only row
+            // (subagent-aware: toggles the focused child view).
+            for btn in &hits.live_btns {
+                if in_rect(btn.rect, m.column, m.row) {
+                    if let Some(v) = collapse_view(chat, *subagent_focus) {
+                        v.toggle_live_region();
+                    }
+                    consumed = true;
+                    break;
+                }
+            }
             // Click on a Subagent-block header: enter
             // the subagent's perspective (ctx-switch).
             // No inline expansion — the child view and

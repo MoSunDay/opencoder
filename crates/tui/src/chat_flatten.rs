@@ -7,6 +7,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use super::live_turn;
 use super::{
     assistant_rows, push_duration_span, render_collapsible, step_render, SayHeader, PLAN_HEADER,
     ROLE_SAY_HEADER, ROLE_USER_HEADER, SPINNER,
@@ -19,7 +20,24 @@ impl ChatView {
     /// by `flatten()` (which passes `0`) for non-render callers (selection,
     /// scroll-counting, tests) — line counts are identical across tick values,
     /// so hit-rects and selection math stay aligned with the live render.
+    /// Flatten all blocks into a single `Vec<Line>` for rendering, using
+    /// `anim_tick` advances running subagent and step-progress spinners. Delegated to
+    /// by `flatten()` (which passes `0`) for non-render callers (selection,
+    /// scroll-counting, tests) — line counts are identical across tick values,
+    /// so hit-rects and selection math stay aligned with the live render.
     pub fn flatten_with(&self, anim_tick: u32, now_ms: i64) -> Vec<Line<'static>> {
+        self.flatten_opts(anim_tick, now_ms, true)
+    }
+
+    /// Copy-mode flatten: same shapes as [`Self::flatten_with`] minus the
+    /// TURN LIVE REGION — its rows are transient streaming UI, never
+    /// transcript content, so copy text (and copy-mode scroll geometry)
+    /// excludes the whole region while the turn still streams.
+    pub fn flatten_for_copy(&self, anim_tick: u32, now_ms: i64) -> Vec<Line<'static>> {
+        self.flatten_opts(anim_tick, now_ms, false)
+    }
+
+    fn flatten_opts(&self, anim_tick: u32, now_ms: i64, include_live: bool) -> Vec<Line<'static>> {
         let mut out = Vec::with_capacity(self.blocks.len() * 2);
         for (bi, block) in self.blocks.iter().enumerate() {
             match block {
@@ -159,6 +177,22 @@ impl ChatView {
                         anim_tick,
                         say,
                     );
+                    // TURN LIVE REGION: while this group runs (armed, no
+                    // Say yet) the in-flight step streams RIGHT BELOW the
+                    // ladder — above any Subagent blocks that follow — as
+                    // rows inside this same transcript window. Clickable
+                    // via its header row (`chat_headers.rs` registers the
+                    // `LiveHeader` target); `collect_headers` mirrors the
+                    // row count so hit-rects below stay aligned. Copy mode
+                    // omits the region (`flatten_for_copy`): transient
+                    // streaming rows are never transcript content.
+                    if include_live && *progress_active && !steps.is_empty() {
+                        out.extend(live_turn::render_lines(
+                            steps,
+                            anim_tick,
+                            self.live_collapsed,
+                        ));
+                    }
                 }
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(
@@ -256,11 +290,12 @@ impl ChatView {
                 }
             }
         }
-        // The transcript holds ONLY Say + ladder blocks — the running
-        // turn's current step streams in the separate TURN LIVE REGION
-        // (own layout area, see `chat_live_turn.rs` / `render.rs`), NEVER
-        // in these lines: scroll, selection, hit-rects and line accounting
-        // stay untouched by streaming.
+        // The running turn's current step streams in the TURN LIVE REGION
+        // emitted right below the running group's ladder, INSIDE these
+        // lines (`chat_live_turn.rs`) — one scroll window with the
+        // transcript, above any subagent blocks. The region's header row is
+        // clickable (`toggle_live_region`), and `collect_headers`
+        // (`chat_headers.rs`) mirrors its count so hit-rects stay aligned.
         out
     }
 

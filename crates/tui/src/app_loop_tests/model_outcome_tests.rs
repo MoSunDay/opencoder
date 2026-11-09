@@ -52,7 +52,6 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
     let mut client: std::sync::Arc<dyn opencoder_llm::ChatStream> =
         std::sync::Arc::new(MockChatClient::new());
     let mut config = base_cfg;
-    let mut model_label = String::new();
     let mut compaction_threshold = 0u64;
     let mut context_limit = 0u64;
     let mut frame_ms = 25u64;
@@ -69,7 +68,6 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
         k,
         &mut client,
         &mut config,
-        &mut model_label,
         &mut compaction_threshold,
         &mut context_limit,
         &mut frame_ms,
@@ -154,7 +152,6 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
     let mut client: std::sync::Arc<dyn opencoder_llm::ChatStream> =
         std::sync::Arc::new(MockChatClient::new());
     let mut config = base_cfg;
-    let mut model_label = String::new();
     let mut compaction_threshold = 0u64;
     let mut context_limit = 0u64;
     let mut frame_ms = 25u64;
@@ -171,7 +168,6 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
         k,
         &mut client,
         &mut config,
-        &mut model_label,
         &mut compaction_threshold,
         &mut context_limit,
         &mut frame_ms,

@@ -31,7 +31,6 @@ pub(crate) async fn handle_model_outcome(
     k: KeyEvent,
     client: &mut Arc<dyn ChatStream>,
     config: &mut Config,
-    model_label: &mut String,
     compaction_threshold: &mut u64,
     context_limit: &mut u64,
     frame_ms: &mut u64,
@@ -46,7 +45,7 @@ pub(crate) async fn handle_model_outcome(
                 Ok(path) => {
                     match Config::load(workdir) {
                         Ok(reloaded) => {
-                            *model_label = reloaded.model.clone();
+                            chat.model = reloaded.model.clone();
                             *compaction_threshold = reloaded.compaction.context_threshold;
                             *context_limit = reloaded.context_limit();
                             // Rebuild the outer `client` too so subsequent
@@ -132,7 +131,7 @@ pub(crate) async fn handle_model_outcome(
         }
         ModelOutcome::SaveSessionOnly(json) => {
             switch_session(json, config, client, cmd_tx, chat).await;
-            *model_label = config.model.clone();
+            chat.model = config.model.clone();
             *compaction_threshold = config.compaction.context_threshold;
             *context_limit = config.context_limit();
         }

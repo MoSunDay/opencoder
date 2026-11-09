@@ -136,6 +136,7 @@ async fn clear_context_folds_transcript_and_feeds_seed_to_model() {
         UiCmd::Prompt("/clear_context".into(), vec![]),
         &mut sess,
         &tx,
+        0,
     )
     .await;
     assert!(!quit, "the fold must not signal quit");
@@ -264,6 +265,7 @@ async fn clear_context_without_assistant_text_stops_without_llm_turn() {
         UiCmd::Prompt("/clear_context".into(), vec![]),
         &mut sess,
         &tx,
+        0,
     )
     .await;
     assert!(!quit);
@@ -321,6 +323,7 @@ async fn compound_clear_context_runs_trailing_text_as_prompt() {
         UiCmd::Prompt("/clear_context write the summary".into(), vec![]),
         &mut sess,
         &tx,
+        0,
     )
     .await;
     assert!(!quit);
@@ -370,7 +373,7 @@ async fn act_switch_after_fold_is_pure_state_change() {
     let before: Vec<String> = sess.messages.iter().map(|m| m.id.clone()).collect();
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/act".into(), vec![]), &mut sess, &tx).await;
+    let quit = process_cmd(UiCmd::Prompt("/act".into(), vec![]), &mut sess, &tx, 0).await;
     assert!(!quit);
     let events = drain(&mut rx).await;
 
@@ -431,6 +434,7 @@ async fn plan_clear_context_hands_off_and_executes_under_act() {
         UiCmd::Prompt("/clear_context".into(), vec![]),
         &mut sess,
         &tx,
+        0,
     )
     .await;
     assert!(!quit, "the fold must not signal quit");

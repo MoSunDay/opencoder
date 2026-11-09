@@ -74,6 +74,7 @@ pub(crate) async fn dispatch_mode_switch(
     mode: ModeSwitch,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     running: &mut bool,
     follow: &mut bool,
     chat: &mut ChatView,
@@ -97,6 +98,7 @@ pub(crate) async fn dispatch_mode_switch(
             if !start_turn(
                 cmd_tx,
                 cancel,
+                turn_gen,
                 UiCmd::Prompt(mode.prompt().into(), Vec::new()),
             )
             .await
@@ -164,6 +166,9 @@ pub(crate) async fn dispatch_slash_action(
     // `/subtasks` fullscreen view slot — the Subtasks arm fills it; every
     // other action leaves it untouched (trailing param, same pattern).
     subtask_view: &mut Option<crate::subtask_detail::SubtaskView>,
+    // Turn generation: threaded to `start_turn` / `dispatch_mode_switch` so
+    // stale completions from cancelled turns are dropped (trailing param).
+    turn_gen: &mut u64,
 ) -> LoopFlow {
     if chat.remote
         && !matches!(
@@ -224,7 +229,7 @@ pub(crate) async fn dispatch_slash_action(
         }
         SlashAction::Compact => match gate_compact(*running) {
             CompactGate::Run => {
-                if !start_turn(cmd_tx, cancel, UiCmd::Compact).await {
+                if !start_turn(cmd_tx, cancel, turn_gen, UiCmd::Compact).await {
                     worker_dead(chat);
                     return LoopFlow::Quit;
                 }
@@ -253,6 +258,7 @@ pub(crate) async fn dispatch_slash_action(
                 ModeSwitch::Act,
                 cmd_tx,
                 cancel,
+                turn_gen,
                 running,
                 follow,
                 chat,
@@ -268,6 +274,7 @@ pub(crate) async fn dispatch_slash_action(
                 ModeSwitch::Plan,
                 cmd_tx,
                 cancel,
+                turn_gen,
                 running,
                 follow,
                 chat,
@@ -335,6 +342,7 @@ pub(crate) async fn dispatch_slash_action(
 pub(crate) async fn steer_submit_after_mouse(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     subagent_focus: Option<usize>,
     running: &mut bool,
     chat: &mut crate::chat::ChatView,
@@ -351,8 +359,13 @@ pub(crate) async fn steer_submit_after_mouse(
         chat,
     );
     if outcome == crate::app::steer_fire::SteerSubmitOutcome::StartTurn {
-        crate::app_helpers::start_turn(cmd_tx, cancel, UiCmd::Prompt(String::new(), Vec::new()))
-            .await;
+        crate::app_helpers::start_turn(
+            cmd_tx,
+            cancel,
+            turn_gen,
+            UiCmd::Prompt(String::new(), Vec::new()),
+        )
+        .await;
         *running = true;
         chat.begin_turn();
     }
@@ -371,11 +384,17 @@ pub(crate) async fn steer_submit_after_mouse(
 pub(crate) async fn cancel_running_turn(
     chat: &mut crate::chat::ChatView,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     child_runtime: &mut crate::worker::ChildRuntimeHandles,
     running: &mut bool,
     cancelled: &mut bool,
     follow: &mut bool,
 ) {
+    // Bump the turn generation: the cancelled turn's worker-side TurnDone
+    // (and any admit completion in flight) will carry the OLD generation and
+    // must be treated as stale — it must neither flip `running` off a turn
+    // that already superseded it nor re-kick the drain after the interrupt.
+    *turn_gen = turn_gen.wrapping_add(1);
     cancel.cancel();
     opencoder_session::fire_child_cancels(&child_runtime.cancels);
     chat.push_marker(ratatui::text::Line::from(ratatui::text::Span::styled(
@@ -399,6 +418,7 @@ pub(crate) async fn fire_clear_confirm(
     cc: crate::clear_confirm::ClearConfirm,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     running: &mut bool,
     follow: &mut bool,
     chat: &mut ChatView,
@@ -424,6 +444,7 @@ pub(crate) async fn fire_clear_confirm(
             queue_items,
             pending_images,
             session_id,
+            *turn_gen,
             anim_tick,
             mode_flash,
         );
@@ -449,7 +470,7 @@ pub(crate) async fn fire_clear_confirm(
     let name = crate::clear_confirm::CLEAR_CONTEXT_CMD.trim_start_matches('/');
     *sys_tokens = sys_tokens_for(name, workdir, None);
     *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text, Vec::new())).await {
+    if !start_turn(cmd_tx, cancel, turn_gen, UiCmd::Prompt(text, Vec::new())).await {
         worker_dead(chat);
         return LoopFlow::Quit;
     }
@@ -472,6 +493,7 @@ pub(crate) async fn fire_clear_confirm_now(
     cc: crate::clear_confirm::ClearConfirm,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     running: &mut bool,
     follow: &mut bool,
     chat: &mut ChatView,
@@ -489,13 +511,20 @@ pub(crate) async fn fire_clear_confirm_now(
     child_runtime: &mut crate::worker::ChildRuntimeHandles,
     cancelled: &mut bool,
 ) -> LoopFlow {
-    if *running {
-        cancel_running_turn(chat, cancel, child_runtime, running, cancelled, follow).await;
+    // Interrupt on ANY in-flight work, not just `running`: during the
+    // autopilot stage gap / subagent drain window the parent already reports
+    // idle while the worker is still inside its (continuing) turn — without
+    // this gate the manual confirm would queue the fold behind that turn
+    // instead of executing act immediately.
+    if *running || chat.subagents_running > 0 {
+        cancel_running_turn(chat, cancel, turn_gen, child_runtime, running, cancelled, follow)
+            .await;
     }
     fire_clear_confirm(
         cc,
         cmd_tx,
         cancel,
+        turn_gen,
         running,
         follow,
         chat,
@@ -531,6 +560,7 @@ pub(crate) async fn handle_confirm_key(
     chat: &mut ChatView,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     running: &mut bool,
     follow: &mut bool,
     sys_tokens: &mut u64,
@@ -562,6 +592,7 @@ pub(crate) async fn handle_confirm_key(
                         cc,
                         cmd_tx,
                         cancel,
+                        turn_gen,
                         running,
                         follow,
                         chat,
@@ -618,6 +649,7 @@ pub(crate) async fn confirm_tick(
     session_id: &str,
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
+    turn_gen: &mut u64,
 ) -> bool {
     if let Some(cc) = crate::clear_confirm::tick(clear_confirm, mode_flash, anim_tick) {
         return matches!(
@@ -625,6 +657,7 @@ pub(crate) async fn confirm_tick(
                 cc,
                 cmd_tx,
                 cancel,
+                turn_gen,
                 running,
                 follow,
                 chat,
@@ -667,6 +700,7 @@ pub(crate) async fn append_subtask_result(
     pending_images: &mut Vec<(String, String)>,
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
+    turn: u64,
 ) -> Option<crate::task::TaskPick> {
     // Not descended from a parent task: nothing to append into.
     let parent = main_task_id?;
@@ -691,6 +725,7 @@ pub(crate) async fn append_subtask_result(
             queue_items,
             pending_images,
             parent,
+            turn,
         ) {
             *mode_flash = Some((
                 crate::queue_admitter::QUEUE_SUBMIT_FAILED_FLASH.to_string(),
@@ -712,6 +747,7 @@ pub(crate) async fn append_subtask_result(
             &mut scratch_queue,
             &mut scratch_images,
             parent,
+            turn,
         ) {
             *mode_flash = Some((
                 crate::queue_admitter::QUEUE_SUBMIT_FAILED_FLASH.to_string(),

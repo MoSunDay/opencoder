@@ -32,6 +32,7 @@ use crate::worker::UiCmd;
 pub(crate) async fn handle_submit_action(
     text: String,
     running: &mut bool,
+    turn_gen: &mut u64,
     admit_tx: &mpsc::Sender<queue_admitter::AdmitReq>,
     admit_st: &mut queue_admitter::AdmitUiState,
     queue_items: &mut Vec<(i64, String)>,
@@ -93,6 +94,7 @@ pub(crate) async fn handle_submit_action(
             queue_items,
             pending_images,
             session_id,
+            *turn_gen,
             anim_tick,
             mode_flash,
         );
@@ -180,6 +182,7 @@ pub(crate) async fn handle_submit_action(
             clear_confirm,
             agent_menu,
             subtask_view,
+            turn_gen,
         )
         .await;
         match f {
@@ -196,7 +199,8 @@ pub(crate) async fn handle_submit_action(
             // trigger body. (The runner-side activation is idempotent against
             // resolve_persist's: same body lands on the shared handle.)
             let image_uris = snapshot_image_uris(pending_images);
-            if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text.clone(), image_uris)).await {
+            if !start_turn(cmd_tx, cancel, turn_gen, UiCmd::Prompt(text.clone(), image_uris)).await
+            {
                 worker_dead(chat);
                 return LoopFlow::Quit;
             }
@@ -222,7 +226,7 @@ pub(crate) async fn handle_submit_action(
             chat.context_used += estimate(&clean) as u64;
         }
         let image_uris = snapshot_image_uris(pending_images);
-        if !start_turn(cmd_tx, cancel, UiCmd::Prompt(clean, image_uris)).await {
+        if !start_turn(cmd_tx, cancel, turn_gen, UiCmd::Prompt(clean, image_uris)).await {
             worker_dead(chat);
             return LoopFlow::Quit;
         }

@@ -83,7 +83,7 @@ pub(crate) fn spawn(
                 }
                 command = commands.recv() => match command {
                     None | Some(UiCmd::Quit) => break,
-                    Some(UiCmd::ResetCancel(token)) => { cancel = token; cancel_sent = false; }
+                    Some(UiCmd::ResetCancel(token, _)) => { cancel = token; cancel_sent = false; }
                     Some(UiCmd::Prompt(prompt, images)) => {
                         let result = async {
                             if recover {

@@ -22,6 +22,7 @@ mod skill_outcome_tests;
 mod done_error_mirror_tests;
 
 mod compact_done_rekick;
+mod stale_turn_done_tests;
 
 mod plan_chip_consume_tests;
 

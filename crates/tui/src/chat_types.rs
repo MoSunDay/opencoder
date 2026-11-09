@@ -158,6 +158,13 @@ pub struct ChatView {
     pub blocks: Vec<ChatBlock>,
     pub agent: String,
     pub status: String,
+    /// The LIVE session's model id (`provider/model` or bare) that requests
+    /// actually use — synced from the resumed session config, `/model`
+    /// switches (save + session-only) and `ModelSwitch` events. The top body
+    /// title renders this (config default only as an empty-state fallback),
+    /// so the displayed name can never diverge from the model on the wire.
+    /// Empty on remote/agent-server views (the title shows `Server · agent`).
+    pub model: String,
     /// Start of the currently-running provider/model round. Display-only:
     /// this value never becomes a persisted model message or prompt content.
     /// While `Some`, `[call cost]` counts up live. Cleared on `LlmRoundEnd`

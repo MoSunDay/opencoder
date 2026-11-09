@@ -53,7 +53,7 @@ async fn running_session(
 
 async fn submit(sess: &mut SessionState, cmd: &str) -> Vec<UiEvent> {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt(cmd.into(), vec![]), sess, &tx).await;
+    let quit = process_cmd(UiCmd::Prompt(cmd.into(), vec![]), sess, &tx, 0).await;
     assert!(!quit, "{cmd} must not signal quit");
     let mut events = Vec::new();
     let collect = async {
@@ -186,6 +186,7 @@ async fn switch_never_folds_or_records() {
         UiCmd::Prompt("continue in plan".into(), vec![]),
         &mut sess,
         &tx,
+        0,
     )
     .await;
     assert!(!quit);

@@ -42,6 +42,7 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
 
     macro_rules! fold {
         ($ev:expr) => {
@@ -60,6 +61,7 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
                 &mut follow,
                 &cmd_tx,
                 &mut cancel,
+                &mut turn_gen,
                 &mut evt_rx,
                 &mut notepad,
                 &mut None,
@@ -85,7 +87,7 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
     assert!(!skip_next_render, "Done batch must stay paint-eligible");
 
     // 3) TurnDone: authoritative idle close; running stays off.
-    fold!(Some(UiEvent::TurnDone("act".into())));
+    fold!(Some(UiEvent::TurnDone("act".into(), turn_gen)));
     assert!(!running, "TurnDone must leave the app idle");
     assert!(!skip_next_render, "TurnDone batch must stay paint-eligible");
     assert_eq!(

@@ -191,7 +191,8 @@ async fn blocked_admit_does_not_stall_ui_loop() {
         &mut queue_items,
         &mut pending,
         q_input("s1", "first"),
-        "first".into()
+        "first".into(),
+        0
     ));
     assert_eq!(queue_items, vec![(-1, "first".to_string())]);
     assert_eq!(st.inflight.len(), 1);
@@ -282,7 +283,8 @@ async fn consumed_before_completion_does_not_resurrect() {
         &mut queue_items,
         &mut pending,
         q_input("s1", "first"),
-        "first".into()
+        "first".into(),
+        0
     ));
     assert_eq!(queue_items, vec![(-1, "first".to_string())]);
 
@@ -324,7 +326,8 @@ async fn second_submit_lines_up_behind_blocked_first() {
         &mut queue_items,
         &mut pending,
         q_input("s1", "first"),
-        "first".into()
+        "first".into(),
+        0
     ));
     assert!(queue_admitter::submit(
         &tx,
@@ -332,7 +335,8 @@ async fn second_submit_lines_up_behind_blocked_first() {
         &mut queue_items,
         &mut pending,
         q_input("s1", "second"),
-        "second".into()
+        "second".into(),
+        0
     ));
     assert_eq!(
         queue_items,

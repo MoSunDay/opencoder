@@ -94,7 +94,64 @@ mod tests {
             display: "d".into(),
             session_id: "s".into(),
             steer: false,
+            turn: 0,
         }
+    }
+
+    /// Stale-generation guard: an admit completion carrying an outdated
+    /// turn generation (the loop cancelled/restarted its turn after the
+    /// admit was submitted) must NOT re-kick the drain even when idle with
+    /// a stranded row — resurrecting work the user just cancelled is the
+    /// interrupt bug this generation counter exists to prevent.
+    #[tokio::test]
+    async fn stale_turn_admit_done_does_not_rekick() {
+        use opencoder_store::Delivery;
+        let store = seeded_store().await;
+        store
+            .admit_input(&opencoder_store::SessionInput {
+                seq: None,
+                id: "pending-1".into(),
+                session_id: "s".into(),
+                delivery: Delivery::Queue,
+                prompt: "stranded".into(),
+                images: vec![],
+                admitted_seq: 0,
+                promoted_seq: None,
+                display_text: None,
+            })
+            .await
+            .unwrap();
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
+        let mut cancel = tokio_util::sync::CancellationToken::new();
+        let mut st = crate::queue_admitter::AdmitUiState::default();
+        let mut queue_items = vec![(-1, "stranded".to_string())];
+        let mut turn_gen = 1u64; // the loop advanced past the admit's turn 0
+
+        let o = on_admit_done(
+            ok_done(-1, 1), // carries turn: 0 — stale against turn_gen 1
+            &mut st,
+            &mut queue_items,
+            &mut vec![],
+            &mut vec![],
+            false, // idle
+            &mut turn_gen,
+            &store,
+            "s",
+            &cmd_tx,
+            &mut cancel,
+        )
+        .await;
+        assert_eq!(
+            o.flow,
+            AdmitDoneFlow::Ok,
+            "stale-generation admit must not re-kick the drain"
+        );
+        assert!(
+            cmd_rx.try_recv().is_err(),
+            "no drain restart for a superseded turn's completion"
+        );
+        // The queue mirror still reconciles (the admit itself was real).
+        assert_eq!(queue_items, vec![(1, "stranded".to_string())]);
     }
 
     /// A1 core: a successful admit landing while IDLE with a stranded pending
@@ -123,6 +180,7 @@ mod tests {
         let mut pending_images = vec![];
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
         let mut cancel = tokio_util::sync::CancellationToken::new();
+        let mut turn_gen = 0u64;
 
         let o = on_admit_done(
             ok_done(-1, 1),
@@ -131,6 +189,7 @@ mod tests {
             &mut vec![],
             &mut pending_images,
             false, // idle
+            &mut turn_gen,
             &store,
             "s",
             &cmd_tx,
@@ -148,7 +207,7 @@ mod tests {
         // Drain restart commands: ResetCancel (fresh token) then empty Prompt.
         assert!(matches!(
             cmd_rx.recv().await.unwrap(),
-            crate::worker::UiCmd::ResetCancel(_)
+            crate::worker::UiCmd::ResetCancel(_, _)
         ));
         match cmd_rx.recv().await.unwrap() {
             crate::worker::UiCmd::Prompt(p, imgs) => {
@@ -181,6 +240,7 @@ mod tests {
             .unwrap();
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
         let mut cancel = tokio_util::sync::CancellationToken::new();
+        let mut turn_gen = 0u64;
 
         // Running drain: no re-kick.
         let mut st = crate::queue_admitter::AdmitUiState::default();
@@ -191,6 +251,7 @@ mod tests {
             &mut vec![],
             &mut vec![],
             true, // running
+            &mut turn_gen,
             &store,
             "s",
             &cmd_tx,
@@ -208,12 +269,14 @@ mod tests {
                 display: "d".into(),
                 session_id: "s".into(),
                 steer: false,
+                turn: 0,
             },
             &mut st,
             &mut vec![],
             &mut vec![],
             &mut vec![],
             false,
+            &mut turn_gen,
             &store,
             "s",
             &cmd_tx,
@@ -233,6 +296,7 @@ mod tests {
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
         let mut cancel = tokio_util::sync::CancellationToken::new();
         let mut st = crate::queue_admitter::AdmitUiState::default();
+        let mut turn_gen = 0u64;
 
         let o = on_admit_done(
             ok_done(-1, 1),
@@ -241,6 +305,7 @@ mod tests {
             &mut vec![],
             &mut vec![],
             false,
+            &mut turn_gen,
             &store,
             "s",
             &cmd_tx,
@@ -293,6 +358,13 @@ pub(crate) struct AdmitDoneOutcome {
 /// Session-mismatched completions are dropped inside `apply_done` (ghost-row
 /// guard) while the stranded re-kick decision below still evaluates the
 /// CURRENT session — that is its purpose.
+///
+/// The re-kick is generation-guarded: an admit requested under turn `done.turn`
+/// that completes after the user hard-cancelled (or after a newer turn
+/// started — bumping the generation) must NOT restart the drain. Restarting
+/// there resurrected work right after an interrupt — the "cancel did
+/// nothing" regression: pending rows are deliberately preserved by cancel,
+/// so a late completion would otherwise always find them stranded.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn on_admit_done(
     done: crate::queue_admitter::AdmitDone,
@@ -301,6 +373,7 @@ pub(crate) async fn on_admit_done(
     steer_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     running: bool,
+    turn_gen: &mut u64,
     store: &Arc<dyn Store>,
     session_id: &str,
     cmd_tx: &tokio::sync::mpsc::Sender<crate::worker::UiCmd>,
@@ -308,6 +381,7 @@ pub(crate) async fn on_admit_done(
 ) -> AdmitDoneOutcome {
     // Capture the outcome before `apply_done` consumes `done`.
     let admit_ok = done.result.is_ok();
+    let done_turn = done.turn;
     let flash = crate::queue_admitter::apply_done(
         st,
         done,
@@ -316,7 +390,11 @@ pub(crate) async fn on_admit_done(
         pending_images,
         session_id,
     );
-    if !admit_ok || running || !stranded_pending(store, session_id).await {
+    if !admit_ok
+        || running
+        || done_turn != *turn_gen
+        || !stranded_pending(store, session_id).await
+    {
         return AdmitDoneOutcome {
             flash,
             flow: AdmitDoneFlow::Ok,
@@ -325,6 +403,7 @@ pub(crate) async fn on_admit_done(
     let flow = if crate::app_helpers::start_turn(
         cmd_tx,
         cancel,
+        turn_gen,
         crate::worker::UiCmd::Prompt(String::new(), Vec::new()),
     )
     .await

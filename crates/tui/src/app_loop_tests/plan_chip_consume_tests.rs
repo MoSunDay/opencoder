@@ -24,7 +24,8 @@ async fn fold_fixture() -> (
 }
 
 macro_rules! fold {
-    ($chat:expr, $store:expr, $cmd_tx:expr, $evt_rx:expr, $cancel:expr, $ev:expr, $flag:expr) => {
+    ($chat:expr, $store:expr, $cmd_tx:expr, $evt_rx:expr, $cancel:expr, $ev:expr, $flag:expr) => {{
+        let mut turn_gen = 0u64;
         fold_ui_events(
             $ev,
             &mut $chat,
@@ -40,13 +41,14 @@ macro_rules! fold {
             &mut true,
             &mut $cmd_tx,
             &mut $cancel,
+            &mut turn_gen,
             &mut $evt_rx,
             &mut None,
             &mut None,
             &opencoder_session::QuestionHub::new(),
         )
         .await
-    };
+    }};
 }
 
 #[tokio::test]

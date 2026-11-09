@@ -126,7 +126,8 @@ async fn actor_failure_path_flashes_and_removes_row() {
         &mut queue_items,
         &mut pending,
         mk_input("p"),
-        "d".into()
+        "d".into(),
+        0
     ));
     let done = done_rx.recv().await.unwrap();
     assert!(done.result.is_err());

@@ -59,7 +59,6 @@ pub(super) async fn run_app(
     mut session_id: String,
     mut compaction_threshold: u64,
     mut context_limit: u64,
-    mut model_label: String,
     workdir: PathBuf,
     mut config: Config,
     mut client: Arc<dyn ChatStream>,
@@ -77,6 +76,10 @@ pub(super) async fn run_app(
     question_hub.attach();
     let mut question_menu = crate::question_menu::dialog_state();
     let mut chat = initial_chat_view(&session, &store).await;
+    // The title renders the LIVE session model (resumed sessions carry their
+    // own persisted `sessions.model`, which can differ from the config
+    // default the old title always showed).
+    chat.model = session.config.model.clone();
     chat.annotation_text = session.requirement.clone();
     let mut input = String::new();
     let mut pending_images: Vec<(String, String)> = Vec::new();
@@ -88,6 +91,8 @@ pub(super) async fn run_app(
     let mut prev_running = false;
     let mut task_elapsed_ms: u64 = 0;
     let (mut last_clock, mut cancelled) = (Instant::now(), false);
+    // Turn generation: bumped by start_turn/cancels; worker tags TurnDone.
+    let mut turn_gen: u64 = 0;
     let mut drain_pending = false;
     let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
@@ -199,7 +204,6 @@ pub(super) async fn run_app(
                 &config,
                 &client,
                 &store,
-                &mut model_label,
                 &mut session_states,
                 &mut running,
                 &mut chat,
@@ -229,6 +233,7 @@ pub(super) async fn run_app(
                     pending_images.clear();
                     subagent_focus = None;
                     cancelled = false;
+                    turn_gen = 0; // fresh worker starts its counter at 0
                     drain_pending = false;
                     clear_confirm = None;
                     plan_edit = None;
@@ -338,7 +343,7 @@ pub(super) async fn run_app(
                     input_disabled,
                     tail_ms,
                     task_elapsed_ms,
-                    app_loop::body_is_top_level(&chat, subagent_focus),
+                    app_display::body_is_top_level(&chat, subagent_focus),
                     config.autopilot.mode,
                     &display_mode,
                     plan_skill_active,
@@ -375,7 +380,7 @@ pub(super) async fn run_app(
                     Event::Key(k) => {
                         // Armed clear-context guard: Enter or a second Shift+Tab fires, Esc 回撤, rest inert.
                         if clear_confirm.is_some() {
-                            if app_loop::handle_confirm_key(&mut clear_confirm, k, &mut input, &mut cursor_idx, &mut undo_state, &mut chat, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut sys_tokens, &mut mode_flash, anim_tick, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx, &mut child_runtime, &mut cancelled).await { break; }
+                            if app_loop::handle_confirm_key(&mut clear_confirm, k, &mut input, &mut cursor_idx, &mut undo_state, &mut chat, &cmd_tx, &mut cancel, &mut turn_gen, &mut running, &mut follow, &mut sys_tokens, &mut mode_flash, anim_tick, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx, &mut child_runtime, &mut cancelled).await { break; }
                             dirty = true;
                             continue;
                         }
@@ -395,15 +400,15 @@ pub(super) async fn run_app(
                         // Fullscreen `/subtasks` view: intercept all keys.
                         if subtask_view.is_some() {
                             let term_h = terminal.size().map(|r| r.height).unwrap_or(app_subtask::FALLBACK_TERM_H);
-                            if app_subtask::key(&mut subtask_view, k, term_h, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, &config).await {
+                            if app_subtask::key(&mut subtask_view, k, term_h, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, &config, turn_gen).await {
                                 dirty = true; continue;
                             }
                         }
                         // Task picker modal: intercept all keys while open.
                         match app_popups::handle_popup_key(
                             k, &mut task_picker, &mut selection, &mut pending_task_pick,
-                            &cmd_tx, &mut running, &mut chat, &store, &mut model_menu,
-                            &mut client, &mut config, &mut model_label, &mut compaction_threshold,
+                            &cmd_tx, &mut turn_gen, &mut running, &mut chat, &store,
+                            &mut model_menu, &mut client, &mut config, &mut compaction_threshold,
                             &mut context_limit, &mut frame_ms, &mut frame_ticker, &mut mcp_menu,
                             &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu, &mut question_menu,
                             &question_hub, terminal, &mut cache_salt_menu, &mut keymap,
@@ -482,7 +487,7 @@ pub(super) async fn run_app(
                         match action {
                             KeyAction::Submit(text) => {
                                 if app_submit::handle_submit_action(
-                                    text, &mut running, &admit_tx, &mut admit_st,
+                                    text, &mut running, &mut turn_gen, &admit_tx, &mut admit_st,
                                     &mut queue_items, &mut pending_images, &session_id,
                                     &mut history, &mut hist_idx, &mut active_skill,
                                     &mut active_skill_body, &mut sys_tokens, &agent_name,
@@ -507,7 +512,7 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::AppendSubtask(child_id) => {
-                                app_subtask::append_and_pick(&child_id, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick).await;
+                                app_subtask::append_and_pick(&child_id, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, turn_gen).await;
                                 dirty = true;
                             }
                             KeyAction::Steer(text) => {
@@ -530,8 +535,8 @@ pub(super) async fn run_app(
                                     // hand-off flashes (↑ recovers). `>` = interrupt.
                                     steer_submit_flash(
                                         &admit_tx, &mut admit_st, &mut chat.steer_items,
-                                        &mut pending_images, &session_id, &raw, anim_tick,
-                                        &mut mode_flash,
+                                        &mut pending_images, &session_id, &raw, turn_gen,
+                                        anim_tick, &mut mode_flash,
                                     );
                                 }
                                 push_history(&mut history, &mut hist_idx, &text);
@@ -545,7 +550,8 @@ pub(super) async fn run_app(
                                 // waits on db_lock; a failed hand-off flashes (text via ↑).
                                 queue_submit_flash(
                                     &text, &admit_tx, &mut admit_st, &mut queue_items,
-                                    &mut pending_images, &session_id, anim_tick, &mut mode_flash,
+                                    &mut pending_images, &session_id, turn_gen, anim_tick,
+                                    &mut mode_flash,
                                 );
                                 push_history(&mut history, &mut hist_idx, &text);
                                 follow = true;
@@ -617,7 +623,7 @@ pub(super) async fn run_app(
                             KeyAction::SwitchAgent(name) => {
                                 let mode = app_loop::ModeSwitch::for_agent(&name);
                                 if app_loop::dispatch_mode_switch(
-                                    mode, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat,
+                                    mode, &cmd_tx, &mut cancel, &mut turn_gen, &mut running, &mut follow, &mut chat,
                                     &mut sys_tokens, &mut mode_flash, anim_tick, &workdir,
                                 ).await == app_loop::LoopFlow::Quit { break; }
                             }
@@ -636,7 +642,7 @@ pub(super) async fn run_app(
                             }
                             KeyAction::Cancel => {
                                 app_loop::cancel_running_turn(
-                                    &mut chat, &mut cancel,
+                                    &mut chat, &mut cancel, &mut turn_gen,
                                     &mut child_runtime, &mut running, &mut cancelled, &mut follow,
                                 ).await;
                             }
@@ -654,7 +660,10 @@ pub(super) async fn run_app(
                                 render_pending = true;
                             }
                             KeyAction::Quit => {
-                                app_loop::handle_quit(running, &cancel, &mut chat, &cmd_tx).await;
+                                app_loop::handle_quit(
+                                    running || chat.subagents_running > 0,
+                                    &cancel, &mut chat, &cmd_tx,
+                                ).await;
                                 chat.status = "shutting down\u{2026}".to_string();
                                 dirty = true;
                                 render_pending = true;
@@ -681,7 +690,7 @@ pub(super) async fn run_app(
                         .await;
                         if outcome == MouseOutcome::SteerSubmit {
                             app_loop::steer_submit_after_mouse(
-                                &cmd_tx, &mut cancel, subagent_focus, &mut running,
+                                &cmd_tx, &mut cancel, &mut turn_gen, subagent_focus, &mut running,
                                 &mut chat, &mut follow, &child_runtime, &turn_cancel,
                             ).await;
                         }
@@ -699,7 +708,7 @@ pub(super) async fn run_app(
             maybe_done = admit_done_rx.recv(), if admitter_alive => {
                 match maybe_done {
                     Some(done) => {
-                        let o = crate::idle_rekick::on_admit_done(done, &mut admit_st, &mut queue_items, &mut chat.steer_items, &mut pending_images, running, &store, &session_id, &cmd_tx, &mut cancel).await;
+                        let o = crate::idle_rekick::on_admit_done(done, &mut admit_st, &mut queue_items, &mut chat.steer_items, &mut pending_images, running, &mut turn_gen, &store, &session_id, &cmd_tx, &mut cancel).await;
                         if let Some(flash) = o.flash { mode_flash = Some((flash.to_string(), anim_tick)); }
                         match o.flow {
                             crate::idle_rekick::AdmitDoneFlow::Started => { running = true; follow = true; cancelled = false; chat.begin_turn(); }
@@ -718,7 +727,7 @@ pub(super) async fn run_app(
                     maybe_ev, &mut chat, &store, &session_id, &mut queue_items,
                     &mut plan_skill_active, &mut admit_st, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
-                    &cmd_tx, &mut cancel, &mut evt_rx, &mut notepad,
+                    &cmd_tx, &mut cancel, &mut turn_gen, &mut evt_rx, &mut notepad,
                     &mut question_menu, &question_hub,
                 )
                 .await;
@@ -746,7 +755,7 @@ pub(super) async fn run_app(
                 if running { anim_tick = anim_tick.wrapping_add(1); dirty = true; }
                 if clear_confirm.is_some() {
                     anim_tick = anim_tick.wrapping_add(1);
-                    if app_loop::confirm_tick(&mut clear_confirm, &mut mode_flash, anim_tick, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat, &mut sys_tokens, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx).await { break; }
+                    if app_loop::confirm_tick(&mut clear_confirm, &mut mode_flash, anim_tick, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat, &mut sys_tokens, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx, &mut turn_gen).await { break; }
                     dirty = true;
                 }
                 if app_notepad::poll_bash(&mut bash_rx, &mut chat) { dirty = true; }

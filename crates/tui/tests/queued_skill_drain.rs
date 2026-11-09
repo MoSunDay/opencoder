@@ -160,7 +160,7 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
 
     // Submit the kickoff; the run drains the queued follow-up at the first
     // idle boundary (no tool calls in turn 1).
-    let quit = process_cmd(UiCmd::Prompt("kickoff".into(), vec![]), &mut sess, &tx).await;
+    let quit = process_cmd(UiCmd::Prompt("kickoff".into(), vec![]), &mut sess, &tx, 0).await;
     assert!(!quit, "Prompt must not break the worker loop");
 
     let requests = mock.requests();

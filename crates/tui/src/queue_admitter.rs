@@ -24,6 +24,11 @@ pub struct AdmitReq {
     pub display: String,
     /// Owning session, echoed on the completion for the switch-race drop.
     pub session_id: String,
+    /// App-loop turn generation at request time. Echoed on [`AdmitDone`]
+    /// so the stranded-admit re-kick can tell a completion that raced a
+    /// cancel/new-turn (generation moved on) from one that merely raced the
+    /// runner's final pending check (generation unchanged — re-kick it).
+    pub turn: u64,
 }
 
 /// Actor completion: the store result for the admitted input, plus the
@@ -38,6 +43,9 @@ pub struct AdmitDone {
     pub session_id: String,
     /// Which mirror to reconcile: steer_items (true) or queue_items (false).
     pub steer: bool,
+    /// Turn generation echoed from [`AdmitReq::turn`]; stale (superseded by
+    /// a cancel or a newer turn) completions must not re-kick the drain.
+    pub turn: u64,
 }
 
 /// One in-flight optimistic submit's image snapshot (restored on failure).
@@ -74,6 +82,7 @@ pub fn spawn_admitter(
                     display: req.display,
                     session_id: req.session_id,
                     steer: req.input.delivery == Delivery::Steer,
+                    turn: req.turn,
                 })
                 .await
                 .is_err()
@@ -96,6 +105,7 @@ pub fn submit(
     pending_images: &mut Vec<(String, String)>,
     input: SessionInput,
     display: String,
+    turn: u64,
 ) -> bool {
     st.next_temp_seq -= 1;
     let temp_seq = st.next_temp_seq;
@@ -109,6 +119,7 @@ pub fn submit(
         input,
         display,
         session_id,
+        turn,
     }) {
         Ok(()) => true,
         Err(_) => {
@@ -139,8 +150,9 @@ pub(crate) fn admit_running(
     pending_images: &mut Vec<(String, String)>,
     input: SessionInput,
     display: String,
+    turn: u64,
 ) -> bool {
-    submit(tx, st, queue_items, pending_images, input, display)
+    submit(tx, st, queue_items, pending_images, input, display, turn)
 }
 
 /// Deferred queue admission for a submission made while a turn is running
@@ -168,6 +180,7 @@ pub(crate) fn handle_queue(
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     session_id: &str,
+    turn: u64,
 ) -> bool {
     let raw = text.trim();
     if raw.is_empty() {
@@ -188,7 +201,7 @@ pub(crate) fn handle_queue(
         Some(display.clone()),
         &crate::app_helpers::snapshot_image_uris(pending_images),
     );
-    admit_running(tx, st, queue_items, pending_images, input, display)
+    admit_running(tx, st, queue_items, pending_images, input, display, turn)
 }
 
 /// Outcome of reconciling a successful completion against the queue mirror.
@@ -305,6 +318,7 @@ pub fn apply_done(
         display,
         session_id,
         steer,
+        turn: _,
     } = done;
     // Session-switch race: this admit fired against the OLD session. Folding
     // it into the NEW session's mirrors would plant a ghost row — the durable
@@ -481,7 +495,8 @@ mod tests {
             &mut queue_items,
             &mut pending_images,
             mk_input("p"),
-            "d1".into()
+            "d1".into(),
+            0
         ));
         assert_eq!(queue_items, vec![(-1, "d1".to_string())]);
         assert!(
@@ -502,7 +517,8 @@ mod tests {
             &mut queue_items,
             &mut pending2,
             mk_input("q"),
-            "d2".into()
+            "d2".into(),
+            0
         ));
         assert_eq!(queue_items[1], (-2, "d2".to_string()));
     }
@@ -520,7 +536,8 @@ mod tests {
             &mut queue_items,
             &mut pending_images,
             mk_input("p"),
-            "d".into()
+            "d".into(),
+            0
         ));
         assert!(queue_items.is_empty(), "temp row rolled back");
         assert_eq!(
@@ -547,7 +564,8 @@ mod tests {
             &mut queue_items,
             &mut pending_images,
             mk_input("p"),
-            "d".into()
+            "d".into(),
+            0
         ));
         assert_eq!(queue_items, vec![(-1, "d".to_string())]);
     }
@@ -567,7 +585,8 @@ mod tests {
             &mut queue_items,
             &mut pending_images,
             mk_input("p"),
-            "d".into()
+            "d".into(),
+            0
         ));
         assert!(queue_items.is_empty(), "temp row rolled back");
         assert_eq!(
@@ -590,7 +609,8 @@ mod tests {
             &mut queue_items,
             &mut pending_images,
             mk_input("p"),
-            "d".into()
+            "d".into(),
+            0
         ));
         let done = done_rx.recv().await.unwrap();
         assert_eq!(done.temp_seq, -1);
@@ -619,6 +639,7 @@ mod tests {
             &mut queue_items,
             &mut pending_images,
             "s",
+            0,
         );
 
         // Queue-panel mirror shows what the user typed, token included.
@@ -665,6 +686,7 @@ mod tests {
             &mut queue_items,
             &mut pending_images,
             "s",
+            0,
         );
 
         let done = done_rx.recv().await.unwrap();

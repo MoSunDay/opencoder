@@ -69,7 +69,6 @@ pub(crate) async fn switch_session(
     config: &Config,
     client: &Arc<dyn ChatStream>,
     store: &Arc<dyn Store>,
-    model_label: &mut String,
     session_states: &mut std::collections::HashMap<String, crate::session_ui::SessionUiState>,
     running: &mut bool,
     chat: &mut ChatView,
@@ -169,7 +168,10 @@ pub(crate) async fn switch_session(
     let _ = cmd_tx.try_send(UiCmd::Quit);
     let remote = new_session.harness.remote.clone();
     let new_session_id = new_session.id.clone();
-    *model_label = new_session.config.model.clone();
+    // The title shows the LIVE session model — the resumed/forked session's
+    // own config (restored from its persisted `sessions.model`), not the
+    // outer default.
+    chat.model = new_session.config.model.clone();
     let new_cancel = CancellationToken::new();
     let new_session = new_session.with_cancel(new_cancel.clone());
     // Mirror `cancel`: the switched session's parent turn-cancel handle must

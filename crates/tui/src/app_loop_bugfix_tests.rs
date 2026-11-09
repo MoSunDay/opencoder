@@ -64,8 +64,9 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     let _flow = fold_ui_events(
-        Some(UiEvent::TurnDone("act".into())),
+        Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
         &store,
         "test-session",
@@ -79,6 +80,7 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -151,6 +153,7 @@ async fn done_with_pending_queue_arms_drain_pending() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -166,6 +169,7 @@ async fn done_with_pending_queue_arms_drain_pending() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -224,6 +228,7 @@ async fn done_with_empty_store_goes_idle() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -239,6 +244,7 @@ async fn done_with_empty_store_goes_idle() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,
@@ -279,8 +285,9 @@ async fn drain_pending_restart_with_dead_worker_quits() {
     drop(cmd_rx);
 
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut turn_gen = 0u64;
     let flow = fold_ui_events(
-        Some(UiEvent::TurnDone("act".into())),
+        Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
         &store,
         "dead-worker-test",
@@ -294,6 +301,7 @@ async fn drain_pending_restart_with_dead_worker_quits() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         &mut evt_rx,
         &mut notepad,
         &mut None,

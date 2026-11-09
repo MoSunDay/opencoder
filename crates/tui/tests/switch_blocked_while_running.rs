@@ -85,6 +85,7 @@ async fn control_command_waits_for_inflight_turn_to_settle() {
             UiCmd::Prompt("long running task".into(), vec![]),
             &mut sess,
             &tx,
+            0,
         )
         .await;
         (quit, sess)
@@ -112,7 +113,7 @@ async fn control_command_waits_for_inflight_turn_to_settle() {
     assert!(
         turn_events
             .iter()
-            .any(|e| matches!(e, UiEvent::TurnDone(n) if n == "act")),
+            .any(|e| matches!(e, UiEvent::TurnDone(n, _) if n == "act")),
         "the in-flight turn must settle with TurnDone(act) before any switch"
     );
     assert!(
@@ -124,7 +125,7 @@ async fn control_command_waits_for_inflight_turn_to_settle() {
 
     // Only now does the switch apply — and it applies without an LLM turn.
     let (tx2, mut rx2) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::Prompt("/plan".into(), vec![]), &mut sess, &tx2).await;
+    let quit = process_cmd(UiCmd::Prompt("/plan".into(), vec![]), &mut sess, &tx2, 0).await;
     assert!(!quit);
     let switch_events = drain(&mut rx2).await;
     assert!(switch_events.iter().any(|e| matches!(
@@ -154,6 +155,7 @@ async fn switch_events_never_interleave_a_running_turn() {
             UiCmd::Prompt("streaming turn".into(), vec![]),
             &mut sess,
             &tx,
+            0,
         )
         .await;
         (quit, sess)
@@ -168,7 +170,7 @@ async fn switch_events_never_interleave_a_running_turn() {
     // The switch arrives strictly after the turn's terminal TurnDone.
     let turn_done_pos = all
         .iter()
-        .position(|e| matches!(e, UiEvent::TurnDone(_)))
+        .position(|e| matches!(e, UiEvent::TurnDone(..)))
         .expect("the turn ends with TurnDone");
     assert!(
         all[..turn_done_pos]
@@ -179,7 +181,7 @@ async fn switch_events_never_interleave_a_running_turn() {
 
     // Now run the queued switch through the same worker and append its stream.
     let (tx2, mut rx2) = mpsc::channel::<UiEvent>(64);
-    let _ = process_cmd(UiCmd::Prompt("/plan".into(), vec![]), &mut sess, &tx2).await;
+    let _ = process_cmd(UiCmd::Prompt("/plan".into(), vec![]), &mut sess, &tx2, 0).await;
     all.extend(drain(&mut rx2).await);
     let switch_pos = all
         .iter()

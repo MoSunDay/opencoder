@@ -3,7 +3,7 @@ use crate::fleet::FleetConnection;
 use super::super::{records::read_index, FleetStore};
 use anyhow::{ensure, Result};
 use opencoder_core::fleet::{Assignment, ExecutionIndex};
-use turso::transaction::TransactionBehavior;
+use opencoder_database::busy;
 use turso::{params, Connection};
 
 pub(super) async fn insert(
@@ -56,11 +56,7 @@ impl FleetConnection {
     /// Both timely and late Create replies can confirm an execution. Node
     /// reports remain the authority for subsequent status changes.
     pub async fn accept_execution(&self, accepted: &ExecutionIndex) -> Result<()> {
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         insert(&tx, accepted, None).await?;
         tx.commit().await?;
         Ok(())

@@ -103,10 +103,13 @@ pub async fn update_with_vector_if_version(
 /// DELETE a capability. `brain_eng_inputs` and `brain_vectors` rows follow via
 /// the schema's `ON DELETE CASCADE` (foreign_keys=ON is a connection pragma).
 pub async fn delete(conn: &Connection, id: &str) -> Result<()> {
-    conn.execute("DELETE FROM brain_capabilities WHERE id=?1", params![id])
-        .await
-        .context("delete brain capability")?;
-    Ok(())
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute("DELETE FROM brain_capabilities WHERE id=?1", params![id])
+            .await
+            .context("delete brain capability")?;
+        Ok(())
+    })
+    .await
 }
 
 /// Fetch one capability with its exemplar inputs ordered by `position, id`.
@@ -165,16 +168,19 @@ pub async fn upsert_vector(
     emb: &[u8],
     updated_at: i64,
 ) -> Result<()> {
-    insert_or_replace_vector(
-        conn,
-        capability_id,
-        &BrainVectorWrite {
-            dim,
-            model: model.to_string(),
-            emb: emb.to_vec(),
-            embedded_at: updated_at,
-        },
-    )
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        insert_or_replace_vector(
+            conn,
+            capability_id,
+            &BrainVectorWrite {
+                dim,
+                model: model.to_string(),
+                emb: emb.to_vec(),
+                embedded_at: updated_at,
+            },
+        )
+        .await
+    })
     .await
 }
 

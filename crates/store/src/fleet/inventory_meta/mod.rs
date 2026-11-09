@@ -2,11 +2,9 @@
 //! Old writers discard the optional field; the next read safely stamps it again.
 use super::FleetStore;
 use anyhow::{ensure, Result};
+use opencoder_database::busy;
 use serde_json::Value;
-use turso::{
-    params,
-    transaction::{Transaction, TransactionBehavior},
-};
+use turso::params;
 
 const FIELD: &str = "_opencoder_inventory_revision";
 const PREFIX: &str = "{\"_opencoder_inventory_revision\":\"";
@@ -66,7 +64,7 @@ impl FleetStore {
         let id = id.to_owned();
         self.db
             .write(move |conn| async move {
-                let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).await?;
+                let tx = busy::immediate_with_retry(&conn).await?;
                 let mut rows = tx
                     .query(
                         "SELECT body FROM fleet_definitions WHERE kind='runtime_sleep' AND id=?1",

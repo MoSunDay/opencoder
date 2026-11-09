@@ -1,7 +1,7 @@
 //! Validate a Runtime inventory without querying ownership once per history row.
 use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
-use turso::transaction::TransactionBehavior;
+use opencoder_database::busy;
 use turso::{params, Connection};
 
 // JSON virtual-table values have no declared affinity. An explicit TEXT type
@@ -20,11 +20,7 @@ impl FleetConnection {
         if !has_unassigned(&self.conn, runtime, &encoded).await? {
             return Ok(());
         }
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         let mut registered = tx
             .query("SELECT 1 FROM host_runtimes WHERE id=?1", [runtime])
             .await?;

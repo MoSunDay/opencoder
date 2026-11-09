@@ -38,19 +38,26 @@ pub async fn latest(conn: &Connection) -> Result<Vec<ProjectAssignment>> {
 }
 
 pub async fn link(conn: &Connection, record: &ProjectAssignment) -> Result<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO project_todo_executions (todo_id,execution_id,created_at,kind,name,capability_id) VALUES (?,?,?,?,?,?)",
-        params![record.todo_id.as_str(), record.execution_id.as_str(), record.created_at, record.kind.as_str(), record.name.as_str(), record.capability_id.as_deref()],
-    ).await?;
-    Ok(())
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
+            "INSERT OR IGNORE INTO project_todo_executions (todo_id,execution_id,created_at,kind,name,capability_id) VALUES (?,?,?,?,?,?)",
+            params![record.todo_id.as_str(), record.execution_id.as_str(), record.created_at, record.kind.as_str(), record.name.as_str(), record.capability_id.as_deref()],
+        )
+        .await?;
+        Ok(())
+    })
+    .await
 }
 
 pub async fn unlink(conn: &Connection, todo_id: &str, execution_id: &str) -> Result<bool> {
-    Ok(conn
-        .execute(
-            "DELETE FROM project_todo_executions WHERE todo_id = ? AND execution_id = ?",
-            params![todo_id, execution_id],
-        )
-        .await?
-        > 0)
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        Ok(conn
+            .execute(
+                "DELETE FROM project_todo_executions WHERE todo_id = ? AND execution_id = ?",
+                params![todo_id, execution_id],
+            )
+            .await?
+            > 0)
+    })
+    .await
 }

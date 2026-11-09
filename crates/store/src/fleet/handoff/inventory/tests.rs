@@ -1,5 +1,6 @@
 use super::*;
 use crate::fleet::handoff::RuntimeRecord;
+use turso::transaction::TransactionBehavior;
 use turso::Builder;
 
 async fn register(store: &FleetStore, id: &str) {

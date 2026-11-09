@@ -12,7 +12,7 @@ Commit: cea9499682d959503567277918b3f8da3d8115ba
   `lib.rs` re-export）；[contract/](../../../crates/store/src/store/contract) 与
   [impl_methods/](../../../crates/store/src/turso_store/impl_methods) 分组
   组装接口与实现
-- [src/turso_store/](../../../crates/store/src/turso_store) — Turso 实现（WAL）
+- [src/turso_store/](../../../crates/store/src/turso_store) — Turso 实现（WAL）；全部写路径经 `opencoder-database::busy`（BEGIN IMMEDIATE 有界 Busy 重试）取跨进程写锁，`tx.rs` 为其 re-export 垫片
 - [src/jsonl.rs](../../../crates/store/src/jsonl.rs) — `JsonlStore`
 - [src/project.rs](../../../crates/store/src/project.rs) — `ProjectStore`
   项目目录与执行持久化

@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use opencoder_database::Database;
+use opencoder_database::{busy, Database};
 
 const CREATE_TS_SESSIONS: &str = "\
 CREATE TABLE IF NOT EXISTS ts_sessions (
@@ -51,9 +51,13 @@ impl TsRegistry {
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
         let db = Database::open(path).await?;
         db.write(|conn| async move {
-            conn.execute_batch(CREATE_TS_SESSIONS).await?;
-            conn.execute_batch(CREATE_META).await?;
-            Ok(())
+            let conn = &conn;
+            busy::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+                conn.execute_batch(CREATE_TS_SESSIONS).await?;
+                conn.execute_batch(CREATE_META).await?;
+                Ok(())
+            })
+            .await
         })
         .await?;
         Ok(Self { db })
@@ -69,30 +73,33 @@ impl TsRegistry {
         self.db
             .write(move |conn| async move {
                 let record = &record;
-
-                conn.execute(
-                    "INSERT OR REPLACE INTO ts_sessions \
+                let conn = &conn;
+                busy::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+                    conn.execute(
+                        "INSERT OR REPLACE INTO ts_sessions \
                  (id, workdir, store_dir, created_at, updated_at, title, preview) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    turso::params![
-                        record.id.clone(),
-                        record
-                            .workdir
-                            .as_ref()
-                            .map(|p| p.to_string_lossy().into_owned()),
-                        record
-                            .store_dir
-                            .as_ref()
-                            .map(|p| p.to_string_lossy().into_owned()),
-                        record.created_at,
-                        record.updated_at,
-                        record.title.clone(),
-                        record.preview.clone(),
-                    ],
-                )
+                        turso::params![
+                            record.id.clone(),
+                            record
+                                .workdir
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().into_owned()),
+                            record
+                                .store_dir
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().into_owned()),
+                            record.created_at,
+                            record.updated_at,
+                            record.title.clone(),
+                            record.preview.clone(),
+                        ],
+                    )
+                    .await
+                    .with_context(|| format!("upsert ts session {}", record.id))?;
+                    Ok(())
+                })
                 .await
-                .with_context(|| format!("upsert ts session {}", record.id))?;
-                Ok(())
             })
             .await
     }
@@ -163,14 +170,17 @@ impl TsRegistry {
         self.db
             .write(move |conn| async move {
                 let id = id.as_str();
-
-                conn.execute(
-                    "DELETE FROM ts_sessions WHERE id = ?1",
-                    turso::params![id.to_string()],
-                )
+                let conn = &conn;
+                busy::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+                    conn.execute(
+                        "DELETE FROM ts_sessions WHERE id = ?1",
+                        turso::params![id.to_string()],
+                    )
+                    .await
+                    .with_context(|| format!("delete ts session {id}"))?;
+                    Ok(())
+                })
                 .await
-                .with_context(|| format!("delete ts session {id}"))?;
-                Ok(())
             })
             .await
     }
@@ -195,13 +205,17 @@ impl TsRegistry {
     pub async fn mark_migrated(&self) -> Result<()> {
         self.db
             .write(move |conn| async move {
-                conn.execute(
-                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated', '1')",
-                    (),
-                )
+                let conn = &conn;
+                busy::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+                    conn.execute(
+                        "INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated', '1')",
+                        (),
+                    )
+                    .await
+                    .context("mark ts registry migrated")?;
+                    Ok(())
+                })
                 .await
-                .context("mark ts registry migrated")?;
-                Ok(())
             })
             .await
     }

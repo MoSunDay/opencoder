@@ -1,4 +1,5 @@
 use crate::{database::Store, error::AppError};
+use opencoder_database::busy;
 use std::{collections::HashMap, path::Path};
 use turso::Connection;
 
@@ -136,7 +137,7 @@ pub(super) async fn bootstrap(
     files: &Path,
     policy: SchemaPolicy,
 ) -> Result<(), AppError> {
-    connection.execute("BEGIN IMMEDIATE", ()).await?;
+    busy::begin_with_retry(connection, "BEGIN IMMEDIATE").await?;
     let result = apply(connection, files, policy).await;
     connection
         .execute(if result.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())

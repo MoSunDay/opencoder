@@ -23,22 +23,25 @@ const CANCEL: &str = "UPDATE subagent_tasks SET status = ?1, completed_at = ?2 W
 
 pub async fn create(conn: &Connection, rec: &SubagentTaskRecord) -> Result<()> {
     let parent_msg: Option<&str> = rec.parent_message_id.as_deref();
-    conn.execute(
-        INSERT,
-        params![
-            rec.task_id.as_str(),
-            rec.parent_session_id.as_str(),
-            rec.child_session_id.as_str(),
-            parent_msg,
-            rec.agent.as_str(),
-            rec.prompt.as_str(),
-            rec.status.as_str(),
-            rec.started_at,
-        ],
-    )
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
+            INSERT,
+            params![
+                rec.task_id.as_str(),
+                rec.parent_session_id.as_str(),
+                rec.child_session_id.as_str(),
+                parent_msg,
+                rec.agent.as_str(),
+                rec.prompt.as_str(),
+                rec.status.as_str(),
+                rec.started_at,
+            ],
+        )
+        .await?;
+        Ok(())
+    })
     .await
-    .context("insert subagent_task")?;
-    Ok(())
+    .context("insert subagent_task")
 }
 
 pub async fn complete(conn: &Connection, task_id: &str, result: &str, ok: bool) -> Result<()> {
@@ -48,10 +51,12 @@ pub async fn complete(conn: &Connection, task_id: &str, result: &str, ok: bool) 
         SubagentStatus::Failed
     };
     let now = opencoder_core::message::now_ms();
-    let rows = conn
-        .execute(COMPLETE, params![result, ok, status.as_str(), now, task_id])
-        .await
-        .context("update subagent_task completion")?;
+    let rows = super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(COMPLETE, params![result, ok, status.as_str(), now, task_id])
+            .await
+            .context("update subagent_task completion")
+    })
+    .await?;
     if rows == 0 {
         anyhow::bail!("subagent_task not found: {task_id}");
     }
@@ -60,13 +65,15 @@ pub async fn complete(conn: &Connection, task_id: &str, result: &str, ok: bool) 
 
 pub async fn cancel(conn: &Connection, task_id: &str) -> Result<()> {
     let now = opencoder_core::message::now_ms();
-    let rows = conn
-        .execute(
+    let rows = super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
             CANCEL,
             params![SubagentStatus::Cancelled.as_str(), now, task_id],
         )
         .await
-        .context("cancel subagent_task")?;
+        .context("cancel subagent_task")
+    })
+    .await?;
     if rows == 0 {
         anyhow::bail!("subagent_task not found: {task_id}");
     }

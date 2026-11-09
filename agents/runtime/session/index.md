@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # session 模块
 
@@ -7,12 +7,15 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 
 ## 索引
 - [src/lib.rs](../../../crates/session/src/lib.rs) — 模块根与公共导出
-  （`run`、`run_with_registry`）
+  （`run`、`run_once`、`run_with_images`、`run_with_registry`、`SessionEvent`）
 - [src/runner/](../../../crates/session/src/runner) — drain/执行/sidecar/steer；
   [subagent.rs](../../../crates/session/src/runner/subagent.rs) 子代理、
   [local_memory/](../../../crates/session/src/runner/local_memory) 记忆维护、
   [entry/](../../../crates/session/src/runner/entry/mod.rs) 入口 future、
   [drain.rs](../../../crates/session/src/runner/drain.rs) 队列消费
+- [src/subagent_steer_gate.rs](../../../crates/session/src/subagent_steer_gate.rs)
+  — 非中断 subagent steer 的运行时准入门，锚定 provider-turn 边界；
+  `lib.rs` re-export `SteerReservation`/`SubagentSteerGate`
 - [src/harness/](../../../crates/session/src/harness) — 前端共用的执行器准备与
   续会话校验（`SessionState` 入口）
 - [codex/launch.rs](../../../crates/session/src/harness/codex/launch.rs)、

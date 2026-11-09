@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # Computer use
 
@@ -7,22 +7,11 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 
 ## 索引
 
-- [使用文档](../../../tools/computer-use/README.md) — 安装、配置与方案调研
 - [pyproject.toml](../../../tools/computer-use/pyproject.toml) —
   `opencoder-computer` 包定义
-- [cli.py](../../../tools/computer-use/src/opencoder_computer/cli.py)
-  — `doctor`/`run`/`status`/`cancel` 命令入口
-- [runner.py](../../../tools/computer-use/src/opencoder_computer/runner.py)、
-  [state.py](../../../tools/computer-use/src/opencoder_computer/state.py)、
-  [results.py](../../../tools/computer-use/src/opencoder_computer/results.py) —
-  运行循环、状态与结果/截图产物
-- [config.py](../../../tools/computer-use/src/opencoder_computer/config.py)、
-  [model.py](../../../tools/computer-use/src/opencoder_computer/model.py)、
-  [locks.py](../../../tools/computer-use/src/opencoder_computer/locks.py)、
-  [backend.py](../../../tools/computer-use/src/opencoder_computer/backend.py) —
-  配置（`native_tool_calls`）、桌面模型、单实例锁与后端
-- [运维说明](../../../tools/computer-use/ops/README.md)、
-  [install-windows.ps1](../../../tools/computer-use/ops/install-windows.ps1) —
+- [install-windows.ps1](../../../tools/computer-use/ops/install-windows.ps1) —
   Windows 服务安装
-- [computer-use 模块](../../../agents/execution/computer-use/index.md) — 实现索引域卡
+- [computer-use 模块](../../../agents/execution/computer-use/index.md) —
+  cli/config/backend/model/runner/state/locks/results 与 ops 的完整代码索引
+  （原生函数配置项 `native_tool_calls`）
 

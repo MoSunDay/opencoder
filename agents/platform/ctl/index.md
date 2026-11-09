@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # ctl 模块
 
@@ -14,7 +14,8 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 - [maintenance/](../../../crates/ctl/src/maintenance/mod.rs) — Storage 子命令组
   （Serve/Query/Backup/Checkpoint）：检查/备份本机内嵌 Turso 数据库
   （`engine: turso`），本地执行不走 HTTP，底层
-  `opencoder_database::maintenance`
+  `opencoder_database::maintenance`；Serve 桥在 stdin 上回滚空闲超过
+  30s 的写事务（maintenance/bridge.rs `IDLE_WRITE_TX_LIMIT`）
 - `src/cmd/` — 按域子命令（纯 plan() 映射）
 - `src/cmd/ontology/` — Ontology 数据操作、检查与补同步；
   见 [Ontology CLI](../../../rules/10-ontology-cli.md)

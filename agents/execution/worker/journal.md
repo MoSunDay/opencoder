@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # worker journal 子系统
 
@@ -7,7 +7,8 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 ## 模块
 - [journal.rs](../../../crates/worker/src/journal.rs) — Journal 打开、恢复、保存与删除入口
 - [journal/summary.rs](../../../crates/worker/src/journal/summary.rs) — 常驻调度元数据；冻结请求与配置留在磁盘
-- [journal/loading.rs](../../../crates/worker/src/journal/loading.rs) — 阻塞线程逐条加载历史并提取摘要
+- [journal/loading.rs](../../../crates/worker/src/journal/loading.rs) — 阻塞线程逐条加载历史并提取摘要；
+  布局共存校验：`coexisting_records_are_valid` + `migration::receipt_matches_legacy`
 - [journal/reading.rs](../../../crates/worker/src/journal/reading.rs) — 按需读取与修订核对
 - [journal/cache.rs](../../../crates/worker/src/journal/cache.rs) — 完整正文与小详情的最近使用读取缓存
 - [journal/inspection/mod.rs](../../../crates/worker/src/journal/inspection/mod.rs) — 不驻留冻结 runtime 的小详情视图

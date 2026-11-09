@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # server 模块
 
@@ -18,7 +18,7 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 - 备份与数据归档：[rolling/backup.py](../../../scripts/platform/rolling/backup.py)、
   [data_archive.py](../../../scripts/platform/data_archive.py)、
   [backup_files/scope.py](../../../scripts/platform/rolling/backup_files/scope.py)
-- 就绪探针 [rolling/probes.py](../../../scripts/platform/rolling/probes.py)；发布验收)
+- 就绪探针 [rolling/probes.py](../../../scripts/platform/rolling/probes.py)；发布验收：
   [smooth_release/live.py](../../../scripts/acceptance/smooth_release/live.py)、
   [signal_release/main.py](../../../scripts/acceptance/signal_release/main.py)
 - 代码：[项目 CLI](../../../crates/ctl/src/cmd/project.rs)、

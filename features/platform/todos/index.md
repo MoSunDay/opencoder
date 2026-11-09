@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # TODO 工作台
 
@@ -7,9 +7,7 @@ JSON/Markdown 目录编辑、运行、Review 与指定节点重跑；本卡只�
 ## 索引
 
 - [todos 域卡](../../../agents/workbench/todos/index.md) — `WorkflowSpec` 运行时、状态机
-  与目录编解码
-- [crates/todos/src/directory/](../../../crates/todos/src/directory) — 文件集 ↔
-  WorkflowSpec 无损编解码
+  与目录无损编解码
 - [crates/todos/src/runner.rs](../../../crates/todos/src/runner.rs)、
   [review/](../../../crates/todos/src/review) — 运行与 Review
 - [workloads/todos.rs](../../../crates/worker/src/workloads/todos.rs)

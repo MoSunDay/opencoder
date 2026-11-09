@@ -87,7 +87,7 @@ fn config_with(model: &str) -> Config {
 /// sender closes the channel and lets the drain below terminate promptly.
 async fn run_cmd(sess: &mut SessionState, cmd: UiCmd) -> Vec<UiEvent> {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(cmd, sess, &tx).await;
+    let quit = process_cmd(cmd, sess, &tx, 0).await;
     assert!(!quit, "worker must not signal quit");
     drop(tx);
     let mut events = Vec::new();

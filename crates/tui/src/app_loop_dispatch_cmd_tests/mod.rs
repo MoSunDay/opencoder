@@ -17,6 +17,7 @@ use opencoder_core::Config;
 use opencoder_store::TursoStore;
 
 mod act_clear;
+mod act_clear_busy;
 
 /// Build a CommandMenu filtered to the given query.
 fn menu_for(query: &str) -> Option<CommandMenu> {
@@ -39,7 +40,7 @@ fn enter_key() -> KeyEvent {
 fn drain_cmd(cmd_rx: &mut mpsc::Receiver<UiCmd>) -> UiCmd {
     let first = cmd_rx.try_recv().unwrap();
     assert!(
-        matches!(first, UiCmd::ResetCancel(_)),
+        matches!(first, UiCmd::ResetCancel(_, _)),
         "expected ResetCancel preamble, got wrong variant"
     );
     cmd_rx.try_recv().unwrap()
@@ -76,6 +77,7 @@ async fn dispatch_popup(
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
     let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
     let mut clear_confirm: Option<crate::clear_confirm::ClearConfirm> = None;
 
     let flow = dispatch_command(
@@ -83,6 +85,7 @@ async fn dispatch_popup(
         enter_key(),
         &cmd_tx,
         &mut cancel,
+        &mut turn_gen,
         chat,
         &sidecar_tx,
         &mut running,

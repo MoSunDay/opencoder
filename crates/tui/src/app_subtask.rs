@@ -45,6 +45,7 @@ pub(crate) async fn key(
     anim_tick: u32,
     pending_task_pick: &mut Option<TaskPick>,
     config: &Config,
+    turn: u64,
 ) -> bool {
     let Some(detail) = view.as_mut() else {
         return false;
@@ -66,6 +67,7 @@ pub(crate) async fn key(
                 mode_flash,
                 anim_tick,
                 pending_task_pick,
+                turn,
             )
             .await;
             *view = None;
@@ -98,6 +100,7 @@ pub(crate) async fn append_and_pick(
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
     pending_task_pick: &mut Option<TaskPick>,
+    turn: u64,
 ) {
     if let Some(pick) = super::app_loop::append_subtask_result(
         child_id,
@@ -111,6 +114,7 @@ pub(crate) async fn append_and_pick(
         pending_images,
         mode_flash,
         anim_tick,
+        turn,
     )
     .await
     {
@@ -274,6 +278,7 @@ mod tests {
             0,
             &mut pending_task_pick,
             &Config::default(),
+            0,
         )
         .await;
         assert!(!consumed);
@@ -309,6 +314,7 @@ mod tests {
             0,
             &mut pending_task_pick,
             &Config::default(),
+            0,
         )
         .await;
         assert!(consumed);

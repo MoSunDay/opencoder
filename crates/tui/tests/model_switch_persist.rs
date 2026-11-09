@@ -63,6 +63,7 @@ async fn reload_config_persists_model_and_emits_model_switch_event() {
         UiCmd::ReloadConfig(Box::new(switched_config())),
         &mut sess,
         &tx,
+        0,
     )
     .await;
     assert!(!broke, "ReloadConfig must not break the worker loop");
@@ -120,6 +121,7 @@ async fn model_switch_survives_resume() {
         UiCmd::ReloadConfig(Box::new(switched_config())),
         &mut sess,
         &tx,
+        0,
     )
     .await;
     // drain the ModelSwitch event forwarded by the worker

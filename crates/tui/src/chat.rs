@@ -261,6 +261,10 @@ impl ChatView {
                 // bare model id even if a stale/persisted event carries the
                 // full "provider/model" string (issue #1).
                 let bare = m.split_once('/').map(|(_, id)| id).unwrap_or(m);
+                // Keep the live-session model the title renders in sync with
+                // the switch the worker just applied (full id when carried,
+                // bare otherwise — the title strips the prefix anyway).
+                self.model = m.clone();
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
                         format!("[model] {}", sanitize_single_line(bare)),

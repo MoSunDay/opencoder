@@ -50,127 +50,15 @@ pub(crate) enum LoopFlow {
     Quit,
 }
 
-/// Per-iteration display state computed by [`compute_display`]: the chat view,
-/// titles and context stats that vary depending on whether a subagent
-/// perspective is being viewed.
-///
-/// `display_chat` is a borrow into the live `ChatView` (either the parent's or a
-/// subagent block's child view), matching the original inline code which held a
-/// `&ChatView` rather than cloning.
-pub(crate) struct DisplayState<'a> {
-    pub(crate) agent_name: String,
-    pub(crate) display_mode: String,
-    pub(crate) status: String,
-    pub(crate) display_chat: &'a ChatView,
-    /// Body block title. Top level: `workdir · model · effort`; subagent
-    /// focus: the back/navigation title.
-    pub(crate) display_title: Line<'static>,
-    pub(crate) display_ctx: u64,
-    pub(crate) display_sys: u64,
-}
+/// Display-state computation lives in [`crate::app::app_display`] beside the
+/// title composer it relies on (extracted to keep this file within the
+/// iteration line cap). Re-exported so `app.rs` / tests keep the
+/// `app_loop::compute_display` path.
+pub(crate) use crate::app::app_display::{compute_display, DisplayState};
+// Test-only path stability: in-file test modules keep `super::body_is_top_level`.
+#[cfg(test)]
+pub(crate) use crate::app::app_display::body_is_top_level;
 
-/// Compute the per-iteration display values — `display_chat`, `display_title`,
-/// `display_ctx` and `display_sys` — swapping in a subagent's child ChatView
-/// when one is focused. The top-level title grades its segments by importance
-/// (subtle workdir, muted separators, accent model, pink thinking level). The
-/// mode remains in the bottom status bar. Pure: reads state, returns the values; the caller assigns them.
-/// Whether the body currently shows the TOP-LEVEL main transcript — the only
-/// context where the empty-session tutorial may appear. A focused sidecar
-/// panel (or a subagent child view) is never top level: the sidecar's fresh
-/// empty nested view must show a bare panel, not the welcome tutorial.
-pub(crate) fn body_is_top_level(chat: &ChatView, subagent_focus: Option<usize>) -> bool {
-    subagent_focus.is_none() && !chat.sidecar_focus
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn compute_display<'a>(
-    chat: &'a ChatView,
-    subagent_focus: Option<usize>,
-    subagent_sys: u64,
-    sys_tokens: u64,
-    config: &Config,
-    workdir: &Path,
-    _row_width: u16,
-    _arrow_w: u16,
-) -> DisplayState<'a> {
-    let agent_name = chat.agent.clone();
-    let status = chat.status.clone();
-    // When viewing a subagent's perspective, swap in its child ChatView,
-    // back-title, and its own context stats (instead of the parent's).
-    // The body title keeps the "Ctrl+L back" hint.
-    // The focused sidecar box takes precedence (sidecar focus and a subagent
-    // focus are mutually exclusive): body = the sidecar panel's nested view,
-    // mode chip reads `sidecar`, and the ctx meter reads the conversation's
-    // accumulated Turn tokens (the child's usage is forwarded bare, so the
-    // nested view itself never carries a context figure). The main task's
-    // `running` state is untouched — it is driven by the worker, not by
-    // sidecar turns.
-    let (display_chat, display_title, display_ctx, display_sys, display_mode) =
-        if let Some((view, question, total_tokens)) = crate::chat::sidecar::focused(chat) {
-            // A question-less block is the freshly entered empty panel: the
-            // title keeps only the nav element (the submitted question now
-            // echoes into the body, so no input hint is needed).
-            let title = if question.is_empty() {
-                "\u{2190} [Ctrl+L] back | \u{21f2}sidecar".to_string()
-            } else {
-                format!("\u{2190} [Ctrl+L] back | \u{21f2}sidecar {question}")
-            };
-            (
-                view,
-                Line::from(title),
-                total_tokens,
-                sys_tokens,
-                "sidecar".to_string(),
-            )
-        } else if let Some(idx) = subagent_focus {
-            match chat.blocks.get(idx) {
-                Some(crate::chat::ChatBlock::Subagent {
-                    view, kind, prompt, ..
-                }) => (
-                    view as &crate::chat::ChatView,
-                    Line::from(format!(
-                        "\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}"
-                    )),
-                    view.context_used,
-                    subagent_sys,
-                    kind.clone(),
-                ),
-                _ => (
-                    chat,
-                    Line::from(agent_name.clone()),
-                    chat.context_used,
-                    sys_tokens,
-                    agent_name.clone(),
-                ),
-            }
-        } else {
-            let title = if chat.remote {
-                Line::from(format!("Server · {}", chat.agent))
-            } else {
-                super::app_display::compose_top_title(
-                    workdir,
-                    config.model_id(),
-                    config.reasoning_effort.as_deref(),
-                )
-            };
-            (
-                chat,
-                title,
-                chat.context_used,
-                sys_tokens,
-                agent_name.clone(),
-            )
-        };
-    DisplayState {
-        agent_name,
-        display_mode,
-        status,
-        display_chat,
-        display_title,
-        display_ctx,
-        display_sys,
-    }
-}
 
 /// Advance the task-total clock using a single `last_clock` dt baseline.
 /// Provider/model round timing is event-driven in `ChatView`; it is distinct
@@ -243,6 +131,7 @@ pub(crate) async fn fold_ui_events(
     follow: &mut bool,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
     _notepad: &mut Option<crate::notepad::NotepadView>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
@@ -448,7 +337,18 @@ pub(crate) async fn fold_ui_events(
             UiEvent::AssistantFinal(text) => {
                 chat.reconcile_completed_assistant(&text);
             }
-            UiEvent::TurnDone(agent) => {
+            UiEvent::TurnDone(agent, turn) => {
+                // Stale completion guard: the worker emits exactly one
+                // TurnDone per processed turn command, tagged with the
+                // generation of its most recent ResetCancel. When the app
+                // loop has since cancelled (cancel_running_turn bumps the
+                // generation) or started a newer turn, this completion
+                // belongs to the OLD turn — dropping it keeps `running`
+                // armed for the superseding turn (double-Shift+Tab act fire)
+                // and keeps the chip from snapping back mid-handoff.
+                if *turn_gen != turn {
+                    continue;
+                }
                 // Reconcile the status chip from the authoritative agent.
                 // The ordered forwarder reliably delivers AgentSwitch before
                 // TurnDone. Keep this authoritative assignment for compatibility
@@ -470,7 +370,9 @@ pub(crate) async fn fold_ui_events(
                     // the drain loop to promote pending steers.
                     *drain_pending = false;
                     *cancelled = false;
-                    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(String::new(), Vec::new())).await {
+                    if !start_turn(cmd_tx, cancel, turn_gen, UiCmd::Prompt(String::new(), Vec::new()))
+                        .await
+                    {
                         worker_dead(chat);
                         return LoopFlow::Quit;
                     }
@@ -508,6 +410,7 @@ pub(crate) async fn dispatch_command(
     k: KeyEvent,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
     chat: &mut ChatView,
     sidecar_ask: &mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
     running: &mut bool,
@@ -571,6 +474,7 @@ pub(crate) async fn dispatch_command(
                 clear_confirm,
                 agent_menu,
                 subtask_view,
+                turn_gen,
             )
             .await;
         }
@@ -589,14 +493,18 @@ pub(crate) async fn dispatch_command(
 /// Hard exit (Ctrl+C/Ctrl+D): interrupt any in-flight turn so the worker stops
 /// promptly. Without cancelling the shared token the worker stays blocked inside
 /// `run_session` and cannot read `UiCmd::Quit` until the turn naturally ends (up
-/// to the 30-min timeout), freezing the terminal on the alt-screen.
+/// to the 30-min timeout), freezing the terminal on the alt-screen. `busy`
+/// covers BOTH a running parent turn and the subagent drain window (parent
+/// already idle, children still live) — in that gap the worker can still be
+/// unwinding inside `run_session`, so quitting without the token cancel
+/// wedges the same way.
 pub(crate) async fn handle_quit(
-    running: bool,
+    busy: bool,
     cancel: &CancellationToken,
     chat: &mut ChatView,
     cmd_tx: &mpsc::Sender<UiCmd>,
 ) {
-    if running && !chat.remote {
+    if busy && !chat.remote {
         cancel.cancel();
         chat.push_marker(Line::from(Span::styled(
             "[exiting…]",

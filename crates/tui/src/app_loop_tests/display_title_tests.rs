@@ -169,3 +169,45 @@ fn remote_display_identifies_server_capability_instead_of_local_model() {
     assert_eq!(line_text(&ds.display_title), "Server · operator:ops");
     assert_eq!(ds.display_mode, "operator:ops");
 }
+
+/// The title mirrors the LIVE session's model (`chat.model`, kept in sync by
+/// ModelSwitch events / session switches) — the outer run config's model is
+/// only the fallback when the live value is unknown. Before the fix the
+/// title always showed the outer config model, so switching models (or
+/// resuming a session with a different persisted model) displayed a name
+/// that did not match the model actually answering.
+#[test]
+fn compute_display_title_prefers_live_session_model_over_config() {
+    use opencoder_core::Config;
+
+    let chat = ChatView {
+        agent: "act".to_string(),
+        model: "bigmodel/gpt-9".to_string(),
+        ..ChatView::default()
+    };
+    let config = Config {
+        model: "bigmodel/glm-5.2".to_string(),
+        ..Config::default()
+    };
+
+    let ds = compute_display(
+        &chat,
+        None,
+        0,
+        0,
+        &config,
+        Path::new("/root/opencoder"),
+        80,
+        crate::app::app_display::TOP_ARROW_W,
+    );
+
+    let t = line_text(&ds.display_title);
+    assert!(
+        t.contains("gpt-9"),
+        "live session model must win in the title; got: {t}"
+    );
+    assert!(
+        !t.contains("glm-5.2"),
+        "outer config model must not leak into the title; got: {t}"
+    );
+}

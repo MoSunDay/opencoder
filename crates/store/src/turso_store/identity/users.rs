@@ -98,7 +98,7 @@ pub async fn create(
         )
         .await?;
         if !token_hash.is_empty() {
-            tokens::create(
+            tokens::create_in_tx(
                 conn,
                 &crate::AccessToken {
                     id: format!("user:{name}"),
@@ -135,14 +135,18 @@ pub async fn delete(conn: &Connection, name: &str) -> Result<bool> {
 /// row write and can never remove the final admin. `Missing`/`LastAdmin`
 /// are resolved after the fact purely to shape the API response.
 pub async fn delete_guarding_last_admin(conn: &Connection, name: &str) -> Result<GuardedDelete> {
-    let changed = conn
-        .execute(
-            "DELETE FROM platform_users WHERE name = ?1 \
-             AND (role != 'admin' OR (SELECT COUNT(*) FROM platform_users WHERE role = 'admin') > 1)",
-            params![name],
-        )
-        .await
-        .context("delete platform user (last-admin guarded)")?;
+    let changed = super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let removed = conn
+            .execute(
+                "DELETE FROM platform_users WHERE name = ?1 \
+                 AND (role != 'admin' OR (SELECT COUNT(*) FROM platform_users WHERE role = 'admin') > 1)",
+                params![name],
+            )
+            .await?;
+        Ok(removed)
+    })
+    .await
+    .context("delete platform user (last-admin guarded)")?;
     if changed > 0 {
         return Ok(GuardedDelete::Deleted);
     }
@@ -156,25 +160,31 @@ pub async fn delete_guarding_last_admin(conn: &Connection, name: &str) -> Result
 /// Returns false when no row carries that name; a UNIQUE(token_hash)
 /// collision with another user surfaces as an error.
 pub async fn update_token_hash(conn: &Connection, name: &str, token_hash: &str) -> Result<bool> {
-    let changed = conn
-        .execute(
-            "UPDATE platform_tokens SET token_hash = ?2 WHERE id = 'user:' || ?1",
-            params![name, token_hash],
-        )
-        .await
-        .context("rotate platform user token")?;
-    Ok(changed > 0)
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let changed = conn
+            .execute(
+                "UPDATE platform_tokens SET token_hash = ?2 WHERE id = 'user:' || ?1",
+                params![name, token_hash],
+            )
+            .await?;
+        Ok(changed > 0)
+    })
+    .await
+    .context("rotate platform user token")
 }
 
 pub async fn update_role(conn: &Connection, name: &str, role: Role) -> Result<bool> {
     anyhow::ensure!(role != Role::Admin, "admin uses the startup credential");
-    Ok(conn
-        .execute(
-            "UPDATE platform_users SET role=?2 WHERE name=?1 AND role != 'admin'",
-            params![name, role.as_str()],
-        )
-        .await?
-        > 0)
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        Ok(conn
+            .execute(
+                "UPDATE platform_users SET role=?2 WHERE name=?1 AND role != 'admin'",
+                params![name, role.as_str()],
+            )
+            .await?
+            > 0)
+    })
+    .await
 }
 
 #[cfg(test)]

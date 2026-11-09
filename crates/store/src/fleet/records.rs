@@ -4,23 +4,30 @@ use opencoder_core::fleet::{
     ExecutionCursor, ExecutionIndex, ExecutionKind, ExecutionPage, NodeRegistration,
     EXECUTION_PAGE_MAX,
 };
+use opencoder_database::busy;
 use serde_json::Value;
 use turso::params;
 
 impl FleetConnection {
     pub async fn register(&self, node: &NodeRegistration) -> Result<()> {
-        self.conn.execute("INSERT INTO fleet_nodes VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET registration=excluded.registration",
-            params![node.id.clone(), serde_json::to_string(node)?]).await?;
-        Ok(())
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn.execute("INSERT INTO fleet_nodes VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET registration=excluded.registration",
+                params![node.id.clone(), serde_json::to_string(node)?]).await?;
+            Ok(())
+        })
+        .await
     }
     /// Remove only the node registration; execution ownership and history
     /// remain in execution_index and in the node's own durable store.
     pub async fn unregister(&self, id: &str) -> Result<bool> {
-        Ok(self
-            .conn
-            .execute("DELETE FROM fleet_nodes WHERE id=?1", params![id])
-            .await?
-            > 0)
+        let removed = busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            Ok(self
+                .conn
+                .execute("DELETE FROM fleet_nodes WHERE id=?1", params![id])
+                .await?)
+        })
+        .await?;
+        Ok(removed > 0)
     }
     pub async fn nodes(&self) -> Result<Vec<NodeRegistration>> {
         let mut rows = self
@@ -43,9 +50,12 @@ impl FleetConnection {
                 bail!("execution ownership conflict: {}", record.id);
             }
         }
-        self.conn.execute("INSERT INTO execution_index(id,created_at,kind,node_id,status) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET status=excluded.status",
-            params![record.id.clone(), record.created_at, record.kind.prefix(), record.node_id.clone(), record.status.as_str()]).await?;
-        Ok(())
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn.execute("INSERT INTO execution_index(id,created_at,kind,node_id,status) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET status=excluded.status",
+                params![record.id.clone(), record.created_at, record.kind.prefix(), record.node_id.clone(), record.status.as_str()]).await?;
+            Ok(())
+        })
+        .await
     }
     /// Remove execution-index rows by id, ownership-guarded by `node_id` and
     /// `kind`, together with their frozen dispatch assignments and execution
@@ -62,8 +72,7 @@ impl FleetConnection {
         if ids.is_empty() {
             return Ok(0);
         }
-        self.conn
-            .execute("BEGIN IMMEDIATE", ())
+        busy::begin_with_retry(&self.conn, "BEGIN IMMEDIATE")
             .await
             .context("begin index deletion transaction")?;
         let result: anyhow::Result<u64> = async {
@@ -202,16 +211,22 @@ impl FleetConnection {
         Ok(result)
     }
     pub async fn delete_definition(&self, kind: &str, id: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM fleet_definitions WHERE kind=?1 AND id=?2",
-                params![kind, id],
-            )
-            .await?;
-        Ok(())
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn
+                .execute(
+                    "DELETE FROM fleet_definitions WHERE kind=?1 AND id=?2",
+                    params![kind, id],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
     }
     pub async fn put_definition(&self, kind: &str, id: &str, body: &Value) -> Result<()> {
-        self.put_definition_locked(kind, id, body).await
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.put_definition_locked(kind, id, body).await
+        })
+        .await
     }
     pub(super) async fn put_definition_locked(
         &self,

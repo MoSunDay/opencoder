@@ -13,11 +13,13 @@ pub use runtimes::{RuntimeOwner, RuntimeRecord};
 
 use super::FleetStore;
 use anyhow::{Context, Result};
+use opencoder_database::busy;
 use std::fs::{File, OpenOptions};
 use turso::Connection;
 
 pub(super) async fn initialize(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
+    busy::run_tx(conn, "BEGIN IMMEDIATE", || async {
+        conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS dispatch_receipts (
             scope TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL,
             phase TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,id));
@@ -37,8 +39,10 @@ pub(super) async fn initialize(conn: &Connection) -> Result<()> {
             execution_id TEXT NOT NULL, runtime_id TEXT NOT NULL,
             phase TEXT NOT NULL CHECK(phase IN ('queued','running','done')));
          CREATE UNIQUE INDEX IF NOT EXISTS one_live_slot ON capacity_queue(execution_id) WHERE phase!='done';",
-    ).await?;
-    Ok(())
+        ).await?;
+        Ok(())
+    })
+    .await
 }
 
 impl FleetStore {

@@ -5,6 +5,7 @@ use crate::{
     error::AppError,
     http::AppState,
 };
+use opencoder_database::busy;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -42,7 +43,7 @@ impl AppState {
             let database = state.database.clone();
             let task = move |connection: turso::Connection| async move {
                 if write {
-                    connection.execute("BEGIN IMMEDIATE", ()).await?;
+                    busy::begin_with_retry(&connection, "BEGIN IMMEDIATE").await?;
                 }
                 let store = Store {
                     connection: connection.clone(),

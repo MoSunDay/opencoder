@@ -50,7 +50,11 @@ pub(super) async fn format(conn: &Connection, reader: u32, writer: u32) -> Resul
     );
     drop(rows);
     if writer as i64 > stored {
-        conn.execute("INSERT INTO execution_report_format(id,version) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET version=excluded.version",[writer as i64]).await?;
+        super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+            conn.execute("INSERT INTO execution_report_format(id,version) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET version=excluded.version",[writer as i64]).await?;
+            Ok(())
+        })
+        .await?;
     }
     Ok(())
 }

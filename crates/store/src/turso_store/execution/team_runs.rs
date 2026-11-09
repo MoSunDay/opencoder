@@ -36,32 +36,38 @@ const RUN_COLS: &str = "topic_id, node_id, status, created_at";
 /// `created_at` — the conflict arm updates ONLY `status`, so a refresh
 /// (e.g. re-announcing an executing pairing) never restarts the run's clock.
 pub async fn upsert(conn: &Connection, rec: &TeamTopicRunRecord) -> Result<()> {
-    conn.execute(
-        "INSERT INTO team_topic_runs (topic_id, node_id, status, created_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(topic_id, node_id) DO UPDATE SET status = excluded.status",
-        params![
-            rec.topic_id.as_str(),
-            rec.node_id.as_str(),
-            rec.status.as_str(),
-            rec.created_at
-        ],
-    )
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
+            "INSERT INTO team_topic_runs (topic_id, node_id, status, created_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(topic_id, node_id) DO UPDATE SET status = excluded.status",
+            params![
+                rec.topic_id.as_str(),
+                rec.node_id.as_str(),
+                rec.status.as_str(),
+                rec.created_at
+            ],
+        )
+        .await?;
+        Ok(())
+    })
     .await
-    .context("upsert team topic run")?;
-    Ok(())
+    .context("upsert team topic run")
 }
 
 /// Flip EVERY row of `topic_id` to `finished`. No-op (0 rows) for unknown or
 /// already-finished topics — callers treat "nothing to finish" as success.
 pub async fn finish(conn: &Connection, topic_id: &str) -> Result<()> {
-    conn.execute(
-        "UPDATE team_topic_runs SET status = 'finished' WHERE topic_id = ?1",
-        params![topic_id],
-    )
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
+            "UPDATE team_topic_runs SET status = 'finished' WHERE topic_id = ?1",
+            params![topic_id],
+        )
+        .await?;
+        Ok(())
+    })
     .await
-    .context("finish team topic runs")?;
-    Ok(())
+    .context("finish team topic runs")
 }
 
 /// All run rows of `topic_id`, oldest `created_at` first (rowid breaks

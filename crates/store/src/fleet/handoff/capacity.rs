@@ -1,8 +1,8 @@
 use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Context, Result};
+use opencoder_database::busy;
 use serde::Serialize;
 use turso::params;
-use turso::transaction::TransactionBehavior;
 
 // The optimistic read and transactional update must use the same FIFO fence.
 // Completed tickets remain durable history. Poll only the existing partial
@@ -27,21 +27,27 @@ impl FleetConnection {
             max_runs > 0 && max_runs <= i64::MAX as usize,
             "invalid host capacity"
         );
-        self.conn
-            .execute(
-                "INSERT INTO host_capacity VALUES (1,?1) ON CONFLICT(singleton) DO NOTHING",
-                [max_runs as i64],
-            )
-            .await?;
-        Ok(())
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn
+                .execute(
+                    "INSERT INTO host_capacity VALUES (1,?1) ON CONFLICT(singleton) DO NOTHING",
+                    [max_runs as i64],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
     }
     pub async fn configure_capacity(&self, max_runs: usize) -> Result<()> {
         ensure!(
             max_runs > 0 && max_runs <= i64::MAX as usize,
             "invalid host capacity"
         );
-        self.conn.execute("INSERT INTO host_capacity VALUES (1,?1) ON CONFLICT(singleton) DO UPDATE SET max_runs=excluded.max_runs", [max_runs as i64]).await?;
-        Ok(())
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn.execute("INSERT INTO host_capacity VALUES (1,?1) ON CONFLICT(singleton) DO UPDATE SET max_runs=excluded.max_runs", [max_runs as i64]).await?;
+            Ok(())
+        })
+        .await
     }
 
     pub async fn capacity(&self) -> Result<CapacitySnapshot> {
@@ -74,7 +80,11 @@ impl FleetConnection {
         {
             return Ok(sequence);
         }
-        self.conn.execute("INSERT INTO capacity_queue(ticket,execution_id,runtime_id,phase) VALUES (?1,?2,?3,'queued') ON CONFLICT(ticket) DO NOTHING", params![ticket,execution,runtime]).await?;
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn.execute("INSERT INTO capacity_queue(ticket,execution_id,runtime_id,phase) VALUES (?1,?2,?3,'queued') ON CONFLICT(ticket) DO NOTHING", params![ticket,execution,runtime]).await?;
+            Ok(())
+        })
+        .await?;
         self.capacity_ticket_sequence(ticket, execution, runtime)
             .await?
             .context("capacity ticket disappeared after enqueue")
@@ -127,11 +137,7 @@ impl FleetConnection {
         if !eligible {
             return Ok(false);
         }
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         let changed = tx
             .execute(
                 &format!("UPDATE capacity_queue SET phase='running' WHERE {CLAIMABLE}"),
@@ -145,13 +151,16 @@ impl FleetConnection {
     /// Only the owning runtime calls this after completion and durable writes.
     /// No timer, host retirement, or release rollback is allowed to call it.
     pub async fn finish_capacity(&self, ticket: &str, runtime: &str) -> Result<()> {
-        let changed = self
-            .conn
-            .execute(
-                "UPDATE capacity_queue SET phase='done' WHERE ticket=?1 AND runtime_id=?2",
-                params![ticket, runtime],
-            )
-            .await?;
+        let changed = busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            Ok(self
+                .conn
+                .execute(
+                    "UPDATE capacity_queue SET phase='done' WHERE ticket=?1 AND runtime_id=?2",
+                    params![ticket, runtime],
+                )
+                .await?)
+        })
+        .await?;
         ensure!(changed == 1, "unknown capacity owner");
         Ok(())
     }
@@ -166,11 +175,7 @@ impl FleetConnection {
         execution: &str,
         runtime: &str,
     ) -> Result<bool> {
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         let row = {
             let mut rows = tx
                 .query(

@@ -335,3 +335,68 @@ async fn check_detects_changed_generated_objects_and_sync_repairs_them() {
         true
     );
 }
+
+/// A foreign process holding the database write lease must not fail the
+/// catalog apply: when the lease outlasts the pooled connection's busy
+/// budget, the apply's `BEGIN IMMEDIATE` only succeeds by queueing on the
+/// bounded Busy retry until the lease commits. The lease holder runs as a
+/// real child process of this test binary and marks the file once held.
+#[tokio::test]
+async fn catalog_apply_queues_past_a_foreign_write_lease() {
+    const LEASE_ENV: &str = "OPENCODER_TEST_CATALOG_LEASE_DB";
+    const LEASE_MS: u64 = 31_000;
+    if let Ok(path) = std::env::var(LEASE_ENV) {
+        let held = format!("{path}.held");
+        let database = turso::Builder::new_local(&path)
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        conn.execute("BEGIN IMMEDIATE", ()).await.unwrap();
+        std::fs::write(&held, b"").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(LEASE_MS)).await;
+        conn.execute("COMMIT", ()).await.unwrap();
+        return;
+    }
+
+    let f = Fixture::new().await;
+    let db_path = f.directory.path().join("ontology.db");
+    let held = std::path::PathBuf::from(format!("{}.held", db_path.to_string_lossy()));
+    let _ = std::fs::remove_file(&held);
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "catalog_apply_queues_past_a_foreign_write_lease",
+            "--nocapture",
+        ])
+        .env(LEASE_ENV, &db_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let waited = std::time::Instant::now();
+    while !held.exists() {
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(30),
+            "lease holder never acquired the write lock"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(apply(&f, vec![entry("foreign-lease")]).await["created"], 1);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "lease holder failed: {} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let items = rows(&f).await["items"].as_array().unwrap().clone();
+    assert!(
+        items
+            .iter()
+            .any(|row| row["capability"]["key"] == "foreign-lease"),
+        "the contended apply must land its entry"
+    );
+}

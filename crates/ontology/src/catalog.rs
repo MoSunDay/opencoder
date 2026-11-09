@@ -5,6 +5,7 @@ use crate::{
     http::AppState,
 };
 use opencoder_core::ontology::Capability;
+use opencoder_database::busy;
 use serde_json::Value;
 
 #[derive(Clone, Debug)]
@@ -37,7 +38,7 @@ impl AppState {
             let database = state.database.clone();
             let task = move |connection: turso::Connection| async move {
                 if write {
-                    connection.execute("BEGIN IMMEDIATE", ()).await?;
+                    busy::begin_with_retry(&connection, "BEGIN IMMEDIATE").await?;
                 }
                 let store = Store {
                     connection: connection.clone(),

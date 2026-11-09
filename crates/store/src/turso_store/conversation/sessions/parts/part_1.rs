@@ -25,17 +25,21 @@ pub async fn set_harness_runtime(
     id: &str,
     runtime: &opencoder_core::harness::HarnessRuntime,
 ) -> Result<()> {
-    let count = conn
-        .execute(
-            "UPDATE sessions SET harness_runtime = ? WHERE id = ?",
-            params![serde_json::to_string(runtime)?, id],
-        )
-        .await?;
-    anyhow::ensure!(count == 1, "session missing while saving harness runtime");
-    Ok(())
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let count = conn
+            .execute(
+                "UPDATE sessions SET harness_runtime = ? WHERE id = ?",
+                params![serde_json::to_string(runtime)?, id],
+            )
+            .await?;
+        anyhow::ensure!(count == 1, "session missing while saving harness runtime");
+        Ok(())
+    })
+    .await
 }
 
-pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
+/// Insert the session row inside a caller-owned transaction.
+pub(super) async fn create_in_tx(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     conn.execute(
         INSERT_SESSION,
         params![
@@ -61,6 +65,10 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     .await
     .context("insert session")?;
     Ok(())
+}
+
+pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || create_in_tx(conn, meta)).await
 }
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
@@ -321,8 +329,11 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     }
     let sql = format!("UPDATE sessions SET {} WHERE id = ?", sets.join(", "));
     args.push(id.to_string().into());
-    conn.execute(&sql, params_from_iter(args)).await?;
-    Ok(())
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(&sql, params_from_iter(args)).await?;
+        Ok(())
+    })
+    .await
 }
 
 pub async fn delete(conn: &Connection, id: &str) -> Result<()> {
@@ -335,9 +346,12 @@ pub async fn delete(conn: &Connection, id: &str) -> Result<()> {
 /// subagent_tasks) are removed by their `ON DELETE CASCADE` foreign keys.
 /// Returns the count of deleted session rows.
 pub async fn clear_others(conn: &Connection, keep_id: &str) -> Result<u64> {
-    let affected = conn
-        .execute("DELETE FROM sessions WHERE id != ?", params![keep_id])
-        .await
-        .context("clear other sessions")?;
-    Ok(affected as u64)
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let affected = conn
+            .execute("DELETE FROM sessions WHERE id != ?", params![keep_id])
+            .await?;
+        Ok(affected as u64)
+    })
+    .await
+    .context("clear other sessions")
 }

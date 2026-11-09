@@ -1,10 +1,10 @@
 use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
 use opencoder_core::fleet::{Assignment, CreateExecution, ExecutionKind, RpcReply};
+use opencoder_database::busy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use turso::transaction::TransactionBehavior;
 use turso::{params, params_from_iter};
 
 /// Project sessions retain one owner while each initial admission has its own run ID.
@@ -57,10 +57,14 @@ impl FleetConnection {
 
     /// First writer owns the original intent. Returns false on content reuse.
     pub async fn claim_request(&self, scope: &str, id: &str, fingerprint: &str) -> Result<bool> {
-        self.conn.execute(
-            "INSERT INTO dispatch_receipts VALUES (?1,?2,?3,'claimed','null') ON CONFLICT(scope,id) DO NOTHING",
-            params![scope,id,fingerprint],
-        ).await?;
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn.execute(
+                "INSERT INTO dispatch_receipts VALUES (?1,?2,?3,'claimed','null') ON CONFLICT(scope,id) DO NOTHING",
+                params![scope,id,fingerprint],
+            ).await?;
+            Ok(())
+        })
+        .await?;
         let mut rows = self
             .conn
             .query(
@@ -73,10 +77,15 @@ impl FleetConnection {
 
     /// Caller holds request_lock for this key. Updates cannot change intent.
     pub async fn save_receipt(&self, scope: &str, id: &str, receipt: &Receipt) -> Result<()> {
-        let changed = self.conn.execute(
-            "UPDATE dispatch_receipts SET phase=?4,payload=?5 WHERE scope=?1 AND id=?2 AND fingerprint=?3",
-            params![scope,id,receipt.fingerprint.clone(),receipt.phase.clone(),serde_json::to_string(&receipt.payload)?],
-        ).await?;
+        let changed = busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            Ok(self.conn
+                .execute(
+                    "UPDATE dispatch_receipts SET phase=?4,payload=?5 WHERE scope=?1 AND id=?2 AND fingerprint=?3",
+                    params![scope,id,receipt.fingerprint.clone(),receipt.phase.clone(),serde_json::to_string(&receipt.payload)?],
+                )
+                .await?)
+        })
+        .await?;
         ensure!(changed == 1, "request receipt ownership conflict");
         Ok(())
     }
@@ -142,11 +151,7 @@ impl FleetConnection {
                 && assignment.index.kind == assignment.request.kind,
             "assignment index must match request id and kind"
         );
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         let i = &assignment.index;
         let mut rows = tx
             .query(
@@ -227,11 +232,7 @@ impl FleetConnection {
             "node acceptance required"
         );
         let accepted = serde_json::from_value(reply.body.clone())?;
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         super::acceptance::insert(&tx, &accepted, Some(id)).await?;
         let changed = tx.execute(
             "UPDATE dispatch_receipts SET phase='accepted',payload=?3 WHERE scope='execution' AND id=?1 AND fingerprint=?2",

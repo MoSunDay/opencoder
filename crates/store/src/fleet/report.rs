@@ -2,6 +2,7 @@ use super::FleetStore;
 use super::{FleetConnection, records::read_index};
 use anyhow::{Context, Result, bail};
 use opencoder_core::fleet::{ExecutionIndex, valid_id};
+use opencoder_database::busy;
 use std::collections::HashSet;
 use turso::{Connection, params};
 
@@ -72,8 +73,7 @@ impl FleetConnection {
         // Serialize outside the shared writer gate. Whole inventories can
         // contain tens of thousands of rows during a Server handoff.
         let encoded = serde_json::to_string(records)?;
-        self.conn
-            .execute("BEGIN IMMEDIATE", ())
+        busy::begin_with_retry(&self.conn, "BEGIN IMMEDIATE")
             .await
             .context("begin index report transaction")?;
         match async {

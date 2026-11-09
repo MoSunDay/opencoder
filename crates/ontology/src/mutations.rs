@@ -8,6 +8,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use opencoder_database::busy;
 use std::sync::atomic::Ordering;
 
 pub(crate) struct Active(Database);
@@ -39,7 +40,7 @@ pub(crate) async fn transaction(
         let database = state.database.clone();
         let work = move |connection: turso::Connection| async move {
             if write {
-                connection.execute("BEGIN IMMEDIATE", ()).await?;
+                busy::begin_with_retry(&connection, "BEGIN IMMEDIATE").await?;
             }
             let response = REQUEST_CONNECTION
                 .scope(connection.clone(), async {

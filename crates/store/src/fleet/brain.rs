@@ -1,12 +1,16 @@
 use super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Result};
 use opencoder_core::{brain::*, fleet::valid_id};
+use opencoder_database::busy;
 use serde_json::Value;
 use turso::params;
 
 pub(super) async fn initialize(conn: &turso::Connection) -> Result<()> {
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS brain_plan_versions (id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(id,version));").await?;
-    Ok(())
+    busy::run_tx(conn, "BEGIN IMMEDIATE", || async {
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS brain_plan_versions (id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(id,version));").await?;
+        Ok(())
+    })
+    .await
 }
 
 impl FleetConnection {
@@ -16,7 +20,7 @@ impl FleetConnection {
     /// entries. Returns `false` when the plan metadata does not exist.
     pub async fn delete_brain_plan(&self, id: &str) -> Result<bool> {
         ensure!(valid_id(id), "invalid plan identity");
-        self.conn.execute("BEGIN IMMEDIATE", ()).await?;
+        busy::begin_with_retry(&self.conn, "BEGIN IMMEDIATE").await?;
         let result = async {
             if self.definition_locked("brain_plan", id).await?.is_none() {
                 return Ok(false);
@@ -76,7 +80,7 @@ impl FleetConnection {
             !version.changelog.trim().is_empty(),
             "changelog is required"
         );
-        self.conn.execute("BEGIN IMMEDIATE", ()).await?;
+        busy::begin_with_retry(&self.conn, "BEGIN IMMEDIATE").await?;
         let result = self.save_brain_plan_tx(version).await;
         match result {
             Ok(result) => {
@@ -205,8 +209,11 @@ impl FleetConnection {
                 .ok_or_else(|| anyhow::anyhow!("unknown plan"))?,
         )?;
         definition.stable_version = Some(version);
-        self.put_definition_locked("brain_plan", id, &serde_json::to_value(&definition)?)
-            .await?;
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.put_definition_locked("brain_plan", id, &serde_json::to_value(&definition)?)
+                .await
+        })
+        .await?;
         Ok(definition)
     }
 }

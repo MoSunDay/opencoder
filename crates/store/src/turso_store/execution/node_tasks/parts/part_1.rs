@@ -19,7 +19,7 @@ pub async fn dispatch(
             anyhow::bail!("dispatch_node_task: node {node_id} does not exist");
         }
         // Session first: node_tasks.session_id is an immediate FK into it.
-        super::sessions::create(
+        super::sessions::create_in_tx(
             conn,
             &SessionMeta {
                 kind: None,

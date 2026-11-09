@@ -25,19 +25,23 @@ pub async fn register(
     now_ms: i64,
 ) -> Result<NodeRecord> {
     let id = ulid::Ulid::new().to_string();
-    conn.execute(
-        "INSERT INTO nodes (id, name, version, workdir, first_seen, last_seen_at, last_status, last_task_id, last_addr)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'online', NULL, ?6)
-         ON CONFLICT(name) DO UPDATE SET
-           version = excluded.version,
-           workdir = excluded.workdir,
-           last_seen_at = excluded.last_seen_at,
-           last_status = 'online',
-           last_addr = excluded.last_addr",
-        params![id.as_str(), name, version, workdir, now_ms, addr],
-    )
-    .await
-    .context("upsert node")?;
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
+            "INSERT INTO nodes (id, name, version, workdir, first_seen, last_seen_at, last_status, last_task_id, last_addr)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'online', NULL, ?6)
+             ON CONFLICT(name) DO UPDATE SET
+               version = excluded.version,
+               workdir = excluded.workdir,
+               last_seen_at = excluded.last_seen_at,
+               last_status = 'online',
+               last_addr = excluded.last_addr",
+            params![id.as_str(), name, version, workdir, now_ms, addr],
+        )
+        .await
+        .context("upsert node")?;
+        Ok(())
+    })
+    .await?;
     get_by_name(conn, name)
         .await?
         .ok_or_else(|| anyhow::anyhow!("register_node: row for {name:?} vanished after upsert"))

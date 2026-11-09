@@ -1,4 +1,5 @@
 //! Shared embedded database execution. Disk work runs outside application workers.
+pub mod busy;
 pub mod maintenance;
 mod marker;
 mod pool;

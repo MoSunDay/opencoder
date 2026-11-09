@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use opencoder_core::fleet::{valid_id, ExecutionKind, ExecutionStatus};
+use opencoder_database::busy;
 use serde_json::Value;
 use turso::{params, Connection};
 
@@ -34,7 +35,7 @@ const CURRENT_COLUMNS: &[(&str, &str, bool, bool)] = &[
 ];
 
 pub(super) async fn initialize(conn: &Connection) -> Result<()> {
-    conn.execute("BEGIN IMMEDIATE", ())
+    busy::begin_with_retry(conn, "BEGIN IMMEDIATE")
         .await
         .context("begin fleet schema transaction")?;
     match initialize_tx(conn).await {

@@ -42,26 +42,29 @@ const RUN_COLS: &str =
 /// `(schedule_id, scheduled_for_ms)` key is deterministic, so a retried fire
 /// (e.g. after a submission error) converges instead of duplicating.
 pub async fn record(conn: &Connection, rec: &ScheduleRunRecord) -> Result<()> {
-    conn.execute(
-        "INSERT OR REPLACE INTO schedule_runs (
-           schedule_id, kind, target, scheduled_for_ms, fired_at_ms,
-           execution_id, status, error, missed
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            rec.schedule_id.as_str(),
-            rec.kind.as_str(),
-            rec.target.as_str(),
-            rec.scheduled_for_ms,
-            rec.fired_at_ms,
-            rec.execution_id.as_deref(),
-            rec.status.as_str(),
-            rec.error.as_deref(),
-            rec.missed as i64
-        ],
-    )
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
+            "INSERT OR REPLACE INTO schedule_runs (
+               schedule_id, kind, target, scheduled_for_ms, fired_at_ms,
+               execution_id, status, error, missed
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                rec.schedule_id.as_str(),
+                rec.kind.as_str(),
+                rec.target.as_str(),
+                rec.scheduled_for_ms,
+                rec.fired_at_ms,
+                rec.execution_id.as_deref(),
+                rec.status.as_str(),
+                rec.error.as_deref(),
+                rec.missed as i64
+            ],
+        )
+        .await?;
+        Ok(())
+    })
     .await
-    .context("record schedule run")?;
-    Ok(())
+    .context("record schedule run")
 }
 
 /// The most recent row of `schedule_id` (latest tick wins; rowid breaks
@@ -149,32 +152,35 @@ pub async fn upsert_def(
     now_ms: i64,
 ) -> Result<()> {
     let params_json = serde_json::to_string(&job.params).context("serialize schedule params")?;
-    conn.execute(
-        "INSERT INTO schedules (
-           id, cron, timezone, enabled, kind, target, params_json, overlap, node_id,
-           created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-         ON CONFLICT(id) DO UPDATE SET
-           cron = excluded.cron, timezone = excluded.timezone, enabled = excluded.enabled,
-           kind = excluded.kind, target = excluded.target, params_json = excluded.params_json,
-           overlap = excluded.overlap, node_id = excluded.node_id, updated_at = excluded.updated_at",
-        params![
-            job.id.as_str(),
-            job.cron.as_str(),
-            job.timezone.as_deref(),
-            job.enabled as i64,
-            job.kind.as_str(),
-            job.target.as_str(),
-            params_json.as_str(),
-            job.overlap.as_str(),
-            job.node_id.as_deref(),
-            now_ms,
-            now_ms,
-        ],
-    )
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute(
+            "INSERT INTO schedules (
+               id, cron, timezone, enabled, kind, target, params_json, overlap, node_id,
+               created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+               cron = excluded.cron, timezone = excluded.timezone, enabled = excluded.enabled,
+               kind = excluded.kind, target = excluded.target, params_json = excluded.params_json,
+               overlap = excluded.overlap, node_id = excluded.node_id, updated_at = excluded.updated_at",
+            params![
+                job.id.as_str(),
+                job.cron.as_str(),
+                job.timezone.as_deref(),
+                job.enabled as i64,
+                job.kind.as_str(),
+                job.target.as_str(),
+                params_json.as_str(),
+                job.overlap.as_str(),
+                job.node_id.as_deref(),
+                now_ms,
+                now_ms,
+            ],
+        )
+        .await?;
+        Ok(())
+    })
     .await
-    .context("upsert schedule")?;
-    Ok(())
+    .context("upsert schedule")
 }
 
 /// One definition by id (with its timestamps), or `None`.
@@ -208,10 +214,13 @@ pub async fn list_defs(conn: &Connection) -> Result<Vec<ScheduleDefRecord>> {
 /// Delete one definition. Its `schedule_runs` ledger rows are KEPT (no FK):
 /// fire history is an audit trail and outlives the definition.
 pub async fn delete_def(conn: &Connection, id: &str) -> Result<()> {
-    conn.execute("DELETE FROM schedules WHERE id = ?1", params![id])
-        .await
-        .context("delete schedule")?;
-    Ok(())
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        conn.execute("DELETE FROM schedules WHERE id = ?1", params![id])
+            .await?;
+        Ok(())
+    })
+    .await
+    .context("delete schedule")
 }
 
 fn row_to_def(r: &Row) -> Result<ScheduleDefRecord> {

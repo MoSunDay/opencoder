@@ -1,9 +1,9 @@
 use super::super::{FleetConnection, FleetStore};
 use anyhow::{ensure, Context, Result};
+use opencoder_database::busy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use turso::params;
-use turso::transaction::TransactionBehavior;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeRecord {
@@ -32,16 +32,20 @@ impl FleetConnection {
         );
         ensure!(runtime.mode == "staged", "runtime must register staged");
         let config = serde_json::to_string(&runtime.config)?;
-        self.conn
-            .execute(
-                "INSERT INTO host_runtimes VALUES (?1,?2,?3,'staged') ON CONFLICT(id) DO NOTHING",
-                params![
-                    runtime.id.clone(),
-                    runtime.release_id.clone(),
-                    config.clone()
-                ],
-            )
-            .await?;
+        busy::run_tx(&self.conn, "BEGIN IMMEDIATE", || async {
+            self.conn
+                .execute(
+                    "INSERT INTO host_runtimes VALUES (?1,?2,?3,'staged') ON CONFLICT(id) DO NOTHING",
+                    params![
+                        runtime.id.clone(),
+                        runtime.release_id.clone(),
+                        config.clone()
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await?;
         let mut rows = self
             .conn
             .query(
@@ -79,11 +83,7 @@ impl FleetConnection {
 
     /// Activation affects only previously unseen IDs. Ownership never moves.
     pub async fn activate_runtime(&self, id: &str) -> Result<()> {
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         let mut rows = tx
             .query("SELECT 1 FROM host_runtimes WHERE id=?1", [id])
             .await?;
@@ -133,11 +133,7 @@ impl FleetConnection {
             );
             return Ok(owner.runtime_id);
         }
-        let tx = turso::transaction::Transaction::new_unchecked(
-            &self.conn,
-            TransactionBehavior::Immediate,
-        )
-        .await?;
+        let tx = busy::immediate_with_retry(&self.conn).await?;
         let mut rows = tx
             .query(
                 "SELECT runtime_id FROM runtime_owners WHERE execution_id=?1",

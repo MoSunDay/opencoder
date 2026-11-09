@@ -3,19 +3,22 @@
 /// `ON DELETE CASCADE` foreign keys. Unknown ids are ignored. Returns the
 /// number of deleted session rows.
 pub async fn delete_many(conn: &Connection, ids: &[String]) -> Result<u64> {
-    let mut removed = 0u64;
-    for chunk in ids.chunks(100) {
-        let placeholders = vec!["?"; chunk.len()].join(",");
-        let affected = conn
-            .execute(
-                &format!("DELETE FROM sessions WHERE id IN ({placeholders})"),
-                params_from_iter(chunk.iter().map(String::as_str)),
-            )
-            .await
-            .context("delete sessions by id")?;
-        removed += affected as u64;
-    }
-    Ok(removed)
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let mut removed = 0u64;
+        for chunk in ids.chunks(100) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let affected = conn
+                .execute(
+                    &format!("DELETE FROM sessions WHERE id IN ({placeholders})"),
+                    params_from_iter(chunk.iter().map(String::as_str)),
+                )
+                .await
+                .context("delete sessions by id")?;
+            removed += affected as u64;
+        }
+        Ok(removed)
+    })
+    .await
 }
 
 /// Legacy agent-name normalization, applied on READ paths only: databases

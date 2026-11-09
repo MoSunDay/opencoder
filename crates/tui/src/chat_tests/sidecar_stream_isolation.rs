@@ -235,6 +235,34 @@ fn panel_ladder_lands_below_the_echoed_question() {
         id: "sc-1".into(),
         ev: Box::new(SessionEvent::ReasoningDelta("先看代码".into())),
     });
+    // Settle the step (call round-trip): while the FIRST step streams the
+    // ladder emits no rows at all (the in-flight step lives in the turn
+    // live region), so the ladder marker needs a settled step to render.
+    v.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ToolStart {
+            id: "p1".into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": "echo x"}),
+        }),
+    });
+    v.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ToolEnd {
+            id: "p1".into(),
+            name: "bash".into(),
+            output: "p1-out".into(),
+            is_error: false,
+            images: Vec::new(),
+        }),
+    });
+    // …and begin a SECOND step: while the turn runs, the ladder renders
+    // SETTLED history only, so the first step's row appears exactly when
+    // the next step goes in flight (streams in the live region below).
+    v.apply(&SessionEvent::SidecarChild {
+        id: "sc-1".into(),
+        ev: Box::new(SessionEvent::ReasoningDelta("再看一眼".into())),
+    });
     let panel = v.sidecar.as_ref().expect("panel alive");
     let user_idx = panel
         .view

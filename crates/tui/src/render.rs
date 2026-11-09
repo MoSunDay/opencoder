@@ -22,7 +22,6 @@ use crate::keymap_menu::KeymapMenu;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::queue_panel::QueueBtn;
-use crate::render_live;
 use crate::render_viewport::ViewportCache;
 use crate::task::TaskPicker;
 use crate::theme;
@@ -42,7 +41,9 @@ pub(crate) use status_bar::SPINNER;
 /// and wheel scrolls against. Recomputed every frame. The struct and the
 /// button types live in `render_hits.rs` next to their recorders; re-exported
 /// here so `crate::render::MouseHits` paths stay stable.
-pub(crate) use hit_records::{CompactionBtn, MouseHits, SubagentBtn, ThinkingBtn, ToolCallBtn};
+pub(crate) use hit_records::{
+    CompactionBtn, LiveBtn, MouseHits, SubagentBtn, ThinkingBtn, ToolCallBtn,
+};
 
 pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
@@ -181,11 +182,6 @@ pub(crate) fn render<B: Backend + 'static>(
             .saturating_sub(text_h.saturating_sub(1))
             .min(max_scroll);
 
-        // TURN LIVE REGION — the TAIL of the transcript's scroll window
-        // (`render_live`): rides the SAME scrollbar as the Say/transcript
-        // rows, above the `[tok cost]` bottom border, never truncated —
-        // scrolling up reveals the region's start.
-        let live_lines = render_live::region(chat, plan_active, anim_tick);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -208,6 +204,7 @@ pub(crate) fn render<B: Backend + 'static>(
         hits.subagent_btns.clear();
         hits.tool_call_btns.clear();
         hits.compaction_btns.clear();
+        hits.live_btns.clear();
         hits.keymap_btns.clear();
         if !plan_active {
             render_body(
@@ -226,12 +223,12 @@ pub(crate) fn render<B: Backend + 'static>(
                 &mut hits.subagent_btns,
                 &mut hits.tool_call_btns,
                 &mut hits.compaction_btns,
+                &mut hits.live_btns,
                 viewport,
                 is_top_level,
                 tail_ms,
                 copy_mode,
                 wrap_plan.as_ref(),
-                &live_lines,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -385,6 +382,7 @@ fn clear_chat_hits(hits: &mut MouseHits) {
     hits.subagent_btns.clear();
     hits.tool_call_btns.clear();
     hits.compaction_btns.clear();
+    hits.live_btns.clear();
     hits.keymap_btns.clear();
 }
 
@@ -405,12 +403,12 @@ fn render_body(
     subagent_btns: &mut Vec<SubagentBtn>,
     tool_call_btns: &mut Vec<ToolCallBtn>,
     compaction_btns: &mut Vec<CompactionBtn>,
+    live_btns: &mut Vec<LiveBtn>,
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
     tail_ms: u64,
     copy_mode: bool,
     wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
-    live_lines: &[Line<'static>],
 ) {
     *body_out = Some(area);
     // Copy mode: undecorated full-width view for terminal-native selection.
@@ -448,24 +446,24 @@ fn render_body(
         return;
     }
 
-    // A1: build/refresh the viewport cache (first frame, body refresh, or
-    // width change) — O(visible_h) per frame. Needs only `text_w`, so it
-    // is built before any content-area splitting.
-    let needs_rebuild = viewport.as_ref().is_none_or(|v| v.width() != text_w);
+    // A1: build/refresh the viewport cache (first frame, body refresh,
+    // width change, or leaving copy mode — the copy-mode cache omits the
+    // turn live region) — O(visible_h) per frame. Needs only `text_w`, so
+    // it is built before any content-area splitting.
+    let needs_rebuild = viewport
+        .as_ref()
+        .is_none_or(|v| v.width() != text_w || !v.includes_live());
     if needs_rebuild {
         *viewport = Some(ViewportCache::build(chat, text_w, anim_tick, now_ms));
     }
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
-
-    // TURN LIVE REGION rides the scroll-window TAIL: transcript + live
-    // rows form ONE scrollable window (`render_live`) — a single scrollbar
-    // for both, never truncated (scrolling up reveals the region's start).
-    let live_rows = render_live::wrapped_total(live_lines, text_w);
-    let total_all = total_rows + live_rows;
+    // The cache carries the transcript AND the turn live region (emitted
+    // by flatten right below the running ladder) — ONE scroll window, one
+    // scrollbar; never truncated (scrolling up reveals the live start).
     let visible_h = inner.height as usize;
 
-    let max_rows = total_all.saturating_sub(visible_h);
+    let max_rows = total_rows.saturating_sub(visible_h);
     if follow {
         *scroll = max_rows as u32;
     }
@@ -473,7 +471,8 @@ fn render_body(
     let scroll_y = *scroll as usize;
 
     // Content rows visible in THIS window — hit-rects exist only there
-    // (the live tail carries no click targets).
+    // (the live region's DETAIL rows carry no click targets; its header
+    // row does — recorded below like every other header).
     let content_vis = visible_h.min(total_rows.saturating_sub(scroll_y));
 
     // Record click hit-rects using cached row offsets — O(headers), not O(n).
@@ -517,6 +516,16 @@ fn render_body(
         inner.y,
         compaction_btns,
     );
+    hit_records::record_live_hits(
+        chat,
+        cache,
+        text_w,
+        scroll_y,
+        content_vis,
+        inner.x,
+        inner.y,
+        live_btns,
+    );
 
     f.render_widget(block, area);
     let content_area = Rect {
@@ -526,8 +535,7 @@ fn render_body(
     };
 
     // A1: Virtualization over the unified window — slice only the visible
-    // CONTENT rows from the cached lines, then fill the window's remaining
-    // rows with the live tail, so one wrapping Paragraph renders both.
+    // rows from the cached lines (transcript + live region alike).
     let mut top_skip = 0usize;
     let mut window_lines: Vec<Line<'static>> = Vec::new();
     if content_vis > 0 {
@@ -535,23 +543,11 @@ fn render_body(
         top_skip = skip;
         window_lines = cache.lines()[start..end].to_vec();
     }
-    let (live_slice, live_top_skip) = render_live::slice_window(
-        live_lines,
-        text_w,
-        scroll_y.saturating_sub(total_rows),
-        visible_h - content_vis,
-    );
-    if content_vis == 0 {
-        // The window starts inside the live region: its partial first row
-        // is what the paragraph scroll must skip past.
-        top_skip = live_top_skip as usize;
-    }
-    window_lines.extend(live_slice);
     let para = Paragraph::new(window_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), content_area);
 
-    if total_all > visible_h {
-        draw_scrollbar(f, inner, total_all, visible_h, scroll_y);
+    if total_rows > visible_h {
+        draw_scrollbar(f, inner, total_rows, visible_h, scroll_y);
     }
 
     // Follow indicator on the body's bottom-border row, right-aligned.

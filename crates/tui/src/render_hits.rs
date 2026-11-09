@@ -37,6 +37,10 @@ pub(crate) struct MouseHits {
     pub tool_call_btns: Vec<ToolCallBtn>,
     /// Clickable Compaction-block header rows; clicking toggles collapse.
     pub compaction_btns: Vec<CompactionBtn>,
+    /// Clickable TURN LIVE REGION header rows (`> live` / `▸ live`); one
+    /// per running group currently visible in the body viewport. Clicking
+    /// toggles the region between its detail rows and the collapsed header.
+    pub live_btns: Vec<LiveBtn>,
     pub keymap_btns: Vec<Rect>,
     /// Cached total content rows from the last render_body call. Used by
     /// the scroll-wheel handler to clamp scroll without re-flattening.
@@ -67,6 +71,15 @@ pub(crate) struct SubagentBtn {
 pub(crate) struct ToolCallBtn {
     pub block_idx: usize,
     pub call_idx: usize,
+    pub rect: Rect,
+}
+
+/// A clickable TURN LIVE REGION header row (`> live` / `▸ live`, the first
+/// row the region emits below the running ladder). Clicking toggles the
+/// region between its detail rows and the collapsed header-only shape
+/// (`ChatView::toggle_live_region`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LiveBtn {
     pub rect: Rect,
 }
 
@@ -104,8 +117,42 @@ pub(super) fn record_thinking_hits(
     }
 }
 
+/// Populate `out` with one `LiveBtn` per TURN LIVE REGION header line that
+/// is currently visible inside the body viewport. Mirrors
+/// `record_thinking_hits`; the data source is `ChatView::live_headers`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn record_live_hits(
+    chat: &ChatView,
+    cache: &ViewportCache,
+    text_w: u16,
+    scroll_y: usize,
+    visible_h: usize,
+    x: u16,
+    y0: u16,
+    out: &mut Vec<LiveBtn>,
+) {
+    let headers = chat.live_headers();
+    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
+        return;
+    }
+    let viewport_bottom = scroll_y + visible_h;
+    for h in headers {
+        let header_row = cache.row_of_line(h.header_line_idx);
+        if header_row >= viewport_bottom {
+            break;
+        }
+        if header_row >= scroll_y {
+            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
+            out.push(LiveBtn {
+                rect: Rect::new(x, screen_y, text_w, 1),
+            });
+        }
+    }
+}
+
 /// Populate `out` with one `SubagentBtn` per Subagent-block header line that is
-/// currently visible inside the body viewport. Mirrors `record_thinking_hits`.
+/// currently visible inside the body viewport. Mirrors
+/// `record_thinking_hits`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn record_subagent_hits(
     chat: &ChatView,

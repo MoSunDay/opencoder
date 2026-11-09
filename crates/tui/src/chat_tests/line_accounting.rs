@@ -148,53 +148,61 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                 progress_active,
                 ..
             } => {
-                // Mirrors the StepGroup arm in collect_headers: group row
-                // (or merged Say header when the next block is the Say) plus
-                // its separator blank, then the three-level ladder while
-                // open, then one trailing blank — the LADDER blank is
-                // skipped for a CLOSED merged pair (the header's separator
-                // blank already terminates it).
-                expected += 1; // group row
-                if say_merged_after_group {
-                    // 合并头部行之后的空行（与 flatten_step_group 同步）。
-                    expected += 1;
-                }
-                if !*open && say_merged_after_group {
-                    // merged closed pair: no trailing blank
-                } else if *open {
-                    for s in steps {
-                        expected += 1; // step row
-                        if s.open {
-                            if !s.thinking.is_empty() {
-                                expected += 1 + s.thinking.len();
-                            }
-                            if !s.calls.is_empty() {
-                                expected += 1; // calls aggregation row
-                                if s.calls_open {
-                                    for c in &s.calls {
-                                        expected +=
-                                            1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                // Mirrors the StepGroup arm in collect_headers: the LADDER
+                // renders SETTLED steps only (`steps::settled_steps`) —
+                // group row (or merged Say header when the next block is
+                // the Say) plus its separator blank, then the three-level
+                // ladder while open, then one trailing blank (skipped for
+                // a CLOSED merged pair and when a final expanded call's
+                // separator blank already terminates the block). While the
+                // group runs, the in-flight LAST step streams ONLY in the
+                // TURN LIVE REGION whose rows ride right below the ladder
+                // — while the FIRST step is still in flight the block
+                // itself renders ONLY the region's rows.
+                let ladder = super::super::steps::settled_steps(*progress_active, steps);
+                let live_rows = if *progress_active && !steps.is_empty() {
+                    // `anim_tick` never changes the region's line count.
+                    super::super::live_turn::render_lines(steps, 0, view.live_collapsed).len()
+                } else {
+                    0
+                };
+                if !(*progress_active && ladder.is_empty()) {
+                    expected += 1; // group row (or merged Say header row)
+                    if say_merged_after_group {
+                        // 合并头部行之后的空行（与 flatten_step_group 同步）。
+                        expected += 1;
+                    }
+                    if *open {
+                        for s in ladder {
+                            expected += 1; // step row
+                            if s.open {
+                                if !s.thinking.is_empty() {
+                                    expected += 1 + s.thinking.len();
+                                }
+                                if !s.calls.is_empty() {
+                                    expected += 1; // calls aggregation row
+                                    if s.calls_open {
+                                        for c in &s.calls {
+                                            expected +=
+                                                1 + if c.expanded { 1 + c.output.len() } else { 0 };
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                } else {
-                    // folded ladder: group row (+ blank) is the whole block
-                    // — the running step streams in the TURN LIVE AREA at
-                    // the tail, counted after the loop below.
-                    let _ = progress_active;
+                    // Exactly one blank after the group: a final expanded
+                    // call's separator blank (counted per call above)
+                    // doubles as the trailing blank.
+                    let ends_on_expanded_call = *open
+                        && ladder.last().is_some_and(|s| {
+                            s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
+                        });
+                    if !ends_on_expanded_call && (*open || !say_merged_after_group) {
+                        expected += 1; // trailing blank
+                    }
                 }
-                // Exactly one blank after the group: a final expanded
-                // call's separator blank (counted per call above) doubles as
-                // the trailing blank.
-                let ends_on_expanded_call = *open
-                    && steps.last().is_some_and(|s| {
-                        s.open && s.calls_open && s.calls.last().is_some_and(|c| c.expanded)
-                    });
-                if !ends_on_expanded_call && (*open || !say_merged_after_group) {
-                    expected += 1; // trailing blank
-                }
+                expected += live_rows; // the live region rides below the ladder
             }
             ChatBlock::Image { rendered, .. } => {
                 expected +=

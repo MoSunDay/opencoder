@@ -117,7 +117,7 @@ fn subagent_dispatch_live_window_streams_raw_without_duplication() {
 no half-render): {flat:?}"
     );
     let live = crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
-        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0, v.live_collapsed))
         .unwrap_or_default();
     assert!(
         live.is_empty(),

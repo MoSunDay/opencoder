@@ -26,6 +26,12 @@ pub(crate) const ROLE_SAY_HEADER: &str = "\u{276f} Say:";
 pub(crate) const STEP_THINKING_HEADER: &str = "\u{1f4ad} Thinking";
 /// `ChatBlock::Plan` header row.
 pub(crate) const PLAN_HEADER: &str = "\u{2576}\u{2500} plan \u{2500}\u{2574}";
+/// TURN LIVE REGION header row label (`chat_live_turn.rs`): the row is
+/// `{prefix}live` — `LIVE_ROW_OPEN_PREFIX` (`> `) while the region streams
+/// its detail rows, the shared `GROUP_ROW_CLOSED_PREFIX` (`▸ `) while
+/// collapsed to the header. Declared here so the whole crate (render,
+/// tests) shares the exact prefix shape.
+pub(crate) const LIVE_ROW_OPEN_PREFIX: &str = "> ";
 
 /// Body lines of streaming assistant `raw`, mirroring `flatten_with`: drop the
 /// single trailing empty element from a terminating newline (interior blanks kept).
@@ -466,6 +472,10 @@ impl ChatView {
         self.round_assistant_idx = None;
         self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
         self.frozen_round_ms = None;
+        // Every newly-admitted running turn opens its live region expanded:
+        // `live_collapsed` is the user's collapse of the PREVIOUS region
+        // (or this turn's, mid-run) — never a sticky default for the next.
+        self.live_collapsed = false;
     }
 
     /// Re-anchor the live ladder floor after a user echo landed mid-flow
@@ -482,6 +492,10 @@ impl ChatView {
         // `begin_turn`: the pre-echo Say anchor must not survive as a
         // repair target for the post-echo run.
         self.round_assistant_idx = None;
+        // Same turn-admission rule as `begin_turn`: the echoed input's
+        // fresh live region starts expanded, whatever the user did to the
+        // previous turn's.
+        self.live_collapsed = false;
     }
 
     /// Push a non-streamed line and ensure the next TextDelta starts a new
@@ -523,10 +537,26 @@ impl ChatView {
     /// step; a calls target flips the aggregate list; a call target toggles
     /// that single call's result. No-op if either index is out of range.
     pub fn toggle_tool_call_at(&mut self, block_idx: usize, call_idx: usize) {
-        let Some(ChatBlock::StepGroup { open, steps, .. }) = self.blocks.get_mut(block_idx) else {
+        let Some(ChatBlock::StepGroup {
+            open,
+            steps,
+            progress_active,
+            ..
+        }) = self.blocks.get_mut(block_idx)
+        else {
             return;
         };
-        let Some(target) = steps::visible_targets(*open, steps).get(call_idx).copied() else {
+        // The ladder enumerates SETTLED steps only: while the group runs
+        // (`progress_active`) the in-flight LAST step streams in the turn
+        // live region below the ladder — no ladder rows, no toggle target.
+        let settled = steps::settled_steps(*progress_active, steps);
+        if *progress_active && settled.is_empty() {
+            return; // first step still streaming: no group row exists
+        }
+        let Some(target) = steps::visible_targets(*open, settled)
+            .get(call_idx)
+            .copied()
+        else {
             return;
         };
         // Plain toggles: the state set here persists — streaming never
@@ -556,13 +586,28 @@ impl ChatView {
         }
     }
 
+    /// Toggle the TURN LIVE REGION between its expanded shape (the `> live`
+    /// header plus the running step's detail rows) and the collapsed
+    /// `▸ live` header-only row. Bound to the region header click
+    /// (`LiveHeader` hit-rect, `render_hits.rs` / `app_mouse.rs`); plain
+    /// view state — no block is touched. A collapse persists for the rest
+    /// of the turn (streaming never re-opens it); the NEXT admitted turn
+    /// starts expanded again (`live_collapsed = false` in `begin_turn` /
+    /// `reanchor_turn_after_user_echo`).
+    pub fn toggle_live_region(&mut self) {
+        self.live_collapsed = !self.live_collapsed;
+    }
+
     /// Collapse every collapsible block (Thinking + Compaction + StepGroup)
     /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks
     /// and closes every level of the tool ladder — turn fold, step folds,
     /// calls-list folds and expanded call results — in one keystroke (the turn row itself
     /// always stays rendered; also applied to a child
-    /// subagent view before exiting it).
+    /// subagent view before exiting it). The TURN LIVE REGION collapses to
+    /// its `▸ live` header row too — it keeps streaming there (its header
+    /// stays clickable to re-expand) and re-expands on the next armed turn.
     pub fn collapse_all_collapsible(&mut self) {
+        self.live_collapsed = true;
         for block in &mut self.blocks {
             match block {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
@@ -570,9 +615,9 @@ impl ChatView {
                 }
                 ChatBlock::StepGroup { open, steps, .. } => {
                     // Plain fold of every level: streaming never re-opens
-                    // them, so the user's explicit close persists. The live
-                    // preview is render-only and still shows the running
-                    // step while `progress_active`.
+                    // them, so the user's explicit close persists. The
+                    // running step keeps streaming in the (now collapsed)
+                    // live region below the ladder while `progress_active`.
                     *open = false;
                     for s in steps {
                         s.open = false;

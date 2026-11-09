@@ -21,8 +21,9 @@ fn thinking_delta_is_sanitized_once_before_it_reaches_rendering() {
     view.apply(&SessionEvent::ReasoningDelta(
         "old\rNEW\x08\x1b[2J\u{009b}31m\tline".into(),
     ));
-    // The running step streams in the TURN LIVE REGION (its own area, never
-    // the transcript), so the sanitize check must cover BOTH surfaces.
+    // The running step streams in the TURN LIVE REGION whose rows ride
+    // INLINE inside `flatten`, so the sanitize check covers both surfaces
+    // in one pass (plus the region slice for shape assertions).
 
     let text = flattened_text(&view);
     let live = super::step_group::live_lines(&view).join("\n");
@@ -33,8 +34,8 @@ fn thinking_delta_is_sanitized_once_before_it_reaches_rendering() {
         "sanitized thinking streams in the live region: {live:?}"
     );
     assert!(
-        !text.contains("oldNEW"),
-        "the transcript never carries the live region's rows: {text:?}"
+        text.contains("oldNEW[2J31m    line"),
+        "the region's SANITIZED rows ride inline in the transcript: {text:?}"
     );
 }
 

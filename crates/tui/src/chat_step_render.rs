@@ -25,8 +25,9 @@ use super::{
 /// bold) + a live progress hint until Say begins; while the group is closed
 /// that row (plus one trailing
 /// blank) is the whole block; while the turn runs the CURRENT step streams
-/// in the separate TURN LIVE AREA at the transcript tail
-/// (`chat_live_turn.rs`), not here. Disclosure NEVER moves on its own: the
+/// in the TURN LIVE REGION directly BELOW this ladder (inside the
+/// transcript window, above subagent blocks — `chat_live_turn.rs`), never
+/// in the ladder itself. Disclosure NEVER moves on its own: the
 /// ladder opens only by user toggle. While it
 /// is open, per step: the step row (indent 2) — while the step is open its
 /// `💭 Thinking` block (header
@@ -193,7 +194,18 @@ pub(crate) fn flatten_step_group(
     anim_tick: u32,
     say: Option<SayHeader>,
 ) {
-    let n = steps.len();
+    // Ladder = SETTLED history only: while the group runs the in-flight
+    // LAST step streams in the TURN LIVE REGION right below this ladder
+    // (emitted by `chat_flatten.rs`) and must NOT appear here until it
+    // settles. `settled_steps` is the single gating shared with hit
+    // accounting and click toggles.
+    let ladder = super::steps::settled_steps(progress_active, steps);
+    if progress_active && ladder.is_empty() {
+        // First step still streaming: no history yet — no group row, no
+        // blank. The live region below is the turn's only surface.
+        return;
+    }
+    let n = ladder.len();
     match say {
         // Say-paired ladder: ONE header row `{glyph} Say(n step{s}): <say
         // first line>` carries the step count and toggles the ladder; the
@@ -201,7 +213,7 @@ pub(crate) fn flatten_step_group(
         // plus the Say body (emitted by the Assistant block right below) is
         // the whole pair — no extra blank row.
         Some(say) => {
-            out.push(say_header_line(open, steps.len(), &say));
+            out.push(say_header_line(open, ladder.len(), &say));
             // 头部行之后必须空出一行再接下方内容：preview 行不与正文
             // （或展开的 ladder）挤在一起。闭合时这一个空行兼任整对的
             // 尾部空行 —— 正文若整块隐藏（单行 Say），绝不叠加第二个
@@ -244,7 +256,7 @@ pub(crate) fn flatten_step_group(
             if !open {
                 // Folded ladder: the row plus one trailing blank is the
                 // whole block. While the turn runs its CURRENT step streams
-                // in the separate TURN LIVE AREA at the transcript tail
+                // in the TURN LIVE REGION right below this block
                 // (`chat_live_turn.rs`) — never inside this block, never
                 // coupled to this ladder's disclosure state.
                 out.push(Line::from(""));
@@ -255,12 +267,12 @@ pub(crate) fn flatten_step_group(
     // User-opened ladder: every step renders its `Step(n)` row; open steps
     // reveal thinking + the calls aggregate, open aggregates reveal the
     // call headers.
-    for (si, step) in steps.iter().enumerate() {
+    for (si, step) in ladder.iter().enumerate() {
         push_step_body(
             out,
             si,
             step,
-            steps.len(),
+            ladder.len(),
             anim_tick,
             step.open,
             step.calls_open,

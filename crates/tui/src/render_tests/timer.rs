@@ -28,12 +28,12 @@ fn render_body_with_tail(content: &str, tail_ms: u64, width: u16, height: u16) -
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 tail_ms,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -173,12 +173,12 @@ fn body_call_cost_timer_not_mixed_into_tool_output() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 30000,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();
@@ -240,12 +240,12 @@ fn body_timer_visible_when_scrolled_away_from_tail() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 30000,
                 false,
                 None,
-                &[],
             );
         })
         .unwrap();

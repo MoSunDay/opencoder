@@ -50,7 +50,7 @@ fn flatten_text(v: &ChatView) -> Vec<String> {
 /// is NOT here anymore — it streams as transcript content.
 fn live_text(v: &ChatView) -> String {
     crate::chat::live_turn::live_data(&v.blocks, v.turn_block_start)
-        .map(|steps| crate::chat::live_turn::render_lines(steps, 0))
+        .map(|steps| crate::chat::live_turn::render_lines(steps, 0, v.live_collapsed))
         .map(|rows| {
             rows.iter()
                 .map(|l| {
@@ -242,19 +242,41 @@ fn collapsed_by_default_renders_single_group_row() {
 #[test]
 fn running_hint_persists_until_say_begins() {
     let mut v = ChatView::default();
+    // A settled first round so the ladder HAS a group row to carry the
+    // hint: while a turn's FIRST step is in flight the group emits no rows
+    // at all (the live region is the turn's only surface).
+    v.apply(&SessionEvent::ReasoningDelta("warmup".into()));
+    v.apply(&SessionEvent::ToolStart {
+        id: "warm".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "true"}),
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "warm".into(),
+        name: "bash".into(),
+        output: "done".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+    v.apply(&SessionEvent::ReasoningDelta("thinking".into()));
+    let line = &flatten_text(&v)[0];
+    assert!(
+        line.contains("running"),
+        "the running turn's group row carries the live hint: {line:?}"
+    );
+    assert!(
+        line.contains("Step  \u{280b} running"),
+        "the animation must keep a two-column gap: {line:?}"
+    );
     v.apply(&SessionEvent::ToolStart {
         id: "slow".into(),
         name: "bash".into(),
         input: serde_json::json!({"command": "sleep 5"}),
     });
-    let line = &flatten_text(&v)[0];
     assert!(
-        line.contains("running"),
-        "unfinished call must show the running hint: {line:?}"
-    );
-    assert!(
-        line.contains("Step  \u{280b} running"),
-        "the animation must keep a two-column gap: {line:?}"
+        flatten_text(&v)[0].contains("running"),
+        "an unfinished call keeps the hint armed: {:?}",
+        flatten_text(&v)[0]
     );
     v.apply(&SessionEvent::ToolEnd {
         id: "slow".into(),
@@ -270,14 +292,14 @@ fn running_hint_persists_until_say_begins() {
     );
     v.apply(&SessionEvent::TextDelta("final answer".into()));
     let text = flatten_text(&v);
-    // The first non-empty Say chunk RETIRES the hint from the pre-Say
-    // group row — and while the Say streams the ladder stays FOLDED in
-    // its settled counting shape: the plain `▸ 1 Step` row (no hint), the
-    // standalone `say:` header carrying the spinner, and the FULL raw
-    // body below (no merge, no preview dedup — that happens on seal).
+    // The first non-empty Say chunk RETIRES the hint and settles the whole
+    // ladder: the plain `\u{25b8} 2 Steps` counting row (no hint), the
+    // standalone `say:` header carrying the spinner, and the FULL raw body
+    // below (no merge, no preview dedup — that happens on seal). The live
+    // region cleared the moment the Say began.
     assert_eq!(
-        text[0], "\u{25b8} 1 Step",
-        "the group row stays folded: {text:?}"
+        text[0], "\u{25b8} 2 Steps",
+        "the settled counting row keeps no hint: {text:?}"
     );
     let say_header = &text[2];
     assert!(
@@ -291,20 +313,24 @@ fn running_hint_persists_until_say_begins() {
         live_text(&v)
     );
 
-    // Say is terminal for the ladder: the standalone header keeps its
-    // spinner exactly as long as the Say stays open; a ToolStart (new
-    // ladder below the Say) opens turn 2 — the OPEN first Say keeps its
-    // standalone shape (no merge yet) while the new ladder runs its own
-    // hint, and Done seals everything (the pair merges, hints retire).
+    // Say is terminal for the ladder: post-Say activity opens the NEXT
+    // turn's ladder BELOW the Say — a fresh group whose first step is in
+    // flight (no group row yet, its live region streams instead), never a
+    // re-armed hint on the Say's own ladder. Done seals everything: the
+    // pair merges and every hint/region retires.
     v.apply(&SessionEvent::ReasoningDelta("one more check".into()));
     let text = flatten_text(&v);
     assert_eq!(
-        text[0], "\u{25b8} 1 Step",
-        "the open Say keeps the ladder folded"
+        text[0], "\u{25b8} 2 Steps",
+        "the open Say keeps its ladder settled: {text:?}"
     );
     assert!(
-        text.iter().any(|l| l.contains("running")),
-        "the new ladder's group row carries its own running hint: {text:?}"
+        !text.iter().any(|l| l.contains("running")),
+        "no hint re-arms after the Say began: {text:?}"
+    );
+    assert!(
+        text.iter().any(|l| l == "> live"),
+        "the post-Say turn streams its own live region below the Say: {text:?}"
     );
     v.apply(&SessionEvent::ToolStart {
         id: "after-say".into(),
@@ -315,7 +341,7 @@ fn running_hint_persists_until_say_begins() {
     v.apply(&SessionEvent::Done);
     let sealed = flatten_text(&v);
     assert_eq!(
-        sealed[0], "\u{25b8} Say(1 step): final answer",
+        sealed[0], "\u{25b8} Say(2 steps): final answer",
         "Done seals the Say — the pair merges: {sealed:?}"
     );
     assert!(!sealed.iter().any(|l| l.contains("running")));
@@ -336,15 +362,18 @@ fn terminal_event_clears_progress_when_no_say_arrives() {
         is_error: false,
         images: Vec::new(),
     });
-    assert!(flatten_text(&v)[0].contains("running"));
+    // While the turn runs the region is the surface (zero settled steps →
+    // no group row); Done settles the ladder: group row + blank, region
+    // gone.
+    assert_eq!(flatten_text(&v)[0], "> live");
     v.apply(&SessionEvent::Done);
-    assert!(!flatten_text(&v)[0].contains("running"));
+    assert_eq!(flatten_text(&v)[0], "\u{25b8} 1 Step");
 
     let mut failed = ChatView::default();
     failed.apply(&SessionEvent::ReasoningDelta("will fail".into()));
-    assert!(flatten_text(&failed)[0].contains("running"));
+    assert_eq!(flatten_text(&failed)[0], "> live");
     failed.apply(&SessionEvent::Error("boom".into()));
-    assert!(!flatten_text(&failed)[0].contains("running"));
+    assert_eq!(flatten_text(&failed)[0], "\u{25b8} 1 Step");
 
     let mut recovered = ChatView::default();
     recovered.apply(&SessionEvent::ToolStart {

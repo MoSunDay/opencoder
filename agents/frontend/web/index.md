@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # web 模块
 
@@ -71,8 +71,7 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - [theme.js](../../../crates/web/spa/src/theme.js) — antd 主题配置
 - `harness/` — Codex 默认配置与档案编辑
 - [Ontology 前端](ontology.md) — 五页面前端（图谱、实体、类型、关系与
-  数据保鲜，面板挂载见 `spa/src/ontology/panels.tsx`）；实体页目录
-  Tabs（目录树聚焦与成员管理）详见同目录 [ontology.md](ontology.md)；
+  数据保鲜，面板挂载见 `spa/src/ontology/panels.tsx`）；
   接口与存储见 [ontology](../../ontology/index.md)
 - 验收入口：[ui/main.js](../../../scripts/acceptance/ui/main.js)、
   [project/](../../../scripts/acceptance/project/README.md)、

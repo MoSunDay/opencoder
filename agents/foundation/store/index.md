@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # store 模块
 
@@ -26,11 +26,14 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
   [schedule.rs](../../../crates/store/src/turso_store/execution/schedule.rs) —
   调度台账与定义表
 - [schema.rs](../../../crates/store/src/turso_store/bootstrap/schema.rs)
-  （bootstrap/）— schema 初始化与版本升级；升级链与专项迁移在
+  （bootstrap/）— schema 初始化与版本升级；只读版本探针让 schema 就绪的
+  暖打开跳过写锁引导+checkpoint（不等待跨进程写锁）；升级链与专项迁移在
   [bootstrap/schema/](../../../crates/store/src/turso_store/bootstrap/schema)
   （migrations.rs、catalog.rs、access.rs、project_links.rs 等）
 - [tokens.rs](../../../crates/store/src/turso_store/identity/users/tokens.rs) —
-  用户身份与独立 Token
+  用户身份与独立 Token；公共身份面另经
+  [src/users.rs](../../../crates/store/src/users.rs) 暴露
+  （`AccessToken`/`PlatformUser`，lib.rs re-export）
 - [sessions.rs](../../../crates/store/src/turso_store/conversation/sessions.rs)
   — 会话读写；
   [messages.rs](../../../crates/store/src/turso_store/conversation/messages.rs)
@@ -51,7 +54,9 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 - [brain_layered/](../../../crates/store/src/turso_store/execution/brain_layered)
   — 分层画布投影（含 schema.rs）
 - [database](../../../crates/database/src/lib.rs) — 统一执行 Store、Fleet、
-  TsRegistry、Ontology 的数据库操作
+  TsRegistry、Ontology 的数据库操作；maintenance serve-bridge（
+  [bridge.rs](../../../crates/database/src/maintenance/bridge.rs)）将 stdin
+  空闲超 30s 的写事务回滚
 - [session_index](../../../scripts/maintenance/session_index/README.md) —
   历史会话排序索引维护
 - [brain_cleanup](../../../scripts/maintenance/brain_cleanup/__main__.py) —
@@ -62,5 +67,4 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
   多进程与混合负载回归
 
 ## 相关
-- [event](../event/index.md) — 事件队列（opencoder-event）在 Store 之外，
-  基础存储保持 turso 不变
+- [event](../event/index.md)

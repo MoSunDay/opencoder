@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # ontology 模块
 
@@ -44,10 +44,13 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 - [control](../platform/control/index.md) 初始化与角色门禁、就绪和退休生命周期；
   [core](../foundation/core/index.md) 提供配置与平台身份
 - `crates/control/src/ontology.rs` — 正文根校验与 `ontology` 只读 NFS 导出
-- [Web 页面](../frontend/web/index.md) — 类型与表单位于 `spa/src/ontology/`，图谱用 react-force-graph-3d/Three.js 3D 力导图
+- [Web 页面](../frontend/web/index.md) — 类型与表单位于 `crates/web/spa/src/ontology/`，图谱用 react-force-graph-3d/Three.js 3D 力导图
 - [Server 与备份](../platform/server/index.md) 同时保存数据库和正文；维护升级见
   [发布约定](../../scripts/acceptance/smooth_release/main.py)
-- `crates/database/src/lib.rs` — `opencoder-database` 独立读写执行器
+- `crates/database/src/lib.rs` — `opencoder-database` 独立读写执行器；
+  全部 ontology 写路径经 `busy::begin_with_retry` 有界 Busy 重试取跨进程
+  写锁（mutations.rs / catalog.rs / schema / freshness.rs），store 的 turso
+  路径共用同一 crate（`tx.rs` 的 `run_tx` re-export）
 
 ## 数据保鲜
 

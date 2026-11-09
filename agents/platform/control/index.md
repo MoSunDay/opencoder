@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # control 模块
 
@@ -26,14 +26,14 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 - `src/api/project/`、`api/project.rs`、`api/project_links/` — Project 中继与
   TODO 执行/能力引用
 - `src/api/compat/` — 兼容路由（workflows / dag_instances / sessions …）
-- `src/api/brain_runs/` — Brain 计划与运行；`v4/` 负责准入、派发、读取与事件确认
+- `src/api/brain_runs/` — Brain 计划与运行（`v4/` 语义锚点：agents/brain）
 - `api/brain_runs/tui.rs` — TUI 能力目录投影
 - `api/brain_runs/attachments/` — 通用图片附件上传与读取
 - [api/stream.rs](../../../crates/control/src/api/stream.rs)、`api/streaming/` — SSE 与
   实例中继
 - `src/api/catalog.rs` — 节点/定义目录
 - `src/api/settings/` — Harness 与节点调度配置（Maintenance RPC 转发）
-- `src/api/admission.rs` — `/ready` 准入与就绪快照
+- `src/api/admission.rs` — `/api/ready` 准入与就绪快照
 - `src/scheduler.rs`、`src/scheduler/`、`api/schedules/` — cron 调度与定义 CRUD；
   `api/scheduler_metrics.rs`、`seed_schedules.rs` 调度总览与遗留导入
 - `src/catalog_guard/` — DAG / 二进制 / 能力 / Agent 目录写入与删除保护

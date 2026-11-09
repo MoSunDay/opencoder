@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 # worker 模块
 
@@ -21,7 +21,7 @@ Windows 节点只接受 `ExecutionKind::Operator`，用户边界见
   `terminal_release_collects_unused_gates_and_maintenance_registrations`
 - [state/config_cache.rs](../../../crates/worker/src/state/config_cache.rs) —
   配置文件 stat 指纹（mtime/size）；`state.rs` 的
-  `configuration_shared`（492-513 附近）按指纹把 effective config 缓存
+  `configuration_shared` 按指纹把 effective config 缓存
   为共享 `Arc`，harness task-local 作用域旁路缓存、加载错误不缓存；
   回归 `configuration_cache_reuses_the_load_until_input_files_change`
 - [runtime/](../../../crates/worker/src/runtime/mod.rs)、[resources.rs](../../../crates/worker/src/resources.rs) — 容量与健康准入、NFS 资源快照

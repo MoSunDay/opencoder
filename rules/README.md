@@ -16,6 +16,7 @@ Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 | 08 | [infrastructure-scope.md](08-infrastructure-scope.md) | 仓库只保留通用基建能力，代码、样例与文档不得带入具体业务信息 |
 | 09 | [ontology-capabilities.md](09-ontology-capabilities.md) | Ontology 统一入口、实体目录与关系组织、能力变更同步要求 |
 | 10 | [ontology-cli.md](10-ontology-cli.md) | Ontology CLI 增删改查、切面、实体和关系查询、实体目录挂载及同步操作 |
+| 11 | [test-organization.md](11-test-organization.md) | 测试组织与模块地图：模块 → 测试位置、目录结构约定、夹具复用与验收脚本归组 |
 
 ## 快速检查清单（每次 PR / commit 前）
 
@@ -27,3 +28,4 @@ Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 - [ ] 代码、注释、样例、提示词与文档只描述通用基建，没有具体业务信息或专用逻辑（规则 08）
 - [ ] 新增文件 ≤ 400 行；迭代中文件 ≤ 800 行
 - [ ] 能力或入口变更已更新 Ontology 登记、同步映射与定向验证
+- [ ] 新增测试 case 已按规则 11 的地图归位，并复用既有 support 夹具（不重复手写）

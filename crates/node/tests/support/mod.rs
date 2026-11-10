@@ -8,6 +8,11 @@
 
 #![allow(dead_code)] // helpers are shared per-test-file; not all are used by both
 
+/// DAG-claim flavored sibling stub (used by `runner_dag.rs`): register +
+/// heartbeat with `cancel_run_ids`, always-empty task claim, and the DAG
+/// claim/events/status routes.
+pub mod dag;
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

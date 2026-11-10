@@ -26,7 +26,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 - [agents/local](agents/frontend/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
 - [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区经 flatten 内联在运行中阶梯下方、Subagent 块之上（阶梯只渲染已落定 step，首个 in-flight step 期间阶梯零行），`> streaming` 头行默认展开、点击/Ctrl+L 可收起，与转录共用同一滚动窗，settle 后完整 step 落入阶梯：`chat_live_turn`（见 features/changelog/2026-11-09/live-region-inline-below-ladder-collapsible.md）；open Say 一开始其阶梯整体退场（与 live 区同时清空，流式期间转录仅 `say:` 头行 + running 提示 + raw body 全量，共享滚动），seal 后合并为 `Say(n steps)` 头行、步数回归（见 features/changelog/2026-11-09/tui-ladder-retires-on-say-stream.md）；一次性 `@capability` 子任务派发）。
-- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区 `TurnLiveRegion` 位于 transcript 滚动容器内、消息列表之下、与消息共用滚动条：主体仅 thinking + 与阶梯 L3 同款调用行（无 Step(k) 计数、无 Say 块）；流式 Say 由 `StreamingSay`（`pendingSay` 原文）渲染在同一滚动流、flush 边界落地为消息，auto-stick 仅贴底跟随；settle 后实时区清空（`findRunningStepsTurn`）：`stepsBlock.jsx`）。
+- [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区 `TurnLiveRegion` 位于 transcript 滚动容器内、消息列表之下、与消息共用滚动条：头部 `> streaming` 展开 / `▸ streaming` 收起（dim warn、默认展开、点击头行或 Ctrl/Cmd+L 收起、每个新 turn 重新展开，折叠仅隐藏主体以保留嵌套调用开合状态），主体仅 thinking + 与阶梯 L3 同款调用行（无 Step(k) 计数、无 Say 块）；流式 Say 由 `StreamingSay`（`pendingSay` 原文）渲染在同一滚动流、flush 边界落地为消息，auto-stick 仅贴底跟随；settle 后实时区清空（`findRunningStepsTurn`）：`stepsBlock.jsx`）。
 
 **ontology**
 
@@ -76,3 +76,4 @@ OpenCoder 能力入口见 [features/index.md](features/index.md)。
 - [rules/08-infrastructure-scope.md](rules/08-infrastructure-scope.md) — 代码、样例、提示词与文档只保留通用基建内容
 - [rules/09-ontology-capabilities.md](rules/09-ontology-capabilities.md) — Ontology 是全部平台能力的统一查询与组织入口，查找能力先走能力目录与图谱
 - [rules/10-ontology-cli.md](rules/10-ontology-cli.md) — `opencoder-cli ontology` 的命令入口与操作方式，CLI/API 约定变化时同步更新
+- [rules/11-test-organization.md](rules/11-test-organization.md) — 测试组织与模块地图：新增 case 先查地图归位、复用 support 夹具、验收脚本进 scripts/acceptance/<domain>/

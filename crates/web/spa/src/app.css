@@ -27,6 +27,7 @@
   --oc-success-bg: #f6ffed;
   --oc-error: #ff4d4f;
   --oc-error-bg: #fff2f0;
+  --oc-warning: #faad14;
   /* Transcript role accents, the DAG binary-node icon accent + markdown heading
      green. The -rgb twins feed rgba() washes (RoleAvatar). */
   --oc-accent-user: #13c2c2;

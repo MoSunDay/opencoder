@@ -33,8 +33,8 @@ fn main() {
             .is_some_and(|arg| arg == "internal-process-supervisor")
         {
             assert_eq!(args[1], "--");
-            let code = opencoder_session::process::supervisor_main(args[2..].to_vec(), None)
-                .unwrap();
+            let code =
+                opencoder_session::process::supervisor_main(args[2..].to_vec(), None).unwrap();
             std::process::exit(code);
         }
     }

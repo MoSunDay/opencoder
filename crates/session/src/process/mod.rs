@@ -90,9 +90,7 @@ pub(crate) struct SupervisedWorkload<'a> {
 #[cfg(target_os = "linux")]
 pub(crate) fn supervisor_args(command: &[OsString]) -> Result<SupervisedWorkload<'_>> {
     let (identity, rest) = identity::parse(command)?;
-    let (program, args) = rest
-        .split_first()
-        .context("supervised command missing")?;
+    let (program, args) = rest.split_first().context("supervised command missing")?;
     Ok(SupervisedWorkload {
         program: program.as_os_str(),
         args,

@@ -126,7 +126,10 @@ async fn supervisor_runs_the_workload_as_the_provisioned_user() {
 
     let deny = format!("/root/deny-{suffix}");
     let out = tool
-        .execute(serde_json::json!({"command": format!("touch {deny}")}), &ctx)
+        .execute(
+            serde_json::json!({"command": format!("touch {deny}")}),
+            &ctx,
+        )
         .await
         .unwrap();
     assert!(

@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::message::lower_messages;
+use crate::sanitize::sanitize_tool_messages;
 use opencoder_core::Message;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -40,9 +41,20 @@ pub struct ChatRequest {
 
 impl ChatRequest {
     pub fn to_body(&self) -> Value {
+        // Lower, then repair any tool-call pairing corruption (hard-cancel /
+        // compaction boundary artifacts) so the emitted body stays wire-legal.
+        let (messages, sanitize_report) = sanitize_tool_messages(lower_messages(&self.messages));
+        if !sanitize_report.is_clean() {
+            tracing::warn!(
+                dropped_tool_messages = sanitize_report.dropped_tool_messages,
+                stripped_tool_calls = sanitize_report.stripped_tool_calls,
+                dropped_assistant_messages = sanitize_report.dropped_assistant_messages,
+                "sanitize: repaired ill-formed tool-call pairing in request body"
+            );
+        }
         let mut body = json!({
             "model": self.model,
-            "messages": lower_messages(&self.messages),
+            "messages": messages,
             "stream": true,
             "stream_options": { "include_usage": true },
         });

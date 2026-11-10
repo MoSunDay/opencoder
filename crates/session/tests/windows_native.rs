@@ -127,10 +127,11 @@ async fn cancelling_shell_and_natural_exit_stop_all_descendants() {
     for suffix in ["; Start-Sleep 60", ""] {
         let script = format!("$p = Start-Process pwsh -ArgumentList '-NoLogo','-NoProfile','-NonInteractive','-Command','Start-Sleep 60' -PassThru -WindowStyle Hidden; Set-Content child.txt $p.Id{suffix}");
         let context = context(root.path());
-        let task =
-            tokio::spawn(
-                async move { ShellTool::default().execute(json!({"command":script}), &context).await },
-            );
+        let task = tokio::spawn(async move {
+            ShellTool::default()
+                .execute(json!({"command":script}), &context)
+                .await
+        });
         let pid = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if let Ok(value) = std::fs::read_to_string(root.path().join("child.txt")) {

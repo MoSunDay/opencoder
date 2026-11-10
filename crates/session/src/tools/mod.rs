@@ -423,9 +423,6 @@ mod run_as_binding_tests {
         let before = registry.len();
         bind_shell_identity(&mut registry, Some(&identity));
         assert_eq!(registry.len(), before, "rebinding must not add entries");
-        assert!(
-            registry
-                .contains_key(opencoder_core::platform::shell::tool_name())
-        );
+        assert!(registry.contains_key(opencoder_core::platform::shell::tool_name()));
     }
 }

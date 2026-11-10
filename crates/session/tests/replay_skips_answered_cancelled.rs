@@ -9,7 +9,9 @@ use std::sync::Arc;
 use opencoder_core::{Config, ContentBlock, Message, MessageUsage, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::SessionState;
-use opencoder_store::{SessionMeta, Store, SubagentStatus, SubagentTaskRecord, TursoStore};
+use opencoder_store::{
+    SessionMeta, SessionPatch, Store, SubagentStatus, SubagentTaskRecord, TursoStore,
+};
 use tokio_util::sync::CancellationToken;
 
 async fn mem_store() -> Arc<dyn Store> {
@@ -196,5 +198,162 @@ async fn replay_skips_cancelled_task_with_existing_tool_result() {
     assert_eq!(
         result_count, 1,
         "exactly one tool_result expected (no duplicate), got {result_count}"
+    );
+}
+
+/// Regression: a Cancelled task whose dispatching assistant AND its
+/// tool_result both live in the summarized (trimmed) head — the in-memory
+/// session only holds the synthetic summary head + tail, so replay would
+/// backfill an orphan `tool_result` answering a `tool_use` the provider never
+/// sees (wire-level orphan → HTTP 400).
+#[tokio::test]
+async fn replay_skips_cancelled_task_answered_in_summarized_head() {
+    let store = mem_store().await;
+    store
+        .create_session(&session_meta("parent-sh", "act"))
+        .await
+        .unwrap();
+    // child_session_id is also a FK → create the child session row too.
+    store
+        .create_session(&session_meta("child-sh", "explore"))
+        .await
+        .unwrap();
+
+    // Head that compaction will summarize away: dispatch assistant turn.
+    let assistant_msg = Message {
+        provider_state: None,
+        display: None,
+        id: "a-sh".into(),
+        role: Role::Assistant,
+        blocks: vec![
+            ContentBlock::Text {
+                text: "delegating".into(),
+            },
+            ContentBlock::ToolUse {
+                id: "task-sh".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "explore", "subagent_type": "explore"}),
+            },
+        ],
+        model: Some("m".into()),
+        agent: Some("act".into()),
+        usage: MessageUsage::default(),
+        created_at: 0,
+        synthetic: false,
+    };
+    let _dispatch_seq = store
+        .append_message("parent-sh", &assistant_msg)
+        .await
+        .unwrap();
+
+    // The dispatch's answer also lives in the summarized head.
+    let tool_msg = Message {
+        provider_state: None,
+        display: None,
+        id: "t-sh".into(),
+        role: Role::Tool,
+        blocks: vec![ContentBlock::ToolResult {
+            tool_use_id: "task-sh".into(),
+            content: "subagent result".into(),
+            is_error: false,
+            images: Vec::new(),
+        }],
+        model: None,
+        agent: None,
+        usage: MessageUsage::default(),
+        created_at: 0,
+        synthetic: false,
+    };
+    let last_head_seq = store.append_message("parent-sh", &tool_msg).await.unwrap();
+
+    // Tail user message AFTER the head that gets summarized away.
+    store
+        .append_message("parent-sh", &Message::user("u-sh", "continue"))
+        .await
+        .unwrap();
+
+    // Persist the compaction boundary covering the head.
+    store
+        .update_session(
+            "parent-sh",
+            &SessionPatch {
+                summary: Some("summary of head".into()),
+                summary_seq: Some(last_head_seq),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    store
+        .create_subagent_task(&SubagentTaskRecord {
+            task_id: "task-sh".into(),
+            parent_session_id: "parent-sh".into(),
+            child_session_id: "child-sh".into(),
+            parent_message_id: None,
+            agent: "explore".into(),
+            prompt: "explore".into(),
+            result: None,
+            status: SubagentStatus::Cancelled,
+            ok: None,
+            started_at: 0,
+            completed_at: None,
+        })
+        .await
+        .unwrap();
+
+    // In-memory session mirrors the post-compaction resume state: synthetic
+    // summary head + tail only — no message carries a ToolUse with id
+    // "task-sh" and no ToolResult exists in memory either.
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_event("should not run")]));
+    let agent = opencoder_core::resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "parent-sh",
+        agent,
+        Config {
+            model: "m".into(),
+            ..Config::default()
+        },
+        mock.clone() as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    )
+    .with_store(store.clone());
+    session
+        .messages
+        .push(Message::user("summary-sh", "summary of head"));
+    session.messages.push(Message::user("u-sh", "continue"));
+    session.cancel = Some(CancellationToken::new());
+
+    let before = session.messages.len();
+    opencoder_session::resume::replay_cancelled_tasks(&mut session, false).await;
+
+    // The child must NOT have been replayed.
+    assert_eq!(
+        mock.call_count(),
+        0,
+        "dispatch trimmed into summarized head must not be replayed — result would be an orphan tool_result"
+    );
+
+    // No backfill appended.
+    assert_eq!(
+        session.messages.len(),
+        before,
+        "no backfill tool_result should be appended"
+    );
+
+    // Task status remains Cancelled (not replayed, not abandoned).
+    let tasks = store.list_subagent_tasks("parent-sh").await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(
+        matches!(tasks[0].status, SubagentStatus::Cancelled),
+        "task must remain Cancelled, got {:?}",
+        tasks[0].status
+    );
+
+    // No orphan tool_result for the summarized-away dispatch.
+    assert_eq!(
+        count_tool_results(&session.messages, "task-sh"),
+        0,
+        "no tool_result expected for the summarized-away dispatch"
     );
 }

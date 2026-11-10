@@ -182,9 +182,14 @@ mod tests {
     #[tokio::test]
     async fn run_as_without_identity_executes_the_script_directly() {
         let root = tempfile::tempdir().unwrap();
-        let output = run_as("printf ok", Some(root.path()), Duration::from_secs(10), None)
-            .await
-            .unwrap();
+        let output = run_as(
+            "printf ok",
+            Some(root.path()),
+            Duration::from_secs(10),
+            None,
+        )
+        .await
+        .unwrap();
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
     }

@@ -491,14 +491,20 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: b
         .unwrap_or_default()
         .into_iter()
         .filter(|t| {
+            // Unified visibility guard: replay only tasks whose dispatching
+            // `tool_use` is visible in the CURRENT in-memory transcript — the
+            // same predicate `filter_replay_candidates` applies cross-process
+            // (`dangling_tools::task_tool_use_visible`, preferring
+            // `parent_message_id` then falling back to scanning for the
+            // ToolUse id). The old guard only checked visibility after a
+            // handoff boundary; on a compaction boundary (`summary_seq` trim)
+            // it let through tasks whose dispatching assistant had been
+            // summarized out of the in-memory transcript, so replay backfilled
+            // a `tool_result` answering a `tool_use` the provider never sees —
+            // a wire-level orphan rejected with HTTP 400.
             t.status == SubagentStatus::Cancelled
                 && !answered.contains(t.task_id.as_str())
-                && (session.handoff_seq.is_none()
-                    || session.messages.iter().any(|m| {
-                        m.blocks.iter().any(
-                            |b| matches!(b, ContentBlock::ToolUse { id, .. } if id == &t.task_id),
-                        )
-                    }))
+                && crate::dangling_tools::task_tool_use_visible(t, &session.messages)
         })
         .collect();
     if cancelled.is_empty() {

@@ -18,7 +18,7 @@ Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
   30s 的写事务（maintenance/bridge.rs `IDLE_WRITE_TX_LIMIT`）
 - `src/cmd/` — 按域子命令（纯 plan() 映射）
 - `src/cmd/ontology/` — Ontology 数据操作、检查与补同步；
-  见 [Ontology CLI](../../../rules/10-ontology-cli.md)
+  见 [Ontology CLI](../../../rules/09-ontology-capabilities.md)
 - [cmd/brain.rs](../../../crates/ctl/src/cmd/brain.rs) — brain 子命令，与 Web 共用 API
 - [cmd/project.rs](../../../crates/ctl/src/cmd/project.rs)、`src/cmd/project/`) — 项目、
   专项与 TODO API 映射（comments / context / summary / files）

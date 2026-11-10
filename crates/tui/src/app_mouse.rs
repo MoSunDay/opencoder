@@ -170,7 +170,7 @@ pub(crate) async fn handle_mouse(
                     break;
                 }
             }
-            // Click the TURN LIVE REGION's `> live` / `▸ live` header (in
+            // Click the TURN LIVE REGION's `> streaming` / `▸ streaming` header (in
             // the body, right below the running ladder): toggle the region
             // between its detail rows and the collapsed header-only row
             // (subagent-aware: toggles the focused child view).

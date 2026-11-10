@@ -25,8 +25,8 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   `render_live.rs` 已删除），与转录共用同一滚动窗/滚动条（ViewportCache
   统一计行）；首个 step 流式期间阶梯**零行**（连 `N Steps` 行都没有），
   live 区是该 turn 唯一表面；Say 开始或 turn 结束（settle）后 live 区
-  消失，完整 step 落入阶梯历史。live 区头行 `> live`
-  （`LIVE_ROW_OPEN_PREFIX`）展开 / `▸ live`（复用
+  消失，完整 step 落入阶梯历史。live 区头行 `> streaming`
+  （`LIVE_ROW_OPEN_PREFIX`）展开 / `▸ streaming`（复用
   GROUP_ROW_CLOSED_PREFIX）收起，dim warn 样式，默认展开：点击头行
   （`chat_headers.rs` LiveHeader + `render_hits.rs`
   LiveBtn/record_live_hits，`app_mouse.rs` 命中调

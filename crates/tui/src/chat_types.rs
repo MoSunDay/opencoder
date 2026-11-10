@@ -75,10 +75,10 @@ pub enum ChatBlock {
     /// ladder — the ladder renders SETTLED history only
     /// (`steps::settled_steps`), and the in-flight step streams in the TURN
     /// LIVE REGION emitted by `flatten_with` DIRECTLY BELOW the running
-    /// ladder (above any later blocks), as a `> live` header plus the
+    /// ladder (above any later blocks), as a `> streaming` header plus the
     /// step's detail rows (`chat_live_turn.rs`). While the FIRST step is
     /// still streaming the block itself renders ZERO rows — the region is
-    /// the turn's only surface. The region collapses to its `▸ live`
+    /// the turn's only surface. The region collapses to its `▸ streaming`
     /// header on click / Ctrl+L (`ChatView::live_collapsed`) and disappears
     /// the moment progress settles (Say's first chunk, run end, new turn),
     /// leaving the step inside the ladder history.
@@ -259,8 +259,8 @@ pub struct ChatView {
     /// (`chat_live_turn.rs`). The region streams the running turn's current
     /// step INLINE below the running ladder (inside `flatten_with`), so its
     /// disclosure is view state, not block state: `false` (the `Default`)
-    /// renders the `> live` header plus the current step's detail rows;
-    /// `true` renders the `▸ live` header row only. Re-armed (`false`) on
+    /// renders the `> streaming` header plus the current step's detail rows;
+    /// `true` renders the `▸ streaming` header row only. Re-armed (`false`) on
     /// every newly-admitted running turn; collapsed by click and Ctrl+L.
     pub live_collapsed: bool,
     /// The `/sidecar` Q/A panel while it is open (never inside `blocks` —
@@ -285,7 +285,7 @@ pub struct SubagentHeader {
     pub header_line_idx: usize,
 }
 
-/// Locates the TURN LIVE REGION's `> live` / `▸ live` header line (the
+/// Locates the TURN LIVE REGION's `> streaming` / `▸ streaming` header line (the
 /// first row the region emits inside `flatten_with`, right below the
 /// running ladder) for mouse hit-testing: clicking it toggles the region
 /// between its detail rows and the collapsed header-only shape

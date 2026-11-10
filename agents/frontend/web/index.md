@@ -35,8 +35,11 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - [stepsBlock.jsx](../../../crates/web/spa/src/stepsBlock.jsx) — Step 阶梯
   三级展开：纯用户控制、默认折叠（L0–L3 全部非受控）；运行中
   （`ladderRunning`，Say 之前）的最后一步由 **`TurnLiveRegion`** 流式
-  渲染（头部 `⬥ live`，主体仅 thinking + 与阶梯 L3 同款的
-  `ToolContent` 调用行，无 Step(k) 计数、无 Say 块）——面板在
+  渲染（头部 `> streaming` 展开 / `▸ streaming` 收起，dim warn；
+  默认展开，点击头行或 Ctrl/Cmd+L 收起，每个新 turn 重新展开；折叠仅
+  用 `display: none` 隐藏主体，保留嵌套 `ToolContent` 的开合状态。主体
+  仅 thinking + 与阶梯 L3 同款的 `ToolContent` 调用行，无 Step(k) 计数、
+  无 Say 块）——面板在
   transcript 滚动容器**内**、消息列表之下，与消息共用滚动条；流式
   Say 由 `StreamingSay`（`state.pendingSay` 原文、无标记）渲染在同一
   滚动流的列表与面板之间，flush 边界落地为消息（text_delta 只累积

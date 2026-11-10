@@ -56,6 +56,7 @@
 // (identical rows everywhere). The import is one-way (transcript →
 // stepsBlock), no cycle.
 
+import { useEffect, useState } from 'react';
 import { Collapse, Tag, Typography } from 'antd';
 import { fmtDuration } from './format.js';
 import { sayPresentation } from './transcript/markdown.js';
@@ -268,14 +269,33 @@ export function StreamingSay({ text }) {
 /// in the message list at FLUSH time (round end / next tool or thinking
 /// activity / terminal settle / new input).
 /// The region clears on settle. Gated ONLY on running state — it never
-/// reacts to any ladder's opening or folding.
+/// reacts to any ladder's opening or folding. Its body is keyed by the
+/// running turn's array position: streaming rerenders keep the collapse
+/// state, while a new turn (or a settle followed by a new run) remounts
+/// expanded.
 export function TurnLiveRegion({ turns }) {
-  const running = findRunningStepsTurn(turns);
-  const steps = running && Array.isArray(running.steps) ? running.steps : [];
-  const step = steps.length > 0 ? steps[steps.length - 1] : null;
-  if (!step) {
-    return null;
-  }
+  const found = findRunningStepsTurn(turns);
+  if (!found || !found.step) return null;
+  return <LiveRegionBody key={found.index} step={found.step} />;
+}
+
+/// Expanded by default. The header button toggles the body; Ctrl/Cmd+L
+/// collapses it like TUI `collapse_all_collapsible`, without touching
+/// TranscriptView's own bubble-remount epoch. The body stays MOUNTED and is
+/// hidden with `display: none`, so nested ToolContent open state survives a
+/// collapse/expand round-trip.
+function LiveRegionBody({ step }) {
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setCollapsed(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const list = (step && Array.isArray(step.calls)) ? step.calls : [];
   const failed = list.some((c) => c && c.isError);
   return (
@@ -290,10 +310,29 @@ export function TurnLiveRegion({ turns }) {
       }}
     >
       <div style={{ fontFamily: MONO_VAR, fontSize: 12, marginBottom: 4 }}>
-        <span style={{ opacity: 0.65 }}>{'\u{2B25} live'}</span>
+        <button
+          type="button"
+          data-turn-live-toggle
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+          style={{
+            padding: 0,
+            border: 0,
+            background: 'transparent',
+            color: 'var(--oc-warning)',
+            opacity: 0.65,
+            fontFamily: MONO_VAR,
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          {collapsed ? '\u25B8 streaming' : '> streaming'}
+        </button>
         {failed ? <Tag color="red" style={{ marginLeft: 8 }}>error</Tag> : null}
       </div>
-      <StepBody step={step} flatCalls />
+      <div data-turn-live-body style={{ display: collapsed ? 'none' : undefined }}>
+        <StepBody step={step} flatCalls />
+      </div>
     </div>
   );
 }
@@ -319,7 +358,11 @@ function findRunningStepsTurn(turns) {
     const running = typeof turn.progressActive === 'boolean'
       ? turn.progressActive === true
       : openCall;
-    if (running) return turn;
+    if (running) {
+      const steps = Array.isArray(turn.steps) ? turn.steps : [];
+      const step = steps.length > 0 ? steps[steps.length - 1] : null;
+      return step ? { index: i, step } : null;
+    }
     return null; // newest steps turn exists but is not running
   }
   return null;

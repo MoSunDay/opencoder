@@ -377,6 +377,82 @@ describe('turn live region (below the list, inside the transcript scroll flow)',
     expect(summary.compareDocumentPosition(liveRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('the streaming header is expanded by default and leads the running step body', () => {
+    mountWithLiveRegion([runningTurn()]);
+    const toggle = screen.getByText('> streaming');
+    expect(toggle.closest('[data-turn-live-toggle]')).toBe(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.queryByText('▸ streaming')).toBeNull();
+    // The retired glyph label must never come back.
+    expect(screen.queryByText('⬥ live')).toBeNull();
+    const body = screen.getByText('reading the entrypoint')
+      .closest('[data-turn-live-body]');
+    expect(body).toBeTruthy();
+    expect(body.style.display).not.toBe('none');
+    expect(within(body).getByText(/🔧 read/)).toBeTruthy();
+  });
+
+  it('clicking the streaming header collapses to ▸ streaming and hides the mounted body', () => {
+    const mounted = mountWithLiveRegion([runningTurn()]);
+    const body = mounted.container.querySelector('[data-turn-live-body]');
+    expect(body.textContent).toContain('reading the entrypoint');
+    fireEvent.click(screen.getByText('> streaming'));
+    const toggle = screen.getByText('▸ streaming');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('> streaming')).toBeNull();
+    expect(mounted.container.querySelector('[data-turn-live-body]')).toBe(body);
+    expect(body.style.display).toBe('none');
+    expect(body.textContent).toContain('reading the entrypoint');
+  });
+
+  it('re-expanding keeps a call row that was open before the collapse', () => {
+    mountWithLiveRegion([runningTurn()]);
+    fireEvent.click(screen.getByText(/🔧 read/));
+    const callItem = screen.getByText(/🔧 read/).closest('.ant-collapse-item');
+    expect(callItem.classList.contains('ant-collapse-item-active')).toBe(true);
+    expect(screen.getByText(/src\/main\.rs/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('> streaming'));
+    expect(screen.getByText('▸ streaming')).toBeTruthy();
+    fireEvent.click(screen.getByText('▸ streaming'));
+    expect(screen.getByText('> streaming')).toBeTruthy();
+    const restored = screen.getByText(/🔧 read/).closest('.ant-collapse-item');
+    expect(restored).toBe(callItem);
+    expect(restored.classList.contains('ant-collapse-item-active')).toBe(true);
+    expect(screen.getByText(/src\/main\.rs/)).toBeTruthy();
+  });
+
+  it('Ctrl+L collapses the live region and streaming rerenders keep it collapsed', () => {
+    const mounted = mountWithLiveRegion([runningTurn()]);
+    fireEvent.keyDown(window, { key: 'l', ctrlKey: true });
+    expect(screen.getByText('▸ streaming')).toBeTruthy();
+    expect(screen.queryByText('> streaming')).toBeNull();
+
+    const still = runningTurn();
+    still.steps[1].calls[0].output = 'still streaming after Ctrl+L';
+    rerenderWithLiveRegion(mounted, [still]);
+    expect(screen.getByText('▸ streaming')).toBeTruthy();
+    expect(screen.queryByText('> streaming')).toBeNull();
+    expect(mounted.container.querySelector('[data-turn-live-body]').style.display).toBe('none');
+  });
+
+  it('settle clears the region and the next running turn starts expanded', () => {
+    const mounted = mountWithLiveRegion([runningTurn()]);
+    fireEvent.click(screen.getByText('> streaming'));
+    expect(screen.getByText('▸ streaming')).toBeTruthy();
+
+    rerenderWithLiveRegion(mounted, [stepsTurn()]);
+    expect(mounted.container.querySelector('[data-turn-live-region]')).toBeNull();
+
+    const next = runningTurn();
+    next.steps[1].thinking = 'next turn reasoning';
+    rerenderWithLiveRegion(mounted, [stepsTurn(), next]);
+    const toggle = screen.getByText('> streaming');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.queryByText('▸ streaming')).toBeNull();
+    expect(screen.getByText('next turn reasoning')).toBeTruthy();
+  });
+
   it('live region advances to the newest step while the ladder stays folded', () => {
     const mounted = mountWithLiveRegion([runningTurn()]);
     expect(screen.getByText('reading the entrypoint')).toBeTruthy();
@@ -418,7 +494,9 @@ describe('turn live region (below the list, inside the transcript scroll flow)',
     expect(screen.getByText('streaming answer').closest('[data-turn-streaming-say]')).toBeTruthy();
     expect(screen.queryByText('💬 Say')).toBeNull();
     // No running steps turn → no region at all (steps only, never Say).
-    expect(screen.queryByText(/live/)).toBeNull();
+    expect(screen.queryByText('⬥ live')).toBeNull();
+    expect(screen.queryByText('> streaming')).toBeNull();
+    expect(screen.queryByText('▸ streaming')).toBeNull();
     expect(screen.queryByText(/🔧/)).toBeNull();
     expect(screen.queryByText('💭 Thinking')).toBeNull();
   });
@@ -462,7 +540,9 @@ describe('turn live region (below the list, inside the transcript scroll flow)',
     expect(screen.queryByText('reading the entrypoint')).toBeNull();
     expect(screen.queryByText(/🔧 read/)).toBeNull();
     expect(screen.queryByText('running')).toBeNull();
-    expect(screen.queryByText(/live/)).toBeNull();
+    expect(screen.queryByText('⬥ live')).toBeNull();
+    expect(screen.queryByText('> streaming')).toBeNull();
+    expect(screen.queryByText('▸ streaming')).toBeNull();
     expect(screen.queryByText('💬 Say')).toBeNull();
     expect(screen.queryByText('partial answer')).toBeNull();
   });

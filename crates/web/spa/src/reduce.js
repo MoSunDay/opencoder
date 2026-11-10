@@ -71,11 +71,11 @@ function subagentIndex(turns, id) {
 }
 
 export function emptyStream() {
-  // pendingSay: the STREAMING Say buffer (TUI live-region parity): while
-  // text_delta chunks arrive the Say is NOT transcript content — it renders
-  // ONLY in the turn live region (chat.jsx passes this field as TurnLiveRegion's
-  // `say` prop) and lands in `turns` at the next boundary (round end / next
-  // tool or thinking activity / terminal settle / new input) via
+  // pendingSay: the STREAMING Say buffer while text_delta chunks arrive.
+  // It is NOT transcript content yet — chat.jsx renders it as raw
+  // `StreamingSay` text in the transcript flow, ABOVE the turn live region
+  // (never inside it), and lands in `turns` at the next boundary (round end /
+  // next tool or thinking activity / terminal settle / new input) via
   // flushPendingSay. The nested subagent fold carries the same field on the
   // subagent turn so a child's streaming Say survives across frames.
   // pendingEcho: the in-flight turn's user echo (TUI chat_types.rs
@@ -413,8 +413,9 @@ function foldFrame(state, frame, nowMs) {
     }
     case 'llm_attempt_reset': {
       // Restore the round-start snapshot AND drop the discarded attempt's
-      // partial Say: it streamed only in the live region, so it vanishes
-      // with the attempt instead of ever landing in the transcript.
+      // partial Say: it streamed only as the StreamingSay preview above the
+      // live region, so it vanishes with the attempt instead of ever landing
+      // in the transcript.
       const restored = state.attemptTurns
         ? { ...state, turns: state.attemptTurns, error: null }
         : state;
@@ -427,10 +428,11 @@ function foldFrame(state, frame, nowMs) {
       }
       // STREAMING Say (TUI live-region parity): a Say is NOT transcript
       // content while it streams — the chunk accumulates in `pendingSay`
-      // (rendered ONLY in the turn live region) and the turn array is left
-      // untouched. Order invariant (reduce.order.test.js): the ladder
-      // settles and the Say lands TOGETHER at FLUSH time (the next round
-      // end / tool or thinking activity / terminal settle / new input — see
+      // (rendered by StreamingSay above the turn live region, never inside
+      // it) and the turn array is left untouched. Order invariant
+      // (reduce.order.test.js): the ladder settles and the Say lands
+      // TOGETHER at FLUSH time (the next round end / tool or thinking
+      // activity / terminal settle / new input — see
       // flushPendingSay), not per-chunk: settleTurnProgress runs once, then
       // appendDelta appends/extends the FULL Say.
       return { ...state, pendingSay: (state.pendingSay || '') + text };

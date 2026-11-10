@@ -58,13 +58,16 @@ impl ChatView {
                 } => {
                     // The Say is TRANSCRIPT CONTENT both while streaming
                     // and once sealed. While it STREAMS (`done == false`)
-                    // the ladder above stays FOLDED in its settled counting
-                    // shape (the merge happens only on seal), so the Say
+                    // the ladder above has RETIRED — the StepGroup arm
+                    // emits nothing once its Say begins (the same
+                    // retirement the live region gets then) — so the Say
                     // renders STANDALONE here: the `say:` header row + the
-                    // running spinner hint, then its RAW body rows indented
-                    // 4 — full, no preview dedup. Sealing swaps the raw
-                    // rows for the rendered ones and merges the pair under
-                    // a preceding StepGroup (`done == true` path below).
+                    // running spinner hint, then its RAW body rows
+                    // indented 4 — full, no preview dedup. Sealing swaps
+                    // the raw rows for the rendered ones and merges the
+                    // pair under a preceding StepGroup (`done == true`
+                    // path below): the step count returns folded into the
+                    // merged header.
                     if !*done {
                         out.push(Line::from(vec![
                             Span::styled(
@@ -151,14 +154,22 @@ impl ChatView {
                     progress_active,
                     ..
                 } => {
-                    // Adjacent-pair merge: when the block right below this
-                    // group is the turn's SEALED Say (`done == true`), the
-                    // two render as one clickable header row — pass the Say
-                    // so `flatten_step_group` can fold the `N Steps` row
+                    // Adjacent-pair lifecycle: when the block right below
+                    // this group is the turn's SEALED Say (`done == true`),
+                    // the two render as one clickable header row — pass the
+                    // Say so `flatten_step_group` can fold the `N Steps` row
                     // into it. While the follower STREAMS (`done == false`)
-                    // the group keeps its plain folded `▸ N Steps` row (the
-                    // Say renders standalone below — see the Assistant arm);
-                    // the merge forms only when the Say seals.
+                    // the ladder RETIRES entirely — it stops rendering the
+                    // moment its Say begins, mirroring how the live region
+                    // clears then (no lingering counting row above the
+                    // streaming answer); the count returns on seal folded
+                    // into the merged `Say(n steps)` header. The ladder's
+                    // disclosure flags survive untouched — it re-renders
+                    // from them once the pair merges.
+                    let follower_streams = matches!(
+                        self.blocks.get(bi + 1),
+                        Some(ChatBlock::Assistant { done: false, .. })
+                    );
                     let say = match self.blocks.get(bi + 1) {
                         Some(ChatBlock::Assistant {
                             rendered,
@@ -169,14 +180,16 @@ impl ChatView {
                         }),
                         _ => None,
                     };
-                    step_render::flatten_step_group(
-                        &mut out,
-                        *open,
-                        *progress_active,
-                        steps,
-                        anim_tick,
-                        say,
-                    );
+                    if !follower_streams {
+                        step_render::flatten_step_group(
+                            &mut out,
+                            *open,
+                            *progress_active,
+                            steps,
+                            anim_tick,
+                            say,
+                        );
+                    }
                     // TURN LIVE REGION: while this group runs (armed, no
                     // Say yet) the in-flight step streams RIGHT BELOW the
                     // ladder — above any Subagent blocks that follow — as

@@ -8,9 +8,9 @@
 //! Say renders as ONE header row `{glyph} Say(n steps): <say first line>` that
 //! both carries the step count and toggles the steps on click; the
 //! standalone `{glyph} N Steps` row disappears into it. While the Say still
-//! STREAMS the merge is off (the group keeps its plain folded `N Steps` row
-//! and the Say renders standalone below — see `chat_flatten.rs`); the merge
-//! forms only on seal.
+//! STREAMS the ladder is RETIRED — `chat_flatten.rs` skips this function
+//! entirely once the turn's Say begins (the same retirement the live region
+//! gets); the merge — and the step count — (re)appear only on seal.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};

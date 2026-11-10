@@ -35,9 +35,9 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   展开；`chat_live_turn.rs::render_lines(steps, anim_tick, collapsed)`
   收起时仅头行；区内只有当前 step 的 thinking + 与阶梯同款的调用行
   （`push_step_details(…, show_results=false)`），**无 step 计数行、
-  无 Say**。open Say 是转录内容：流式期间独立形态（`❯ Say:` 头行（`chat.rs`
+  无 Say**。open Say 是转录内容：Say 一开始其上方阶梯整体退场（`chat_flatten.rs` 检测下邻 open `Assistant` 即跳过 `flatten_step_group`，行数/点击镜像 `chat_headers.rs` 同门控，`open` 披露标记不动、seal 后恢复），流式期间独立形态（`❯ Say:` 头行（`chat.rs`
   ROLE_SAY_HEADER）+ running 提示 + raw body 全量，共享滚动/复制），seal 后才与邻接阶梯
-  合并为 `Say(n steps)` 头行（渲染正文 + 预览去重）；copy 模式经
+  合并为 `Say(n steps)` 头行（渲染正文 + 预览去重，步数随合并回归）；copy 模式经
   `flatten_for_copy`（`flatten_opts(.., include_live)`，配合
   `render_viewport.rs` build_for_copy/includes_live/refresh_copy_cache）
   排除 live 区，复制文本保持纯转录（与 SPA `stepsBlock.jsx` 同契约）

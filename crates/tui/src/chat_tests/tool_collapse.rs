@@ -292,21 +292,23 @@ fn running_hint_persists_until_say_begins() {
     );
     v.apply(&SessionEvent::TextDelta("final answer".into()));
     let text = flatten_text(&v);
-    // The first non-empty Say chunk RETIRES the hint and settles the whole
-    // ladder: the plain `\u{25b8} 2 Steps` counting row (no hint), the
-    // standalone `say:` header carrying the spinner, and the FULL raw body
-    // below (no merge, no preview dedup — that happens on seal). The live
-    // region cleared the moment the Say began.
+    // The first non-empty Say chunk RETIRES the hint and the whole ladder
+    // WITH it (no counting row above the streaming answer); it returns on
+    // seal folded into the merged `Say(n steps)` header. What streams is
+    // the standalone `say:` header carrying the spinner and the FULL raw
+    // body below (no merge, no preview dedup — that happens on seal). The
+    // live region cleared the moment the Say began.
     assert_eq!(
-        text[0], "\u{25b8} 2 Steps",
-        "the settled counting row keeps no hint: {text:?}"
+        text.len(),
+        2,
+        "ladder rows retired while the Say streams: {text:?}"
     );
-    let say_header = &text[2];
+    let say_header = &text[0];
     assert!(
         say_header.starts_with("\u{276f} Say: ") && say_header.contains('\u{280b}'),
         "the standalone say: header carries the running spinner: {say_header:?}"
     );
-    assert_eq!(text[3], "    final answer", "the raw body streams in full");
+    assert_eq!(text[1], "    final answer", "the raw body streams in full");
     assert!(
         live_text(&v).is_empty(),
         "the open Say never streams in the live region: {}",
@@ -320,9 +322,13 @@ fn running_hint_persists_until_say_begins() {
     // pair merges and every hint/region retires.
     v.apply(&SessionEvent::ReasoningDelta("one more check".into()));
     let text = flatten_text(&v);
-    assert_eq!(
-        text[0], "\u{25b8} 2 Steps",
-        "the open Say keeps its ladder settled: {text:?}"
+    assert!(
+        text[0].starts_with("\u{276f} Say: "),
+        "the streaming Say leads — its ladder stays retired: {text:?}"
+    );
+    assert!(
+        !text.iter().any(|l| l.contains("2 Steps")),
+        "no counting row resurfaces while the Say streams: {text:?}"
     );
     assert!(
         !text.iter().any(|l| l.contains("running")),

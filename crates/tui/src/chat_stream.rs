@@ -15,12 +15,17 @@ use super::{ChatBlock, ChatView};
 
 impl ChatView {
     pub(super) fn append_text_delta(&mut self, text: &str) {
-        // The progress hint belongs to the pre-Say phase. Remove it on the
-        // first real Say chunk, not at ToolEnd, so the inter-round gap stays
-        // visibly alive without overlapping the answer itself.
-        if !text.is_empty() {
-            super::steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
-        }
+        // The progress hint belongs to the pre-Say phase, and the Say
+        // BLOCK — even an empty first chunk — ends that phase: the
+        // new-block path below pushes the Say and advances the turn floor
+        // PAST the running ladder, so this is the LAST walk that can still
+        // reach the group. Disarm unconditionally (not just on the first
+        // real chunk) or an empty first chunk would strand the group armed
+        // forever — the live region would render beside the streaming Say
+        // and even past seal. ToolEnd keeps the hint alive for the
+        // inter-round gap; the Say landing retires ladder and live region
+        // in the same stroke.
+        super::steps::set_turn_progress(&mut self.blocks, self.turn_block_start, false);
         let extends_open_say = matches!(
             self.blocks.last(),
             Some(ChatBlock::Assistant { done: false, .. })

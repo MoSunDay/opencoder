@@ -426,7 +426,7 @@ fn tool_turn_boundary_keeps_exactly_one_trailing_blank() {
     assert_eq!(
         lines(&v),
         vec![
-            "> live",
+            "> streaming",
             "    \u{1f4ad} Thinking",
             "        think",
             "    \u{276f} 1 Function call",
@@ -438,7 +438,7 @@ step streams (no group row, no blank)"
     assert_eq!(
         live_lines(&v),
         vec![
-            "> live",
+            "> streaming",
             "    \u{1f4ad} Thinking",
             "        think",
             "    \u{276f} 1 Function call",

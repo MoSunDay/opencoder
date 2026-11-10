@@ -40,7 +40,7 @@ impl ChatView {
     /// Return the TURN LIVE REGION's header rows — one per RUNNING group
     /// (`progress_active`, steps in flight) — in render order. Clicking one
     /// toggles the region between its detail rows and the collapsed
-    /// `▸ live` header (`toggle_live_region`).
+    /// `▸ streaming` header (`toggle_live_region`).
     pub fn live_headers(&self) -> Vec<LiveHeader> {
         self.collect_headers().4
     }

@@ -1,6 +1,6 @@
 //! The TURN LIVE REGION renders INLINE inside the transcript window:
 //! `flatten_with` emits it DIRECTLY BELOW the running group's ladder (the
-//! `> live` header plus the current step's detail rows) and ABOVE any later
+//! `> streaming` header plus the current step's detail rows) and ABOVE any later
 //! blocks (e.g. subagent headers) — one scroll window, one scrollbar,
 //! never truncated (scrolling up reveals the region's start); only
 //! physical frame overflow clips the tail. The ladder itself renders
@@ -117,8 +117,8 @@ fn live_region_sits_below_the_ladder_and_above_subagent_blocks() {
         .expect("the settled ladder renders its group row");
     let live = flat
         .iter()
-        .position(|l| l == "> live")
-        .expect("the live region renders its `> live` header");
+        .position(|l| l == "> streaming")
+        .expect("the live region renders its `> streaming` header");
     let sub = flat
         .iter()
         .position(|l| l.contains("subagent"))
@@ -143,7 +143,7 @@ fn live_region_sits_below_the_ladder_and_above_subagent_blocks() {
     let buf = draw_body(&v, 60, 20, false);
     let w = buf.area.width;
     let ladder = row_of(&buf, "1 Step", w).expect("ladder row on screen");
-    let live = row_of(&buf, "live", w).expect("live header on screen");
+    let live = row_of(&buf, "streaming", w).expect("live header on screen");
     let sub = row_of(&buf, "subagent", w).expect("subagent row on screen");
     let tok = row_of(&buf, "tok", w).expect("[tok cost] border renders");
     assert!(
@@ -167,7 +167,7 @@ fn first_in_flight_step_is_the_turns_only_surface() {
     let flat = flat_lines(&v);
     assert_eq!(
         flat.first().map(String::as_str),
-        Some("> live"),
+        Some("> streaming"),
         "the region's header is the first rendered row: {flat:?}"
     );
     assert!(
@@ -184,7 +184,7 @@ fn first_in_flight_step_is_the_turns_only_surface() {
     // On screen the region fills the window above the `[tok cost]` border.
     let buf = draw_body(&v, 40, 12, false);
     let w = buf.area.width;
-    let live = row_of(&buf, "live", w).expect("the live header renders");
+    let live = row_of(&buf, "streaming", w).expect("the live header renders");
     let tok = row_of(&buf, "tok", w).expect("[tok cost] border renders");
     assert!(live < tok, "the region renders above the border");
 }
@@ -222,7 +222,7 @@ fn streaming_say_renders_standalone_in_the_transcript_until_sealed() {
         "say: header, raw body — in order: {flat:?}"
     );
     assert!(
-        !flat.iter().any(|l| l == "> live"),
+        !flat.iter().any(|l| l == "> streaming"),
         "the live region cleared the moment the Say began: {flat:?}"
     );
 
@@ -243,7 +243,9 @@ fn streaming_say_renders_standalone_in_the_transcript_until_sealed() {
         "the body still follows the merged header: {flat:?}"
     );
     assert!(
-        !flat.iter().any(|l| l == "> live" || l.contains("running")),
+        !flat
+            .iter()
+            .any(|l| l == "> streaming" || l.contains("running")),
         "sealing drops the region and the spinner — the only visual delta: {flat:?}"
     );
 }
@@ -266,7 +268,7 @@ fn empty_first_say_chunk_still_clears_the_pre_say_surfaces() {
         "the ladder retired with the Say block: {flat:?}"
     );
     assert!(
-        !flat.iter().any(|l| l == "> live"),
+        !flat.iter().any(|l| l == "> streaming"),
         "the live region cleared with the Say block (no stranded region): {flat:?}"
     );
     assert!(
@@ -283,7 +285,7 @@ fn empty_first_say_chunk_still_clears_the_pre_say_surfaces() {
         "the body streams below the header: {flat:?}"
     );
     assert!(
-        !flat.iter().any(|l| l == "> live"),
+        !flat.iter().any(|l| l == "> streaming"),
         "no stranded live region while the Say streams: {flat:?}"
     );
     v.apply(&SessionEvent::Done);
@@ -293,7 +295,7 @@ fn empty_first_say_chunk_still_clears_the_pre_say_surfaces() {
         "the sealed pair keeps its merged header: {flat:?}"
     );
     assert!(
-        !flat.iter().any(|l| l == "> live"),
+        !flat.iter().any(|l| l == "> streaming"),
         "the region stays retired after seal: {flat:?}"
     );
 }
@@ -301,7 +303,7 @@ fn empty_first_say_chunk_still_clears_the_pre_say_surfaces() {
 /// The live content can grow past the frame on its own (untruncated
 /// thinking + call rows). The scroll window must keep the TAIL while
 /// following (newest rows visible, a scrollbar drawn) AND stay scrollable
-/// to the region's START — scroll=0 reveals the `> live` header and the
+/// to the region's START — scroll=0 reveals the `> streaming` header and the
 /// first thinking rows: never truncated, never blanked.
 #[test]
 fn huge_live_rides_the_scroll_window_tail_kept_and_start_reachable() {
@@ -322,7 +324,7 @@ fn huge_live_rides_the_scroll_window_tail_kept_and_start_reachable() {
     });
     let flat = flat_lines(&v);
     assert!(
-        flat.iter().filter(|l| **l == "> live").count() == 1,
+        flat.iter().filter(|l| **l == "> streaming").count() == 1,
         "fixture: the region is armed"
     );
     assert!(
@@ -336,7 +338,7 @@ fn huge_live_rides_the_scroll_window_tail_kept_and_start_reachable() {
     assert!(tail_call < tok, "following keeps the region's tail rows");
 
     let buf = draw_body(&v, 60, 12, false);
-    let live = row_of(&buf, "live", 60).expect("scroll=0 reveals the live start");
+    let live = row_of(&buf, "streaming", 60).expect("scroll=0 reveals the live start");
     let think = row_of(&buf, "think line", 60).expect("the first thinking rows render");
     let tok = row_of(&buf, "tok", 60).expect("tok cost border");
     assert!(
@@ -367,7 +369,7 @@ fn live_strip_stays_visible_when_transcript_overflows() {
 
     let buf = draw_body(&v, 40, 24, true);
     let w = buf.area.width;
-    let live = row_of(&buf, "live", w).expect("the live header stays visible");
+    let live = row_of(&buf, "streaming", w).expect("the live header stays visible");
     let call = row_of(&buf, "bash", w).expect("the region's call header renders");
     let tok = row_of(&buf, "tok", w).expect("[tok cost] border renders");
     assert!(live < tok, "region header {live} above tok border {tok}");
@@ -405,7 +407,7 @@ fn unified_scrollbar_covers_content_and_live() {
         scrollbar_painted(&buf, area),
         "content + live overflow → scrollbar drawn over the unified window"
     );
-    let live = row_of(&buf, "live", w).expect("the live header stays visible");
+    let live = row_of(&buf, "streaming", w).expect("the live header stays visible");
     let call = row_of(&buf, "bash", w).expect("the live call header renders");
     let tok = row_of(&buf, "tok", w).expect("[tok cost] border renders");
     assert!(

@@ -21,11 +21,11 @@ use std::time::Duration;
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState, SubagentSteerGate};
-use opencoder_store::{Delivery, SessionInput, Store, TursoStore};
+use opencoder_store::{Delivery, SessionInput, Store};
 
-async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(TursoStore::open_memory().await.unwrap())
-}
+mod support;
+
+use support::memory_store;
 
 fn config() -> Config {
     Config {
@@ -148,7 +148,7 @@ async fn admit_steer(store: &Arc<dyn Store>, session_id: &str, id: &str, prompt:
 
 #[tokio::test]
 async fn steer_promotes_at_turn_boundary() {
-    let store = mem_store().await;
+    let store = memory_store().await;
     // 3 bash turns then done. After turn 2 starts, we admit a steer that must
     // land before turn 3 — but since the loop is synchronous per turn, we admit
     // the steer UP FRONT; it should be promoted at the FIRST boundary (top of
@@ -205,7 +205,7 @@ async fn steer_promotes_at_turn_boundary() {
 
 #[tokio::test]
 async fn multiple_steers_at_one_boundary_promoted_once() {
-    let store = mem_store().await;
+    let store = memory_store().await;
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn(1)])
@@ -243,7 +243,7 @@ async fn multiple_steers_at_one_boundary_promoted_once() {
 
 #[tokio::test]
 async fn queue_drains_all_fifo_in_single_run_then_done() {
-    let store = mem_store().await;
+    let store = memory_store().await;
     // A single run drains the entire queue FIFO: "start" turn -> idle ->
     // consume QUEUE-1 -> turn -> idle -> consume QUEUE-2 -> turn -> idle ->
     // Done (queue empty). Steer is the clear-all path; queue is drained one
@@ -298,7 +298,7 @@ async fn queue_drains_all_fifo_in_single_run_then_done() {
 
 #[tokio::test]
 async fn durable_pending_input_survives_until_drain() {
-    let store = mem_store().await;
+    let store = memory_store().await;
     // admit a steer but DON'T run; it must sit pending.
     seed_session(&store).await;
     store
@@ -357,7 +357,7 @@ async fn no_store_attached_behaves_classically() {
 /// not `drain-sess`'s per-session `admitted_seq`.
 #[tokio::test]
 async fn steer_consumed_carries_pk_seq_not_admitted_seq() {
-    let store = mem_store().await;
+    let store = memory_store().await;
     // Noise in another session: advances the global PK counter only.
     seed_session_id(&store, "other").await;
     for i in 0..3u32 {
@@ -409,7 +409,7 @@ async fn steer_consumed_carries_pk_seq_not_admitted_seq() {
 /// the zip alignment between `pending_inputs` and `promote_inputs` returns.
 #[tokio::test]
 async fn multiple_steers_consumed_each_carries_distinct_pk_seq() {
-    let store = mem_store().await;
+    let store = memory_store().await;
     // Noise in another session so PKs diverge from admitted_seqs.
     seed_session_id(&store, "other").await;
     for i in 0..2u32 {
@@ -529,7 +529,7 @@ impl ChatStream for SteerOnIdle {
 
 #[tokio::test]
 async fn late_steer_absorbed_at_idle_boundary() {
-    let store = mem_store().await;
+    let store = memory_store().await;
     let gate = SubagentSteerGate::new();
     // Turn 1 -> text-only "first-idle" (the wrapper admits LATE-STEER just
     // before forwarding this). Turn 2 -> text-only "after-steer" (the

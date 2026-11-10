@@ -14,10 +14,10 @@
 //! the FIRST step is still in flight the block itself emits ZERO rows and
 //! the region is the turn's only surface.
 //!
-//! The region opens with a `> live` header row (`chat.rs`
+//! The region opens with a `> streaming` header row (`chat.rs`
 //! `LIVE_ROW_OPEN_PREFIX`) — a click target (`LiveHeader`, toggles
 //! `ChatView::live_collapsed`): collapsed it is the region's ONLY row
-//! (`▸ live`); expanded (the default — every newly-admitted running turn
+//! (`▸ streaming`); expanded (the default — every newly-admitted running turn
 //! re-expands it) the current step's detail rows follow. Ctrl+L collapses
 //! it with every other disclosure level.
 //!
@@ -56,7 +56,7 @@ pub(crate) fn live_data(blocks: &[ChatBlock], turn_start: usize) -> Option<&[Ste
         .filter(|steps| !steps.is_empty())
 }
 
-/// The live region's full line buffer: the `> live` / `▸ live` header row
+/// The live region's full line buffer: the `> streaming` / `▸ streaming` header row
 /// that marks the region's start (it is NOT transcript content), then —
 /// while expanded (`collapsed == false`, the default) — ONLY the current
 /// step's detail rows, rendered by the SAME shared renderer as the ladder
@@ -70,7 +70,7 @@ pub(crate) fn render_lines(steps: &[Step], anim_tick: u32, collapsed: bool) -> V
         LIVE_ROW_OPEN_PREFIX
     };
     let mut out = vec![Line::from(Span::styled(
-        format!("{prefix}live"),
+        format!("{prefix}streaming"),
         Style::default()
             .fg(theme::warn_color())
             .add_modifier(Modifier::DIM),

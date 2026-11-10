@@ -200,7 +200,7 @@ spinner glyph: {live_text:?}"
     // no settled ladder row at all), while the copy-mode flatten omits it.
     let rows = row_texts(&v);
     assert!(
-        rows.iter().any(|l| l.contains("> live")),
+        rows.iter().any(|l| l.contains("> streaming")),
         "the live region rides inline in the transcript window: {rows:?}"
     );
     assert!(

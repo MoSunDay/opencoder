@@ -190,7 +190,7 @@ fn step_group_running_call_keeps_alignment() {
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
         .collect();
-    assert_eq!(rows[0], "> live", "region header leads: {rows:?}");
+    assert_eq!(rows[0], "> streaming", "region header leads: {rows:?}");
     assert!(
         rows.iter().any(|r| r.contains("1 Function call")),
         "the calls aggregate row renders in the region: {rows:?}"
@@ -281,7 +281,7 @@ region below): {flat:?}"
 /// REGION whose rows ride INLINE directly below the ladder (inside the
 /// same flatten window, above later blocks). The group row counts SETTLED
 /// steps only and stays the ladder's only click target; the region adds
-/// exactly one target of its own — its `> live` header row.
+/// exactly one target of its own — its `> streaming` header row.
 #[test]
 fn live_region_rides_inline_below_the_ladder() {
     let mut expanded = tool_call("a", 3);
@@ -335,7 +335,7 @@ fn live_region_rides_inline_below_the_ladder() {
         "the in-flight step never renders as a ladder row: {flat:?}"
     );
     assert_eq!(
-        flat[2], "> live",
+        flat[2], "> streaming",
         "region header right below the blank: {flat:?}"
     );
     assert!(
@@ -366,6 +366,6 @@ fn live_region_rides_inline_below_the_ladder() {
     assert_eq!(live_headers.len(), 1, "one live header target");
     assert_eq!(
         live_headers[0].header_line_idx, 2,
-        "it points at the rendered `> live` row (below group row + blank)"
+        "it points at the rendered `> streaming` row (below group row + blank)"
     );
 }

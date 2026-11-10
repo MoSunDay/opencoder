@@ -37,7 +37,7 @@ pub(crate) struct MouseHits {
     pub tool_call_btns: Vec<ToolCallBtn>,
     /// Clickable Compaction-block header rows; clicking toggles collapse.
     pub compaction_btns: Vec<CompactionBtn>,
-    /// Clickable TURN LIVE REGION header rows (`> live` / `▸ live`); one
+    /// Clickable TURN LIVE REGION header rows (`> streaming` / `▸ streaming`); one
     /// per running group currently visible in the body viewport. Clicking
     /// toggles the region between its detail rows and the collapsed header.
     pub live_btns: Vec<LiveBtn>,
@@ -74,7 +74,7 @@ pub(crate) struct ToolCallBtn {
     pub rect: Rect,
 }
 
-/// A clickable TURN LIVE REGION header row (`> live` / `▸ live`, the first
+/// A clickable TURN LIVE REGION header row (`> streaming` / `▸ streaming`, the first
 /// row the region emits below the running ladder). Clicking toggles the
 /// region between its detail rows and the collapsed header-only shape
 /// (`ChatView::toggle_live_region`).

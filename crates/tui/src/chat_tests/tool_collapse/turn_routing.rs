@@ -193,7 +193,7 @@ fn step_row_line_index_lands_on_the_step_row() {
     // below it whose spinner is legitimately armed while the tool runs.
     // While the new turn's FIRST step is in flight the ladder renders ZERO
     // rows (settled history only) — the live region is the turn's only
-    // surface, and its `> live` header the only click target of the block.
+    // surface, and its `> streaming` header the only click target of the block.
     let block_idx = groups(&v)[0].0;
     assert!(
         v.tool_call_headers().is_empty(),
@@ -206,7 +206,10 @@ fn step_row_line_index_lands_on_the_step_row() {
         .iter()
         .map(|s| s.content.clone())
         .collect();
-    assert_eq!(live_line, "> live", "its index lands on the region header");
+    assert_eq!(
+        live_line, "> streaming",
+        "its index lands on the region header"
+    );
 
     // A second reasoning round settles step one: the group row appears
     // (carrying the running hint) as the ladder's single target.

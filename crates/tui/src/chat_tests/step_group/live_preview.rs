@@ -6,7 +6,7 @@
 //! scroll window (`chat_live_turn.rs`). The LADDER renders SETTLED history
 //! only (`steps::settled_steps`): while the FIRST step is still in flight
 //! the block emits ZERO rows and the region is the turn's ONLY surface.
-//! The region opens with a `> live` header row (collapsed: `▸ live`, via
+//! The region opens with a `> streaming` header row (collapsed: `▸ streaming`, via
 //! `live_collapsed` / `toggle_live_region` / Ctrl+L) — its ONLY step
 //! counter-free rows; no ladder block ever contains the streaming step. An
 //! OPEN Say streams as TRANSCRIPT CONTENT instead (the region clears when
@@ -83,7 +83,7 @@ fn running_reasoning_streams_in_the_turn_live_area() {
     assert_eq!(
         lines(&v),
         vec![
-            "> live".to_string(),
+            "> streaming".to_string(),
             "    \u{1f4ad} Thinking".to_string(),
             "        first thought".to_string(),
         ],
@@ -138,7 +138,7 @@ fn running_calls_stream_with_spinner_and_the_ladder_stays_folded() {
         "the call's header row (name + summary) renders like the ladder's: {lv}"
     );
     assert!(
-        flat_first(&v) == "> live",
+        flat_first(&v) == "> streaming",
         "still the FIRST step — zero ladder rows, the region's header leads \
 the transcript: {:?}",
         flat_first(&v)
@@ -231,7 +231,7 @@ region): {:?}",
         "settled group row + blank, then the INLINE region rows: {rows:?}"
     );
     assert_eq!(
-        rows[2], "> live",
+        rows[2], "> streaming",
         "the region's header sits directly below the ladder: {rows:?}"
     );
     let lv = live(&v);
@@ -353,7 +353,7 @@ fn live_area_rows_are_not_clickable_targets() {
     start_call(&mut v, "c1");
     // While the FIRST step streams the ladder holds zero SETTLED steps:
     // no group row, no ladder click targets — the region's OWN header row
-    // (`> live`, via `live_headers`) is the turn's only click target.
+    // (`> streaming`, via `live_headers`) is the turn's only click target.
     assert!(
         v.tool_call_headers().is_empty(),
         "no ladder rows exist while the first step streams — nothing to click"
@@ -413,7 +413,7 @@ fn user_opened_ladder_coexists_with_the_live_region_and_survives_the_settle() {
 itself is closed): {rows:?}"
     );
     assert_eq!(
-        rows[3], "> live",
+        rows[3], "> streaming",
         "the region's header rides directly below the ladder's blank: {rows:?}"
     );
     assert!(
@@ -468,7 +468,7 @@ below the user-open ladder — the merge waits for seal: {text}"
 
 /// Ctrl+L folds every collapsible level INCLUDING the live region — but
 /// the region never disappears while the turn runs: collapsed it is its
-/// own single `▸ live` header row (the running step's detail rows fold
+/// own single `▸ streaming` header row (the running step's detail rows fold
 /// away), and `toggle_live_region` re-expands it.
 #[test]
 fn collapse_all_keeps_the_live_region_visible() {
@@ -484,12 +484,12 @@ fn collapse_all_keeps_the_live_region_visible() {
     start_call(&mut v, "c1");
     let lv = live(&v);
     assert_eq!(
-        lv, "\u{25b8} live",
+        lv, "\u{25b8} streaming",
         "collapsed the region is exactly its one header row: {lv}"
     );
     assert_eq!(
         lines(&v),
-        vec!["\u{25b8} live".to_string()],
+        vec!["\u{25b8} streaming".to_string()],
         "while the FIRST step streams, the collapsed region row is the \
 turn's whole inline surface: {:?}",
         lines(&v)
@@ -539,9 +539,9 @@ fn replay_ladders_carry_no_live_area() {
     );
 }
 
-/// The region's OWN disclosure: expanded (the default) the `> live` header
+/// The region's OWN disclosure: expanded (the default) the `> streaming` header
 /// row leads the current step's detail rows; `toggle_live_region` folds it
-/// to exactly ONE `▸ live` row — the region never vanishes while the turn
+/// to exactly ONE `▸ streaming` row — the region never vanishes while the turn
 /// runs — and toggling back restores the exact same rows (lossless).
 #[test]
 fn live_region_toggles_between_expanded_and_collapsed_rows() {
@@ -552,7 +552,7 @@ fn live_region_toggles_between_expanded_and_collapsed_rows() {
     let expanded = lines(&v);
     assert_eq!(
         expanded.first().map(String::as_str),
-        Some("> live"),
+        Some("> streaming"),
         "the expanded region leads with its header row: {expanded:?}"
     );
     assert!(
@@ -563,7 +563,7 @@ fn live_region_toggles_between_expanded_and_collapsed_rows() {
     assert!(v.live_collapsed);
     assert_eq!(
         lines(&v),
-        vec!["\u{25b8} live".to_string()],
+        vec!["\u{25b8} streaming".to_string()],
         "collapsed the region is EXACTLY its one header row (zero settled \
 steps — nothing else renders): {:?}",
         lines(&v)
@@ -600,7 +600,7 @@ fn every_newly_admitted_turn_re_expands_the_live_region() {
     );
     assert_eq!(
         live(&v),
-        "\u{25b8} live",
+        "\u{25b8} streaming",
         "and it keeps rendering exactly its collapsed header row: {}",
         live(&v)
     );
@@ -629,7 +629,7 @@ fn every_newly_admitted_turn_re_expands_the_live_region() {
 }
 
 /// Hit-rect alignment: `live_headers()` must report the header line index
-/// of the `> live` / `▸ live` row EXACTLY where `flatten` emits it — with
+/// of the `> streaming` / `▸ streaming` row EXACTLY where `flatten` emits it — with
 /// blocks above the running group (markers, settled ladder rows) so the
 /// index is non-trivial — and keep pointing at the SAME row when the
 /// region collapses (one row instead of many, same position).
@@ -647,8 +647,8 @@ fn live_header_line_index_points_at_the_rendered_live_row() {
     let idx = headers[0].header_line_idx;
     assert_eq!(
         rows.get(idx).map(String::as_str),
-        Some("> live"),
-        "header_line_idx {idx} must point at the rendered `> live` row: {rows:?}"
+        Some("> streaming"),
+        "header_line_idx {idx} must point at the rendered `> streaming` row: {rows:?}"
     );
     assert_eq!(headers[0].block_idx, 2, "the running group sits at index 2");
 
@@ -659,8 +659,8 @@ fn live_header_line_index_points_at_the_rendered_live_row() {
     let rows = lines(&v);
     assert_eq!(
         rows.get(headers[0].header_line_idx).map(String::as_str),
-        Some("> live"),
-        "after the settle the index still points at the `> live` row: {rows:?}"
+        Some("> streaming"),
+        "after the settle the index still points at the `> streaming` row: {rows:?}"
     );
     assert_eq!(
         headers[0].header_line_idx, 4,
@@ -673,8 +673,8 @@ fn live_header_line_index_points_at_the_rendered_live_row() {
     let rows = lines(&v);
     assert_eq!(
         rows.get(headers[0].header_line_idx).map(String::as_str),
-        Some("\u{25b8} live"),
-        "collapsed the same index points at the `\u{25b8} live` row: {rows:?}"
+        Some("\u{25b8} streaming"),
+        "collapsed the same index points at the `\u{25b8} streaming` row: {rows:?}"
     );
     assert_eq!(
         rows.len(),

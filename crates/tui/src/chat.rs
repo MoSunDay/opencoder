@@ -27,7 +27,7 @@ pub(crate) const STEP_THINKING_HEADER: &str = "\u{1f4ad} Thinking";
 /// `ChatBlock::Plan` header row.
 pub(crate) const PLAN_HEADER: &str = "\u{2576}\u{2500} plan \u{2500}\u{2574}";
 /// TURN LIVE REGION header row label (`chat_live_turn.rs`): the row is
-/// `{prefix}live` — `LIVE_ROW_OPEN_PREFIX` (`> `) while the region streams
+/// `{prefix}streaming` — `LIVE_ROW_OPEN_PREFIX` (`> `) while the region streams
 /// its detail rows, the shared `GROUP_ROW_CLOSED_PREFIX` (`▸ `) while
 /// collapsed to the header. Declared here so the whole crate (render,
 /// tests) shares the exact prefix shape.
@@ -586,9 +586,9 @@ impl ChatView {
         }
     }
 
-    /// Toggle the TURN LIVE REGION between its expanded shape (the `> live`
+    /// Toggle the TURN LIVE REGION between its expanded shape (the `> streaming`
     /// header plus the running step's detail rows) and the collapsed
-    /// `▸ live` header-only row. Bound to the region header click
+    /// `▸ streaming` header-only row. Bound to the region header click
     /// (`LiveHeader` hit-rect, `render_hits.rs` / `app_mouse.rs`); plain
     /// view state — no block is touched. A collapse persists for the rest
     /// of the turn (streaming never re-opens it); the NEXT admitted turn
@@ -604,7 +604,7 @@ impl ChatView {
     /// calls-list folds and expanded call results — in one keystroke (the turn row itself
     /// always stays rendered; also applied to a child
     /// subagent view before exiting it). The TURN LIVE REGION collapses to
-    /// its `▸ live` header row too — it keeps streaming there (its header
+    /// its `▸ streaming` header row too — it keeps streaming there (its header
     /// stays clickable to re-expand) and re-expands on the next armed turn.
     pub fn collapse_all_collapsible(&mut self) {
         self.live_collapsed = true;

@@ -335,7 +335,7 @@ fn running_hint_persists_until_say_begins() {
         "no hint re-arms after the Say began: {text:?}"
     );
     assert!(
-        text.iter().any(|l| l == "> live"),
+        text.iter().any(|l| l == "> streaming"),
         "the post-Say turn streams its own live region below the Say: {text:?}"
     );
     v.apply(&SessionEvent::ToolStart {
@@ -371,13 +371,13 @@ fn terminal_event_clears_progress_when_no_say_arrives() {
     // While the turn runs the region is the surface (zero settled steps →
     // no group row); Done settles the ladder: group row + blank, region
     // gone.
-    assert_eq!(flatten_text(&v)[0], "> live");
+    assert_eq!(flatten_text(&v)[0], "> streaming");
     v.apply(&SessionEvent::Done);
     assert_eq!(flatten_text(&v)[0], "\u{25b8} 1 Step");
 
     let mut failed = ChatView::default();
     failed.apply(&SessionEvent::ReasoningDelta("will fail".into()));
-    assert_eq!(flatten_text(&failed)[0], "> live");
+    assert_eq!(flatten_text(&failed)[0], "> streaming");
     failed.apply(&SessionEvent::Error("boom".into()));
     assert_eq!(flatten_text(&failed)[0], "\u{25b8} 1 Step");
 

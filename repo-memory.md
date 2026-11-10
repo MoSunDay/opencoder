@@ -68,12 +68,10 @@ OpenCoder 能力入口见 [features/index.md](features/index.md)。
 
 - [rules/01-mandatory-tests.md](rules/01-mandatory-tests.md) — 每个功能必须有测试
 - [rules/02-regression-gate.md](rules/02-regression-gate.md) — 改动及直接影响链路定向回归 + changelog 附测试清单
-- [rules/03-test-pyramid.md](rules/03-test-pyramid.md) — 测试分层（unit/integration/e2e）
+- [rules/03-test-pyramid.md](rules/03-test-pyramid.md) — 测试分层与组织：unit/integration/e2e 判层、目录落位、夹具复用与验收脚本归组
 - [rules/04-dag-execution-contract.md](rules/04-dag-execution-contract.md) — DAG 单节点单容器与原生步骤执行约定
 - [rules/05-ui-acceptance.md](rules/05-ui-acceptance.md) — 只验收本次修改的页面与直接影响链路，页面范围由 `scripts/acceptance/ui/scope.js` 维护
 - [rules/06-brain-scheduling-contract.md](rules/06-brain-scheduling-contract.md) — 大脑整层调度、结果评估、返工与恢复约定
 - [rules/07-project-module-contract.md](rules/07-project-module-contract.md) — 项目、专项、TODO 的归属、看板、执行关联与进度约定
 - [rules/08-infrastructure-scope.md](rules/08-infrastructure-scope.md) — 代码、样例、提示词与文档只保留通用基建内容
-- [rules/09-ontology-capabilities.md](rules/09-ontology-capabilities.md) — Ontology 是全部平台能力的统一查询与组织入口，查找能力先走能力目录与图谱
-- [rules/10-ontology-cli.md](rules/10-ontology-cli.md) — `opencoder-cli ontology` 的命令入口与操作方式，CLI/API 约定变化时同步更新
-- [rules/11-test-organization.md](rules/11-test-organization.md) — 测试组织与模块地图：新增 case 先查地图归位、复用 support 夹具、验收脚本进 scripts/acceptance/<domain>/
+- [rules/09-ontology-capabilities.md](rules/09-ontology-capabilities.md) — Ontology 能力目录与 CLI：统一查询入口、同步要求与 opencoder-cli ontology 操作约定

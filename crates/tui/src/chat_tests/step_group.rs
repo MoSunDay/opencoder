@@ -450,14 +450,9 @@ header row, NO result (the ladder owns the drill-down)"
     v.apply(&SessionEvent::TextDelta("spoken".into()));
     assert_eq!(
         lines(&v),
-        vec![
-            "\u{25b8} 1 Step",
-            "",
-            "\u{276f} Say: \u{280b} ",
-            "    spoken"
-        ],
-        "while the Say streams the ladder stays FOLDED (merge only on seal) — \
-standalone say: header + spinner, full raw body below"
+        vec!["\u{276f} Say: \u{280b} ", "    spoken"],
+        "while the Say streams the ladder RETIRED entirely (merge only on \
+seal) — standalone say: header + spinner, full raw body below"
     );
     assert!(
         live_lines(&v).is_empty(),

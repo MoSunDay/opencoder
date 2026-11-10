@@ -89,11 +89,15 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
         // ADJACENT-pair merge (see flatten_with): a StepGroup whose NEXT
         // block is the turn's SEALED Say (`done: true`) renders one merged
         // header row and the Say renders body only — both sides of the
-        // pair lose one line. An OPEN Say renders standalone (the group
-        // keeps its plain row, the Say its `say:` header + raw rows).
+        // pair lose one line. An OPEN Say RETIRES the whole ladder — the
+        // group contributes no rows (only its live-region rows, if armed).
         let say_merged_after_group = matches!(
             view.blocks.get(bi + 1),
             Some(ChatBlock::Assistant { done: true, .. })
+        );
+        let say_streams_after_group = matches!(
+            view.blocks.get(bi + 1),
+            Some(ChatBlock::Assistant { done: false, .. })
         );
         let say_merged_into_group = bi
             .checked_sub(1)
@@ -166,7 +170,7 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                 } else {
                     0
                 };
-                if !(*progress_active && ladder.is_empty()) {
+                if !((*progress_active && ladder.is_empty()) || say_streams_after_group) {
                     expected += 1; // group row (or merged Say header row)
                     if say_merged_after_group {
                         // 合并头部行之后的空行（与 flatten_step_group 同步）。

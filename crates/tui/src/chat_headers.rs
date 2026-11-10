@@ -67,9 +67,9 @@ impl ChatView {
         let mut live = Vec::new();
         let mut line_idx = 0usize;
         let merged_say = |i: usize| -> bool {
-            // Only a SEALED follower merges (`done == true`): an open Say
-            // renders standalone (the group keeps its plain `N Steps` row)
-            // — mirrors `flatten_with`'s StepGroup adjacency lookup.
+            // Only a SEALED follower merges (`done == true`) — mirrors
+            // `flatten_with`'s StepGroup adjacency lookup. An OPEN follower
+            // retires the whole ladder instead (`say_streams` in the arm).
             matches!(
                 self.blocks.get(i + 1),
                 Some(ChatBlock::Assistant { done: true, .. })
@@ -160,6 +160,10 @@ impl ChatView {
                     // counted (and its header registered as a target) so
                     // later blocks' header rows stay aligned with flatten.
                     let say_merged = merged_say(block_idx);
+                    let say_streams = matches!(
+                        self.blocks.get(block_idx + 1),
+                        Some(ChatBlock::Assistant { done: false, .. })
+                    );
                     let ladder = super::steps::settled_steps(*progress_active, steps);
                     let live_rows = if *progress_active && !steps.is_empty() {
                         // `anim_tick` never changes the region's line count.
@@ -167,9 +171,13 @@ impl ChatView {
                     } else {
                         0
                     };
-                    if *progress_active && ladder.is_empty() {
-                        // First step still streaming: the block renders ONLY
-                        // the live region's rows (no group row, no blank).
+                    if (*progress_active && ladder.is_empty()) || say_streams {
+                        // First step still streaming OR the turn's Say
+                        // streaming below: the ladder RETIRED (flatten
+                        // skips `flatten_step_group`) — mirror that here:
+                        // no group row, no blank, no targets; only the
+                        // live region's rows (normally already disarmed)
+                        // still count.
                     } else {
                         let mut call_idx = 0usize;
                         tool_calls.push(ToolCallHeader {

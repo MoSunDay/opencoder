@@ -189,23 +189,22 @@ fn first_in_flight_step_is_the_turns_only_surface() {
     assert!(live < tok, "the region renders above the border");
 }
 
-/// The OPEN Say is TRANSCRIPT content streaming STANDALONE: while it runs
-/// the ladder above keeps its plain folded counting shape (`▸ 1 Step`, NO
-/// merged `Say(n steps)` row), the `say:` header carries the running
-/// spinner, and the RAW body rows render below it in full — and the live
-/// region holds NO Say at all (it cleared the moment the Say began:
-/// progress disarmed). Sealing merges the pair and dedups the body
-/// against the preview.
+/// The OPEN Say is TRANSCRIPT content streaming STANDALONE: the moment it
+/// begins the ladder above RETIRES (its `▸ 1 Step` counting row drops out
+/// exactly like the live region clears then; the count returns on seal via
+/// the merged header), the `say:` header carries the running spinner, and
+/// the RAW body rows render below it in full. Sealing merges the pair and
+/// dedups the body against the preview.
 #[test]
 fn streaming_say_renders_standalone_in_the_transcript_until_sealed() {
     let mut v = running_two_step_view();
     v.apply(&SessionEvent::TextDelta("the answer\nand more".into()));
 
     let flat = flat_lines(&v);
-    let group = flat
-        .iter()
-        .position(|l| l.contains("2 Steps"))
-        .expect("the settled ladder keeps its folded counting shape");
+    assert!(
+        !flat.iter().any(|l| l.contains("Steps")),
+        "the ladder retired the moment the Say began (like the live region): {flat:?}"
+    );
     let say = flat
         .iter()
         .position(|l| l.contains("Say:"))
@@ -219,15 +218,15 @@ fn streaming_say_renders_standalone_in_the_transcript_until_sealed() {
         .position(|l| l.contains("and more"))
         .expect("the raw second body row renders");
     assert!(
-        group < say && say < first && first < rest,
-        "folded row, say: header, raw body — in order: {flat:?}"
+        say < first && first < rest,
+        "say: header, raw body — in order: {flat:?}"
     );
     assert!(
         !flat.iter().any(|l| l == "> live"),
         "the live region cleared the moment the Say began: {flat:?}"
     );
 
-    // Seal: the pair MERGES — folded row + say: header collapse into the
+    // Seal: the pair MERGES — the retired ladder's count returns as the
     // `Say(n steps)` header and the body dedups its preview line away.
     v.apply(&SessionEvent::Done);
     let flat = flat_lines(&v);
@@ -246,6 +245,56 @@ fn streaming_say_renders_standalone_in_the_transcript_until_sealed() {
     assert!(
         !flat.iter().any(|l| l == "> live" || l.contains("running")),
         "sealing drops the region and the spinner — the only visual delta: {flat:?}"
+    );
+}
+
+/// An EMPTY first Say chunk still OPENS the Say block (the turn closes and
+/// the turn floor advances PAST the running ladder) — so the pre-Say
+/// surfaces must retire with the BLOCK, not merely on the first non-empty
+/// chunk: after the floor advance no later walk can reach the old group to
+/// disarm it, and the live region would strand armed beside the streaming
+/// Say (and past seal). The Say block landing clears ladder AND live region
+/// in the same stroke; the empty body still renders the `say:` header.
+#[test]
+fn empty_first_say_chunk_still_clears_the_pre_say_surfaces() {
+    let mut v = running_two_step_view();
+    v.apply(&SessionEvent::TextDelta("".into()));
+
+    let flat = flat_lines(&v);
+    assert!(
+        !flat.iter().any(|l| l.contains("Steps")),
+        "the ladder retired with the Say block: {flat:?}"
+    );
+    assert!(
+        !flat.iter().any(|l| l == "> live"),
+        "the live region cleared with the Say block (no stranded region): {flat:?}"
+    );
+    assert!(
+        flat.iter().any(|l| l.contains("Say:")),
+        "the empty Say still renders its header: {flat:?}"
+    );
+
+    // The follow-up non-empty chunk streams the body; sealing the pair keeps
+    // the region retired — the merged header renders alone.
+    v.apply(&SessionEvent::TextDelta("the answer".into()));
+    let flat = flat_lines(&v);
+    assert!(
+        flat.iter().any(|l| l.contains("the answer")),
+        "the body streams below the header: {flat:?}"
+    );
+    assert!(
+        !flat.iter().any(|l| l == "> live"),
+        "no stranded live region while the Say streams: {flat:?}"
+    );
+    v.apply(&SessionEvent::Done);
+    let flat = flat_lines(&v);
+    assert!(
+        flat.iter().any(|l| l.contains("Say(2 steps): the answer")),
+        "the sealed pair keeps its merged header: {flat:?}"
+    );
+    assert!(
+        !flat.iter().any(|l| l == "> live"),
+        "the region stays retired after seal: {flat:?}"
     );
 }
 

@@ -262,17 +262,16 @@ fn say_streams_in_the_live_region_and_lands_in_the_transcript_on_seal() {
     end_call(&mut v, "c1", "out");
     assert!(live(&v).contains("think"));
 
-    // MID-STREAM: the open Say IS transcript content — but the ladder
-    // stays FOLDED in its settled counting shape (the merge happens only
-    // on seal): the plain `▸ 1 Step` group row, then the standalone
-    // `say:` header carrying the spinner, with the raw body rows below it
-    // in the transcript. The live region holds NO Say at all (it cleared
-    // when the Say began).
+    // MID-STREAM: the open Say IS transcript content — and the ladder has
+    // RETIRED (no `▸ 1 Step` counting row above the answer; the count
+    // returns on seal): the standalone `say:` header carries the spinner,
+    // with the raw body rows below it in the transcript. The live region
+    // holds NO Say at all (it cleared when the Say began).
     v.apply(&SessionEvent::TextDelta("the answer".into()));
     let text = flat(&v);
     assert!(
-        text.contains("\u{25b8} 1 Step"),
-        "the group row keeps its plain folded counting shape: {text}"
+        !text.contains("1 Step"),
+        "the ladder retired the moment the Say began: {text}"
     );
     assert!(
         text.contains("\u{276f} Say: \u{280b}"),

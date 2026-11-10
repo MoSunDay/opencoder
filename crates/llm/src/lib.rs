@@ -7,6 +7,7 @@ pub mod mock;
 pub mod request;
 pub mod responses;
 pub mod retry;
+mod sanitize;
 pub mod schema;
 pub mod sse;
 pub mod stream;

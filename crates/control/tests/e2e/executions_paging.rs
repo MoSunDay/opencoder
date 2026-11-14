@@ -128,7 +128,7 @@ async fn todo_project_and_team_observation_endpoints() {
 }
 
 #[tokio::test]
-async fn artifact_streams_chunked_bytes_for_dag_runs_only() {
+async fn artifact_streams_chunked_bytes_and_kind_gate() {
     let h = Harness::new().await;
     h.put_index("dag-art-1", ExecutionKind::Dag, ExecutionStatus::Done)
         .await;
@@ -168,7 +168,9 @@ async fn artifact_streams_chunked_bytes_for_dag_runs_only() {
         .req(Method::GET, "/api/executions/dag-art-1/artifact", None)
         .await;
     assert_eq!(status, 400);
-    // Non-DAG executions are rejected by the control plane.
+    // Kinds outside the artifact surface (here: an unmanaged Agent run) are
+    // refused by the control plane before any node RPC; managed gating is
+    // covered precisely by executions_artifacts/managed.rs.
     h.put_index("agent-art-1", ExecutionKind::Agent, ExecutionStatus::Idle)
         .await;
     let (status, body) = h
@@ -179,7 +181,7 @@ async fn artifact_streams_chunked_bytes_for_dag_runs_only() {
         )
         .await;
     assert_eq!(status, 400, "{body}");
-    assert_eq!(body["error"], json!("artifacts require a DAG execution"));
+    assert_eq!(body["error"], json!("execution does not expose artifacts"));
     // Unknown artifact on the node → passthrough 404.
     let (status, body) = h
         .req(

@@ -2427,7 +2427,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "ulid",
 ]
 
@@ -2441,7 +2440,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -2453,7 +2451,6 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
- "dirs",
  "opencoder-core",
  "opencoder-llm",
  "opencoder-session",
@@ -2567,7 +2564,6 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
- "dirs",
  "futures",
  "grep-regex",
  "grep-searcher",
@@ -2692,7 +2688,6 @@ dependencies = [
  "axum",
  "base64",
  "chrono",
- "dirs",
  "futures",
  "opencoder-agents",
  "opencoder-brain",

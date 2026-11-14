@@ -75,7 +75,7 @@ pub async fn post_events(
         ));
     }
     if run.status.is_terminal() {
-        return error_409(&format!(
+        return error_409(format!(
             "dag run {rid} is terminal ({}) — event stream closed",
             run.status.as_str()
         ));

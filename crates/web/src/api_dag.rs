@@ -60,7 +60,7 @@ pub async fn post_def(
     // removed step kind reports the dedicated migration message as a 400
     // instead of axum's raw serde variant rejection.
     let Some(spec_value) = body.get("spec") else {
-        return error_400("missing field: spec".into());
+        return error_400("missing field: spec");
     };
     let spec = match decode_spec(spec_value) {
         Ok(spec) => spec,
@@ -91,7 +91,7 @@ pub async fn post_def(
         Err(e) => return error_500(format!("list_dag_defs: {e:#}")),
     };
     let Some(stored) = stored else {
-        return error_500("upsert_dag_def: row vanished after upsert".into());
+        return error_500("upsert_dag_def: row vanished after upsert");
     };
     match def_view(&stored) {
         Ok(v) => Json(v).into_response(),

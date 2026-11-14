@@ -40,7 +40,7 @@ pub async fn execution_capabilities(
     Path(id): Path<String>,
 ) -> Response {
     if !valid_id(&id) {
-        return error_400("invalid node id".into());
+        return error_400("invalid node id");
     }
     response(
         state

@@ -104,7 +104,7 @@ pub async fn list(
     Query(query): Query<CommentQuery>,
 ) -> Response {
     if !query.valid() {
-        return error_400("评论分页参数无效".into());
+        return error_400("评论分页参数无效");
     }
     match state.projects.todo_comments(&id, query).await {
         Ok(Some(page)) => response(RpcReply::ok(json!(page))),
@@ -138,7 +138,7 @@ pub async fn append(
                 .is_some_and(|id| id.trim().is_empty() || id.len() > 255)
         })
     {
-        return error_400("评论不能为空且须在 64 KiB 以内；request_id 和来源 ID 必须有效".into());
+        return error_400("评论不能为空且须在 64 KiB 以内；request_id 和来源 ID 必须有效");
     }
     match state
         .projects

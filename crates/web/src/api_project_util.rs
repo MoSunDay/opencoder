@@ -1,41 +1,17 @@
 //! Shared helpers for the `/api/project/*` REST surface: the uniform
-//! `{"ok": false, "error"}` error bodies (same shape as `api_envs` /
-//! `api_subagents`), the uninitialized-service 503 gate, record
-//! serialization and the plan/execute error→status mapping.
+//! `{"ok": false, "error"}` error responses re-exported from [`crate::api`]
+//! (same shape as `api_envs` / `api_subagents`), the uninitialized-service
+//! 503 gate, record serialization and the plan/execute error→status mapping.
 
 use std::sync::Arc;
 
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::response::Response;
 use opencoder_project::Deps;
-use serde_json::{json, Value};
+use serde_json::Value;
 
+use crate::api::error_503;
+pub(crate) use crate::api::{error_400, error_404, error_409, error_500};
 use crate::AppState;
-
-fn error_json(status: StatusCode, msg: String) -> Response {
-    (status, Json(json!({ "ok": false, "error": msg }))).into_response()
-}
-
-pub fn error_400(msg: impl Into<String>) -> Response {
-    error_json(StatusCode::BAD_REQUEST, msg.into())
-}
-
-pub fn error_404(msg: impl Into<String>) -> Response {
-    error_json(StatusCode::NOT_FOUND, msg.into())
-}
-
-pub fn error_409(msg: impl Into<String>) -> Response {
-    error_json(StatusCode::CONFLICT, msg.into())
-}
-
-pub fn error_500(msg: impl Into<String>) -> Response {
-    error_json(StatusCode::INTERNAL_SERVER_ERROR, msg.into())
-}
-
-pub fn error_503(msg: impl Into<String>) -> Response {
-    error_json(StatusCode::SERVICE_UNAVAILABLE, msg.into())
-}
 
 /// Every `/api/project` handler starts here. An uninitialized
 /// `ProjectService` (an `AppState` built without `init`) answers 503 so the

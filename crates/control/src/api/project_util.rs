@@ -11,18 +11,11 @@ pub fn require_deps(state: &AppState) -> Result<Arc<Deps>, Box<Response>> {
         projects: state.projects.clone(),
     }))
 }
-pub fn error_400(msg: impl Into<String>) -> Response {
-    super::error_400(msg.into())
-}
-pub fn error_404(msg: impl Into<String>) -> Response {
-    super::error_404(&msg.into())
-}
-pub fn error_409(msg: impl Into<String>) -> Response {
-    super::error_409(&msg.into())
-}
-pub fn error_500(msg: impl Into<String>) -> Response {
-    super::error_500(msg.into())
-}
+// Re-export the single error-constructor implementations: the stateless
+// `/api/project` handlers shared with the node API are mounted into this
+// crate from `../../web/src` and reach them through
+// `crate::api_project_util::error_*` (the `lib.rs` alias).
+pub use super::{error_400, error_404, error_409, error_500};
 pub fn to_json<T: serde::Serialize>(value: T) -> Value {
     serde_json::to_value(value).expect("project record serialization")
 }

@@ -81,5 +81,6 @@ pub async fn authed_get_json(
     (status, v)
 }
 pub mod dag_binary;
+pub mod hanging_stream;
 pub mod project_app;
 pub mod project_mock;

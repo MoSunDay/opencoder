@@ -156,10 +156,6 @@ mod tests {
     fn down() -> KeyEvent {
         KeyEvent::new(KeyCode::Down, KeyModifiers::empty())
     }
-    #[allow(dead_code)]
-    fn left() -> KeyEvent {
-        KeyEvent::new(KeyCode::Left, KeyModifiers::empty())
-    }
     fn right() -> KeyEvent {
         KeyEvent::new(KeyCode::Right, KeyModifiers::empty())
     }

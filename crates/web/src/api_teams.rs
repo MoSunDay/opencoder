@@ -78,7 +78,7 @@ pub async fn create_team(
         .map(|p| p.exists())
         .unwrap_or(false)
     {
-        return error_409(&format!("team {} already exists", body.name));
+        return error_409(format!("team {} already exists", body.name));
     }
     let captain = match state.store.get_node(&body.captain_node_id).await {
         Ok(Some(rec)) => rec,
@@ -137,7 +137,7 @@ pub async fn patch_team(
     let root = &state.team.run.team_root;
     let mut meta = match fs_store::load_team(root, &name) {
         Ok(meta) => meta,
-        Err(_) => return error_404(&format!("team {name} not found")),
+        Err(_) => return error_404(format!("team {name} not found")),
     };
     let captain = match state.store.get_node(&body.captain_node_id).await {
         Ok(Some(rec)) => rec,
@@ -176,7 +176,7 @@ pub async fn patch_members(
     let root = &state.team.run.team_root;
     let mut meta = match fs_store::load_team(root, &name) {
         Ok(meta) => meta,
-        Err(_) => return error_404(&format!("team {name} not found")),
+        Err(_) => return error_404(format!("team {name} not found")),
     };
     let remove = dedup(body.remove);
     if remove.contains(&meta.captain.node_id) {
@@ -214,7 +214,7 @@ fn save_team_respond(root: &std::path::Path, mut meta: TeamMeta) -> Response {
 pub async fn profile(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
     let root = state.team.run.team_root.clone();
     if fs_store::load_team(&root, &name).is_err() {
-        return error_404(&format!("team {name} not found"));
+        return error_404(format!("team {name} not found"));
     }
     let dispatcher = state.team.dispatcher.clone();
     let cfg = state.team.run.clone();

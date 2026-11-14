@@ -22,6 +22,7 @@ use serde_json::json;
 
 use opencoder_store::SubagentTaskRecord;
 
+use crate::api::{error_400, error_404, error_409, error_500};
 use crate::AppState;
 
 #[derive(Deserialize, Default)]
@@ -39,7 +40,7 @@ pub async fn list_subagents(
 ) -> Response {
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Ok(None) => return error_404(format!("session not found: {id}")),
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     let tasks = match state.store.list_subagent_tasks(&id).await {
@@ -82,7 +83,7 @@ pub async fn clear_sessions(
     };
     match state.store.get_session(&keep).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("session not found: {keep}")),
+        Ok(None) => return error_404(format!("session not found: {keep}")),
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     if any_draining(&state).await {
@@ -118,38 +119,4 @@ pub async fn clear_sessions(
 async fn any_draining(state: &AppState) -> bool {
     let map = state.handles.lock().await;
     map.values().any(|h| h.draining.load(Ordering::SeqCst))
-}
-
-// ── helpers (same shapes as the other api_* modules) ──────────────────────
-
-fn error_400(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::BAD_REQUEST,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_409(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::CONFLICT,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_404(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::NOT_FOUND,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_500(msg: String) -> Response {
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
 }

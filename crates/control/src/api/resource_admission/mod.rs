@@ -25,7 +25,7 @@ pub mod providers;
 
 pub async fn save(State(state): State<Arc<AppState>>, Json(value): Json<Provider>) -> Response {
     if !providers::valid(&value) {
-        return api::error_400("invalid resource provider configuration".into());
+        return api::error_400("invalid resource provider configuration");
     }
     match state
         .fleet
@@ -33,14 +33,14 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(value): Json<Provider
         .await
     {
         Ok(_) => Json(json!({"enabled":true})).into_response(),
-        Err(_) => api::error_500("resource provider configuration unavailable".into()),
+        Err(_) => api::error_500("resource provider configuration unavailable"),
     }
 }
 
 pub async fn get(State(state): State<Arc<AppState>>) -> Response {
     match state.fleet.definition(NAMESPACE, "current").await {
         Ok(value) => Json(json!({"enabled":value.is_some()})).into_response(),
-        Err(_) => api::error_500("resource provider configuration unavailable".into()),
+        Err(_) => api::error_500("resource provider configuration unavailable"),
     }
 }
 
@@ -103,7 +103,7 @@ pub async fn command(
         input["action"].as_str(),
         Some("started" | "uncertain" | "release" | "release_batch")
     ) {
-        return api::error_400("unsupported resource operation".into());
+        return api::error_400("unsupported resource operation");
     }
     invoke(state, id, input).await
 }
@@ -112,7 +112,7 @@ async fn invoke(state: Arc<AppState>, id: String, mut input: Value) -> Response 
     let assignment = match state.fleet.assignment(&id).await {
         Ok(Some(value)) if value.request.input.get("_resource_request").is_some() => value,
         Ok(_) => return api::error_404("managed resource assignment not found"),
-        Err(_) => return api::error_500("resource assignment unavailable".into()),
+        Err(_) => return api::error_500("resource assignment unavailable"),
     };
     if input["action"] == "release_batch" {
         let terminal = state

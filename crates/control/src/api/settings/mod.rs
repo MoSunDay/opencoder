@@ -43,7 +43,7 @@ pub async fn save_harness(
     Json(settings): Json<CodexSettings>,
 ) -> Response {
     if name != "codex" {
-        return super::error_400("only Codex settings are supported".into());
+        return super::error_400("only Codex settings are supported");
     }
     if let Err(error) = settings.validate() {
         return super::error_400(error);

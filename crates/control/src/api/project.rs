@@ -27,7 +27,7 @@ pub async fn runs(
     Query(query): Query<super::executions::ProjectRunsQuery>,
 ) -> Response {
     if query.before_version.is_some_and(|version| version <= 0) {
-        return error_400("invalid project run cursor".into());
+        return error_400("invalid project run cursor");
     }
     let id = format!("project-{todo}");
     match state.fleet.index(&id).await {
@@ -72,13 +72,13 @@ pub async fn execute(
 }
 async fn start(state: Arc<AppState>, todo: String, action: &str, mut input: Value) -> Response {
     if !input.is_object() {
-        return error_400("project input must be an object".into());
+        return error_400("project input must be an object");
     }
     if input.get("run_id").is_some_and(|id| {
         !id.as_str()
             .is_some_and(|id| id.starts_with("prun-") && valid_id(id))
     }) {
-        return error_400("invalid project run id".into());
+        return error_400("invalid project run id");
     }
     if input.get("run_id").is_none() {
         input["run_id"] = json!(format!("prun-{}", ulid::Ulid::new()));

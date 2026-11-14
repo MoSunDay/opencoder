@@ -6,34 +6,18 @@
 //! resurrect the run — the pending row stays durably admitted and is consumed
 //! by the next user-initiated drain instead.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{Path, State};
 use opencoder_core::Config;
-use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
+use opencoder_llm::ChatStream;
 use opencoder_store::{Delivery, SessionMeta, Store, TursoStore};
-use tokio::sync::mpsc;
 
-/// A `ChatStream` whose every call hangs forever (receiver never resolves):
-/// the drain enters the first LLM turn and stays there until a cancel token
-/// wins the biased select in the runner.
-struct HangingStream {
-    calls: AtomicUsize,
-}
+mod support;
 
-impl ChatStream for HangingStream {
-    fn chat_stream(&self, _req: ChatRequest) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = mpsc::channel::<LlmEvent>(128);
-        tokio::spawn(async move {
-            std::future::pending::<()>().await;
-            drop(tx);
-        });
-        Ok(rx)
-    }
-}
+use support::hanging_stream::HangingStream;
 
 async fn state() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
@@ -109,9 +93,7 @@ async fn interrupt_cancels_drain_watcher_does_not_resurrect() {
     let sid = "interrupt-wins";
     seed(&state, sid).await;
 
-    let hanging = Arc::new(HangingStream {
-        calls: AtomicUsize::new(0),
-    });
+    let hanging = Arc::new(HangingStream::new());
 
     // First prompt: starts the drain, which hangs inside the first LLM turn.
     admit(&state, sid, "first", Delivery::Steer, hanging.clone()).await;

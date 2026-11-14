@@ -39,11 +39,7 @@ pub async fn list(
     let cursor = match (query.cursor_created_at, query.cursor_id) {
         (None, None) => None,
         (Some(created_at), Some(id)) if valid_id(&id) => Some(ExecutionCursor { created_at, id }),
-        _ => {
-            return error_400(
-                "cursor_created_at and a valid cursor_id are required together".into(),
-            )
-        }
+        _ => return error_400("cursor_created_at and a valid cursor_id are required together"),
     };
     match state
         .fleet
@@ -161,7 +157,7 @@ pub async fn messages(
         offset: query.offset.unwrap_or(0),
     };
     if cursor.seq < 0 || (cursor.seq == 0 && cursor.offset != 0) {
-        return error_400("invalid message cursor".into());
+        return error_400("invalid message cursor");
     }
     response(super::messages_id(&state, &id, cursor).await)
 }
@@ -175,7 +171,7 @@ pub async fn event_payload(
     Query(query): Query<EventPayloadQuery>,
 ) -> Response {
     if seq <= 0 {
-        return error_400("event sequence must be positive".into());
+        return error_400("event sequence must be positive");
     }
     response(super::event_payload_id(&state, &id, seq, query.offset.unwrap_or(0)).await)
 }
@@ -196,7 +192,7 @@ pub async fn detail_field(
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
     {
-        return error_400("invalid detail field".into());
+        return error_400("invalid detail field");
     }
     response(
         super::for_id(&state, &id, |execution| NodeOperation::DetailField {
@@ -219,7 +215,7 @@ pub async fn todo_items(
     Query(query): Query<TodoItemsQuery>,
 ) -> Response {
     if query.after_ordinal.is_some_and(|value| value < 0) {
-        return error_400("invalid TODO item cursor".into());
+        return error_400("invalid TODO item cursor");
     }
     response(
         super::for_id(&state, &id, |execution| NodeOperation::TodoItems {
@@ -239,7 +235,7 @@ pub async fn project_runs(
     Query(query): Query<ProjectRunsQuery>,
 ) -> Response {
     if query.before_version.is_some_and(|value| value <= 0) {
-        return error_400("invalid project run cursor".into());
+        return error_400("invalid project run cursor");
     }
     response(
         super::for_id(&state, &id, |execution| NodeOperation::ProjectRuns {
@@ -278,7 +274,7 @@ pub async fn events_page(
     Query(query): Query<EventsPageQuery>,
 ) -> Response {
     if query.after < 0 {
-        return error_400("invalid event cursor".into());
+        return error_400("invalid event cursor");
     }
     response(super::events_id(&state, &id, query.after).await)
 }

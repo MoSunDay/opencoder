@@ -28,16 +28,16 @@ pub fn response(reply: RpcReply) -> Response {
     )
         .into_response()
 }
-pub fn error_400(msg: String) -> Response {
+pub fn error_400(msg: impl Into<String>) -> Response {
     response(RpcReply::error(400, msg))
 }
-pub fn error_404(msg: &str) -> Response {
+pub fn error_404(msg: impl Into<String>) -> Response {
     response(RpcReply::error(404, msg))
 }
-pub fn error_409(msg: &str) -> Response {
+pub fn error_409(msg: impl Into<String>) -> Response {
     response(RpcReply::error(409, msg))
 }
-pub fn error_500(msg: String) -> Response {
+pub fn error_500(msg: impl Into<String>) -> Response {
     response(RpcReply::error(500, msg))
 }
 

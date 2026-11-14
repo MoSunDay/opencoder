@@ -354,7 +354,7 @@ pub async fn post_prompt(
         }))
         .into_response(),
         Err(AdmissionError::BusyModeSwitch) => error_409("mode switch refused while drain running"),
-        Err(AdmissionError::InputConflict(e)) => error_409(&e.to_string()),
+        Err(AdmissionError::InputConflict(e)) => error_409(e.to_string()),
         Err(AdmissionError::Other(e)) => error_500(format!("admit: {e:#}")),
     }
 }
@@ -708,44 +708,31 @@ pub(crate) async fn reject_node_session(state: &AppState, session_id: &str) -> O
     }
 }
 
-pub(crate) fn error_400(msg: String) -> Response {
-    (
-        axum::http::StatusCode::BAD_REQUEST,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-pub(crate) fn error_409(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::CONFLICT,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-pub(crate) fn error_404(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::NOT_FOUND,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
+fn error_body(status: axum::http::StatusCode, msg: String) -> Response {
+    (status, Json(json!({ "ok": false, "error": msg }))).into_response()
 }
 
-pub(crate) fn error_500(msg: String) -> Response {
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
+pub(crate) fn error_400(msg: impl Into<String>) -> Response {
+    error_body(axum::http::StatusCode::BAD_REQUEST, msg.into())
+}
+pub(crate) fn error_409(msg: impl Into<String>) -> Response {
+    error_body(axum::http::StatusCode::CONFLICT, msg.into())
+}
+pub(crate) fn error_404(msg: impl Into<String>) -> Response {
+    error_body(axum::http::StatusCode::NOT_FOUND, msg.into())
+}
+
+pub(crate) fn error_500(msg: impl Into<String>) -> Response {
+    error_body(axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg.into())
 }
 
 /// 502 Bad Gateway: the node (our upstream) answered the relay with a
 /// failure. Used by the P3 message relay; the payload is never persisted.
-pub(crate) fn error_502(msg: String) -> Response {
-    (
-        axum::http::StatusCode::BAD_GATEWAY,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
+pub(crate) fn error_502(msg: impl Into<String>) -> Response {
+    error_body(axum::http::StatusCode::BAD_GATEWAY, msg.into())
+}
+pub(crate) fn error_503(msg: impl Into<String>) -> Response {
+    error_body(axum::http::StatusCode::SERVICE_UNAVAILABLE, msg.into())
 }
 
 pub(crate) fn event_kind_str(k: EventKind) -> &'static str {

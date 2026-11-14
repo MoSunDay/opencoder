@@ -44,7 +44,7 @@ pub async fn fetch_node_messages(
     Json(body): Json<FetchMessagesBody>,
 ) -> Response {
     if body.session_id.trim().is_empty() {
-        return error_400("session_id must not be empty".into());
+        return error_400("session_id must not be empty");
     }
     match state.store.get_node(&id).await {
         Ok(Some(_)) => {}
@@ -90,7 +90,7 @@ pub async fn fetch_node_messages(
         // Waiter dropped without a resolve (hub purge / receiver gone).
         Ok(Err(_)) => {
             state.controls.abandon(&control_id).await;
-            error_502("control result channel closed".into())
+            error_502("control result channel closed")
         }
         // No answer inside the window: remove the waiter so a late upload
         // resolves to `false`, and tell the browser the node timed out.

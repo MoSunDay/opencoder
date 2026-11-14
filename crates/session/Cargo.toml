@@ -19,7 +19,6 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
-dirs.workspace = true
 libc = "0.2"
 # Ripgrep in-process search engine for the `search` tool: no external `rg` binary needed.
 grep-regex = "0.1"

@@ -103,7 +103,7 @@ async fn runs(
     Query(query): Query<RunsQuery>,
 ) -> Response {
     if opencoder_core::config::validate_schedule_id(&id).is_err() {
-        return error_400("invalid schedule id".into());
+        return error_400("invalid schedule id");
     }
     let limit = query.limit.unwrap_or(50).clamp(1, 500);
     match state.store.list_schedule_runs(&id, limit).await {

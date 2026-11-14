@@ -76,7 +76,16 @@ fn sse(
             0u32,
             false,
         ),
-        |(lifecycle, fetch, mut cursor, mut queue, mut page, mut ended, mut empty_polls, end_sent)| async move {
+        |(
+            lifecycle,
+            fetch,
+            mut cursor,
+            mut queue,
+            mut page,
+            mut ended,
+            mut empty_polls,
+            end_sent,
+        )| async move {
             if end_sent {
                 return None;
             }
@@ -89,7 +98,16 @@ fn sse(
                         .data("release switch");
                     return Some((
                         Ok(event),
-                        (lifecycle, fetch, cursor, queue, None, false, empty_polls, true),
+                        (
+                            lifecycle,
+                            fetch,
+                            cursor,
+                            queue,
+                            None,
+                            false,
+                            empty_polls,
+                            true,
+                        ),
                     ));
                 }
                 if let Some(frame) = queue.pop_front() {
@@ -106,7 +124,16 @@ fn sse(
                     empty_polls = 0;
                     return Some((
                         Ok::<_, Infallible>(event),
-                        (lifecycle, fetch, cursor, queue, page, ended, empty_polls, false),
+                        (
+                            lifecycle,
+                            fetch,
+                            cursor,
+                            queue,
+                            page,
+                            ended,
+                            empty_polls,
+                            false,
+                        ),
                     ));
                 }
                 if ended {
@@ -116,7 +143,16 @@ fn sse(
                         .expect("JSON stream end");
                     return Some((
                         Ok(event),
-                        (lifecycle, fetch, cursor, queue, None, true, empty_polls, true),
+                        (
+                            lifecycle,
+                            fetch,
+                            cursor,
+                            queue,
+                            None,
+                            true,
+                            empty_polls,
+                            true,
+                        ),
                     ));
                 }
                 let body = match page.take() {
@@ -133,7 +169,16 @@ fn sse(
                                 .expect("JSON error");
                             return Some((
                                 Ok(event),
-                                (lifecycle, fetch, cursor, queue, None, true, empty_polls, true),
+                                (
+                                    lifecycle,
+                                    fetch,
+                                    cursor,
+                                    queue,
+                                    None,
+                                    true,
+                                    empty_polls,
+                                    true,
+                                ),
                             ));
                         }
                         reply.body
@@ -250,6 +295,10 @@ mod tests {
     fn poll_delay_ramps_on_empty_pages_and_caps_at_one_second() {
         assert_eq!(poll_delay(0), POLL_FLOOR);
         assert_eq!(poll_delay(1), POLL_CAP, "an empty page steps to the cap");
-        assert_eq!(poll_delay(9), POLL_CAP, "the ladder never grows past the cap");
+        assert_eq!(
+            poll_delay(9),
+            POLL_CAP,
+            "the ladder never grows past the cap"
+        );
     }
 }

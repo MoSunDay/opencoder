@@ -2,39 +2,17 @@
 //! setting changes must contend on the same per-session mutex, so whichever
 //! operation wins is complete before the other observes `draining`.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
 use opencoder_core::Config;
-use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{Delivery, SessionMeta, Store, TursoStore};
 use opencoder_web::handle::SessionHandle;
-use tokio::sync::mpsc;
 
-struct HangingStream {
-    calls: AtomicUsize,
-}
+mod support;
 
-impl HangingStream {
-    fn new() -> Self {
-        Self {
-            calls: AtomicUsize::new(0),
-        }
-    }
-}
-
-impl ChatStream for HangingStream {
-    fn chat_stream(&self, _req: ChatRequest) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = mpsc::channel(1);
-        tokio::spawn(async move {
-            std::future::pending::<()>().await;
-            drop(tx);
-        });
-        Ok(rx)
-    }
-}
+use support::hanging_stream::HangingStream;
 
 async fn state(sid: &str) -> (Arc<opencoder_web::AppState>, Arc<SessionHandle>) {
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());

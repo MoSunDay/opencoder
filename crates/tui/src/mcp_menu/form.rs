@@ -338,7 +338,6 @@ fn current_buf_cursor(form: &mut McpForm) -> (&mut String, &mut usize) {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use std::collections::HashMap;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -386,7 +385,6 @@ mod tests {
             command: Some("npx".to_string()),
             args: vec!["-y".to_string()],
             url: None,
-            env: HashMap::new(),
         };
         let mut form = McpForm::from_existing(&entry);
         form.name = "b".to_string();

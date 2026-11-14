@@ -1,7 +1,5 @@
 //! `/mcp` server list: toggle (←/→), close (Enter/Esc), edit (e), add (n), delete (d).
 
-use std::collections::HashMap;
-
 use crossterm::event::{KeyCode, KeyEvent};
 use opencoder_core::config::McpServerConfig;
 use opencoder_core::Config;
@@ -20,8 +18,6 @@ pub struct McpEntry {
     pub command: Option<String>,
     pub args: Vec<String>,
     pub url: Option<String>,
-    #[allow(dead_code)]
-    pub env: HashMap<String, String>,
 }
 
 impl McpEntry {
@@ -33,7 +29,6 @@ impl McpEntry {
             command: cfg.command.clone(),
             args: cfg.args.clone(),
             url: cfg.url.clone(),
-            env: cfg.env.clone(),
         }
     }
 

@@ -38,7 +38,7 @@ async fn register_unregister_roundtrip() {
     let pgid = pid as libc::pid_t;
     std::thread::sleep(Duration::from_millis(50));
 
-    register(pid, pgid, "test".to_string());
+    register(pid, pgid);
     assert!(
         list().iter().any(|info| info.pid == pid),
         "list should expose the registered pid"
@@ -81,7 +81,7 @@ fn stop_kills_registered_process() {
     let pgid = pid as libc::pid_t;
     std::thread::sleep(Duration::from_millis(50));
 
-    register(pid, pgid, "test".to_string());
+    register(pid, pgid);
     assert!(stop(pid), "stop should find the registered pid");
     assert!(
         !list().iter().any(|info| info.pid == pid),
@@ -124,7 +124,7 @@ fn kill_all_terminates_every_registered_process() {
         let pid = child.id();
         let pgid = pid as libc::pid_t;
         std::thread::sleep(Duration::from_millis(50));
-        register(pid, pgid, "test".to_string());
+        register(pid, pgid);
         children.push(child);
     }
     assert_eq!(list().len(), 2, "both processes should be registered");
@@ -209,7 +209,7 @@ async fn completed_handoff_removes_handle_and_retains_output() {
         .expect("spawn setsid sleep");
     let pid = child.id().expect("pid");
     let pgid = pid as libc::pid_t;
-    let process_group = ProcessGroupGuard::registered(pid, pgid, "test-session".into());
+    let process_group = ProcessGroupGuard::registered(pid, pgid);
 
     let state = std::sync::Arc::new(std::sync::Mutex::new(BgState::new()));
     let stdout_task = tokio::spawn(async {});
@@ -243,16 +243,16 @@ async fn handoff_limit_rejects_and_cleans_unaccepted_process() {
     let _guard = test_registry_mutex().lock().await;
     cleanup_all();
 
-    let spawn = |label: &str| {
+    let spawn = || {
         let child = tokio::process::Command::new("setsid")
             .args(["sleep", "300"])
             .spawn()
             .unwrap();
         let pid = child.id().unwrap();
-        let guard = ProcessGroupGuard::registered(pid, pid as libc::pid_t, label.into());
+        let guard = ProcessGroupGuard::registered(pid, pid as libc::pid_t);
         (pid, child, guard)
     };
-    let (first_pid, first, first_guard) = spawn("first");
+    let (first_pid, first, first_guard) = spawn();
     handoff_with_limit(
         first_pid,
         first,
@@ -264,7 +264,7 @@ async fn handoff_limit_rejects_and_cleans_unaccepted_process() {
     )
     .await
     .unwrap();
-    let (rejected_pid, rejected, rejected_guard) = spawn("rejected");
+    let (rejected_pid, rejected, rejected_guard) = spawn();
     let error = handoff_with_limit(
         rejected_pid,
         rejected,

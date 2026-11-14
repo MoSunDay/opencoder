@@ -5,16 +5,16 @@
 //! `rewound_sibling_discards_late_successful_result` in interrupt.rs, kept in
 //! its own file so interrupt.rs does not keep growing.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatStream, LlmEvent};
 use opencoder_store::{Store, TursoStore};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
+
+mod support;
+use support::wait_for_session_message;
 
 fn done(text: &str) -> Vec<LlmEvent> {
     vec![LlmEvent::Completed {
@@ -119,41 +119,6 @@ impl ChatStream for ParkingFailClient {
 
     fn backend(&self) -> &'static str {
         "parking-fail-mock"
-    }
-}
-
-async fn wait_for_session_message(
-    store: &Arc<dyn Store>,
-    workflow_id: &str,
-    todo_id: &str,
-    marker: &str,
-) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let session_id = store
-            .list_todo_items(workflow_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|item| item.todo_id == todo_id)
-            .and_then(|item| item.active_session_id);
-        if let Some(session_id) = session_id {
-            let transcript = store
-                .load_messages(&session_id)
-                .await
-                .unwrap()
-                .iter()
-                .map(|message| message.text())
-                .collect::<String>();
-            if transcript.contains(marker) {
-                return;
-            }
-        }
-        assert!(
-            Instant::now() < deadline,
-            "todo {todo_id} never produced {marker}"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 

@@ -182,7 +182,7 @@ pub async fn relay(State(state): State<Arc<AppState>>, request: Request) -> Resp
     };
     let (id, tail) = rest.split_once('/').unwrap_or((rest, ""));
     if !valid_id(id) || tail.contains("..") {
-        return error_400("invalid session path".into());
+        return error_400("invalid session path");
     }
     let tail = match request.uri().query() {
         Some(query) => format!("{tail}?{query}"),

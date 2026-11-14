@@ -11,10 +11,12 @@ pub mod agent_fixtures;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use opencoder_core::{Config, ContentBlock, Message, MessageUsage, Role};
 use opencoder_llm::{CompletedToolCall, LlmEvent, Usage};
+use opencoder_session::SessionEvent;
 use opencoder_store::{Delivery, SessionInput, SessionMeta, SessionPatch, Store, TursoStore};
 
 pub async fn mem_store() -> Arc<dyn Store> {
@@ -108,6 +110,27 @@ pub fn dangling_tool_uses(msgs: &[Message]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// Block until the shared event log has recorded a `SubagentStart` (the
+/// child registered its cancel tokens), bounded at 5s so a broken dispatch
+/// fails fast instead of hanging the test.
+pub async fn wait_for_subagent_start(events: &Arc<Mutex<Vec<SessionEvent>>>) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::SubagentStart { .. }))
+        {
+            return;
+        }
+        if Instant::now() > deadline {
+            panic!("subagent never started within 5s");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 // ---------------------------------------------------------------------------

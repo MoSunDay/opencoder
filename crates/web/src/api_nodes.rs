@@ -147,7 +147,7 @@ pub async fn post_register(
     Json(body): Json<NodeRegisterRequest>,
 ) -> Response {
     if body.name.trim().is_empty() {
-        return error_400("name must not be empty".into());
+        return error_400("name must not be empty");
     }
     let addr = body
         .addr
@@ -257,7 +257,7 @@ pub async fn dispatch_task(
     Json(body): Json<NodeDispatchRequest>,
 ) -> Response {
     if body.prompt.trim().is_empty() {
-        return error_400("prompt must not be empty".into());
+        return error_400("prompt must not be empty");
     }
     match state.store.get_node(&id).await {
         Ok(Some(_)) => {}

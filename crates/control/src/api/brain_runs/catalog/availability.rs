@@ -52,23 +52,24 @@ pub(super) async fn annotate(
         return Ok(());
     }
     let nodes = state.hub.views().await;
-    let replies = futures::future::join_all(nodes.iter().filter(|n| n.online).map(|node| async move {
-        let reply = tokio::time::timeout(
-            Duration::from_secs(2),
-            state.hub.call(
-                &node.registration.id,
-                NodeOperation::Maintenance {
-                    command: ExecutionCommand {
-                        action: "execution_profiles".into(),
-                        input: json!({}),
+    let replies =
+        futures::future::join_all(nodes.iter().filter(|n| n.online).map(|node| async move {
+            let reply = tokio::time::timeout(
+                Duration::from_secs(2),
+                state.hub.call(
+                    &node.registration.id,
+                    NodeOperation::Maintenance {
+                        command: ExecutionCommand {
+                            action: "execution_profiles".into(),
+                            input: json!({}),
+                        },
                     },
-                },
-            ),
-        )
+                ),
+            )
+            .await;
+            (node, reply.ok().filter(|r| r.status == 200).map(|r| r.body))
+        }))
         .await;
-        (node, reply.ok().filter(|r| r.status == 200).map(|r| r.body))
-    }))
-    .await;
     for (index, kind, name, profile) in references {
         if registered.contains(&profile) {
             continue;

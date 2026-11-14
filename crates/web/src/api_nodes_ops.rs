@@ -232,7 +232,7 @@ pub async fn post_status(
         .await
     {
         // Illegal transitions (e.g. double-terminal) surface as conflicts.
-        return error_409(&format!("update_node_task_status: {e:#}"));
+        return error_409(format!("update_node_task_status: {e:#}"));
     }
     let ok = st == NodeTaskStatus::Done;
     let closure = ClosureEvent {
@@ -285,7 +285,7 @@ pub async fn cancel_task(
                 .update_node_task_status(&tid, NodeTaskStatus::Cancelled, None, now)
                 .await
             {
-                return error_409(&format!("update_node_task_status: {e:#}"));
+                return error_409(format!("update_node_task_status: {e:#}"));
             }
             let closure = ClosureEvent {
                 session_id: &task.session_id,

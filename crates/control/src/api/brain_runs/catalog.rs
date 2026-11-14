@@ -294,7 +294,7 @@ pub async fn stable(
     Json(body): Json<Value>,
 ) -> Response {
     if body["maturity"] != "stable" && body["maturity"] != "draft" {
-        return error_400("maturity must be draft or stable".into());
+        return error_400("maturity must be draft or stable");
     }
     let _process_lock = match state.fleet.request_lock("capability", &id).await {
         Ok(lock) => lock,

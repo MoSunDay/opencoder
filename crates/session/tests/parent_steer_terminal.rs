@@ -14,13 +14,16 @@
 //! tool_result, and the task is never replayed.
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{fire_child_cancels, run, SessionEvent, SessionState};
 use opencoder_store::{Store, SubagentStatus, TursoStore};
 use tokio_util::sync::CancellationToken;
+
+mod common;
+use common::wait_for_subagent_start;
 
 fn config() -> Config {
     Config {
@@ -78,25 +81,6 @@ fn text_done(text: &str) -> LlmEvent {
 
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(TursoStore::open_memory().await.unwrap())
-}
-
-/// Wait until the events vector contains a SubagentStart, or panic after 5s.
-async fn wait_for_subagent_start(events: &Arc<Mutex<Vec<SessionEvent>>>) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| matches!(e, SessionEvent::SubagentStart { .. }))
-        {
-            return;
-        }
-        if Instant::now() > deadline {
-            panic!("subagent never started within 5s");
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
 /// A parent steer cancels only the child token. The child task must become

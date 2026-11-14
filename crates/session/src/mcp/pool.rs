@@ -26,8 +26,6 @@ pub enum ConnStatus {
 }
 
 struct McpConnection {
-    #[allow(dead_code)]
-    client: Arc<McpClient>,
     tools: Vec<ToolArc>,
     status: ConnStatus,
 }
@@ -77,7 +75,6 @@ pub async fn sync(session_id: &str, desired: &[(String, McpServerConfig)]) {
                 new_conns.push((
                     name,
                     McpConnection {
-                        client: McpClient::new(Arc::new(transport::MockTransport::pair().0)),
                         tools: vec![],
                         status: ConnStatus::Failed(format!("{e:#}")),
                     },
@@ -109,7 +106,6 @@ async fn connect_server(name: &str, cfg: &McpServerConfig) -> anyhow::Result<Mcp
     let tool_count = tools_info.len();
     let tools = build_tools(client.clone(), name, tools_info);
     Ok(McpConnection {
-        client,
         tools,
         status: ConnStatus::Connected { tool_count },
     })

@@ -28,9 +28,7 @@ pub async fn bind(
             | ExecutionKind::Operator
     ) || target.target.trim().is_empty()
     {
-        return error_400(
-            "capability target must name an agent, team, workflow or operator".into(),
-        );
+        return error_400("capability target must name an agent, team, workflow or operator");
     }
     // Targets are stored trimmed so bind and the agent grouping agree on one
     // agent key (a padded " act" would otherwise group apart from "act").
@@ -203,7 +201,7 @@ pub async fn delete_capability(
                 .await?
                 .is_some();
         if !exists {
-            return Ok(error_404(&format!("brain capability not found: {id}")));
+            return Ok(error_404(format!("brain capability not found: {id}")));
         }
         // Retry also clears metadata left behind by a prior partial failure.
         state.brain.delete_capability(&id).await?;

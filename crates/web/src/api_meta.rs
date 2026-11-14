@@ -13,6 +13,7 @@ use serde_json::json;
 use opencoder_core::{ApMode, Config};
 use opencoder_store::SessionPatch;
 
+use crate::api::{error_400, error_500};
 use crate::cmd::DrainCmd;
 use crate::handle::send_cmd;
 use crate::AppState;
@@ -215,22 +216,6 @@ fn not_found(id: &str) -> Response {
     (
         axum::http::StatusCode::NOT_FOUND,
         Json(json!({ "ok": false, "error": format!("session not found: {id}") })),
-    )
-        .into_response()
-}
-
-fn error_400(msg: String) -> Response {
-    (
-        axum::http::StatusCode::BAD_REQUEST,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_500(msg: String) -> Response {
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "ok": false, "error": msg })),
     )
         .into_response()
 }

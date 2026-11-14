@@ -20,13 +20,16 @@
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use opencoder_core::{resolve_agent, Config, ContentBlock};
 use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{Store, SubagentStatus, TursoStore};
 use tokio_util::sync::CancellationToken;
+
+mod common;
+use common::wait_for_subagent_start;
 
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(TursoStore::open_memory().await.unwrap())
@@ -156,26 +159,6 @@ fn dangling_tool_use_ids(s: &SessionState) -> Vec<String> {
             _ => None,
         })
         .collect()
-}
-
-/// Block until the runner emits `SubagentStart`, bounding the wait so a broken
-/// dispatch fails fast instead of hanging the whole test.
-async fn wait_for_subagent_start(events: &Arc<Mutex<Vec<SessionEvent>>>) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| matches!(e, SessionEvent::SubagentStart { .. }))
-        {
-            break;
-        }
-        if Instant::now() > deadline {
-            panic!("subagent never started within 5s");
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
 #[tokio::test]

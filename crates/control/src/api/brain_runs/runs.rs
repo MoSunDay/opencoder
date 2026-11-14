@@ -38,9 +38,7 @@ pub async fn list(State(state): State<Arc<AppState>>, Query(page): Query<Page>) 
     let cursor = match (page.cursor_created_at, page.cursor_id) {
         (None, None) => None,
         (Some(created_at), Some(id)) if valid_id(&id) => Some(ExecutionCursor { created_at, id }),
-        _ => {
-            return error_400("cursor_created_at and valid cursor_id are required together".into())
-        }
+        _ => return error_400("cursor_created_at and valid cursor_id are required together"),
     };
     match state
         .fleet

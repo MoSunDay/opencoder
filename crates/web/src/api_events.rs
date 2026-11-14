@@ -21,6 +21,7 @@ use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::api::{error_404, error_500};
 use crate::handle::{SessionHandle, SseEvt};
 use crate::AppState;
 
@@ -179,20 +180,4 @@ pub async fn get_event_seq(State(state): State<Arc<AppState>>, Path(id): Path<St
     }
     let seq = state.store.last_event_seq(&id).await.unwrap_or(0);
     Json(json!({ "id": id, "seq": seq })).into_response()
-}
-
-fn error_404(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::NOT_FOUND,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_500(msg: String) -> Response {
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
 }

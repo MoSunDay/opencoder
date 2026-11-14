@@ -8,6 +8,12 @@ Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 - [routes.rs](../../../crates/control/src/routes.rs) — 路由装配
   （`build_app_with_auth` 公共鉴权与机器凭据分置）
+- `src/lib.rs` — 以 `#[path]` 挂载 `crates/web/src/` 共享 handler
+  （api_agent_*、api_brain、api_dag_binaries*、api_project*、api_todo_* 等）；
+  这些文件内的本地 `error_4xx` 构造不得改为 `crate::api::`——web 与 control
+  两族错误体形状不同（web `{"ok":false,"error":…}`；control 经
+  `RpcReply::error` 为 `{"error":…}`），共享文件靠各自本地实现保持两侧
+  wire 现状
 - [bootstrap.rs](../../../crates/control/src/bootstrap.rs) — control.db / definitions.db
   / ontology.db 装配与就绪检查
 - `src/role_gate.rs` — 角色门禁

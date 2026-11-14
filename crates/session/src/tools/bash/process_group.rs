@@ -19,8 +19,8 @@ impl ProcessGroupGuard {
         self.supervisor.is_some()
     }
 
-    pub(crate) fn registered(pid: u32, pgid: i32, session_id: String) -> Self {
-        bg::register(pid, pgid, session_id);
+    pub(crate) fn registered(pid: u32, pgid: i32) -> Self {
+        bg::register(pid, pgid);
         Self {
             pid,
             pgid,
@@ -31,11 +31,10 @@ impl ProcessGroupGuard {
 
     pub(crate) fn registered_supervised(
         pid: u32,
-        session_id: String,
         supervisor: crate::process::OwnedSupervisor,
     ) -> anyhow::Result<Self> {
         let signal = supervisor.signal_target()?;
-        bg::register_supervised(pid, signal, session_id);
+        bg::register_supervised(pid, signal);
         Ok(Self {
             pid,
             pgid: pid as i32,

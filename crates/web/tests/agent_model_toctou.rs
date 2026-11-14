@@ -2,8 +2,9 @@
 //! setting changes must contend on the same per-session mutex, so whichever
 //! operation wins is complete before the other observes `draining`.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use axum::response::IntoResponse;
 use opencoder_core::Config;
@@ -127,6 +128,19 @@ async fn drain_start_wins_mutex_then_agent_and_model_are_refused() {
     handle.cancel.lock().await.cancel();
 }
 
+/// Poll until the session handle's agent override matches `want`. The
+/// override write happens inside the switch's lifecycle critical section, so
+/// observing it proves the switch holds the mutex mid-critical-section.
+async fn wait_agent_override(handle: &SessionHandle, want: &str) {
+    for _ in 0..200 {
+        if handle.overrides.lock().await.agent.as_deref() == Some(want) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("agent override never reached {want:?}");
+}
+
 #[tokio::test]
 async fn agent_switch_wins_mutex_and_finishes_before_drain_start() {
     let sid = "switch-first";
@@ -145,10 +159,16 @@ async fn agent_switch_wins_mutex_and_finishes_before_drain_start() {
         .await
         .into_response()
     });
-    tokio::task::yield_now().await;
+    // Release the guard so the switch can enter its critical section, then
+    // wait for a write that only happens while it holds the lifecycle mutex.
+    // Spawning the drain only after that observation makes the outcome follow
+    // from mutual exclusion, not from task-poll timing: the switch task has
+    // a store roundtrip before its lock acquire while the drain path reaches
+    // the lock directly, so a bare yield cannot order them.
+    drop(lifecycle);
+    wait_agent_override(&handle, "plan").await;
     let drain_state = state.clone();
     let drain = tokio::spawn(async move { start_hanging_drain(drain_state, sid).await });
-    drop(lifecycle);
 
     assert_eq!(
         status(agent.await.unwrap()).await,

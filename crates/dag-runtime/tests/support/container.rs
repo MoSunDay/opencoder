@@ -21,20 +21,50 @@ fn run(program: &str, arguments: &[&str]) {
     );
 }
 
+/// Single-source hint for every fail-fast in this fixture: how to prepare
+/// the native test image when the default lookup or a freshness check
+/// fails.
+const ROOTFS_HINT: &str = "prepare the native test image first: scripts/prepare-dag-rootfs.sh target/<profile>/dag-rootfs";
+
+/// Resolve the native test image without `DAG_TEST_ROOTFS`.
+///
+/// Test binaries run from several layouts (`target/<profile>/deps`,
+/// `target/<profile>/build/<pkg>/<hash>/out`, ...), so a fixed
+/// `parent().parent()` default only works by accident. Walk a bounded number
+/// of ancestors for a `target/<profile>` directory holding a prepared image;
+/// when nothing matches, fall back to the profile directory beside the
+/// binary so the fail-fast below still points at one concrete path.
+fn default_rootfs(executable: &Path) -> PathBuf {
+    const MAX_ANCESTORS: usize = 8;
+    let mut ancestor = executable;
+    for _ in 0..MAX_ANCESTORS {
+        let Some(profile) = ancestor.parent() else {
+            break;
+        };
+        if profile.file_name().is_some_and(|name| name == "target") {
+            let candidate = ancestor.join("dag-rootfs");
+            if candidate.join("usr/bin/dag-runner").is_file() {
+                return candidate;
+            }
+        }
+        ancestor = profile;
+    }
+    executable
+        .parent()
+        .and_then(Path::parent)
+        .map(|build| build.join("dag-rootfs"))
+        .expect("test binary has no grandparent directory")
+}
+
 pub fn rootfs() -> PathBuf {
     let executable = std::env::current_exe().unwrap();
-    let build = executable.parent().unwrap().parent().unwrap();
     let path = std::env::var_os("DAG_TEST_ROOTFS")
         .map(PathBuf::from)
-        .unwrap_or_else(|| build.join("dag-rootfs"));
+        .unwrap_or_else(|| default_rootfs(&executable));
     assert!(path.is_absolute(), "DAG_TEST_ROOTFS must be absolute");
     for name in ["dag-runner", "agent-step-runner"] {
         let runner = path.join("usr/bin").join(name);
-        assert!(
-            runner.is_file(),
-            "prepare the native test image first: scripts/prepare-dag-rootfs.sh {}",
-            path.display()
-        );
+        assert!(runner.is_file(), "{ROOTFS_HINT}: {}", runner.display());
         let output = Command::new(&runner).arg("--build-info").output().unwrap();
         assert!(
             output.status.success(),
@@ -45,7 +75,7 @@ pub fn rootfs() -> PathBuf {
         assert_eq!(
             actual,
             expected,
-            "stale native test image: {}",
+            "stale native test image: {} — {ROOTFS_HINT}",
             runner.display()
         );
     }

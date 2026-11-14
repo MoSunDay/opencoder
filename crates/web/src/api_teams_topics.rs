@@ -40,14 +40,14 @@ pub async fn create_topic(
     Json(body): Json<CreateTopicBody>,
 ) -> Response {
     if body.title.trim().is_empty() {
-        return error_400("title must not be empty".into());
+        return error_400("title must not be empty");
     }
     if body.requirement.trim().is_empty() {
-        return error_400("requirement must not be empty".into());
+        return error_400("requirement must not be empty");
     }
     let cfg = state.team.run.clone();
     if fs_store::load_team(&cfg.team_root, &name).is_err() {
-        return error_404(&format!("team {name} not found"));
+        return error_404(format!("team {name} not found"));
     }
     let meta = match opencoder_team::start_topic(
         state.store.clone(),
@@ -73,7 +73,7 @@ pub async fn list_team_topics(
 ) -> Response {
     let root = &state.team.run.team_root;
     if fs_store::load_team(root, &name).is_err() {
-        return error_404(&format!("team {name} not found"));
+        return error_404(format!("team {name} not found"));
     }
     Json(json!({ "topics": collect_topics(root, &name) })).into_response()
 }
@@ -87,7 +87,7 @@ pub async fn get_topic(
     let root = &state.team.run.team_root;
     match fs_store::read_topic_tree(root, &name, &tid) {
         Ok((topic, turns)) => Json(json!({ "topic": topic, "turns": turns })).into_response(),
-        Err(_) => error_404(&format!("topic {tid} not found")),
+        Err(_) => error_404(format!("topic {tid} not found")),
     }
 }
 
@@ -105,7 +105,7 @@ pub async fn cancel_topic(
     }
     let mut meta = match fs_store::load_topic(root, &name, &tid) {
         Ok(meta) => meta,
-        Err(_) => return error_404(&format!("topic {tid} not found")),
+        Err(_) => return error_404(format!("topic {tid} not found")),
     };
     if meta.status == TOPIC_EXECUTING || meta.finish_reason.as_deref() == Some(FINISH_ERROR) {
         meta.status = TOPIC_FINISHED.to_string();
@@ -135,7 +135,7 @@ pub async fn resume_topic(
     let root = &state.team.run.team_root;
     let meta = match fs_store::load_topic(root, &name, &tid) {
         Ok(meta) => meta,
-        Err(_) => return error_404(&format!("topic {tid} not found")),
+        Err(_) => return error_404(format!("topic {tid} not found")),
     };
     if state.team.hub.is_running(&tid) {
         return error_409("topic runtime is already running");
@@ -149,7 +149,7 @@ pub async fn resume_topic(
         if let Err(e) = state.store.finish_team_topic_run(&tid).await {
             return error_500(format!("finish_team_topic_run: {e:#}"));
         }
-        return error_409(&format!(
+        return error_409(format!(
             "topic is {} ({}); only executing or finished(error) topics can resume",
             meta.status,
             meta.finish_reason.unwrap_or_default()

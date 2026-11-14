@@ -18,6 +18,9 @@ use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{Store, SubagentStatus, TursoStore};
 use tokio_util::sync::CancellationToken;
 
+mod common;
+use common::wait_for_subagent_start;
+
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(TursoStore::open_memory().await.unwrap())
 }
@@ -76,26 +79,6 @@ fn text_done(text: &str) -> LlmEvent {
             total_tokens: 10,
             ..Default::default()
         }),
-    }
-}
-
-/// Block until the runner has emitted a `SubagentStart` (the child registered
-/// its cancel tokens), bounding the wait so a broken dispatch fails fast.
-async fn wait_for_subagent_start(events: &Arc<Mutex<Vec<SessionEvent>>>) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| matches!(e, SessionEvent::SubagentStart { .. }))
-        {
-            break;
-        }
-        if Instant::now() > deadline {
-            panic!("subagent never started within 5s");
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 

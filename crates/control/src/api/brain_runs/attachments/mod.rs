@@ -64,7 +64,7 @@ pub async fn upload(State(state): State<Arc<AppState>>, Json(body): Json<Upload>
         Err(e) => return error_400(e.to_string()),
     };
     if body.name.is_empty() || body.name.len() > 255 || body.name.chars().any(char::is_control) {
-        return error_400("invalid image name".into());
+        return error_400("invalid image name");
     }
     let id = format!("image-{}", ulid::Ulid::new());
     let reference = json!({"id":id,"name":body.name,"mime":mime,"bytes":bytes.len(),"sha256":format!("{:x}",Sha256::digest(&bytes))});

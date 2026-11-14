@@ -55,7 +55,7 @@ pub async fn create(State(state): State<Arc<AppState>>, Json(body): Json<Value>)
     }
     match state.store.get_schedule(&job.id).await {
         Ok(Some(_)) => {
-            return error_409(&format!(
+            return error_409(format!(
                 "schedule {} already exists (use PUT to update)",
                 job.id
             ))
@@ -79,7 +79,7 @@ pub async fn update(
     Json(body): Json<Value>,
 ) -> Response {
     if validate_schedule_id(&id).is_err() {
-        return error_400("invalid schedule id".into());
+        return error_400("invalid schedule id");
     }
     let job = match parse_job(Some(&id), &body) {
         Ok(job) => job,
@@ -93,7 +93,7 @@ pub async fn update(
             return response(super::RpcReply::ok(json!({"ok": true, "id": id})))
         }
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("schedule {id} not found")),
+        Ok(None) => return error_404(format!("schedule {id} not found")),
         Err(e) => return error_500(e.to_string()),
     }
     match state.store.upsert_schedule(&job, now_ms()).await {
@@ -112,7 +112,7 @@ pub async fn toggle(
 ) -> Response {
     let mut def = match state.store.get_schedule(&id).await {
         Ok(Some(def)) => def,
-        Ok(None) => return error_404(&format!("schedule {id} not found")),
+        Ok(None) => return error_404(format!("schedule {id} not found")),
         Err(e) => return error_500(e.to_string()),
     };
     let changed = def.job.enabled != body.enabled;
@@ -134,7 +134,7 @@ pub async fn toggle(
 pub async fn remove(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     match state.store.get_schedule(&id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("schedule {id} not found")),
+        Ok(None) => return error_404(format!("schedule {id} not found")),
         Err(e) => return error_500(e.to_string()),
     }
     match state.store.delete_schedule(&id).await {
@@ -150,7 +150,7 @@ pub async fn remove(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
 pub async fn run(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     let def = match state.store.get_schedule(&id).await {
         Ok(Some(def)) => def,
-        Ok(None) => return error_404(&format!("schedule {id} not found")),
+        Ok(None) => return error_404(format!("schedule {id} not found")),
         Err(e) => return error_500(e.to_string()),
     };
     if let Err(msg) = def.job.validate() {

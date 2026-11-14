@@ -44,7 +44,7 @@ pub async fn save(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -
 /// keep the source version available and therefore block deletion.
 pub async fn delete(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     if !valid_id(&id) {
-        return error_400("invalid plan identity".into());
+        return error_400("invalid plan identity");
     }
     let _lock = match state.fleet.request_lock("brain-catalog", "registry").await {
         Ok(lock) => lock,
@@ -52,7 +52,7 @@ pub async fn delete(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
     };
     match state.fleet.definition("brain_plan", &id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("brain plan not found: {id}")),
+        Ok(None) => return error_404(format!("brain plan not found: {id}")),
         Err(error) => return error_500(error.to_string()),
     }
     match super::maintenance::references(&state, super::maintenance::Removing::Plan(&id)).await {
@@ -67,7 +67,7 @@ pub async fn delete(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
     }
     match state.fleet.delete_brain_plan(&id).await {
         Ok(true) => response(RpcReply::ok(json!({"ok":true,"deleted":id}))),
-        Ok(false) => error_404(&format!("brain plan not found: {id}")),
+        Ok(false) => error_404(format!("brain plan not found: {id}")),
         Err(error) => error_500(error.to_string()),
     }
 }
@@ -158,7 +158,7 @@ pub async fn stable(
         Err(error) => return error_500(error.to_string()),
     };
     let Some(version) = body["version"].as_u64() else {
-        return error_400("version is required".into());
+        return error_400("version is required");
     };
     match state.fleet.brain_plan_document(&id, version).await {
         Ok(Some(p)) if p.plan["schema_version"] != LAYERED_SCHEMA_VERSION => {

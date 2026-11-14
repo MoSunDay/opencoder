@@ -178,8 +178,6 @@ pub fn output_path(pid: u32) -> PathBuf {
 struct BgEntry {
     pgid: i32,
     supervisor: Option<crate::process::SignalTarget>,
-    #[allow(dead_code)]
-    session_id: String,
     output_path: PathBuf,
 }
 
@@ -423,29 +421,23 @@ pub fn list() -> Vec<BgInfo> {
 /// (the tool future owns the `Child` and `wait()`s directly); the entry is
 /// removed by [`unregister`] when `wait()` returns, or by [`stop`]/[`kill_all`]
 /// when the user intervenes.
-pub fn register(pid: u32, pgid: i32, session_id: String) {
+pub fn register(pid: u32, pgid: i32) {
     registry().lock().unwrap().insert(
         pid,
         BgEntry {
             pgid,
             supervisor: None,
-            session_id,
             output_path: output_path(pid),
         },
     );
 }
 
-pub(crate) fn register_supervised(
-    pid: u32,
-    supervisor: crate::process::SignalTarget,
-    session_id: String,
-) {
+pub(crate) fn register_supervised(pid: u32, supervisor: crate::process::SignalTarget) {
     registry().lock().unwrap().insert(
         pid,
         BgEntry {
             pgid: pid as i32,
             supervisor: Some(supervisor),
-            session_id,
             output_path: output_path(pid),
         },
     );

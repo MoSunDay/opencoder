@@ -180,13 +180,9 @@ impl Tool for ShellTool {
         };
         let pgid = pid as i32;
         let mut process_group = if let Some(lease) = lease {
-            ProcessGroupGuard::registered_supervised(
-                pid,
-                ctx.session_id.clone(),
-                lease.spawned(child.id())?,
-            )?
+            ProcessGroupGuard::registered_supervised(pid, lease.spawned(child.id())?)?
         } else {
-            ProcessGroupGuard::registered(pid, pgid, ctx.session_id.clone())
+            ProcessGroupGuard::registered(pid, pgid)
         };
 
         let state = Arc::new(Mutex::new(BgState::new()));

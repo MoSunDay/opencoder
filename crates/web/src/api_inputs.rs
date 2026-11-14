@@ -11,6 +11,7 @@ use serde_json::json;
 
 use opencoder_store::Delivery;
 
+use crate::api::{error_400, error_500};
 use crate::AppState;
 
 #[derive(Deserialize, Default)]
@@ -111,20 +112,4 @@ pub async fn reorder_inputs(
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(e) => error_500(format!("swap_input_order: {e:#}")),
     }
-}
-
-fn error_400(msg: String) -> Response {
-    (
-        axum::http::StatusCode::BAD_REQUEST,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_500(msg: String) -> Response {
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
 }

@@ -4,17 +4,16 @@
 //! generation bump — the run must stop, persist a non-running workflow, and
 //! stay resumable.
 
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_store::{Store, TursoStore};
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
+
+mod support;
+use support::{wait_for_session_message, wait_until_running};
 
 const CANDIDATE: &str = r#"{"status":"candidate","summary":"done","result":"ok","verification":"checked","evidence_refs":[],"recovery_context":{"summary":"done","refs":[]}}"#;
 
@@ -84,23 +83,6 @@ async fn kinds(store: &Arc<dyn Store>, id: &str) -> Vec<String> {
         .into_iter()
         .map(|event| event.kind)
         .collect()
-}
-
-/// Poll the durable item projections until the TODO shows as running (the
-/// batch committed "todos_dispatched" and execution is in flight).
-async fn wait_until_running(store: &Arc<dyn Store>, workflow_id: &str) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let items = store.list_todo_items(workflow_id).await.unwrap();
-        if items.iter().any(|item| item.status == "running") {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "todo in {workflow_id} never reached running"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 #[tokio::test]
@@ -516,44 +498,6 @@ fn candidate_script(summary: &str) -> Vec<LlmEvent> {
     done(&format!(
         r#"{{"status":"candidate","summary":"{summary}","result":"ok","verification":"checked","evidence_refs":[],"recovery_context":{{"summary":"{summary}","refs":[]}}}}"#
     ))
-}
-
-/// Wait until the given TODO's child session has produced an assistant
-/// message containing `marker` — i.e. the sibling's execution has finished
-/// recording its candidate while the parked TODO is still in flight.
-async fn wait_for_session_message(
-    store: &Arc<dyn Store>,
-    workflow_id: &str,
-    todo_id: &str,
-    marker: &str,
-) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let session_id = store
-            .list_todo_items(workflow_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|item| item.todo_id == todo_id)
-            .and_then(|item| item.active_session_id);
-        if let Some(session_id) = session_id {
-            let transcript = store
-                .load_messages(&session_id)
-                .await
-                .unwrap()
-                .iter()
-                .map(|message| message.text())
-                .collect::<String>();
-            if transcript.contains(marker) {
-                return;
-            }
-        }
-        assert!(
-            Instant::now() < deadline,
-            "TODO {todo_id} never produced the marker message"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 /// Bug #16a regression (external half): the child session SUCCEEDS after an

@@ -32,7 +32,7 @@ pub async fn input(
 ) -> Response {
     let text = body.text.trim();
     if text.is_empty() || text.len() > 4096 {
-        return error_400("text must contain 1..4096 bytes".into());
+        return error_400("text must contain 1..4096 bytes");
     }
     let _lock = match state.fleet.request_lock("brain-control", &id).await {
         Ok(lock) => lock,
@@ -185,7 +185,7 @@ pub async fn command(
         body.action.as_str(),
         "pause" | "resume" | "cancel" | "set_round_budget"
     ) {
-        return error_400("supported commands: pause, resume, cancel, set_round_budget".into());
+        return error_400("supported commands: pause, resume, cancel, set_round_budget");
     }
     let _lock = match state.fleet.request_lock("brain-control", &id).await {
         Ok(lock) => lock,

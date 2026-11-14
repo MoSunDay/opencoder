@@ -21,6 +21,9 @@ use opencoder_store::{
 use opencoder_todos::{types::*, Runtime};
 use tokio_util::sync::CancellationToken;
 
+mod support;
+use support::wait_until_running;
+
 /// Delegating store whose `commit_todo_transition` fails exactly ONCE with
 /// the store's real generation-conflict error (the tx rolls back, so no
 /// event lands), but only for the interrupt commit — simulating the driving
@@ -196,22 +199,6 @@ async fn load(store: &Arc<dyn Store>, id: &str) -> WorkflowState {
         .unwrap()
         .expect("workflow must be persisted")
         .1
-}
-
-/// Poll the durable item projections until the TODO shows as running.
-async fn wait_until_running(store: &Arc<dyn Store>, workflow_id: &str) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        let items = store.list_todo_items(workflow_id).await.unwrap();
-        if items.iter().any(|item| item.status == "running") {
-            return;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "todo in {workflow_id} never reached running"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 fn spec() -> WorkflowSpec {

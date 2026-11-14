@@ -11,11 +11,11 @@
 
 mod support;
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use support::http_util::http;
 use support::llm_stub::{LlmStub, Script};
 
 const TOKEN: &str = "running-mode-e2e-token";
@@ -95,7 +95,7 @@ fn spawn_server(workdir: &std::path::Path) -> (FleetGuard, String) {
             );
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
-                let (_, nodes) = http(&base, "GET", "/api/nodes", "");
+                let (_, nodes) = http(&base, "GET", "/api/nodes", TOKEN, "");
                 // Scheduling (select_node) additionally requires a snapshot
                 // with ready=true, so waiting for online alone races the
                 // first POST /api/sessions into 503.
@@ -119,46 +119,6 @@ fn spawn_server(workdir: &std::path::Path) -> (FleetGuard, String) {
     }
 }
 
-fn http(base: &str, method: &str, path: &str, body: &str) -> (u16, serde_json::Value) {
-    let host = base.trim_start_matches("http://");
-    let mut stream = TcpStream::connect(host).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
-    let request = format!(
-        "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: Bearer {TOKEN}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(request.as_bytes()).unwrap();
-    // `set_read_timeout` surfaces as ErrorKind::WouldBlock mid-body; under
-    // workspace-wide load a 10s stall is normal, so keep reading instead of
-    // panicking (bounded by an overall deadline).
-    let mut response = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        match stream.read_to_end(&mut response) {
-            Ok(_) => break,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(Instant::now() < deadline, "http read stalled: {path}");
-            }
-            Err(e) => panic!("http read failed on {path}: {e}"),
-        }
-    }
-    let response = String::from_utf8(response).unwrap();
-    let (head, body) = response.split_once("\r\n\r\n").unwrap();
-    let status = head
-        .lines()
-        .next()
-        .unwrap()
-        .split_whitespace()
-        .nth(1)
-        .unwrap()
-        .parse()
-        .unwrap();
-    let json = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
-    (status, json)
-}
-
 fn wait_for_session(
     base: &str,
     sid: &str,
@@ -167,7 +127,7 @@ fn wait_for_session(
 ) -> serde_json::Value {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let (status, session) = http(base, "GET", &format!("/api/sessions/{sid}"), "");
+        let (status, session) = http(base, "GET", &format!("/api/sessions/{sid}"), TOKEN, "");
         assert_eq!(
             status, 200,
             "failed to read session while waiting for {label}"
@@ -193,7 +153,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
     std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     let (_server, base) = spawn_server(tmp.path());
 
-    let (status, created) = http(&base, "POST", "/api/sessions", r#"{"agent":"act"}"#);
+    let (status, created) = http(&base, "POST", "/api/sessions", TOKEN, r#"{"agent":"act"}"#);
     assert_eq!(status, 200, "session creation: {created}");
     let sid = created["id"].as_str().unwrap();
     assert_eq!(
@@ -201,6 +161,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             &base,
             "POST",
             &format!("/api/sessions/{sid}/prompt"),
+            TOKEN,
             r#"{"prompt":"keep running","delivery":"steer"}"#,
         )
         .0,
@@ -213,7 +174,11 @@ fn real_server_rejects_running_mode_switches_until_idle() {
         (format!("/api/sessions/{sid}/agent"), r#"{"value":"plan"}"#),
         (format!("/api/sessions/{sid}/handoff"), r#"{"extra":"now"}"#),
     ] {
-        assert_eq!(http(&base, "POST", &path, body).0, 409, "{path} accepted");
+        assert_eq!(
+            http(&base, "POST", &path, TOKEN, body).0,
+            409,
+            "{path} accepted"
+        );
     }
     // Textual mode commands are no longer admission-time mode switches:
     // admitted (200) while running, applied by the runner at the boundary.
@@ -223,6 +188,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             &base,
             "POST",
             &format!("/api/sessions/{sid}/prompt"),
+            TOKEN,
             r#"{"prompt":"/plan later","delivery":"queue","skill":"reviewer"}"#,
         )
         .0,
@@ -234,6 +200,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             &base,
             "POST",
             &format!("/api/sessions/{sid}/prompt"),
+            TOKEN,
             r#"{"prompt":"x","delivery":"queue","agent":"plan"}"#,
         )
         .0,
@@ -241,7 +208,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
         "agent field refused while running"
     );
 
-    let (status, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), "");
+    let (status, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), TOKEN, "");
     assert_eq!(status, 200);
     assert_eq!(
         session["meta"]["agent"], "act",
@@ -260,6 +227,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             &base,
             "POST",
             &format!("/api/sessions/{sid}/agent"),
+            TOKEN,
             r#"{"value":"plan"}"#,
         );
         if switched.0 == 200 {
@@ -272,7 +240,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
-    let (_, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), "");
+    let (_, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), TOKEN, "");
     assert_eq!(session["meta"]["agent"], "plan");
 }
 
@@ -301,7 +269,7 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
     // unrelated automatic title-generation call.
     let created =
         serde_json::json!({"id":SID,"agent":"plan","title":"plan clear context"}).to_string();
-    assert_eq!(http(&base, "POST", "/api/sessions", &created).0, 200);
+    assert_eq!(http(&base, "POST", "/api/sessions", TOKEN, &created).0, 200);
     let path = format!("/api/sessions/{SID}/prompt");
     let original_prompt = "draft a rollout with obsolete planning chatter";
     let first = serde_json::json!({
@@ -310,13 +278,13 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
         "agent": "plan"
     })
     .to_string();
-    assert_eq!(http(&base, "POST", &path, &first).0, 200);
+    assert_eq!(http(&base, "POST", &path, TOKEN, &first).0, 200);
     wait_for_session(&base, SID, "plan reply", |session| {
         session["draining"] == false && session["messages"].to_string().contains(PLAN)
     });
 
     let clear = r#"{"prompt":"/act_clear_context","delivery":"queue"}"#;
-    assert_eq!(http(&base, "POST", &path, clear).0, 200);
+    assert_eq!(http(&base, "POST", &path, TOKEN, clear).0, 200);
     let session = wait_for_session(&base, SID, "act execution", |session| {
         session["draining"] == false
             && session["meta"]["agent"] == "act"
@@ -359,7 +327,10 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
         "delivery": "queue"
     })
     .to_string();
-    assert_eq!(http(&resumed_base, "POST", &path, &resumed_body).0, 200);
+    assert_eq!(
+        http(&resumed_base, "POST", &path, TOKEN, &resumed_body).0,
+        200
+    );
     let resumed = wait_for_session(&resumed_base, SID, "resumed act reply", |session| {
         session["draining"] == false
             && session["meta"]["agent"] == "act"

@@ -42,7 +42,7 @@ fn kill_all_drains_and_signals_registered_group() {
     // Give setsid()+exec a moment to establish the new session.
     std::thread::sleep(Duration::from_millis(50));
 
-    register(pid, pgid, "isolated".to_string());
+    register(pid, pgid);
     assert!(
         list().iter().any(|info| info.pid == pid),
         "list should expose the registered pid"

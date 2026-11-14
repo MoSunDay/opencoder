@@ -80,7 +80,6 @@ pub(crate) struct ManagedSession {
     /// tmux session name, e.g. `opencoder-01H...`.
     pub name: String,
     /// tmux global id, e.g. `$3`.
-    #[allow(dead_code)]
     pub tmux_id: String,
     /// Creation time, unix seconds.
     pub created: i64,

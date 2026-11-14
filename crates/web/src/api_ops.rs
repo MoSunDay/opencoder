@@ -15,6 +15,7 @@ use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_store::SessionPatch;
 
+use crate::api::{error_400, error_404, error_409, error_500};
 use crate::cmd::DrainCmd;
 use crate::handle::{send_cmd, start_drain_locked};
 use crate::AppState;
@@ -36,7 +37,7 @@ pub async fn fork_session(State(state): State<Arc<AppState>>, Path(id): Path<Str
     }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Ok(None) => return error_404(format!("session not found: {id}")),
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     match opencoder_session::fork::fork_session(state.store.as_ref(), &id).await {
@@ -61,7 +62,7 @@ pub async fn post_compact(
     }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Ok(None) => return error_404(format!("session not found: {id}")),
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     let config = match load_config(&state, runtime_config) {
@@ -117,7 +118,7 @@ pub async fn post_handoff(
     }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Ok(None) => return error_404(format!("session not found: {id}")),
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     let extra = body.map(|b| b.extra.clone()).unwrap_or_default();
@@ -229,7 +230,7 @@ pub async fn post_skill(
     }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Ok(None) => return error_404(format!("session not found: {id}")),
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     let mut patch = SessionPatch {
@@ -296,36 +297,4 @@ fn build_client(state: &AppState, config: &Config) -> Result<Arc<dyn ChatStream>
         Ok(c) => Ok(Arc::new(c) as Arc<dyn ChatStream>),
         Err(e) => Err(Box::new(error_500(format!("client: {e:#}")))),
     }
-}
-
-fn error_400(msg: String) -> Response {
-    (
-        axum::http::StatusCode::BAD_REQUEST,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_409(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::CONFLICT,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_404(msg: &str) -> Response {
-    (
-        axum::http::StatusCode::NOT_FOUND,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
-}
-
-fn error_500(msg: String) -> Response {
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "ok": false, "error": msg })),
-    )
-        .into_response()
 }

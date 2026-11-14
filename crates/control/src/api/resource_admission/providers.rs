@@ -40,7 +40,7 @@ pub async fn save(
 ) -> Response {
     let key = match key(&name, version) {
         Ok(key) if valid(&value) => key,
-        _ => return api::error_400("invalid resource provider configuration".into()),
+        _ => return api::error_400("invalid resource provider configuration"),
     };
     let result = async {
         let _lock = state.fleet.request_lock(NAMED, &key).await?;
@@ -58,7 +58,7 @@ pub async fn save(
     match result {
         Ok(true) => Json(json!({"name":name,"version":version,"enabled":true})).into_response(),
         Ok(false) => api::error_409("provider version is immutable"),
-        Err(_) => api::error_500("resource provider configuration unavailable".into()),
+        Err(_) => api::error_500("resource provider configuration unavailable"),
     }
 }
 
@@ -68,12 +68,12 @@ pub async fn get(
 ) -> Response {
     let key = match key(&name, version) {
         Ok(value) => value,
-        Err(_) => return api::error_400("invalid provider identity".into()),
+        Err(_) => return api::error_400("invalid provider identity"),
     };
     match state.fleet.definition(NAMED, &key).await {
         Ok(Some(_)) => Json(json!({"name":name,"version":version,"enabled":true})).into_response(),
         Ok(None) => api::error_404("resource provider not found"),
-        Err(_) => api::error_500("resource provider configuration unavailable".into()),
+        Err(_) => api::error_500("resource provider configuration unavailable"),
     }
 }
 

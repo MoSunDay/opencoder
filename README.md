@@ -110,13 +110,16 @@ TUI 事件命令可写在 `~/.opencoder/hooks.json`：`turn_done` 在最终回�
       "base_url": "https://api.deepseek.com/v1",
       "api_key": "{DEEPSEEK_API_KEY}",
       "model": "deepseek-chat",
-      "headers": [{ "name": "X-Region", "value": "eu" }]
+      "headers": [{ "name": "X-Region", "value": "eu" }],
+      "temperature": 0.0
     }
   }
 }
 ```
 
 `model` 格式为 `"{provider}/{model_id}"`，provider 名匹配 `providers` map 的 key（未匹配则回退到默认 `provider`）。`api_key` / header `value` 支持 `{ENV_VAR}` 环境变量间接引用。
+
+所有请求默认不发送 `temperature`（由服务端按模型套用默认值，兼容仅接受固定温度的模型）。provider 可选 `temperature` 字段可强制该 provider 全部调用使用固定采样温度（如追求可复现输出时钉 `0`）：
 
 接入 GPT-5/6 时，在对应 provider 中设置 `"protocol": "responses"`，并填写服务端提供的模型 ID。未设置协议的旧配置默认使用 `chat_completions`。两种协议可以混用，支持流式推理、工具/MCP、图片、子代理和会话恢复。配置示例与验收范围见 [Responses API](features/interaction/responses/index.md)。
 

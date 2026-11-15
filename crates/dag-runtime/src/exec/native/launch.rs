@@ -23,6 +23,7 @@ pub(crate) fn guest_config(source: &Config, endpoint: Option<Endpoint>) -> Confi
             base_url: endpoint.base_url,
             api_key: Some(endpoint.api_key),
             model: Some(source.model_id().into()),
+            temperature: None,
             headers: endpoint
                 .headers
                 .into_iter()

@@ -239,6 +239,10 @@ async fn title_generation_writes_via_small_model() {
         reqs[0].model, "cheap/mini",
         "title gen must retain small_model provider"
     );
+    assert!(
+        reqs[0].temperature.is_none(),
+        "title gen must not pin a temperature (provider default only)"
+    );
     let meta = store.get_session("t").await.unwrap().unwrap();
     assert_eq!(
         meta.title.as_deref(),

@@ -17,6 +17,12 @@ pub struct ProviderConfig {
     /// Default model id for this provider (the part after the `/` prefix).
     #[serde(default)]
     pub model: Option<String>,
+    /// Sampling temperature pinned on every request to this provider. Some
+    /// backends only accept one fixed temperature (e.g. reasoning models
+    /// locked to `1`); when set it overrides any per-purpose default
+    /// (compaction/title/verify) and the conversation default (unset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
     /// Extra HTTP headers attached to every request to this provider. A header
     /// `value` may be a literal string or a `{VAR}` reference resolved from the
     /// environment at endpoint-resolution time (same convention as `api_key`).
@@ -44,6 +50,18 @@ pub struct Endpoint {
     pub headers: Vec<(String, String)>,
 }
 
+impl crate::Config {
+    /// Resolve the pinned sampling temperature for a provider name:
+    /// `providers[name].temperature` -> legacy `provider.temperature` ->
+    /// `None` (per-purpose defaults / unset apply). Pinned by backends that
+    /// only accept a single temperature value.
+    pub fn temperature_for(&self, name: &str) -> Option<f64> {
+        self.provider_for(name)
+            .and_then(|p| p.temperature)
+            .or(self.provider.temperature)
+    }
+}
+
 pub(super) fn default_protocol() -> String {
     "chat_completions".into()
 }
@@ -62,6 +80,7 @@ impl Default for ProviderConfig {
             base_url: String::new(),
             api_key: None,
             model: None,
+            temperature: None,
             headers: Vec::new(),
         }
     }

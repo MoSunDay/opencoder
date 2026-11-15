@@ -9,6 +9,7 @@ pub(crate) fn cfg() -> Config {
     Config {
         model: "openai/gpt-4o-mini".to_string(),
         provider: opencoder_core::ProviderConfig {
+            temperature: None,
             protocol: "chat_completions".into(),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: Some("sk-abcd1234567".to_string()),
@@ -31,6 +32,7 @@ pub(crate) fn provider_cfg() -> Config {
     c.providers.insert(
         "deepseek".to_string(),
         opencoder_core::ProviderConfig {
+            temperature: None,
             protocol: "chat_completions".into(),
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-secret-key".to_string()),

@@ -170,6 +170,12 @@ async fn small_model_is_used_for_compaction_summary_call() {
         "compaction summarize must retain small_model provider, got {}",
         reqs[0].model
     );
+    assert!(
+        reqs[0].temperature.is_none(),
+        "compaction must not pin a temperature: backends locked to one fixed \
+        value reject any other; the provider default is the only universally \
+        valid choice"
+    );
 }
 
 #[tokio::test]

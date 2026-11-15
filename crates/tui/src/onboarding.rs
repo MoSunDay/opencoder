@@ -245,6 +245,7 @@ mod tests {
         providers.insert(
             "demo".into(),
             ProviderConfig {
+                temperature: None,
                 protocol: "chat_completions".into(),
                 base_url: "https://example.com/v1".into(),
                 api_key: Some("sk-onboarding-secret-1234".into()),

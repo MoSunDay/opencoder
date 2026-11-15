@@ -367,7 +367,10 @@ async fn summarize(
         messages: msgs,
         tools: Vec::new(),
         tool_choice: None,
-        temperature: Some(0.2),
+        // No pinned temperature: the provider default is the only value
+        // guaranteed valid for every model (some only accept one fixed
+        // temperature); a provider pin in config still overrides this.
+        temperature: None,
         max_tokens: session.config.compaction.buffer,
         reasoning_effort: None,
         cache_salt: crate::cache_salt_for(session),

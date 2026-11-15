@@ -281,6 +281,7 @@ mod tests {
         providers.insert(
             "zhipuai".to_string(),
             opencoder_core::ProviderConfig {
+                temperature: None,
                 protocol: "chat_completions".into(),
                 base_url: "https://api.example/v1".into(),
                 api_key: Some("sk-test-1234567890abcdef".into()),
@@ -291,6 +292,7 @@ mod tests {
         providers.insert(
             "short".to_string(),
             opencoder_core::ProviderConfig {
+                temperature: None,
                 protocol: "chat_completions".into(),
                 base_url: "https://api.example/v1".into(),
                 api_key: Some("abcd".into()),
@@ -372,6 +374,7 @@ mod tests {
         providers.insert(
             "deepseek".to_string(),
             ProviderConfig {
+                temperature: None,
                 protocol: "chat_completions".into(),
                 base_url: "https://api.deepseek.com/v1".to_string(),
                 api_key: Some("sk-dk".to_string()),
@@ -382,6 +385,7 @@ mod tests {
         providers.insert(
             "openai".to_string(),
             ProviderConfig {
+                temperature: None,
                 protocol: "chat_completions".into(),
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: None,

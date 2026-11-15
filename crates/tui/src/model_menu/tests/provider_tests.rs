@@ -418,6 +418,7 @@ fn multi_provider_cfg() -> opencoder_core::Config {
     c.providers.insert(
         "active".to_string(),
         opencoder_core::ProviderConfig {
+            temperature: None,
             protocol: "chat_completions".into(),
             base_url: "https://active.example.com/v1".to_string(),
             api_key: Some("ak-active".to_string()),
@@ -428,6 +429,7 @@ fn multi_provider_cfg() -> opencoder_core::Config {
     c.providers.insert(
         "other".to_string(),
         opencoder_core::ProviderConfig {
+            temperature: None,
             protocol: "chat_completions".into(),
             base_url: "https://other.example.com/v1".to_string(),
             api_key: None,

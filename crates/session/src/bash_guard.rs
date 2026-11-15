@@ -92,7 +92,7 @@ const SIDECAR_ADMITTED: &[&str] = &[
 /// wording, verbatim). The contract: name the mode, state the read-only
 /// invariant, tell the model to stop implementation attempts, route context
 /// gathering to a read-only `explore` subagent instead of bash, focus on a
-/// plan, and point at the real escape hatch — switch to act via `/agent act`.
+/// plan, and point at the real escape hatch — switching to the act agent.
 pub fn plan_denial(tool: &str, detail: &str) -> String {
     if tool == "bash" {
         format!(
@@ -100,7 +100,7 @@ pub fn plan_denial(tool: &str, detail: &str) -> String {
              and was not executed. Do not retry or attempt another write. To gather context, \
              delegate read-only investigation to an 'explore' subagent (task tool) instead \
              of bash. Focus on analysis and output a plan only; do not execute implementation. \
-             To make changes, switch to the act agent (/agent act)."
+             To make changes, switch to the act agent."
         )
     } else {
         format!(
@@ -108,7 +108,7 @@ pub fn plan_denial(tool: &str, detail: &str) -> String {
              Do not retry or attempt another write. To gather context, delegate read-only \
              investigation to an 'explore' subagent (task tool). Focus on analysis and \
              output a plan only; do not execute implementation. To make changes, switch \
-             to the act agent (/agent act)."
+             to the act agent."
         )
     }
 }
@@ -448,10 +448,16 @@ mod tests {
         // Context gathering must be routed to the read-only explore
         // subagent, not retried through bash.
         assert!(msg.contains("'explore' subagent"), "got: {msg}");
-        // The escape hatch must name the real path: the act agent.
+        // The escape hatch must point at the act agent without naming a
+        // command: there is no `/agent act` — the canonical commands are
+        // `/act` and `/plan`.
         assert!(
-            msg.contains("switch to the act agent (/agent act)"),
+            msg.contains("switch to the act agent"),
             "got: {msg}"
+        );
+        assert!(
+            !msg.contains("/agent act"),
+            "escape hatch must not name a nonexistent command, got: {msg}"
         );
     }
 

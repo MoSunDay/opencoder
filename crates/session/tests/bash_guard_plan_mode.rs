@@ -4,7 +4,8 @@
 //! Contracts:
 //! - A `rm -rf` call in plan mode produces a ToolEnd with is_error=true
 //!   and output containing "Blocked in plan mode" - the command never
-//!   executes, and the message points at `/agent act` as the way out.
+//!   executes, and the message points at switching to the act agent as the
+//!   way out (never naming a nonexistent command).
 //! - A tool the plan schema never advertises (e.g. a hallucinated `edit`)
 //!   is refused with the same denial and NEVER executes - no silent writes.
 //! - A `ls` call in plan mode produces a ToolEnd with is_error=false.
@@ -121,8 +122,12 @@ async fn plan_mode_blocks_write_command() {
             "output must explain the block, got: {output}"
         );
         assert!(
-            output.contains("/agent act"),
-            "block must point at the real escape hatch (/agent act), got: {output}"
+            output.contains("switch to the act agent"),
+            "block must point at switching to the act agent, got: {output}"
+        );
+        assert!(
+            !output.contains("/agent act"),
+            "block must not name a nonexistent command, got: {output}"
         );
         assert!(output.contains("output a plan only"), "got: {output}");
     }
@@ -598,8 +603,12 @@ async fn plan_mode_refuses_unadvertised_tool_without_executing() {
             "denial must name the mode, got: {output}"
         );
         assert!(
-            output.contains("/agent act"),
-            "denial must point at the real escape hatch, got: {output}"
+            output.contains("switch to the act agent"),
+            "denial must point at switching to the act agent, got: {output}"
+        );
+        assert!(
+            !output.contains("/agent act"),
+            "denial must not name a nonexistent command, got: {output}"
         );
     }
     // The decisive assertion: the edit tool never executed.

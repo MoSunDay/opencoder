@@ -60,7 +60,9 @@ pub async fn verify(
             messages: msgs.clone(),
             tools: Vec::new(),
             tool_choice: None,
-            temperature: Some(0.0),
+            // No pinned temperature — provider default (see compaction);
+            // unparseable verdicts are retried within the budget anyway.
+            temperature: None,
             max_tokens: Some(8),
             reasoning_effort: None,
             cache_salt: None,

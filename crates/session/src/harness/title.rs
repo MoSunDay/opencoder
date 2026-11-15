@@ -34,7 +34,8 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
         messages: msgs,
         tools: Vec::new(),
         tool_choice: None,
-        temperature: Some(0.3),
+        // No pinned temperature — provider default (see compaction).
+        temperature: None,
         max_tokens: Some(64),
         reasoning_effort: None,
         cache_salt: crate::cache_salt_for(session),

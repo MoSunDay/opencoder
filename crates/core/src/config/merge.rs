@@ -238,6 +238,9 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             if let Some(m) = p.get("model").and_then(|v| v.as_str()) {
                 cfg.provider.model = Some(m.to_string());
             }
+            if let Some(t) = p.get("temperature").and_then(|v| v.as_f64()) {
+                cfg.provider.temperature = Some(t);
+            }
             if let Some(hs) = p.get("headers").and_then(|v| v.as_array()) {
                 cfg.provider.headers.extend(hs.iter().filter_map(|h| {
                     let name = h.get("name")?.as_str()?.to_string();
@@ -265,6 +268,9 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                     }
                     if let Some(m) = pcfg.get("model").and_then(|v| v.as_str()) {
                         entry.model = Some(m.to_string());
+                    }
+                    if let Some(t) = pcfg.get("temperature").and_then(|v| v.as_f64()) {
+                        entry.temperature = Some(t);
                     }
                     if let Some(hs) = pcfg.get("headers").and_then(|v| v.as_array()) {
                         // Append rather than replace: a project file's headers

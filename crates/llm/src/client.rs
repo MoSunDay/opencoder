@@ -113,6 +113,13 @@ impl ChatClient {
             }
             ep = route.resolve_endpoint()?;
             req.model = route.model_id().to_owned();
+            // Provider-pinned temperature (backends that only accept one
+            // fixed value, e.g. reasoning models locked to 1): overrides any
+            // per-purpose default so auxiliary calls (compaction/title/
+            // verify) are not rejected with a 400.
+            if let Some(t) = route.temperature_for(route.provider_id()) {
+                req.temperature = Some(t);
+            }
         }
         let scope = ProviderState {
             provider: ep.provider.clone(),

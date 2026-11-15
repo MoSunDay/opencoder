@@ -662,3 +662,47 @@ fn load_with_home_none_matches_plain_load() {
     assert_eq!(plain.model, with_none.model);
     assert_eq!(with_none.model, "plain/load-model");
 }
+
+// --- provider-pinned temperature resolution ---
+
+#[test]
+fn temperature_for_prefers_named_provider_entry() {
+    let mut c = Config::default();
+    c.providers.insert(
+        "pinned".into(),
+        super::ProviderConfig {
+            temperature: Some(1.0),
+            ..Default::default()
+        },
+    );
+    c.provider.temperature = Some(0.5);
+    assert_eq!(c.temperature_for("pinned"), Some(1.0));
+}
+
+#[test]
+fn temperature_for_falls_back_to_legacy_provider_block() {
+    let mut c = Config::default();
+    c.provider.temperature = Some(0.5);
+    assert_eq!(c.temperature_for("unregistered"), Some(0.5));
+}
+
+#[test]
+fn temperature_for_none_when_unset_everywhere() {
+    let c = Config::default();
+    assert_eq!(c.temperature_for("anything"), None);
+}
+
+#[test]
+fn merge_applies_provider_temperature_from_layered_config() {
+    let mut c = Config::default();
+    c.providers.insert("acme".into(), Default::default());
+    super::merge::merge_into(
+        &mut c,
+        serde_json::json!({
+            "providers": { "acme": { "temperature": 1.0 } },
+            "provider": { "temperature": 0.2 }
+        }),
+    );
+    assert_eq!(c.providers["acme"].temperature, Some(1.0));
+    assert_eq!(c.provider.temperature, Some(0.2));
+}

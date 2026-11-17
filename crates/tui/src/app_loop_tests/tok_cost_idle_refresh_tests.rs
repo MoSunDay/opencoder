@@ -66,7 +66,8 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
                 &mut notepad,
                 &mut None,
                 &opencoder_session::QuestionHub::new(),
-            )
+
+            &mut crate::reset_rebuild::ResetRebuildState::default(),)
             .await
         };
     }

@@ -54,7 +54,8 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
     assert!(
         !skip_next_render,
@@ -90,7 +91,8 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
     assert!(
         !skip_next_render,
@@ -130,7 +132,8 @@ async fn reasoning_deltas_render_first_frame_then_coalesce_hidden_updates() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
     assert!(!skip_next_render, "the Say itself renders");
 }
@@ -181,7 +184,8 @@ async fn batched_reasoning_deltas_coalesce_into_one_step() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
     assert!(
         !skip_next_render,
@@ -247,7 +251,8 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
 
     assert_eq!(

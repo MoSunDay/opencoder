@@ -199,7 +199,8 @@ async fn fold_error_resyncs_steer_mirror_from_store() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
 
     assert_eq!(

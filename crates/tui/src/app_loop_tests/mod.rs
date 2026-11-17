@@ -31,6 +31,7 @@ mod render_gate_fuzz;
 mod sidecar_display_tests;
 mod tok_cost_idle_refresh_tests;
 mod transcript_reset_echo_tests;
+mod transcript_reset_offloop_tests;
 
 #[cfg(test)]
 #[path = "../app_loop_plan_edit_tests.rs"]

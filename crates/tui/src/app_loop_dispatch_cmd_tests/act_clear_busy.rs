@@ -38,6 +38,7 @@ async fn manual_confirm_during_subagent_drain_fires_now() {
         steer_gates: Default::default(),
     };
     let mut cancelled = false;
+    let mut body_pending = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -74,6 +75,7 @@ async fn manual_confirm_during_subagent_drain_fires_now() {
         &mut hist_idx,
         &mut child_runtime,
         &mut cancelled,
+        &mut body_pending,
     )
     .await;
 

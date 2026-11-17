@@ -5,6 +5,7 @@
 use super::*;
 
 use crate::chat::ChatBlock;
+use opencoder_core::Message;
 use opencoder_session::SessionEvent;
 use opencoder_store::{SessionMeta, TursoStore};
 
@@ -87,8 +88,12 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
     let mut question_menu = None;
     let question_hub = std::sync::Arc::new(opencoder_session::QuestionHub::default());
     let mut turn_gen = 0u64;
+    let mut reset = crate::reset_rebuild::ResetRebuildState::default();
 
-    let _ = fold_ui_events(
+    // The reset now rebuilds OFF the loop: fold returns immediately (the
+    // rebuild is spawned) and the rebuilt view installs via wait_done —
+    // mirroring the app loop's reset-done arm.
+    let flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
         &mut chat,
         &store,
@@ -108,8 +113,14 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
         &mut notepad,
         &mut question_menu,
         &question_hub,
+        &mut reset,
     )
     .await;
+    assert!(matches!(flow, LoopFlow::Proceed), "reset fold returns at once");
+    assert!(reset.is_pending(), "the rebuild is in flight");
+    if let Some(rebuilt) = reset.wait_done("sess-reset-echo").await {
+        chat = rebuilt;
+    }
 
     // The echo survived the rebuild as the LAST user boundary…
     let user_texts: Vec<usize> = chat
@@ -209,6 +220,7 @@ async fn done_clears_pending_echo_so_later_bare_reset_does_not_resurrect_it() {
     let mut question_menu = None;
     let question_hub = std::sync::Arc::new(opencoder_session::QuestionHub::default());
     let mut turn_gen = 0u64;
+    let mut reset = crate::reset_rebuild::ResetRebuildState::default();
     let _ = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
         &mut chat,
@@ -229,13 +241,121 @@ async fn done_clears_pending_echo_so_later_bare_reset_does_not_resurrect_it() {
         &mut notepad,
         &mut question_menu,
         &question_hub,
+        &mut reset,
     )
     .await;
+    if let Some(rebuilt) = reset.wait_done("sess-bare-reset").await {
+        chat = rebuilt;
+    }
     assert!(
         !chat
             .blocks
             .iter()
             .any(|b| matches!(b, ChatBlock::User { .. })),
         "no user echo resurrected by a bare reset"
+    );
+}
+
+// Remote (`opencode remote attach`) resets must NOT go through the off-loop
+// rebuild actor: the remote client replays the whole view synchronously from
+// the reset's own message list, and the remote/submitted flags survive.
+#[tokio::test]
+async fn remote_reset_still_replays_synchronously() {
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+    store
+        .create_session(&SessionMeta {
+            id: "sess-remote-reset".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    chat.remote = true;
+    chat.submitted = true;
+    crate::app_helpers::push_user(
+        &mut chat,
+        &mut Vec::new(),
+        &mut None,
+        "u1",
+        "stale-local-tail",
+    );
+
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut plan_skill_active = false;
+    let mut admit = crate::queue_admitter::AdmitUiState::default();
+    let mut running = false;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut question_menu = None;
+    let question_hub = std::sync::Arc::new(opencoder_session::QuestionHub::default());
+    let mut turn_gen = 0u64;
+    let mut reset = crate::reset_rebuild::ResetRebuildState::default();
+
+    let flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::TranscriptReset(vec![
+            Message::user("r1", "remote replayed prompt"),
+        ]))),
+        &mut chat,
+        &store,
+        "sess-remote-reset",
+        &mut queue_items,
+        &mut plan_skill_active,
+        &mut admit,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut turn_gen,
+        &mut evt_rx,
+        &mut notepad,
+        &mut question_menu,
+        &question_hub,
+        &mut reset,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(
+        !reset.is_pending(),
+        "remote resets never spawn an off-loop rebuild"
+    );
+    assert!(
+        chat.remote && chat.submitted,
+        "remote flags survive the inline replay"
+    );
+    let user_text = |b: &ChatBlock| match b {
+        ChatBlock::User { rendered } => Some(
+            rendered
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+        _ => None,
+    };
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| user_text(b).as_deref().is_some_and(|t| t.contains("remote replayed prompt"))),
+        "the view is replaced synchronously from the reset's message list"
+    );
+    assert!(
+        !chat
+            .blocks
+            .iter()
+            .any(|b| user_text(b).as_deref().is_some_and(|t| t.contains("stale-local-tail"))),
+        "the pre-reset local view is gone after the inline replay"
     );
 }

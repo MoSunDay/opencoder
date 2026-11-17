@@ -82,8 +82,8 @@ impl ChatView {
     /// its current disclosure state. A `TranscriptReset` rebuild immediately
     /// before this event may already have rendered the same summary as a
     /// replay twin (the reset carries the folded transcript whose head IS
-    /// the summary message, and the in-flight echo re-push can land after
-    /// it, so the twin is not necessarily the last block): keep it as-is —
+    /// the summary message, and continued output can land after it, so the
+    /// twin is not necessarily the last block): keep it as-is —
     /// same text, disclosure preserved — instead of stacking a duplicate.
     /// Otherwise create a fresh collapsed block (the streamed block was
     /// destroyed, e.g. by a `TranscriptReset` replay).

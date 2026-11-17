@@ -214,12 +214,13 @@ pub struct ChatView {
     pub round_assistant_idx: Option<usize>,
     /// Verbatim echo of the currently admitted turn's user input (submit,
     /// steer consumption, or queue consumption). `TranscriptReset` rebuilds
-    /// the whole view from the folded transcript, which lands BEFORE the
+    /// the whole view from the folded transcript, which can land before the
     /// in-flight prompt is recorded — without this memory the user boundary
     /// of the running turn would be wiped and its ladder would render
     /// orphaned (the "steps of the next turn glued onto the previous one"
-    /// regression). `rebuild_after_reset` re-pushes it below the rebuilt
-    /// blocks; cleared on `Done`/`Error`.
+    /// regression). Clear-context rebuilds re-push it below the rebuilt
+    /// blocks; compaction rebuilds keep only the summary and clear it.
+    /// Cleared on `Done`/`Error`.
     pub pending_turn_echo: Option<String>,
     /// Whether the user has submitted at least one prompt since session start
     /// (or last TranscriptReset). Gates the in-body tutorial: the welcome text

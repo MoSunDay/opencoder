@@ -61,6 +61,32 @@ fn compaction_text(chat: &ChatView) -> String {
         .unwrap_or_default()
 }
 
+/// Text of every plain `User` echo block, in transcript order.
+fn user_texts(chat: &ChatView) -> Vec<String> {
+    chat.blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::User { rendered } => Some(
+                rendered
+                    .iter()
+                    .map(|line| {
+                        line.spans
+                            .iter()
+                            .map(|span| span.content.to_string())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+fn user_count(chat: &ChatView) -> usize {
+    user_texts(chat).len()
+}
+
 /// Resume: the folded transcript's summary head must replay into a
 /// Compaction block — before the fix the synthetic head was skipped and the
 /// compressed history vanished on every restart / task switch.
@@ -89,10 +115,9 @@ async fn resume_replay_renders_summary_head() {
     );
 }
 
-/// Mid-run compaction: `TranscriptReset` rebuild renders the twin (after
-/// the retained tail), the trailing `Compaction(summary)` event finalizes
-/// onto it — exactly one block, summary text present, with the in-flight
-/// echo re-pushed below the twin (`tail + summary + continued execution`).
+/// Mid-run compaction: `TranscriptReset` rebuild renders the summary twin
+/// alone (no in-flight `User` echo), the trailing `Compaction(summary)`
+/// event finalizes onto it — exactly one block, summary text present.
 #[tokio::test]
 async fn transcript_reset_then_compaction_event_renders_single_block() {
     let (dir, store) = fresh().await;
@@ -108,9 +133,12 @@ async fn transcript_reset_then_compaction_event_renders_single_block() {
     chat.pending_turn_echo = Some("the running prompt".into());
 
     let summary = "folded: built, tested, shipped";
-    let msgs = vec![summary_message(summary), Message::user("u2", "next")];
+    let msgs = vec![summary_message(summary)];
     rebuild_after_reset(&mut chat, &msgs, &store, "s-midrun").await;
     assert_eq!(compaction_count(&chat), 1, "rebuild renders the twin");
+    assert_eq!(user_count(&chat), 0, "compaction drops the in-flight echo");
+    assert!(chat.pending_turn_echo.is_none());
+    assert_eq!(chat.turn_block_start, chat.blocks.len());
     assert!(compaction_text(&chat).contains("folded"));
 
     chat.apply(&SessionEvent::Compaction(summary.into()));
@@ -119,28 +147,17 @@ async fn transcript_reset_then_compaction_event_renders_single_block() {
         1,
         "final event must not stack a duplicate twin"
     );
+    assert_eq!(user_count(&chat), 0);
     assert!(compaction_text(&chat).contains("folded"));
-    // Order contract: retained tail turn < summary marker < in-flight echo
-    // (`tail + summary + continued execution`); the echo is re-pushed by
-    // `rebuild_after_reset` AFTER the replayed blocks.
-    let tail_user = user_index(&chat).expect("retained tail echo");
-    let summary_idx = compaction_index(&chat).expect("summary block");
-    let echo_user = chat
-        .blocks
-        .iter()
-        .rposition(|b| matches!(b, ChatBlock::User { .. }))
-        .expect("in-flight echo boundary");
-    assert!(summary_idx > tail_user, "summary below the retained tail");
-    assert!(echo_user > summary_idx, "continued run below the summary");
     let _ = dir;
 }
 
 /// Mid-run compaction records the in-flight prompt before folding, so the
-/// folded transcript's retained tail contains it. The reset rebuild must not
-/// keep that copy above the summary AND push the remembered echo again —
-/// exactly one user boundary remains, below the Compaction marker.
+/// folded transcript's retained tail contains it. The reset rebuild must
+/// drop that copy and the remembered echo: the view continues from the
+/// Compaction summary alone, with no `User` boundary re-pushed.
 #[tokio::test]
-async fn transcript_reset_defers_retained_in_flight_echo_below_summary() {
+async fn transcript_reset_drops_retained_in_flight_echo() {
     let (dir, store) = fresh().await;
     store
         .create_session(&SessionMeta {
@@ -160,22 +177,107 @@ async fn transcript_reset_defers_retained_in_flight_echo_below_summary() {
     ];
     rebuild_after_reset(&mut chat, &msgs, &store, "s-midrun-echo").await;
 
-    let summary_idx = compaction_index(&chat).expect("summary block");
-    let user_idxs: Vec<usize> = chat
-        .blocks
-        .iter()
-        .enumerate()
-        .filter_map(|(i, b)| matches!(b, ChatBlock::User { .. }).then_some(i))
-        .collect();
-    assert_eq!(
-        user_idxs.len(),
-        1,
-        "the retained tail copy and the remembered echo must collapse to one"
+    assert_eq!(user_count(&chat), 0, "retained tail copy must be dropped");
+    assert_eq!(compaction_count(&chat), 1);
+    assert!(chat.pending_turn_echo.is_none());
+    let _ = dir;
+}
+
+/// Compaction retains `tail_turns` history turns above the summary, but the
+/// in-flight prompt is neither retained above the summary nor re-pushed
+/// below it.
+#[tokio::test]
+async fn transcript_reset_keeps_prior_tail_turns_but_drops_in_flight_echo() {
+    let (dir, store) = fresh().await;
+    store
+        .create_session(&SessionMeta {
+            id: "s-midrun-prior".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut chat = ChatView {
+        pending_turn_echo: Some("the running prompt".into()),
+        ..Default::default()
+    };
+
+    let msgs = vec![
+        summary_message("folded: earlier work"),
+        Message::user("u1", "prior prompt"),
+        Message::user("u2", "the running prompt"),
+    ];
+    rebuild_after_reset(&mut chat, &msgs, &store, "s-midrun-prior").await;
+
+    assert_eq!(user_count(&chat), 1, "prior retained turn still renders");
+    let texts = user_texts(&chat);
+    assert!(texts[0].contains("prior prompt"));
+    assert!(
+        !texts.iter().any(|t| t.contains("the running prompt")),
+        "in-flight prompt must not be retained above or re-pushed below"
     );
     assert!(
-        user_idxs[0] > summary_idx,
-        "the in-flight prompt belongs to the continued run below the summary"
+        compaction_index(&chat) > user_index(&chat),
+        "summary renders below the retained prior turn"
     );
     assert_eq!(compaction_count(&chat), 1);
+    assert!(chat.pending_turn_echo.is_none());
+    let _ = dir;
+}
+
+/// A compacted transcript with no retained tail `User` message must not
+/// re-push the remembered echo below the summary.
+#[tokio::test]
+async fn transcript_reset_without_tail_prompt_does_not_push_echo() {
+    let (dir, store) = fresh().await;
+    store
+        .create_session(&SessionMeta {
+            id: "s-midrun-no-tail".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut chat = ChatView {
+        pending_turn_echo: Some("the running prompt".into()),
+        ..Default::default()
+    };
+
+    let msgs = vec![summary_message("folded: earlier work")];
+    rebuild_after_reset(&mut chat, &msgs, &store, "s-midrun-no-tail").await;
+
+    assert_eq!(user_count(&chat), 0);
+    assert_eq!(compaction_count(&chat), 1);
+    assert!(chat.pending_turn_echo.is_none());
+    let _ = dir;
+}
+
+/// Clear-context rebuilds keep the running turn's user boundary: the
+/// remembered echo is re-pushed below the rebuilt blocks. The synthetic seed
+/// is continuity context carried across the clear, not an in-flight prompt.
+#[tokio::test]
+async fn clear_context_reset_keeps_in_flight_echo() {
+    let (dir, store) = fresh().await;
+    store
+        .create_session(&SessionMeta {
+            id: "s-clear-echo".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut chat = ChatView {
+        pending_turn_echo: Some("the running prompt".into()),
+        ..Default::default()
+    };
+
+    let mut seed = Message::user("seed", "carried context");
+    seed.synthetic = true;
+    rebuild_after_reset(&mut chat, &[seed], &store, "s-clear-echo").await;
+
+    assert_eq!(user_count(&chat), 1, "remembered echo re-pushed");
+    assert!(user_texts(&chat)[0].contains("the running prompt"));
+    assert_eq!(compaction_count(&chat), 0);
+    assert_eq!(
+        chat.pending_turn_echo.as_deref(),
+        Some("the running prompt")
+    );
     let _ = dir;
 }

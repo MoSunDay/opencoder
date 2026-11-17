@@ -157,6 +157,47 @@ fn run_seed(seed: u64, log: &mut Vec<String>) -> (Option<u64>, Option<u64>) {
     (g.last_rendered, g.cache)
 }
 
+/// Pure gate lock (no fuzz): with a populated cache, a dirty+render-pending
+/// turn whose body flag is NOT set renders the STALE cached frame — this is
+/// exactly the frozen-first-frame the clear-confirm/reset paths used to hit
+/// (echo/marker pushed but only `dirty` set). Setting `body_pending` on the
+/// same loop turn refreshes the cache BEFORE the render, so the first frame
+/// already shows the new body. Locks the gate against regression.
+#[test]
+fn body_pending_flag_refreshes_cache_before_the_same_turn_render() {
+    CURRENT_VERSION.with(|c| c.set(1));
+    let mut g = Gate::new();
+    g.running = false;
+    g.body_pending = true;
+    g.iter_top(); // primes the cache at version 1
+    assert_eq!(g.last_rendered, Some(1));
+
+    // Body changed (version 2) with only dirty+render_pending set: the gate
+    // renders the STALE cache — the regression shape.
+    CURRENT_VERSION.with(|c| c.set(2));
+    g.dirty = true;
+    g.render_pending = true;
+    g.iter_top();
+    assert_eq!(
+        g.last_rendered,
+        Some(1),
+        "without body_pending the stale cached frame renders"
+    );
+
+    // Same situation, but the change ALSO set body_pending (the fix): the
+    // cache refreshes before the render — the new frame lands immediately.
+    CURRENT_VERSION.with(|c| c.set(3));
+    g.dirty = true;
+    g.render_pending = true;
+    g.body_pending = true;
+    g.iter_top();
+    assert_eq!(g.cache, Some(3), "body_pending refreshes the cache");
+    assert_eq!(
+        g.last_rendered, Some(3),
+        "and the same-turn render shows the refreshed body"
+    );
+}
+
 #[test]
 fn fuzz_last_frame_matches_final_state_after_turn_end() {
     for seed in 1..=4000u64 {

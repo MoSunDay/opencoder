@@ -203,7 +203,7 @@ fn finalize_after_replay_twin_does_not_stack_duplicate() {
         collapsed: true,
         streaming: false,
     });
-    // The reset's echo re-push can land after the twin — not the last block.
+    // Continued output can land after the twin — not the last block.
     v.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
 
     v.apply(&SessionEvent::Compaction("the folded history".into()));

@@ -76,6 +76,12 @@ fn compaction_summary_of(msg: &Message) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Whether the transcript starts from (or contains) a synthetic compaction
+/// summary head — the marker of a compacted rebuild.
+fn has_compaction_summary(messages: &[Message]) -> bool {
+    messages.iter().any(|m| compaction_summary_of(m).is_some())
+}
+
 /// Render a compaction summary as the same collapsible Compaction block the
 /// live path finalizes (collapsed, not streaming).
 ///
@@ -344,12 +350,13 @@ pub async fn replay_into_chat(
     .await
 }
 
-/// Replay with the in-flight turn's verbatim echo. When the folded transcript
-/// already contains that prompt (mid-run compaction records the user message
-/// before the runner folds the head), the replayed copy is deferred and lands
-/// AFTER the Compaction marker instead of being retained in the tail AND
-/// pushed again by the reset rebuild. Clear-context resets do not contain the
-/// prompt yet, so the echo is simply appended below the rebuilt blocks.
+/// Replay with the in-flight turn's verbatim echo. A compacted rebuild keeps
+/// its summary (and any retained history turns) but drops the in-flight
+/// prompt: both the matching tail `User` copy and the remembered
+/// `pending_turn_echo` are discarded, so the view continues from the
+/// Compaction block. Clear-context rebuilds keep the running turn's user
+/// boundary — the retained tail copy is replayed below the rebuilt blocks,
+/// else the echo is appended.
 async fn replay_into_chat_inner(
     agent_name: &str,
     messages: &[Message],
@@ -416,6 +423,7 @@ async fn replay_into_chat_inner(
     // Pre-fetch HTTP image URLs so remote images render during synchronous
     // replay. Data URIs are handled inline by `render_image_from_url`.
     let prefetched = prefetch_image_bytes(messages).await;
+    let compacting = has_compaction_summary(messages);
 
     // The in-flight prompt must be the LAST visible user message; anything
     // earlier with the same text is ordinary history and stays where it was.
@@ -466,16 +474,19 @@ async fn replay_into_chat_inner(
         push_compaction_summary_block(&mut chat, summary);
     }
     // The running turn's boundary belongs below the folded-history marker
-    // (tail + summary + continued execution). If the prompt was part of the
-    // retained tail, render it here from its persisted message (images
-    // included) so it is not both retained above the marker and pushed again;
-    // otherwise re-push the remembered echo for a clear-context rebuild.
-    if let Some(idx) = deferred_user_idx {
-        replay_one(&mut chat, &messages[idx], &prefetched);
-    } else if let Some(echo) = deferred_echo.filter(|echo| !echo.trim().is_empty()) {
-        let rendered = crate::markdown::render(echo);
-        chat.blocks.push(ChatBlock::User { rendered });
-        chat.push_marker(Line::from(""));
+    // (tail + summary + continued execution). Compaction drops the in-flight
+    // prompt entirely — retained tail copy and remembered echo alike — so no
+    // `User` boundary follows the summary; retained history turns above it are
+    // untouched. Clear-context rebuilds replay the retained tail copy (images
+    // included) or re-push the remembered echo.
+    if !compacting {
+        if let Some(idx) = deferred_user_idx {
+            replay_one(&mut chat, &messages[idx], &prefetched);
+        } else if let Some(echo) = deferred_echo.filter(|echo| !echo.trim().is_empty()) {
+            let rendered = crate::markdown::render(echo);
+            chat.blocks.push(ChatBlock::User { rendered });
+            chat.push_marker(Line::from(""));
+        }
     }
     // Full transcript token count for ctx% (system prompt added at render).
     chat.context_used = estimate_messages_for_display(messages) as u64;
@@ -513,6 +524,7 @@ pub async fn rebuild_after_reset(
     let saved_first_prompt = chat.first_prompt.clone();
     let saved_tokens_total = chat.tokens_total;
     let saved_turn_echo = chat.pending_turn_echo.clone();
+    let compacting = has_compaction_summary(msgs);
     *chat = replay_into_chat_inner(
         &agent,
         msgs,
@@ -525,14 +537,11 @@ pub async fn rebuild_after_reset(
     chat.annotation_text = saved_annotation_text;
     chat.submitted = saved_submitted;
     chat.first_prompt = saved_first_prompt;
-    chat.pending_turn_echo = saved_turn_echo;
-    // The reset happened inside the admitted turn (e.g. the compound
-    // `/act_clear_context <tail>` that triggered it), and the folded
-    // transcript may not contain that turn's prompt yet — it can be recorded
-    // after the reset fires. `replay_into_chat_inner` puts the remembered
-    // echo below the rebuilt blocks (and de-duplicates it when the folded
-    // transcript already retained it), so the running ladder keeps its user
-    // boundary and is never merged into the pre-reset turn.
+    chat.pending_turn_echo = if compacting { None } else { saved_turn_echo };
+    // Compaction branch drops the in-flight `User` echo (tail copy and
+    // remembered echo) and clears `pending_turn_echo`, so a later reset in
+    // the same turn cannot resurrect it. Clear-context branch still re-pushes
+    // the boundary so the ladder is never merged into the pre-reset turn.
     // Reliable completion repair must never target pre-reset blocks.
     chat.turn_block_start = chat.blocks.len();
 }

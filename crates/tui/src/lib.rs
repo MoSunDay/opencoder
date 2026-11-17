@@ -43,6 +43,7 @@ pub mod queue_panel;
 pub mod remote;
 pub mod render;
 pub mod render_viewport;
+pub mod reset_rebuild;
 pub mod resize;
 pub mod scope_dialog;
 pub mod scrollbar;

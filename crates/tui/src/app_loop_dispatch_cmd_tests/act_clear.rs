@@ -84,6 +84,7 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
     let mut turn_gen = 0u64;
+    let mut body_pending = false;
     let flow = crate::app::app_loop::fire_clear_confirm(
         crate::clear_confirm::arm(Some("finish the summary".into()), None),
         &cmd_tx,
@@ -103,6 +104,7 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
         "test",
         &mut history,
         &mut hist_idx,
+        &mut body_pending,
     )
     .await;
     assert!(matches!(flow, LoopFlow::Proceed));
@@ -114,6 +116,37 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
         other => panic!("expected compound Prompt, got {other:?}"),
     }
     assert!(admit_rx.try_recv().is_err(), "idle fire must not queue");
+    // The fire changed the transcript body (echo + fresh turn): the display
+    // cache must refresh on this loop turn, not behind the body ticker.
+    assert!(
+        body_pending,
+        "idle fire marks the body dirty for an immediate re-cache"
+    );
+    assert_eq!(
+        chat.pending_turn_echo.as_deref(),
+        Some("finish the summary"),
+        "the echo is remembered for the TranscriptReset rebuild"
+    );
+    // And the rebuild itself keeps that boundary: replay the reset path
+    // directly and confirm the tail echo still renders below the new view.
+    {
+        let store: Arc<dyn Store> = Arc::new(
+            opencoder_store::TursoStore::open_memory().await.unwrap(),
+        );
+        store
+            .create_session(&opencoder_store::SessionMeta {
+                id: "test".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        crate::session_ui::rebuild_after_reset(&mut chat, &[], &store, "test").await;
+        assert!(
+            chat.blocks.iter().any(|b| matches!(b, ChatBlock::User { rendered }
+                if rendered.iter().any(|l| l.to_string().contains("finish the summary")))),
+            "the rebuilt view still opens the new turn with the User boundary"
+        );
+    }
 }
 
 /// Expiry firing while running (the unattended countdown path) queues the
@@ -139,6 +172,7 @@ async fn expired_guard_queues_compound_when_running() {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
     let mut turn_gen = 0u64;
+    let mut body_pending = false;
     let flow = crate::app::app_loop::fire_clear_confirm(
         crate::clear_confirm::arm(Some("then run checks".into()), None),
         &cmd_tx,
@@ -158,6 +192,7 @@ async fn expired_guard_queues_compound_when_running() {
         "test",
         &mut history,
         &mut hist_idx,
+        &mut body_pending,
     )
     .await;
     assert!(matches!(flow, LoopFlow::Proceed));
@@ -175,6 +210,10 @@ async fn expired_guard_queues_compound_when_running() {
                 if lines.iter().any(|l| l.to_string().contains("[clear] 已排队")))),
         "the queue deferral must be echoed as a marker; blocks: {:?}",
         chat.blocks
+    );
+    assert!(
+        body_pending,
+        "the queued marker marks the body dirty for an immediate re-cache"
     );
     assert!(
         !chat
@@ -219,6 +258,7 @@ async fn manual_confirm_while_running_interrupts_and_fires_now() {
         steer_gates: Default::default(),
     };
     let mut cancelled = false;
+    let mut body_pending = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -255,6 +295,7 @@ async fn manual_confirm_while_running_interrupts_and_fires_now() {
         &mut hist_idx,
         &mut child_runtime,
         &mut cancelled,
+        &mut body_pending,
     )
     .await;
 
@@ -286,6 +327,10 @@ async fn manual_confirm_while_running_interrupts_and_fires_now() {
     assert!(
         admit_rx.try_recv().is_err(),
         "manual confirm never queues — it interrupts instead"
+    );
+    assert!(
+        body_pending,
+        "the fired clear turn marks the body dirty for an immediate re-cache"
     );
 }
 
@@ -353,6 +398,7 @@ async fn esc_cancel_drops_countdown_chip() {
         steer_gates: Default::default(),
     };
     let mut cancelled = false;
+    let mut body_pending = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -391,6 +437,7 @@ async fn esc_cancel_drops_countdown_chip() {
         &mut hist_idx,
         &mut child_runtime,
         &mut cancelled,
+        &mut body_pending,
     )
     .await;
 
@@ -409,6 +456,10 @@ async fn esc_cancel_drops_countdown_chip() {
     assert!(
         cmd_rx.try_recv().is_err(),
         "cancel must not send any command"
+    );
+    assert!(
+        body_pending,
+        "the cancel marker marks the body dirty for an immediate re-cache"
     );
 }
 
@@ -444,6 +495,7 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
         steer_gates: Default::default(),
     };
     let mut cancelled = false;
+    let mut body_pending = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -482,6 +534,7 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
             &mut hist_idx,
             &mut child_runtime,
             &mut cancelled,
+            &mut body_pending,
         )
         .await;
     }
@@ -515,6 +568,7 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
         &mut hist_idx,
         &mut child_runtime,
         &mut cancelled,
+        &mut body_pending,
     )
     .await;
 
@@ -562,6 +616,7 @@ async fn retyped_clear_command_supersedes_armed_rest() {
         steer_gates: Default::default(),
     };
     let mut cancelled = false;
+    let mut body_pending = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -599,6 +654,7 @@ async fn retyped_clear_command_supersedes_armed_rest() {
             &mut hist_idx,
             &mut child_runtime,
             &mut cancelled,
+            &mut body_pending,
         )
         .await;
     }
@@ -628,6 +684,7 @@ async fn retyped_clear_command_supersedes_armed_rest() {
         &mut hist_idx,
         &mut child_runtime,
         &mut cancelled,
+        &mut body_pending,
     )
     .await;
 
@@ -673,6 +730,7 @@ async fn shift_tab_repress_fires_armed_guard_now() {
         steer_gates: Default::default(),
     };
     let mut cancelled = false;
+    let mut body_pending = false;
 
     crate::clear_confirm::engage(
         &mut clear_confirm,
@@ -709,6 +767,7 @@ async fn shift_tab_repress_fires_armed_guard_now() {
         &mut hist_idx,
         &mut child_runtime,
         &mut cancelled,
+        &mut body_pending,
     )
     .await;
 

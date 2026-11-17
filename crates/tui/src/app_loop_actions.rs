@@ -433,6 +433,7 @@ pub(crate) async fn fire_clear_confirm(
     session_id: &str,
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
+    body_refresh_pending: &mut bool,
 ) -> LoopFlow {
     let text = crate::clear_confirm::command_text(&cc);
     if *running {
@@ -455,6 +456,9 @@ pub(crate) async fn fire_clear_confirm(
             "[clear] 已排队——当前轮结束后执行\u{2026}",
             Style::default().fg(theme::warn_color()),
         )));
+        // The marker changed the transcript body: re-cache on the next loop
+        // turn instead of waiting for the 333ms body ticker.
+        *body_refresh_pending = true;
         crate::app_helpers::push_history(history, hist_idx, &text);
         return LoopFlow::Proceed;
     }
@@ -466,6 +470,12 @@ pub(crate) async fn fire_clear_confirm(
             rendered: crate::markdown::render(&echo),
         });
         chat.push_marker(Line::from(""));
+        // Remember the echo across the TranscriptReset rebuild — same rule as
+        // `push_user`: without it the rebuilt view opens the new turn with no
+        // User boundary (steps read as merged into the pre-reset turn).
+        if !echo.trim().is_empty() {
+            chat.pending_turn_echo = Some(echo);
+        }
     }
     let name = crate::clear_confirm::CLEAR_CONTEXT_CMD.trim_start_matches('/');
     *sys_tokens = sys_tokens_for(name, workdir, None);
@@ -477,6 +487,9 @@ pub(crate) async fn fire_clear_confirm(
     *running = true;
     *follow = true;
     chat.begin_turn();
+    // The echo + fresh turn changed the body: refresh the display cache on
+    // this loop turn so the first frame after firing is never the stale one.
+    *body_refresh_pending = true;
     LoopFlow::Proceed
 }
 
@@ -510,6 +523,7 @@ pub(crate) async fn fire_clear_confirm_now(
     hist_idx: &mut Option<usize>,
     child_runtime: &mut crate::worker::ChildRuntimeHandles,
     cancelled: &mut bool,
+    body_refresh_pending: &mut bool,
 ) -> LoopFlow {
     // Interrupt on ANY in-flight work, not just `running`: during the
     // autopilot stage gap / subagent drain window the parent already reports
@@ -539,6 +553,7 @@ pub(crate) async fn fire_clear_confirm_now(
         session_id,
         history,
         hist_idx,
+        body_refresh_pending,
     )
     .await
 }
@@ -576,6 +591,7 @@ pub(crate) async fn handle_confirm_key(
     hist_idx: &mut Option<usize>,
     child_runtime: &mut crate::worker::ChildRuntimeHandles,
     cancelled: &mut bool,
+    body_refresh_pending: &mut bool,
 ) -> bool {
     match crate::clear_confirm::intercept(clear_confirm, input, cursor_idx, undo_state, k) {
         Some(crate::clear_confirm::ConfirmFlow::Fire) => {
@@ -609,6 +625,7 @@ pub(crate) async fn handle_confirm_key(
                         hist_idx,
                         child_runtime,
                         cancelled,
+                        body_refresh_pending,
                     )
                     .await,
                     LoopFlow::Quit
@@ -621,6 +638,9 @@ pub(crate) async fn handle_confirm_key(
             // Idle freezes anim_tick once the guard is gone, so a leftover
             // flash would stay pinned on screen forever — drop the chip.
             *mode_flash = None;
+            // The cancel marker changed the body: re-cache now, not behind
+            // the 333ms body ticker (first frame must drop the chip).
+            *body_refresh_pending = true;
             false
         }
         None => false,
@@ -650,6 +670,7 @@ pub(crate) async fn confirm_tick(
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
     turn_gen: &mut u64,
+    body_refresh_pending: &mut bool,
 ) -> bool {
     if let Some(cc) = crate::clear_confirm::tick(clear_confirm, mode_flash, anim_tick) {
         return matches!(
@@ -672,6 +693,7 @@ pub(crate) async fn confirm_tick(
                 session_id,
                 history,
                 hist_idx,
+                body_refresh_pending,
             )
             .await,
             LoopFlow::Quit

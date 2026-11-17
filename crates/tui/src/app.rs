@@ -139,6 +139,8 @@ pub(super) async fn run_app(
         std::collections::HashMap::new();
     let (mut cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(crate::worker::UI_EVENT_CAPACITY);
+    // Off-loop TranscriptReset rebuild actor: `inflight` guards the evt arm below.
+    let (mut reset_rebuild, reset_inflight) = crate::reset_rebuild::ResetRebuildState::new();
 
     let (mut sidecar_ask, worker) =
         crate::app_helpers::start_worker(session, evt_tx, cmd_rx, store.clone());
@@ -229,6 +231,8 @@ pub(super) async fn run_app(
             .await;
             match switched {
                 Ok(()) => {
+                    // An in-flight rebuild for the PREVIOUS session must never install over the switched-to view.
+                    reset_rebuild.invalidate();
                     mode_flash = None;
                     pending_images.clear();
                     subagent_focus = None;
@@ -380,7 +384,7 @@ pub(super) async fn run_app(
                     Event::Key(k) => {
                         // Armed clear-context guard: Enter or a second Shift+Tab fires, Esc 回撤, rest inert.
                         if clear_confirm.is_some() {
-                            if app_loop::handle_confirm_key(&mut clear_confirm, k, &mut input, &mut cursor_idx, &mut undo_state, &mut chat, &cmd_tx, &mut cancel, &mut turn_gen, &mut running, &mut follow, &mut sys_tokens, &mut mode_flash, anim_tick, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx, &mut child_runtime, &mut cancelled).await { break; }
+                            if app_loop::handle_confirm_key(&mut clear_confirm, k, &mut input, &mut cursor_idx, &mut undo_state, &mut chat, &cmd_tx, &mut cancel, &mut turn_gen, &mut running, &mut follow, &mut sys_tokens, &mut mode_flash, anim_tick, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx, &mut child_runtime, &mut cancelled, &mut body_refresh_pending).await { break; }
                             dirty = true;
                             continue;
                         }
@@ -638,6 +642,8 @@ pub(super) async fn run_app(
                             }
                             KeyAction::ArmClearConfirm { rest, draft } => {
                                 crate::clear_confirm::engage(&mut clear_confirm, &mut chat, &mut mode_flash, anim_tick, rest, draft);
+                                // The countdown marker changed the body: re-cache this loop turn so the first frame shows it.
+                                body_refresh_pending = true;
                                 dirty = true;
                             }
                             KeyAction::Cancel => {
@@ -645,6 +651,8 @@ pub(super) async fn run_app(
                                     &mut chat, &mut cancel, &mut turn_gen,
                                     &mut child_runtime, &mut running, &mut cancelled, &mut follow,
                                 ).await;
+                                // The interrupted marker changed the body: land it on the next frame, not behind the body ticker.
+                                body_refresh_pending = true;
                             }
                             KeyAction::EnterPlanEdit => {
                                 app_loop::enter_plan_edit(
@@ -722,40 +730,32 @@ pub(super) async fn run_app(
                     None => admitter_alive = false,
                 }
             }
-            maybe_ev = evt_rx.recv() => {
-                let np_flow = app_loop::fold_ui_events(
-                    maybe_ev, &mut chat, &store, &session_id, &mut queue_items,
-                    &mut plan_skill_active, &mut admit_st, &mut running,
-                    &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
-                    &cmd_tx, &mut cancel, &mut turn_gen, &mut evt_rx, &mut notepad,
-                    &mut question_menu, &question_hub,
-                )
-                .await;
-                match np_flow {
+            // While an off-loop reset rebuild is in flight the event arm is
+            // DISABLED (post-reset events stay queued, in order).
+            maybe_ev = evt_rx.recv(), if !reset_inflight.load(std::sync::atomic::Ordering::Relaxed) => {
+                match app_loop::handle_ui_events(
+                    maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut plan_skill_active,
+                    &mut admit_st, &mut running, &mut cancelled, &mut drain_pending, &mut skip_next_render,
+                    &mut follow, &cmd_tx, &mut cancel, &mut turn_gen, &mut evt_rx, &mut notepad,
+                    &mut question_menu, &question_hub, &mut reset_rebuild, &skill_handle, &mut active_skill,
+                    &mut active_skill_body, &mut sys_tokens, &agent_name, &workdir, &mut dirty,
+                    &mut body_refresh_pending,
+                ).await {
                     app_loop::LoopFlow::Quit => break,
-                    app_loop::LoopFlow::Proceed => {
-                        // Consumption-time skill activation (runner record_compound
-                        // at the idle boundary) rewrote the shared handle; mirror
-                        // it so sys_tokens and the /task snapshots stay truthful.
-                        // Only when idle: mid-run the turn owns the handle and the
-                        // next TurnDone re-syncs.
-                        if !running {
-                            crate::app_helpers::refresh_skill_mirrors(
-                                &skill_handle, &mut active_skill, &mut active_skill_body,
-                                &mut sys_tokens, &agent_name, &workdir, &mut plan_skill_active,
-                            );
-                            body_refresh_pending = true; // idle: land the final frame ([tok cost] total) behind the 333ms body ticker
-                        }
-                        dirty = true;
-                    }
                     app_loop::LoopFlow::Redraw => continue,
+                    app_loop::LoopFlow::Proceed => {}
                 }
+            }
+            // Rebuild landed: install the view + force the cache refresh —
+            // the same turn's render gate rebuilds the viewport.
+            maybe_reset = reset_rebuild.wait_done(&session_id), if reset_inflight.load(std::sync::atomic::Ordering::Relaxed) => {
+                if let Some(rebuilt) = maybe_reset { chat = rebuilt; dirty = true; render_pending = true; body_refresh_pending = true; }
             }
             _ = anim_ticker.tick() => {
                 if running { anim_tick = anim_tick.wrapping_add(1); dirty = true; }
                 if clear_confirm.is_some() {
                     anim_tick = anim_tick.wrapping_add(1);
-                    if app_loop::confirm_tick(&mut clear_confirm, &mut mode_flash, anim_tick, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat, &mut sys_tokens, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx, &mut turn_gen).await { break; }
+                    if app_loop::confirm_tick(&mut clear_confirm, &mut mode_flash, anim_tick, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat, &mut sys_tokens, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx, &mut turn_gen, &mut body_refresh_pending).await { break; }
                     dirty = true;
                 }
                 if app_notepad::poll_bash(&mut bash_rx, &mut chat) { dirty = true; }

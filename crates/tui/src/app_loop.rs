@@ -136,6 +136,7 @@ pub(crate) async fn fold_ui_events(
     _notepad: &mut Option<crate::notepad::NotepadView>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
     question_hub: &std::sync::Arc<opencoder_session::QuestionHub>,
+    reset: &mut crate::reset_rebuild::ResetRebuildState,
 ) -> LoopFlow {
     let ev = match maybe_ev {
         Some(ev) => ev,
@@ -146,9 +147,24 @@ pub(crate) async fn fold_ui_events(
     };
     // Drain all queued events to coalesce token bursts into one
     // batch — process them all now, render at most once next frame.
+    // EXCEPTION: a local `TranscriptReset` rebuilds the whole view off the
+    // UI loop now, so draining STOPS at the reset — later events stay queued
+    // (in order, bounded) and fold against the rebuilt view once installed;
+    // an already-drained successor would otherwise hit the stale view.
+    let local_reset = |ev: &UiEvent| {
+        !chat.remote && matches!(ev, UiEvent::Session(SessionEvent::TranscriptReset(_)))
+    };
     let mut events = vec![ev];
-    while let Ok(ev) = evt_rx.try_recv() {
-        events.push(ev);
+    if local_reset(&events[0]) {
+        events.truncate(1);
+    } else {
+        while let Ok(ev) = evt_rx.try_recv() {
+            let hit_reset = local_reset(&ev);
+            events.push(ev);
+            if hit_reset {
+                break;
+            }
+        }
     }
     // A collapsed, already-visible Thinking block does not need a repaint for
     // every appended reasoning token. The first delta that creates the block
@@ -199,7 +215,15 @@ pub(crate) async fn fold_ui_events(
                         chat.remote = true;
                         chat.submitted = true;
                     } else {
-                        crate::session_ui::rebuild_after_reset(chat, msgs, store, session_id).await;
+                        // Off-loop rebuild: the rebuild reads session meta /
+                        // subagent records / messages and prefetches images
+                        // (worst case seconds) — inline awaiting it here
+                        // froze input, frames and the confirm countdown.
+                        // Spawn it; the app loop installs the rebuilt view
+                        // (reset_rebuild::wait_done) and only then folds the
+                        // events queued behind this reset.
+                        reset.spawn(chat, msgs, store, session_id);
+                        return LoopFlow::Proceed;
                     }
                 } else {
                     hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
@@ -396,6 +420,75 @@ pub(crate) async fn fold_ui_events(
         *skip_next_render = !batch_needs_render;
     }
     LoopFlow::Proceed
+}
+
+/// Body of the `maybe_ev = evt_rx.recv()` select arm in `app.rs`: fold all
+/// queued `UiEvent`s (a local `TranscriptReset` spawns an off-loop rebuild
+/// instead of blocking), then apply the idle-boundary skill-mirror refresh.
+/// Sets the caller's `dirty` / `body_refresh_pending` flags; returns the
+/// mapped `LoopFlow`. Extracted to keep `app.rs` under the iteration cap.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_ui_events(
+    maybe_ev: Option<UiEvent>,
+    chat: &mut ChatView,
+    store: &Arc<dyn Store>,
+    session_id: &str,
+    queue_items: &mut Vec<(i64, String)>,
+    plan_skill_active: &mut bool,
+    admit: &mut crate::queue_admitter::AdmitUiState,
+    running: &mut bool,
+    cancelled: &mut bool,
+    drain_pending: &mut bool,
+    skip_next_render: &mut bool,
+    follow: &mut bool,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    turn_gen: &mut u64,
+    evt_rx: &mut mpsc::Receiver<UiEvent>,
+    notepad: &mut Option<crate::notepad::NotepadView>,
+    question_menu: &mut Option<crate::question_menu::QuestionMenu>,
+    question_hub: &std::sync::Arc<opencoder_session::QuestionHub>,
+    reset: &mut crate::reset_rebuild::ResetRebuildState,
+    skill_handle: &std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    active_skill: &mut Option<String>,
+    active_skill_body: &mut Option<String>,
+    sys_tokens: &mut u64,
+    agent_name: &str,
+    workdir: &Path,
+    dirty: &mut bool,
+    body_refresh_pending: &mut bool,
+) -> LoopFlow {
+    let np_flow = fold_ui_events(
+        maybe_ev, chat, store, session_id, queue_items, plan_skill_active, admit, running,
+        cancelled, drain_pending, skip_next_render, follow, cmd_tx, cancel, turn_gen, evt_rx,
+        notepad, question_menu, question_hub, reset,
+    )
+    .await;
+    match np_flow {
+        LoopFlow::Quit => LoopFlow::Quit,
+        LoopFlow::Proceed => {
+            // Consumption-time skill activation (runner record_compound
+            // at the idle boundary) rewrote the shared handle; mirror
+            // it so sys_tokens and the /task snapshots stay truthful.
+            // Only when idle: mid-run the turn owns the handle and the
+            // next TurnDone re-syncs.
+            if !*running {
+                crate::app_helpers::refresh_skill_mirrors(
+                    skill_handle,
+                    active_skill,
+                    active_skill_body,
+                    sys_tokens,
+                    agent_name,
+                    workdir,
+                    plan_skill_active,
+                );
+                *body_refresh_pending = true; // idle: land the final frame ([tok cost] total) behind the 333ms body ticker
+            }
+            *dirty = true;
+            LoopFlow::Proceed
+        }
+        LoopFlow::Redraw => LoopFlow::Redraw,
+    }
 }
 
 /// The `match outcome` block from the `/` command picker modal: dispatches the

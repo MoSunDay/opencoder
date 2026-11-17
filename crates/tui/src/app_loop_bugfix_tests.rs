@@ -85,7 +85,8 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
 
     assert!(!cancelled, "stale cancel flag should be cleared");
@@ -174,7 +175,8 @@ async fn done_with_pending_queue_arms_drain_pending() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
 
     assert!(drain_pending, "stranded queue must arm drain_pending");
@@ -249,7 +251,8 @@ async fn done_with_empty_store_goes_idle() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
 
     assert!(!drain_pending, "empty store must NOT arm drain_pending");
@@ -306,7 +309,8 @@ async fn drain_pending_restart_with_dead_worker_quits() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-    )
+
+    &mut crate::reset_rebuild::ResetRebuildState::default(),)
     .await;
 
     assert!(

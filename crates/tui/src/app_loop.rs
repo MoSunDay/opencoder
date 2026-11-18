@@ -583,28 +583,28 @@ pub(crate) async fn dispatch_command(
     LoopFlow::Proceed
 }
 
-/// Hard exit (Ctrl+C/Ctrl+D): interrupt any in-flight turn so the worker stops
-/// promptly. Without cancelling the shared token the worker stays blocked inside
-/// `run_session` and cannot read `UiCmd::Quit` until the turn naturally ends (up
-/// to the 30-min timeout), freezing the terminal on the alt-screen. `busy`
-/// covers BOTH a running parent turn and the subagent drain window (parent
-/// already idle, children still live) — in that gap the worker can still be
-/// unwinding inside `run_session`, so quitting without the token cancel
-/// wedges the same way.
+/// Hard exit (Ctrl+C/Ctrl+D). Local sessions ALWAYS cancel the shared token:
+/// `busy` can read stale-idle while the worker is still inside `run_session`,
+/// and a worker blocked there cannot read `UiCmd::Quit` until the turn ends
+/// (up to the 30-min timeout), freezing the terminal on the alt-screen.
+/// Remote sessions keep the exemption — a detach must NOT interrupt
+/// server-side execution (the server owns the run). The Quit hand-off is
+/// non-blocking (`try_send`): a full/wedged channel must never freeze the UI
+/// loop before `quitting` is set; `app_bootstrap::finish` drops the sender
+/// and both worker loops break on channel close (`None`), so quit completes.
 pub(crate) async fn handle_quit(
     busy: bool,
     cancel: &CancellationToken,
     chat: &mut ChatView,
     cmd_tx: &mpsc::Sender<UiCmd>,
 ) {
-    if busy && !chat.remote {
+    if !chat.remote {
         cancel.cancel();
-        chat.push_marker(Line::from(Span::styled(
-            "[exiting…]",
-            Style::default().fg(theme::warn_color()),
-        )));
+        if busy {
+            chat.push_marker(Line::from(Span::styled("[exiting…]", Style::default().fg(theme::warn_color()))));
+        }
     }
-    let _ = cmd_tx.send(UiCmd::Quit).await;
+    let _ = cmd_tx.try_send(UiCmd::Quit);
 }
 
 /// Handle a key in plan/annotation-edit mode. On Exit, persists iff modified.

@@ -341,6 +341,62 @@ async fn remote_queue_steer_and_explicit_interrupt_target_server_not_local_store
     }
 }
 
+/// `UiCmd::Interrupt` (queue-panel `>` on a remote session) must surface as a
+/// server `interrupt` command WITHOUT cancelling the local session token —
+/// the remote worker never observes the local turn_cancel mid-turn, so the
+/// force-insert has to travel as a command.
+#[tokio::test]
+async fn remote_interrupt_command_targets_server() {
+    let fixture = Fixture::new().await;
+    let session = super::create(
+        fixture.binding(ExecutionKind::Agent),
+        fixture.config(),
+        fixture.mock.clone(),
+        fixture.store.clone(),
+        fixture.workdir.path(),
+    )
+    .await
+    .unwrap();
+    let id = session.id;
+    let mut runtime = fixture.store.harness_runtime(&id).await.unwrap().unwrap();
+    runtime.remote.as_mut().unwrap().created = true;
+    fixture
+        .store
+        .set_harness_runtime(&id, &runtime)
+        .await
+        .unwrap();
+    let resumed = super::load(
+        &id,
+        fixture.config(),
+        fixture.mock.clone(),
+        fixture.store.clone(),
+        fixture.workdir.path(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let (ui, mut events) = tokio::sync::mpsc::channel(512);
+    // Deliberately NOT cancelled: the interrupt must come from the command,
+    // not from the session token's `cancel.cancelled()` arm.
+    let token = tokio_util::sync::CancellationToken::new();
+    let worker = crate::worker::spawn_task(resumed.with_cancel(token.clone()), rx, ui);
+    until(&mut events, |event| {
+        matches!(event, UiEvent::RemoteSnapshot { .. })
+    })
+    .await;
+    tx.send(UiCmd::Interrupt).await.unwrap();
+    wait_for(&fixture, |requests| {
+        requests
+            .iter()
+            .any(|(_, body)| body["action"] == "interrupt")
+    })
+    .await;
+    assert!(!token.is_cancelled());
+    tx.send(UiCmd::Quit).await.unwrap();
+    worker.await.unwrap();
+}
+
 async fn wait_for(fixture: &Fixture, predicate: impl Fn(&[(String, serde_json::Value)]) -> bool) {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {

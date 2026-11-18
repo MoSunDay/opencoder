@@ -749,7 +749,7 @@ pub(super) async fn run_app(
             // Rebuild landed: install the view + force the cache refresh —
             // the same turn's render gate rebuilds the viewport.
             maybe_reset = reset_rebuild.wait_done(&session_id), if reset_inflight.load(std::sync::atomic::Ordering::Relaxed) => {
-                if let Some(rebuilt) = maybe_reset { chat = rebuilt; dirty = true; render_pending = true; body_refresh_pending = true; }
+                if let Some(rebuilt) = maybe_reset { chat = rebuilt; subagent_focus = None; dirty = true; render_pending = true; body_refresh_pending = true; }
             }
             _ = anim_ticker.tick() => {
                 if running { anim_tick = anim_tick.wrapping_add(1); dirty = true; }

@@ -47,6 +47,12 @@ pub enum UiCmd {
     /// back on the matching `TurnDone` so stale completions from a cancelled
     /// turn are dropped by the UI.
     ResetCancel(CancellationToken, u64),
+    /// Force-interrupt the remote server-side turn so a pending steer is
+    /// absorbed at its boundary (queue-panel `>` on a remote session). The
+    /// local worker ignores it: local `>` already interrupts through the
+    /// shared `turn_cancel` token, which — unlike this command — is observed
+    /// mid-turn.
+    Interrupt,
     Quit,
 }
 
@@ -543,6 +549,9 @@ pub async fn process_cmd(
             sess.cancel = Some(c);
             false
         }
+        // No-op locally: local `>` interrupts via the shared turn_cancel
+        // token, which (unlike this command) is observed mid-turn.
+        UiCmd::Interrupt => false,
         UiCmd::Quit => true,
     };
     drop(ui_tx);

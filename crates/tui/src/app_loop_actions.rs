@@ -369,6 +369,16 @@ pub(crate) async fn steer_submit_after_mouse(
         *running = true;
         chat.begin_turn();
     }
+    // Remote sessions never observe the local turn_cancel token — the `>`
+    // interrupt must travel to the server as a command so the remote runner
+    // breaks at its boundary and claims the pending steer now. Non-blocking:
+    // a wedged channel must not freeze the click path.
+    if chat.remote
+        && outcome == crate::app::steer_fire::SteerSubmitOutcome::SteerOnly
+        && !crate::app::subagent_input::is_live_subagent_focus(chat, subagent_focus)
+    {
+        let _ = cmd_tx.try_send(UiCmd::Interrupt);
+    }
     *follow = true;
 }
 

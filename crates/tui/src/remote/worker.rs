@@ -115,6 +115,13 @@ pub(crate) fn spawn(
                             subscription = Some(tokio::spawn(stream::subscribe(client.clone(), id.clone(), 0, frames_tx.clone(), detach.clone())));
                         }
                     }
+                    Some(UiCmd::Interrupt) => {
+                        if remote.created {
+                            if let Err(error) = client.command(&id, "interrupt", serde_json::json!({})).await {
+                                report(&ui, &remote, error).await;
+                            }
+                        }
+                    }
                     Some(_) => {
                         let _ = ui.send(UiEvent::Session(SessionEvent::Status("This control is available for /agent self tasks".into()))).await;
                     }

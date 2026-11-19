@@ -30,25 +30,27 @@ pub fn find<'a>(refs: &'a [SubtaskRef], id: &str) -> Option<&'a SubtaskRef> {
     refs.iter().find(|item| item.execution_id == id)
 }
 
-/// Whether `status` is a terminal subtask lifecycle state.
+/// Whether `status` is a terminal subtask lifecycle state for the TUI.
+/// `interrupted` is locally terminal: the TUI stops polling it and does not
+/// auto-resume; an explicit server-side resume is outside this path.
 pub fn is_terminal(status: &str) -> bool {
-    matches!(status, "done" | "error" | "cancelled")
+    matches!(status, "done" | "error" | "cancelled" | "interrupted")
 }
 
 /// Server-side statuses that mean the subtask has finished, mapped to the
 /// status string recorded in the registry. Agent/operator subtasks converge
 /// to `Idle` on success (worker never reports `Done` for them), so idle is
-/// recorded as `done`. `None` while the execution may still make progress.
+/// recorded as `done`. `Interrupted` is locally settled as terminal so the
+/// TUI stops polling; an explicit server-side resume is outside this watcher
+/// path. `None` for statuses the watcher should keep polling.
 pub fn settle_status(status: ExecutionStatus) -> Option<&'static str> {
     match status {
-        ExecutionStatus::Pending
-        | ExecutionStatus::Running
-        | ExecutionStatus::Cancelling
-        | ExecutionStatus::Interrupted => None,
+        ExecutionStatus::Pending | ExecutionStatus::Running | ExecutionStatus::Cancelling => None,
         ExecutionStatus::Idle => Some("done"),
-        ExecutionStatus::Done | ExecutionStatus::Error | ExecutionStatus::Cancelled => {
-            Some(status.as_str())
-        }
+        ExecutionStatus::Done
+        | ExecutionStatus::Error
+        | ExecutionStatus::Cancelled
+        | ExecutionStatus::Interrupted => Some(status.as_str()),
     }
 }
 
@@ -113,6 +115,25 @@ pub fn apply_update(
     (next, delta)
 }
 
+/// Status-only settlement for a locally terminal cancel response. Unlike
+/// [`apply_update`] it never touches tokens and only clears the summary when
+/// the new status is `cancelled` (so a prior transport-error summary is not
+/// retained). Unknown id or an unchanged status returns an unchanged clone.
+pub fn settle_status_only(refs: &[SubtaskRef], id: &str, status: &str) -> Vec<SubtaskRef> {
+    let Some(index) = refs.iter().position(|item| item.execution_id == id) else {
+        return refs.to_vec();
+    };
+    if refs[index].status == status {
+        return refs.to_vec();
+    }
+    let mut next = refs.to_vec();
+    next[index].status = status.to_string();
+    if status == "cancelled" {
+        next[index].result_summary = None;
+    }
+    next
+}
+
 /// Truncate to [`SUMMARY_MAX_CHARS`] chars (display-safe) appending `…`
 /// (U+2026) when truncation happened. No other sanitization.
 pub fn bound_summary(text: &str) -> String {
@@ -167,7 +188,7 @@ mod tests {
             (ExecutionStatus::Pending, None),
             (ExecutionStatus::Running, None),
             (ExecutionStatus::Cancelling, None),
-            (ExecutionStatus::Interrupted, None),
+            (ExecutionStatus::Interrupted, Some("interrupted")),
             (ExecutionStatus::Idle, Some("done")),
             (ExecutionStatus::Done, Some("done")),
             (ExecutionStatus::Error, Some("error")),
@@ -189,6 +210,29 @@ mod tests {
             Some("done")
         );
         assert_eq!(find(&replaced, "agent-z"), None);
+    }
+
+    #[test]
+    fn settle_status_only_preserves_summary_and_tokens() {
+        let mut refs = vec![entry("agent-a", "running", 40)];
+        refs[0].result_summary = Some("partial".into());
+        // `done` keeps the existing summary and token fold.
+        let done = settle_status_only(&refs, "agent-a", "done");
+        let saved = find(&done, "agent-a").expect("entry kept");
+        assert_eq!(saved.status, "done");
+        assert_eq!(saved.result_summary.as_deref(), Some("partial"));
+        assert_eq!(saved.tokens, 40);
+        // `cancelled` clears the summary (no stale transport error) but
+        // keeps the folded cost.
+        let cancelled = settle_status_only(&refs, "agent-a", "cancelled");
+        let saved = find(&cancelled, "agent-a").expect("entry kept");
+        assert_eq!(saved.status, "cancelled");
+        assert_eq!(saved.result_summary, None);
+        assert_eq!(saved.tokens, 40);
+        // Unknown id is a no-op clone.
+        assert_eq!(settle_status_only(&refs, "agent-z", "cancelled"), refs);
+        // Unchanged status is a no-op clone too.
+        assert_eq!(settle_status_only(&refs, "agent-a", "running"), refs);
     }
 
     #[test]

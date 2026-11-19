@@ -104,9 +104,6 @@ pub struct Config {
     /// surfaced (as names in the context-tail skill catalog reminder).
     #[serde(default)]
     pub skills: HashMap<String, SkillConfig>,
-    /// Run repository memory maintenance in an isolated context after each task.
-    #[serde(default)]
-    pub local_memory: bool,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,6 +211,13 @@ pub struct Config {
     /// the task into the Cancelled state. Defaults to 15.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent_drain_secs: Option<u64>,
+    /// Whether the `task` tool may dispatch subagents. `None`/absent =
+    /// enabled (default on).
+    #[serde(
+        default = "default_subagent_enabled",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub subagent: Option<bool>,
     /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
     #[serde(default)]
     pub autopilot: AutoPilotConfig,
@@ -241,6 +245,10 @@ pub struct Config {
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
+    Some(true)
+}
+
+fn default_subagent_enabled() -> Option<bool> {
     Some(true)
 }
 
@@ -317,7 +325,6 @@ impl Default for Config {
             mcp_servers: HashMap::new(),
             cli: HashMap::new(),
             skills: HashMap::new(),
-            local_memory: false,
             model: default_model(),
             small_model: None,
             embedding_model: None,
@@ -334,6 +341,7 @@ impl Default for Config {
             reasoning_effort: None,
             cache_salt: default_cache_salt(),
             interleaved_thinking: Some(true),
+            subagent: Some(true),
             fps: None,
             network: NetworkConfig::default(),
             tool_guard: ToolGuardConfig::default(),
@@ -592,6 +600,10 @@ impl Config {
     /// Effective grace window for a subagent to drain after an interrupt.
     pub fn subagent_drain(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.subagent_drain_secs.unwrap_or(15))
+    }
+    /// Whether subagent (`task` tool) dispatch is enabled. Defaults to true.
+    pub fn subagent_enabled(&self) -> bool {
+        self.subagent.unwrap_or(true)
     }
     /// Model id used for low-cost background calls (title generation, compaction
     /// summarization). Returns the id (after the `/`) so the request body carries

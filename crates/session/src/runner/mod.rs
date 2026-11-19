@@ -25,7 +25,6 @@ mod event;
 mod execute;
 mod input_recovery;
 mod llm_call;
-mod local_memory;
 mod registry;
 pub(crate) mod sidecar;
 mod steer;

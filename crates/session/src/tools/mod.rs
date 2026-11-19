@@ -110,6 +110,8 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, hide_build: bool) -> Vec<Val
 /// The filtering logic mirrors `runner::llm_call::run_one_llm_call` exactly
 /// (agent allowlist ∧ latent-gating, with the plan `question` exemption),
 /// so the estimate matches what the provider actually receives.
+/// The `subagent` toggle is enforced only in the runner, so while it is off
+/// this static estimate may still count the `task` schema.
 pub fn estimate_tool_schema_tokens(
     agent: &opencoder_core::Agent,
     skill_body: Option<&str>,

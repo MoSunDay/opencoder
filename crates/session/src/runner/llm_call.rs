@@ -62,6 +62,11 @@ pub(super) async fn run_one_llm_call(
     let allowed: HashMap<String, ToolArc> = registry
         .iter()
         .filter(|(name, _)| {
+            // The `subagent` config toggle removes the `task` tool from the
+            // advertised set so the model never attempts a dispatch while off.
+            if name.as_str() == "task" && !session.config.subagent_enabled() {
+                return false;
+            }
             if session.agent.kind == opencoder_core::AgentKind::Act
                 && extensions.iter().any(|t| t.name() == name.as_str())
             {

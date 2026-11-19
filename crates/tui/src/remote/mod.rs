@@ -67,4 +67,4 @@ pub(crate) fn local_control(action: &crate::key_handler::KeyAction) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

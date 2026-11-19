@@ -5,11 +5,30 @@
 //! is independent of the session worker (workers are quit on `/task`
 //! switches) so writebacks keep flowing into the parent registry that owns
 //! the subtask.
+//!
+//! Failures are isolated per target: a transport error only advances that
+//! target's consecutive-failure counter, so one unreachable execution never
+//! drags healthy siblings down with it.
 
 use crate::remote::client::ServerClient;
 use crate::worker::UiEvent;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
+
+/// Ids settled locally (terminal cancel response): the watcher drops them
+/// before polling and before delivering a terminal update, so a dead target
+/// can never overwrite the settled status with `error`.
+pub(crate) type SettledSet = Arc<Mutex<HashSet<String>>>;
+
+/// `true` when `id` was settled locally; poisoned locks are recovered.
+fn is_settled(settled: &SettledSet, id: &str) -> bool {
+    settled
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(id)
+}
 
 /// One subtask to poll. `session` is the parent session whose runtime
 /// registry owns the subtask; the emitted update routes back into it even
@@ -19,84 +38,149 @@ pub(crate) struct WatchTarget {
     pub execution_id: String,
 }
 
+/// Per-target poll bookkeeping: consecutive failures and the last error
+/// detail (used verbatim for the settling "error" delivery).
+struct TargetState {
+    target: WatchTarget,
+    failed_rounds: u32,
+    last_error: Option<String>,
+}
+
 /// Poll period; matches the fleet heartbeat cadence.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
-/// Consecutive failed ROUNDS (any status transport error marks the round)
-/// before the watcher gives up and settles every remaining target as errored.
+/// Consecutive failed polls per target; only that target settles as error,
+/// healthy targets keep polling.
 const MAX_FAILED_ROUNDS: u32 = 5;
 
 /// Spawned after every dispatch and on parent-session hydration (the event
-/// hub arms it for every pending registry entry).
+/// hub arms it for every pending registry entry). Test/back-compat wrapper
+/// without a locally-settled set.
+#[allow(dead_code)]
 pub(crate) fn spawn(
     client: ServerClient,
     ui: mpsc::Sender<UiEvent>,
     targets: Vec<WatchTarget>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(client, ui, targets))
+    spawn_with_settled(client, ui, targets, SettledSet::default())
 }
 
-async fn run(client: ServerClient, ui: mpsc::Sender<UiEvent>, mut targets: Vec<WatchTarget>) {
-    let mut ticker = tokio::time::interval(POLL_INTERVAL);
-    let mut failed_rounds = 0;
-    while !targets.is_empty() {
+/// Production entry: shares the hub's locally-settled id set.
+pub(crate) fn spawn_with_settled(
+    client: ServerClient,
+    ui: mpsc::Sender<UiEvent>,
+    targets: Vec<WatchTarget>,
+    settled: SettledSet,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(run(client, ui, targets, settled))
+}
+
+async fn run(
+    client: ServerClient,
+    ui: mpsc::Sender<UiEvent>,
+    targets: Vec<WatchTarget>,
+    settled: SettledSet,
+) {
+    run_with_settled(client, ui, targets, POLL_INTERVAL, settled).await
+}
+
+/// Poll loop with an injectable cadence (tests use a short real-time
+/// interval); no locally-settled ids.
+#[allow(dead_code)]
+pub(crate) async fn run_with(
+    client: ServerClient,
+    ui: mpsc::Sender<UiEvent>,
+    targets: Vec<WatchTarget>,
+    interval: Duration,
+) {
+    run_with_settled(client, ui, targets, interval, SettledSet::default()).await
+}
+
+/// Poll loop with an injectable cadence (tests use a short real-time
+/// interval). Each round polls every still-live target independently and
+/// drops ids settled locally by the cancel-response path.
+pub(crate) async fn run_with_settled(
+    client: ServerClient,
+    ui: mpsc::Sender<UiEvent>,
+    targets: Vec<WatchTarget>,
+    interval: Duration,
+    settled: SettledSet,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    let mut states: Vec<TargetState> = targets
+        .into_iter()
+        .map(|target| TargetState {
+            target,
+            failed_rounds: 0,
+            last_error: None,
+        })
+        .collect();
+    while !states.is_empty() {
+        // Locally settled ids (terminal cancel response) stop being polled.
+        states.retain(|state| !is_settled(&settled, &state.target.execution_id));
+        if states.is_empty() {
+            return;
+        }
         ticker.tick().await;
-        let mut round_error = None;
-        let mut remaining = Vec::with_capacity(targets.len());
-        for target in std::mem::take(&mut targets) {
-            match crate::remote::subtasks::fetch_status(&client, &target.execution_id).await {
+        let mut remaining = Vec::with_capacity(states.len());
+        for mut state in std::mem::take(&mut states) {
+            let id = state.target.execution_id.clone();
+            match crate::remote::subtasks::fetch_status(&client, &id).await {
                 Ok(status) => {
                     if let Some(final_status) = crate::subtask_registry::settle_status(status) {
                         // Summary/token fetch failures degrade to None/0 —
-                        // they never fail the round (status is the truth).
-                        let summary =
-                            crate::remote::subtasks::fetch_summary(&client, &target.execution_id)
-                                .await
-                                .ok()
-                                .flatten();
-                        let tokens =
-                            crate::remote::subtasks::fetch_tokens(&client, &target.execution_id)
-                                .await
-                                .unwrap_or(0);
-                        if !send(&ui, &target, final_status.to_string(), summary, tokens).await {
+                        // they never fail the poll (status is the truth).
+                        let summary = crate::remote::subtasks::fetch_summary(&client, &id)
+                            .await
+                            .ok()
+                            .flatten();
+                        let tokens = crate::remote::subtasks::fetch_tokens(&client, &id)
+                            .await
+                            .unwrap_or(0);
+                        if is_settled(&settled, &id) {
+                            continue; // settled locally mid-round: drop it
+                        }
+                        if !send(
+                            &ui,
+                            &state.target,
+                            final_status.to_string(),
+                            summary,
+                            tokens,
+                        )
+                        .await
+                        {
                             return; // UI channel closed: nothing left to update
                         }
                     } else {
-                        remaining.push(target);
+                        state.failed_rounds = 0;
+                        state.last_error = None;
+                        remaining.push(state);
                     }
                 }
                 Err(error) => {
-                    round_error = Some(error);
-                    remaining.push(target);
+                    state.failed_rounds += 1;
+                    state.last_error = Some(format!("{error:#}"));
+                    if state.failed_rounds >= MAX_FAILED_ROUNDS {
+                        // This target's transport is dead: settle it once so
+                        // its registry entry stops counting as pending. The
+                        // other targets are unaffected and keep polling.
+                        let detail = state
+                            .last_error
+                            .as_deref()
+                            .unwrap_or("subtask status unreachable");
+                        let summary = Some(crate::subtask_registry::bound_summary(detail));
+                        if is_settled(&settled, &id) {
+                            continue; // settled locally mid-round: no error delivery
+                        }
+                        if !send(&ui, &state.target, "error".into(), summary, 0).await {
+                            return;
+                        }
+                    } else {
+                        remaining.push(state);
+                    }
                 }
             }
         }
-        targets = remaining;
-        failed_rounds = if round_error.is_some() {
-            failed_rounds + 1
-        } else {
-            0
-        };
-        if failed_rounds >= MAX_FAILED_ROUNDS {
-            // Transport dead: settle each remaining target once with an
-            // error status so its registry entry stops counting as pending.
-            let detail = round_error
-                .map(|error| format!("{error:#}"))
-                .unwrap_or_else(|| "subtask status unreachable".into());
-            for target in &targets {
-                let done = send(
-                    &ui,
-                    target,
-                    "error".into(),
-                    Some(crate::subtask_registry::bound_summary(&detail)),
-                    0,
-                )
-                .await;
-                if !done {
-                    return;
-                }
-            }
-            return;
-        }
+        states = remaining;
     }
 }
 
@@ -167,6 +251,36 @@ mod tests {
                 .await
                 .is_ok(),
             "watcher exits after settling"
+        );
+    }
+
+    /// A target settled locally (terminal cancel response) is dropped before
+    /// the first poll: no `/index` call, no delivery, and the watcher exits.
+    #[tokio::test]
+    async fn watcher_skips_locally_settled_target() {
+        let fixture = crate::remote::tests::support::Fixture::new().await;
+        let client = ServerClient::new(&fixture.url, None).unwrap();
+        let (tx, mut rx) = mpsc::channel(16);
+        let settled: SettledSet = Arc::new(Mutex::new(HashSet::from(["agent-sub-1".to_string()])));
+        let handle = spawn_with_settled(client, tx, vec![target("agent-sub-1")], settled);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), handle)
+                .await
+                .is_ok(),
+            "settled target is dropped without polling"
+        );
+        assert!(rx.try_recv().is_err(), "no update for a settled target");
+        assert_eq!(
+            fixture
+                .state
+                .lock()
+                .unwrap()
+                .index_calls
+                .get("agent-sub-1")
+                .copied()
+                .unwrap_or(0),
+            0,
+            "a settled target is never polled"
         );
     }
 

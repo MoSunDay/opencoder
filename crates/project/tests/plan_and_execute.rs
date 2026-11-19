@@ -54,11 +54,6 @@ async fn harness(scripts: Vec<Vec<LlmEvent>>) -> Harness {
     let mock = Arc::new(mock);
     let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("opencoder.json"),
-        r#"{"local_memory":false}"#,
-    )
-    .unwrap();
     let service = ProjectService::new();
     service
         .init(

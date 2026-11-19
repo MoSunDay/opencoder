@@ -33,7 +33,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/config",
-        "配置思考深度 / 上下文阈值 / 渲染帧率 / tmux / local-memory",
+        "配置思考深度 / 上下文阈值 / 渲染帧率 / tmux / subagent",
     ),
     (
         "/compact",

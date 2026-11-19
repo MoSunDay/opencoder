@@ -18,10 +18,9 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 - [Web 会话](../agents/frontend/web/index.md) — 流式会话、SSE 与模型发现。
 - [Responses API](interaction/responses/index.md) — Responses 协议编码工作流：provider state 持久化，resume/fork/compaction 保持完整工具组。
 - [Computer use](interaction/computer-use/index.md) — 通过可选 CLI 调用 Cua Agent，操作已有远程桌面。
-## 配置与基础能力（base/）
+## 配置与基础能力
 - [配置和资源作用域](../agents/foundation/core/index.md) — 模型/压缩/命名环境与 Skill 注入。
 - [模型客户端](../agents/foundation/llm/index.md)、[持久化](../agents/foundation/store/index.md) — 流式客户端与本地存储。
-- [本地仓库记忆](base/local-memory/index.md) — 任务完成后在独立上下文更新记忆，可在 `/config` 开关。
 - 内置 Skill 工作流 — task-plan / task-plan-subagent / say-and-replay。
 - [sandbox 命令分类](../agents/runtime/shellguard/index.md) — 只读模式写效应拦截。
 - [测试规则](../rules/) — 功能测试、回归 gate、测试分层。

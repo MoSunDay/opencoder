@@ -79,6 +79,51 @@ async fn terminal_entry_from_same_session_appends_to_queue_items() {
     );
 }
 
+/// `interrupted` is terminal too: the append lands like done/error/cancelled
+/// instead of tripping the not-finished guard.
+#[tokio::test]
+async fn interrupted_entry_appends_like_other_terminal_states() {
+    let store = store_with_registry("parent", vec![entry("agent-1", "interrupted")]).await;
+    let (admit_tx, _rx) = mpsc::channel(8);
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let mut chat = ChatView::default();
+    let mut queue_items = Vec::new();
+    let mut pending_images = Vec::new();
+    let mut flash = None;
+    let pick = append_subtask_result(
+        "agent-1",
+        &store,
+        "parent",
+        &mut chat,
+        Some("parent"),
+        &admit_tx,
+        &mut admit_st,
+        &mut queue_items,
+        &mut pending_images,
+        &mut flash,
+        0,
+        0,
+    )
+    .await;
+    assert!(pick.is_none(), "parent is live: no switch requested");
+    assert_eq!(queue_items.len(), 1, "queue panel carries the append row");
+    assert!(
+        queue_items[0].1.contains("[subtask agent-1"),
+        "row renders the append text, got: {}",
+        queue_items[0].1
+    );
+    assert_ne!(
+        flash.as_ref().map(|(t, _)| t.as_str()),
+        Some("subtask 尚未完成，完成后再追加"),
+        "no not-finished guard flash for a terminal state"
+    );
+    assert_eq!(
+        flash.as_ref().map(|(t, _)| t.as_str()),
+        Some("subtask 结果已追加到主任务"),
+        "success flash"
+    );
+}
+
 /// A still-running subtask must not append: only the guard flash fires.
 #[tokio::test]
 async fn non_terminal_entry_flashes_and_does_not_append() {

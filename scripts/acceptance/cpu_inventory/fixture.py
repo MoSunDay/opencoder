@@ -43,8 +43,7 @@ class Fixture:
                             'RUST_LOG': 'info'}
         for role in ('server', 'host', 'runtime', 'home'):
             write(self.root / role / '.opencoder/config.json', {
-                'agent': {'agents_dir': None},
-                'local_memory': False})
+                'agent': {'agents_dir': None}})
             write(self.root / role / '.opencoder/ap.json', {'mode': 'off'})
         self.data = self.root / 'runtime-data'
         host_data = self.root / 'host-data'

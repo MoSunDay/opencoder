@@ -21,9 +21,7 @@ use super::skills_dir;
 /// the `task-plan -> do-and-done -> review -> submit` workflow, the
 /// `task-plan-subagent` delegation companion, the orthogonal `summary`
 /// retrospective tool (read-only task recap at any checkpoint), and the
-/// `say-and-replay` alignment snapshot tool (read-only progress replay), plus
-/// the memory pair `repo-local-memory` (per-iteration repair-on-touch minimal
-/// updates) and `repo-local-dreaming` (periodic full memory consolidation).
+/// `say-and-replay` alignment snapshot tool (read-only progress replay).
 const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
     (
         "task-plan",
@@ -60,30 +58,6 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
         &[(
             "SKILL.md",
             include_str!("../../assets/skills/do-and-done/SKILL.md"),
-        )],
-    ),
-    (
-        "repo-local-memory",
-        &[
-            (
-                "SKILL.md",
-                include_str!("../../assets/skills/repo-local-memory/SKILL.md"),
-            ),
-            (
-                "EXAMPLES.md",
-                include_str!("../../assets/skills/repo-local-memory/EXAMPLES.md"),
-            ),
-            (
-                "TEMPLATES.md",
-                include_str!("../../assets/skills/repo-local-memory/TEMPLATES.md"),
-            ),
-        ],
-    ),
-    (
-        "repo-local-dreaming",
-        &[(
-            "SKILL.md",
-            include_str!("../../assets/skills/repo-local-dreaming/SKILL.md"),
         )],
     ),
     (

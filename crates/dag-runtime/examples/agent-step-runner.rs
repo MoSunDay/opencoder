@@ -72,9 +72,9 @@ fn run() -> Result<(), i32> {
         }
     };
     // The container has a fresh HOME. Seed this runner's embedded skills in
-    // the writable step workspace before sessions can request local memory.
-    // Frozen metadata stays read-only inside the container.
-    // Reusing the snapshot keeps retries independent of host skill changes.
+    // the writable step workspace. Frozen metadata stays read-only inside
+    // the container. Reusing the snapshot keeps retries independent of host
+    // skill changes.
     if let Err(error) =
         opencoder_core::skill::pin_runtime_skills(&step_dir.join(".opencoder/runtime"), None)
     {

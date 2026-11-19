@@ -139,7 +139,6 @@ impl ModelBridge {
         config.provider.base_url = self.url.clone();
         config.provider.api_key = Some("local-fixture".into());
         config.provider.protocol = "chat_completions".into();
-        config.local_memory = false;
     }
 }
 

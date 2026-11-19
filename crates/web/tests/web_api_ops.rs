@@ -222,14 +222,14 @@ async fn skill_persists_to_store_meta() {
                 .method("POST")
                 .uri("/api/sessions/s1/skill")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"skill":"repo-local-memory"}"#))
+                .body(Body::from(r#"{"skill":"task-plan"}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let meta = state.store.get_session("s1").await.unwrap().unwrap();
-    assert_eq!(meta.skill.as_deref(), Some("repo-local-memory"));
+    assert_eq!(meta.skill.as_deref(), Some("task-plan"));
 }
 
 #[tokio::test]
@@ -274,7 +274,7 @@ async fn skill_nonexistent_returns_404() {
                 .method("POST")
                 .uri("/api/sessions/nope/skill")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"skill":"repo-local-memory"}"#))
+                .body(Body::from(r#"{"skill":"task-plan"}"#))
                 .unwrap(),
         )
         .await

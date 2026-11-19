@@ -33,7 +33,7 @@ class Model:
         self.thread.start()
 
     def config(self):
-        return {'model': 'fixture/model', 'cache_salt': False, 'local_memory': False,
+        return {'model': 'fixture/model', 'cache_salt': False,
                 'agent': {'agents_dir': None},
                 'providers': {'fixture': {'base_url': f'http://127.0.0.1:{self.server.server_port}/v1',
                                            'api_key': 'local-fixture', 'protocol': 'chat_completions'}}}

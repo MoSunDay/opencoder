@@ -27,45 +27,6 @@ pub async fn run_with_registry(
     user_text: String,
     images: Vec<String>,
     registry: &HashMap<String, ToolArc>,
-    mut on_event: impl FnMut(SessionEvent) + Send,
-) -> Result<()> {
-    // The gate keys on the agent the task will actually run under: a
-    // compound control command switches the agent inside the run, so
-    // eligibility probes the switch target.
-    // `Done` must still fire synchronously at its original point (before the
-    // re-absorb tail) — only the eligibility snapshot is probe-aware.
-    let memory_enabled = super::local_memory::eligible_for_run(session, &user_text);
-    let baseline = session.messages.len();
-    let result = run_without_memory(session, user_text, images, registry, |event| {
-        if !memory_enabled || !matches!(event, SessionEvent::Done) {
-            on_event(event);
-        }
-    })
-    .await;
-    let result = match result {
-        Ok(()) if memory_enabled => {
-            opencoder_core::agent::scope::with_root(
-                session.config.agent.agents_dir.clone(),
-                super::local_memory::after_task(session, baseline, &mut on_event),
-            )
-            .await
-        }
-        other => other,
-    };
-    if memory_enabled {
-        if let Err(error) = &result {
-            on_event(SessionEvent::Error(error.to_string()));
-        }
-        on_event(SessionEvent::Done);
-    }
-    result
-}
-
-pub(super) async fn run_without_memory(
-    session: &mut SessionState,
-    user_text: String,
-    images: Vec<String>,
-    registry: &HashMap<String, ToolArc>,
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let root = session.config.agent.agents_dir.clone();

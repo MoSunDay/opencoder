@@ -15,8 +15,17 @@ use opencoder_core::{
 use opencoder_llm::MockChatClient;
 use opencoder_store::{Store, TursoStore};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+
+/// Scripted `/index` reply, consumed one per call (the last item repeats
+/// forever once the script is exhausted).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IndexReply {
+    Status(&'static str),
+    Fail,
+}
 
 #[derive(Default)]
 pub struct MockState {
@@ -28,10 +37,18 @@ pub struct MockState {
     pub auth_denied: bool,
     pub payload: Vec<u8>,
     pub questions: Vec<Value>,
-    /// Execution status served by `/index` (empty = "running").
+    /// Execution status served by `/index` when no script is registered
+    /// (empty = "running").
     pub status: String,
+    /// Per-execution `/index` scripts; absent = fall back to `status`.
+    pub index_script: HashMap<String, Vec<IndexReply>>,
+    /// Number of `/index` calls served per execution id.
+    pub index_calls: HashMap<String, u32>,
     /// `summary` string served by `/result` (None = empty object).
     pub result_summary: Option<String>,
+    /// Terminal status echoed by `/commands` for `cancel` actions (None =
+    /// the legacy `{"ok":true,"admitted_seq":42}` body).
+    pub command_status: Option<String>,
 }
 pub struct Fixture {
     pub url: String,
@@ -162,6 +179,15 @@ async fn handler(State(state): State<Arc<Mutex<MockState>>>, request: Request<Bo
         if input["input"]["tail"] == "questions" {
             return axum::Json(json!({"questions":state.questions})).into_response();
         }
+        let cancel_status = if input["action"] == "cancel" {
+            state.command_status.clone()
+        } else {
+            None
+        };
+        if let Some(status) = cancel_status {
+            let id = path.split('/').nth(3).unwrap_or_default();
+            return axum::Json(json!({"id":id,"status":status})).into_response();
+        }
         return axum::Json(json!({"ok":true,"admitted_seq":42})).into_response();
     }
     if path.ends_with("/index") {
@@ -171,10 +197,23 @@ async fn handler(State(state): State<Arc<Mutex<MockState>>>, request: Request<Bo
         } else {
             "agent"
         };
-        let status = if state.status.is_empty() {
-            "running"
-        } else {
-            &state.status
+        let call = state.index_calls.get(id).copied().unwrap_or(0);
+        state.index_calls.insert(id.to_string(), call + 1);
+        let scripted = state
+            .index_script
+            .get(id)
+            .and_then(|script| script.get(call as usize).or_else(|| script.last()).cloned());
+        let status = match scripted {
+            Some(IndexReply::Status(status)) => status.to_string(),
+            Some(IndexReply::Fail) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(json!({"error":"scripted failure"})),
+                )
+                    .into_response()
+            }
+            None if state.status.is_empty() => "running".to_string(),
+            None => state.status.clone(),
         };
         return axum::Json(
             json!({"id":id,"kind":kind,"node_id":"auto-node","status":status,"created_at":1}),

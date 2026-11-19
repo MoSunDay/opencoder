@@ -3,6 +3,7 @@
 
 use super::*;
 use crossterm::event::KeyModifiers;
+use opencoder_core::fleet::ExecutionStatus;
 use serde_json::json;
 
 fn entry(id: &str, kind: &str, status: &str) -> SubtaskRef {
@@ -87,6 +88,23 @@ fn apply_update_merges_entry_and_snapshot() {
     // Unknown ids are a no-op.
     view.apply_update("ghost", "done", None, 1);
     assert_eq!(view.entries[0].status, "done");
+}
+
+/// The cancel poll hands back the target id it was armed for together with
+/// the outcome (the selection may have moved meanwhile).
+#[test]
+fn poll_cancel_returns_target_and_outcome() {
+    let mut view = SubtaskView::new(vec![entry("agent-a", "agent", "running")]);
+    let (tx, rx) = oneshot::channel();
+    view.cancel = Some(("agent-a".into(), rx));
+    tx.send(Ok(CancelOutcome {
+        status: Some(ExecutionStatus::Cancelled),
+    }))
+    .unwrap();
+    let (id, result) = view.poll_cancel().expect("cancel completed");
+    assert_eq!(id, "agent-a", "target id survives the slot clear");
+    assert_eq!(result.unwrap().status, Some(ExecutionStatus::Cancelled));
+    assert!(view.cancel.is_none(), "slot cleared after polling");
 }
 
 #[test]

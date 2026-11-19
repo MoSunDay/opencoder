@@ -164,7 +164,6 @@ pub(super) async fn fixture(
     std::fs::create_dir_all(config.agent.agents_dir.as_ref().unwrap()).unwrap();
     let bridge = model::ModelBridge::start(client);
     bridge.configure(&mut config);
-    config.local_memory = false;
     Fixture {
         container,
         _bridge: bridge,

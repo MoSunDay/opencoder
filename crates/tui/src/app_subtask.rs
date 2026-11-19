@@ -26,8 +26,8 @@ pub(crate) const FALLBACK_TERM_H: u16 = 24;
 /// Route one key while the fullscreen `/subtasks` view is open. Returns
 /// `true` when the key was consumed (app.rs sets dirty + continues). `Esc`
 /// closes, `Ctrl+Enter` appends the selected result back to the main task,
-/// `Enter` descends into the child conversation (armed with a main-task
-/// return pointer, exactly like the Ctrl+Enter-from-child flow).
+/// `Enter` descends into the child conversation (staged together with the
+/// parent return pointer, exactly like the Ctrl+Enter-from-child flow).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn key(
     view: &mut Option<SubtaskView>,
@@ -37,13 +37,14 @@ pub(crate) async fn key(
     session_id: &str,
     chat: &mut ChatView,
     subtask_ui: &mut SubtaskUi,
+    selection: &mut crate::remote::Selection,
     admit_tx: &mpsc::Sender<queue_admitter::AdmitReq>,
     admit_st: &mut AdmitUiState,
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
-    pending_task_pick: &mut Option<TaskPick>,
+    pending_task_pick: &mut Option<super::app_switch::PendingSwitch>,
     config: &Config,
     turn: u64,
 ) -> bool {
@@ -60,6 +61,7 @@ pub(crate) async fn key(
                 session_id,
                 chat,
                 subtask_ui,
+                selection,
                 admit_tx,
                 admit_st,
                 queue_items,
@@ -73,10 +75,14 @@ pub(crate) async fn key(
             *view = None;
         }
         SubtaskOutcome::EnterConversation(child_id) => {
-            // Stage the parent pointer: the switch Ok arm clears the live
-            // descent pointer first, then adopts this once the child is up.
-            subtask_ui.arm_after_switch = Some(session_id.to_string());
-            *pending_task_pick = Some(TaskPick::Resume(child_id));
+            // Stage the descend atomically: drop any in-flight `/agent`
+            // query, then carry the Resume pick together with the parent to
+            // adopt once the child switch succeeds.
+            super::app_switch::stage(
+                pending_task_pick,
+                selection,
+                super::app_switch::descend(TaskPick::Resume(child_id), session_id.to_string()),
+            );
             *view = None;
         }
     }
@@ -93,15 +99,22 @@ pub(crate) async fn append_and_pick(
     session_id: &str,
     chat: &mut ChatView,
     subtask_ui: &mut SubtaskUi,
+    selection: &mut crate::remote::Selection,
     admit_tx: &mpsc::Sender<queue_admitter::AdmitReq>,
     admit_st: &mut AdmitUiState,
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
-    pending_task_pick: &mut Option<TaskPick>,
+    pending_task_pick: &mut Option<super::app_switch::PendingSwitch>,
     turn: u64,
 ) {
+    // Nothing to append into: flash instead of silently doing nothing (the
+    // detail view still closes, but no switch is staged).
+    if subtask_ui.main_task_id.is_none() {
+        *mode_flash = Some(("当前会话没有主任务，无法追加".into(), anim_tick));
+        return;
+    }
     if let Some(pick) = super::app_loop::append_subtask_result(
         child_id,
         store,
@@ -119,7 +132,7 @@ pub(crate) async fn append_and_pick(
     .await
     {
         subtask_ui.main_task_id = None;
-        *pending_task_pick = Some(pick);
+        super::app_switch::stage(pending_task_pick, selection, super::app_switch::plain(pick));
     }
 }
 
@@ -146,8 +159,47 @@ pub(crate) async fn tick(
     if let Some(Ok(caps)) = subtask_ui.poll_caps() {
         subtask_ui.caps = caps;
     }
+    // Cancel completions land BEFORE watcher deliveries: a terminal status
+    // settles the registry locally so a late (404-driven) `error` delivery
+    // can never overwrite it.
+    if let Some(view) = subtask_view.as_mut() {
+        if let Some((id, result)) = view.poll_cancel() {
+            match result {
+                Ok(outcome) => {
+                    match outcome
+                        .status
+                        .filter(|status| crate::subtask_registry::is_terminal(status.as_str()))
+                    {
+                        Some(status) => {
+                            view.apply_status(&id, status.as_str());
+                            subtask_ui
+                                .settle_local(
+                                    store,
+                                    session_states,
+                                    session_id,
+                                    chat,
+                                    session_id,
+                                    &id,
+                                    status.as_str(),
+                                )
+                                .await;
+                            let flash = format!("subtask {id} {}", status.as_str());
+                            *mode_flash = Some((flash, anim_tick));
+                            dirty = true;
+                            render = true;
+                        }
+                        None => {
+                            *mode_flash = Some(("已请求取消 subtask".into(), anim_tick));
+                        }
+                    }
+                }
+                Err(error) => *mode_flash = Some((format!("{error:#}"), anim_tick)),
+            }
+        }
+    }
     // Subtask watcher deliveries (dedicated channel; the session worker
-    // channel is quit on every switch).
+    // channel is quit on every switch). Locally settled ids are skipped
+    // entirely: no view update, no registry write, no flash.
     for ev in subtask_ui.drain_updates() {
         if let UiEvent::SubtaskUpdate {
             ref session,
@@ -157,6 +209,9 @@ pub(crate) async fn tick(
             tokens,
         } = ev
         {
+            if subtask_ui.is_locally_settled(id) {
+                continue;
+            }
             if let Some(view) = subtask_view.as_mut() {
                 view.apply_update(id, status, summary.as_deref(), tokens);
                 dirty = true;
@@ -210,18 +265,11 @@ pub(crate) async fn tick(
             Err(error) => *mode_flash = Some((format!("{error:#}"), anim_tick)),
         }
     }
-    // Open detail view: snapshot refresh + cancel completions (the poll
-    // methods merge results into the view themselves).
+    // Open detail view: snapshot refresh (merges into the view itself).
     if let Some(view) = subtask_view.as_mut() {
         if let Some(result) = view.poll_refresh() {
             match result {
                 Ok(()) => dirty = true,
-                Err(error) => *mode_flash = Some((format!("{error:#}"), anim_tick)),
-            }
-        }
-        if let Some(result) = view.poll_cancel() {
-            match result {
-                Ok(()) => *mode_flash = Some(("已请求取消 subtask".into(), anim_tick)),
                 Err(error) => *mode_flash = Some((format!("{error:#}"), anim_tick)),
             }
         }
@@ -232,9 +280,11 @@ pub(crate) async fn tick(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::subtasks::load_registry;
+    use crate::subtask_registry::find;
     use crossterm::event::{KeyCode, KeyModifiers};
-    use opencoder_core::harness::SubtaskRef;
-    use opencoder_store::TursoStore;
+    use opencoder_core::harness::{HarnessRuntime, SubtaskRef};
+    use opencoder_store::{SessionMeta, TursoStore};
 
     fn entry(id: &str) -> SubtaskRef {
         SubtaskRef {
@@ -256,6 +306,7 @@ mod tests {
         let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         let mut chat = ChatView::default();
         let mut subtask_ui = SubtaskUi::new();
+        let mut selection = None;
         let (admit_tx, _rx) = mpsc::channel(4);
         let mut admit_st = AdmitUiState::default();
         let mut queue_items = Vec::new();
@@ -270,6 +321,7 @@ mod tests {
             "s",
             &mut chat,
             &mut subtask_ui,
+            &mut selection,
             &admit_tx,
             &mut admit_st,
             &mut queue_items,
@@ -284,14 +336,15 @@ mod tests {
         assert!(!consumed);
     }
 
-    /// Esc closes the view; Enter on an agent entry arms the conversation
-    /// switch (main-task pointer + Resume pick) and closes it.
+    /// Esc closes the view; Enter on an agent entry stages the conversation
+    /// switch (Resume pick + parent return pointer) and closes it.
     #[tokio::test]
     async fn enter_descends_into_the_selected_child_session() {
         let mut view = Some(SubtaskView::new(vec![entry("agent-a")]));
         let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         let mut chat = ChatView::default();
         let mut subtask_ui = SubtaskUi::new();
+        let mut selection = None;
         let (admit_tx, _rx) = mpsc::channel(4);
         let mut admit_st = AdmitUiState::default();
         let mut queue_items = Vec::new();
@@ -306,6 +359,7 @@ mod tests {
             "parent",
             &mut chat,
             &mut subtask_ui,
+            &mut selection,
             &admit_tx,
             &mut admit_st,
             &mut queue_items,
@@ -319,7 +373,242 @@ mod tests {
         .await;
         assert!(consumed);
         assert!(view.is_none(), "fullscreen view closes on descend");
-        assert_eq!(subtask_ui.arm_after_switch.as_deref(), Some("parent"));
-        assert!(matches!(pending_task_pick, Some(TaskPick::Resume(id)) if id == "agent-a"));
+        let pending = pending_task_pick.expect("descend staged");
+        assert!(matches!(pending.pick, TaskPick::Resume(id) if id == "agent-a"));
+        assert_eq!(pending.parent_after_switch.as_deref(), Some("parent"));
+    }
+
+    /// Descending from `/subtasks` drops any in-flight `/agent` capability
+    /// query, so its late result cannot replace the staged descend.
+    #[tokio::test]
+    async fn enter_descend_clears_pending_agent_selection() {
+        let mut view = Some(SubtaskView::new(vec![entry("agent-a")]));
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let mut chat = ChatView::default();
+        let mut subtask_ui = SubtaskUi::new();
+        let (_tx, rx) = tokio::sync::oneshot::channel::<anyhow::Result<TaskPick>>();
+        let mut selection = Some(rx);
+        let (admit_tx, _rx) = mpsc::channel(4);
+        let mut admit_st = AdmitUiState::default();
+        let mut queue_items = Vec::new();
+        let mut pending_images = Vec::new();
+        let mut mode_flash = None;
+        let mut pending_task_pick = None;
+        let consumed = key(
+            &mut view,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            FALLBACK_TERM_H,
+            &store,
+            "parent",
+            &mut chat,
+            &mut subtask_ui,
+            &mut selection,
+            &admit_tx,
+            &mut admit_st,
+            &mut queue_items,
+            &mut pending_images,
+            &mut mode_flash,
+            0,
+            &mut pending_task_pick,
+            &Config::default(),
+            0,
+        )
+        .await;
+        assert!(consumed);
+        assert!(
+            selection.is_none(),
+            "descend drops the in-flight /agent query receiver"
+        );
+        let pending = pending_task_pick.expect("descend staged");
+        assert!(matches!(pending.pick, TaskPick::Resume(id) if id == "agent-a"));
+        assert_eq!(pending.parent_after_switch.as_deref(), Some("parent"));
+    }
+
+    /// Ctrl+Enter without a parent task flashes guidance instead of staging
+    /// a switch: the fullscreen view still closes, the `/agent` query stays
+    /// live, and no pick is queued behind the user's back.
+    #[tokio::test]
+    async fn ctrl_enter_without_parent_flashes_and_does_not_stage_switch() {
+        let mut view = Some(SubtaskView::new(vec![entry("agent-a")]));
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let mut chat = ChatView::default();
+        let mut subtask_ui = SubtaskUi::new();
+        let (_tx, rx) = tokio::sync::oneshot::channel::<anyhow::Result<TaskPick>>();
+        let mut selection = Some(rx);
+        let (admit_tx, _rx) = mpsc::channel(4);
+        let mut admit_st = AdmitUiState::default();
+        let mut queue_items = Vec::new();
+        let mut pending_images = Vec::new();
+        let mut mode_flash = None;
+        let mut pending_task_pick = None;
+        let consumed = key(
+            &mut view,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+            FALLBACK_TERM_H,
+            &store,
+            "parent",
+            &mut chat,
+            &mut subtask_ui,
+            &mut selection,
+            &admit_tx,
+            &mut admit_st,
+            &mut queue_items,
+            &mut pending_images,
+            &mut mode_flash,
+            7,
+            &mut pending_task_pick,
+            &Config::default(),
+            0,
+        )
+        .await;
+        assert!(consumed);
+        assert!(view.is_none(), "fullscreen view still closes");
+        assert_eq!(
+            mode_flash.as_ref().map(|(text, _)| text.as_str()),
+            Some("当前会话没有主任务，无法追加"),
+            "the no-parent case is explained instead of ignored"
+        );
+        assert!(pending_task_pick.is_none(), "no switch is staged");
+        assert!(selection.is_some(), "the /agent query is left alone");
+        assert!(subtask_ui.main_task_id.is_none());
+    }
+
+    /// A terminal watcher delivery folds into the registry and chat counters
+    /// and flashes the mode line; `interrupted` counts as terminal.
+    #[tokio::test]
+    async fn tick_folds_terminal_update_and_flashes() {
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        store
+            .create_session(&SessionMeta {
+                id: "parent".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        store
+            .set_harness_runtime(
+                "parent",
+                &HarnessRuntime {
+                    subtasks: vec![SubtaskRef {
+                        status: "pending".into(),
+                        ..entry("agent-a")
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let mut subtask_ui = SubtaskUi::new();
+        subtask_ui
+            .ui_sender()
+            .send(UiEvent::SubtaskUpdate {
+                session: "parent".into(),
+                id: "agent-a".into(),
+                status: "interrupted".into(),
+                summary: Some("stopped".into()),
+                tokens: 7,
+            })
+            .await
+            .unwrap();
+        let mut view = None;
+        let mut chat = ChatView::default();
+        let mut mode_flash = None;
+        let (dirty, render) = tick(
+            &mut subtask_ui,
+            &mut view,
+            &store,
+            &mut std::collections::HashMap::new(),
+            "parent",
+            &mut chat,
+            &Config::default(),
+            &mut mode_flash,
+            9,
+        )
+        .await;
+        assert!(dirty && render, "terminal delivery marks dirty + render");
+        let registry = load_registry(&store, "parent").await.unwrap();
+        let stored = find(&registry, "agent-a").expect("registry kept the entry");
+        assert_eq!(stored.status, "interrupted");
+        assert_eq!(stored.tokens, 7);
+        assert_eq!(chat.subtask_done, 1);
+        assert_eq!(chat.tokens_total, 7);
+        assert_eq!(mode_flash, Some(("subtask agent-a interrupted".into(), 9)));
+    }
+
+    /// A local cancel settle wins over a later watcher `error` delivery: the
+    /// event drain skips the locally settled id (no registry rewrite, no
+    /// token fold, no flash).
+    #[tokio::test]
+    async fn late_watcher_error_does_not_overwrite_local_cancel() {
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        store
+            .create_session(&SessionMeta {
+                id: "parent".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        store
+            .set_harness_runtime(
+                "parent",
+                &HarnessRuntime {
+                    subtasks: vec![SubtaskRef {
+                        status: "running".into(),
+                        tokens: 3,
+                        ..entry("agent-a")
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let mut subtask_ui = SubtaskUi::new();
+        let mut states = std::collections::HashMap::new();
+        let mut chat = ChatView::default();
+        let settled = subtask_ui
+            .settle_local(
+                &store,
+                &mut states,
+                "parent",
+                &mut chat,
+                "parent",
+                "agent-a",
+                "cancelled",
+            )
+            .await;
+        assert!(settled, "running -> cancelled settles locally");
+        subtask_ui
+            .ui_sender()
+            .send(UiEvent::SubtaskUpdate {
+                session: "parent".into(),
+                id: "agent-a".into(),
+                status: "error".into(),
+                summary: Some("boom".into()),
+                tokens: 0,
+            })
+            .await
+            .unwrap();
+        let mut view = None;
+        let mut mode_flash = None;
+        let (dirty, render) = tick(
+            &mut subtask_ui,
+            &mut view,
+            &store,
+            &mut states,
+            "parent",
+            &mut chat,
+            &Config::default(),
+            &mut mode_flash,
+            9,
+        )
+        .await;
+        assert!(!dirty && !render, "skipped delivery changes nothing");
+        let registry = load_registry(&store, "parent").await.unwrap();
+        let stored = find(&registry, "agent-a").expect("registry kept the entry");
+        assert_eq!(stored.status, "cancelled", "late error is ignored");
+        assert_eq!(stored.result_summary, None, "cancelled cleared summary");
+        assert_eq!(stored.tokens, 3);
+        assert_eq!(chat.tokens_total, 0, "local settle adds no token delta");
+        assert_eq!(mode_flash, None, "the watcher error is not flashed");
     }
 }

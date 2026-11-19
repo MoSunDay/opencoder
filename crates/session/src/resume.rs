@@ -651,6 +651,10 @@ async fn replay_child(
     working_dir: &Path,
     parent_cancel: Option<&CancellationToken>,
 ) -> Result<(String, bool)> {
+    // A disabled `subagent` toggle must not start children during recovery.
+    if !config.subagent_enabled() {
+        return Err(anyhow!("subagent dispatch is disabled (`subagent: false`)"));
+    }
     // Children never carry subagent tasks of their own (no `task` tool), so
     // resume()'s stuck-task path is a no-op here; its dangling-`tool_use`
     // reconciliation correctly patches a child interrupted mid-tool-call.

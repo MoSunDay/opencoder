@@ -37,6 +37,8 @@ mod app_popups;
 mod app_submit;
 #[path = "app_subtask.rs"]
 mod app_subtask;
+#[path = "app_switch.rs"]
+mod app_switch;
 #[path = "app_task.rs"]
 mod app_task;
 #[path = "steer_dispatch.rs"]
@@ -187,10 +189,10 @@ pub(super) async fn run_app(
             dirty = true;
             render_pending = true;
         }
-        if pick.is_some() {
-            pending_task_pick = pick;
+        if let Some(pick) = pick {
+            app_switch::accept_polled(&mut pending_task_pick, pick);
         }
-        if let Some(pick) = pending_task_pick.take() {
+        if let Some(pending) = pending_task_pick.take() {
             if chat.remote {
                 question_menu = None;
             } else {
@@ -198,7 +200,7 @@ pub(super) async fn run_app(
             }
 
             let switched = app_task::switch_session(
-                pick,
+                pending.pick,
                 opts,
                 &mut cmd_tx,
                 &mut evt_rx,
@@ -245,16 +247,9 @@ pub(super) async fn run_app(
                     task_elapsed_ms = 0;
                     plan_skill_active = false;
                     admit_st = Default::default();
-                    // User-driven switches drop the subtask descent pointer
-                    // (Ctrl+Enter only returns from a session the TUI itself
-                    // descended into), close the fullscreen subtask view and
-                    // resume this session's watchers.
-                    subtask_ui.main_task_id = None;
-                    // A staged descent (Enter key in the `/subtasks` view)
-                    // adopts its parent pointer right after the clear above.
-                    if let Some(parent) = subtask_ui.arm_after_switch.take() {
-                        subtask_ui.main_task_id = Some(parent);
-                    }
+                    // User switches close the subtask view, resume watchers
+                    // and adopt the staged parent (or clear it for plain moves).
+                    subtask_ui.settle_switch(true, pending.parent_after_switch);
                     subtask_view = None;
                     if !chat.remote {
                         subtask_ui
@@ -265,7 +260,11 @@ pub(super) async fn run_app(
                     render_pending = true;
                     body_refresh_pending = true;
                 }
-                Err(error) => mode_flash = Some((format!("{error:#}"), anim_tick)),
+                Err(error) => {
+                    // A failed switch keeps the current descent pointer and drops the staged parent.
+                    subtask_ui.settle_switch(false, pending.parent_after_switch);
+                    mode_flash = Some((format!("{error:#}"), anim_tick));
+                }
             }
         }
         app_loop::tick_clock(
@@ -404,7 +403,7 @@ pub(super) async fn run_app(
                         // Fullscreen `/subtasks` view: intercept all keys.
                         if subtask_view.is_some() {
                             let term_h = terminal.size().map(|r| r.height).unwrap_or(app_subtask::FALLBACK_TERM_H);
-                            if app_subtask::key(&mut subtask_view, k, term_h, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, &config, turn_gen).await {
+                            if app_subtask::key(&mut subtask_view, k, term_h, &store, &session_id, &mut chat, &mut subtask_ui, &mut selection, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, &config, turn_gen).await {
                                 dirty = true; continue;
                             }
                         }
@@ -516,7 +515,7 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::AppendSubtask(child_id) => {
-                                app_subtask::append_and_pick(&child_id, &store, &session_id, &mut chat, &mut subtask_ui, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, turn_gen).await;
+                                app_subtask::append_and_pick(&child_id, &store, &session_id, &mut chat, &mut subtask_ui, &mut selection, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut mode_flash, anim_tick, &mut pending_task_pick, turn_gen).await;
                                 dirty = true;
                             }
                             KeyAction::Steer(text) => {
@@ -574,7 +573,7 @@ pub(super) async fn run_app(
                             KeyAction::SelectAgent(name) => {
                                 match name.as_str() {
                                     "" => { selection = None; agent_menu = Some(crate::agent_menu::AgentMenu::configured(config.clone())); }
-                                    "self" => { selection = None; pending_task_pick = Some(crate::task::TaskPick::New); }
+                                    "self" => { app_switch::stage(&mut pending_task_pick, &mut selection, app_switch::plain(crate::task::TaskPick::New)); }
                                     _ => { selection = Some(crate::remote::request(config.clone(),name)); mode_flash = Some(("Connecting to Server…".into(),anim_tick)); }
                                 }
                             }

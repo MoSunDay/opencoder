@@ -99,7 +99,7 @@ description: 从当前问题或候选发布面的全局影响面出发，按合�
 ### 2.1 建立合约与保鲜矩阵
 
 - 跨服务、异步任务、数据保鲜或迁移任务必须列出：source of truth、producer、consumer、identity、请求字段、响应码/响应体、状态机、幂等键、重试/超时、顺序/并发、副作用、鉴权和失败归属。
-- 同时核对仓库声明、部署 manifest、线上 effective config/schema/artifact、AP 账本和 local memory；任何不一致都按 drift 处理，不能任选一份作为成功证据。
+- 同时核对仓库声明、部署 manifest、线上 effective config/schema/artifact 和 AP 账本；任何不一致都按 drift 处理，不能任选一份作为成功证据。
 - 版本 payload/readback 只证明版本记录一致，不证明运行时实际使用同一 artifact。若平台会用 workflow/deployment/global 的当前 effective image、model、agent version 或路由覆盖版本内声明，必须分别规划“版本记录 readback”和“真实 execution build detail/runtime artifact”核对；candidate 验收期间不得提前恢复会影响实际执行的 effective 配置，补偿必须绑定 candidate 接受/拒绝生命周期。
 - 版本候选默认必须与自然流量做运行时隔离：显式 version 应使用 version-scoped artifact，不得通过修改 workflow/deployment/global effective 配置让未晋级 artifact 影响其他版本。若平台暂不支持版本隔离，计划必须把平台根因修复或独立 workflow/deployment 作为明确决策点，不能把 `default=false` 当成隔离证据。
 - 任何会修改共享 effective 配置的工具，都必须在写入前持久化不可覆盖的 rollback journal。计划需覆盖“远端写成功、本地进程崩溃”“重试时目标已 matched”“补偿再次中断”，并要求显式 rollback/restore 入口和读回验证；进程内变量或最新一次 result 文件不能作为可靠锚点。

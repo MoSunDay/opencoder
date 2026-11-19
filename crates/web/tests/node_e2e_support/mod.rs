@@ -233,10 +233,9 @@ pub fn node_opts(
     }
 }
 
-/// Keep developer-wide autopilot and local-memory settings out of scripted
-/// worker rounds (same isolation as `crates/node/tests`).
+/// Keep developer-wide autopilot settings out of scripted worker rounds
+/// (same isolation as `crates/node/tests`).
 pub fn pin_autopilot_off(workdir: &std::path::Path) {
-    std::fs::write(workdir.join("opencoder.json"), r#"{"local_memory":false}"#).unwrap();
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(
         workdir.join(".opencoder").join("ap.json"),

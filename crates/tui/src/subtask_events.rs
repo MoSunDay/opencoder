@@ -25,11 +25,6 @@ const EVENT_CHANNEL_CAPACITY: usize = 64;
 pub(crate) struct SubtaskUi {
     /// Parent session the TUI descended from into a subtask child session.
     pub main_task_id: Option<String>,
-    /// Parent to arm as `main_task_id` AFTER the next session switch: the
-    /// switch handler clears the descent pointer (user-driven moves break
-    /// descent), so descending from the `/subtasks` view stages the pointer
-    /// here and the Ok arm adopts it once the child session is live.
-    pub arm_after_switch: Option<String>,
     /// Execution ids ever handed to a watcher (terminal transitions are
     /// one-way, so the set only grows; prevents duplicate pollers).
     watched: HashSet<String>,
@@ -41,6 +36,10 @@ pub(crate) struct SubtaskUi {
     /// In-flight capability-catalog fetch (skipped while one is pending).
     caps_refresh: Option<tokio::sync::oneshot::Receiver<anyhow::Result<Vec<ServerCapability>>>>,
 
+    /// Ids locally settled from a terminal cancel response: the watcher
+    /// drops them and late deliveries are ignored (a dead 404 poller can
+    /// never overwrite the settled status with `error`).
+    settled: Arc<std::sync::Mutex<HashSet<String>>>,
     /// Watcher -> main-loop events (dedicated: workers die on `/task` switch).
     events: (mpsc::Sender<UiEvent>, mpsc::Receiver<UiEvent>),
 }
@@ -50,11 +49,11 @@ impl SubtaskUi {
         let events = mpsc::channel(EVENT_CHANNEL_CAPACITY);
         SubtaskUi {
             main_task_id: None,
-            arm_after_switch: None,
             watched: HashSet::new(),
             dispatch: None,
             caps: Vec::new(),
             caps_refresh: None,
+            settled: Arc::new(std::sync::Mutex::new(HashSet::new())),
             events,
         }
     }
@@ -62,6 +61,15 @@ impl SubtaskUi {
     /// Cloneable sender half handed to spawned watchers.
     pub(crate) fn ui_sender(&self) -> mpsc::Sender<UiEvent> {
         self.events.0.clone()
+    }
+
+    /// Settle a session switch: success adopts `parent_after_switch` as
+    /// `main_task_id` (clearing it for a plain switch); failure keeps the
+    /// current descent pointer and drops the staged intent.
+    pub(crate) fn settle_switch(&mut self, switched: bool, parent_after_switch: Option<String>) {
+        if switched {
+            self.main_task_id = parent_after_switch;
+        }
     }
 
     /// Spawn a watcher per still-pending registry entry lacking a poller;
@@ -92,7 +100,72 @@ impl SubtaskUi {
         };
         self.watched
             .extend(targets.iter().map(|t| t.execution_id.clone()));
-        crate::subtask_watcher::spawn(client, self.ui_sender(), targets);
+        crate::subtask_watcher::spawn_with_settled(
+            client,
+            self.ui_sender(),
+            targets,
+            self.settled.clone(),
+        );
+    }
+
+    /// Remember an id settled locally (terminal cancel response); the
+    /// watcher stops polling it and the event drain ignores late updates.
+    pub(crate) fn mark_locally_settled(&self, id: &str) {
+        self.settled
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_string());
+    }
+
+    /// Whether `id` was settled locally by the cancel-response path.
+    pub(crate) fn is_locally_settled(&self, id: &str) -> bool {
+        self.settled
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(id)
+    }
+
+    /// Apply a locally terminal cancel status to the owning registry. The id
+    /// is marked settled ONLY after the registry write succeeds, so a failed
+    /// save leaves the watcher as the fallback. Token delta is always 0 (the
+    /// cancel response carries no usage) and summary/tokens are preserved
+    /// except the `cancelled` summary clear in [`settle_status_only`].
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn settle_local(
+        &self,
+        store: &Arc<dyn Store>,
+        session_states: &mut HashMap<String, SessionUiState>,
+        current_session: &str,
+        chat: &mut ChatView,
+        ev_session: &str,
+        ev_id: &str,
+        status: &str,
+    ) -> bool {
+        let registry = crate::remote::subtasks::load_registry(store, ev_session)
+            .await
+            .unwrap_or_default();
+        let refs = crate::subtask_registry::settle_status_only(&registry, ev_id, status);
+        // Unknown id or an idempotent re-settle: nothing to persist.
+        if refs == registry {
+            return false;
+        }
+        if crate::remote::subtasks::save_registry(store, ev_session, &refs)
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        self.mark_locally_settled(ev_id);
+        let done = crate::subtask_registry::done_count(&refs);
+        let total = crate::subtask_registry::total_count(&refs);
+        if ev_session == current_session {
+            chat.subtask_done = done;
+            chat.subtask_total = total;
+        } else if let Some(state) = session_states.get_mut(ev_session) {
+            state.chat.subtask_done = done;
+            state.chat.subtask_total = total;
+        }
+        true
     }
 
     /// Non-blocking poll of an in-flight dispatch (same pattern as
@@ -268,6 +341,44 @@ mod tests {
         assert_eq!(find(&saved, "agent-a").unwrap().status, "done");
     }
 
+    /// A terminal cancel status settles the registry in place: only the
+    /// status changes (summary cleared for `cancelled`, tokens kept), the
+    /// counters recompute, no token delta folds, and the id is marked
+    /// locally settled for the watcher/event-drain guards.
+    #[tokio::test]
+    async fn settle_local_updates_registry_and_counters() {
+        let mut parent = entry("agent-a", "running", 40);
+        parent.result_summary = Some("partial".into());
+        let store = store_with_registry("parent", vec![parent]).await;
+        let mut states = HashMap::new();
+        let mut chat = ChatView {
+            tokens_total: 100,
+            ..Default::default()
+        };
+        let ui = SubtaskUi::new();
+        let settled = ui
+            .settle_local(
+                &store,
+                &mut states,
+                "parent",
+                &mut chat,
+                "parent",
+                "agent-a",
+                "cancelled",
+            )
+            .await;
+        assert!(settled, "changed registry settles locally");
+        let saved = load_registry(&store, "parent").await.unwrap();
+        let item = find(&saved, "agent-a").expect("registry kept the entry");
+        assert_eq!(item.status, "cancelled");
+        assert_eq!(item.result_summary, None, "cancelled clears the summary");
+        assert_eq!(item.tokens, 40, "tokens are preserved");
+        assert_eq!(chat.subtask_done, 1);
+        assert_eq!(chat.subtask_total, 1);
+        assert_eq!(chat.tokens_total, 100, "no token delta on a cancel");
+        assert!(ui.is_locally_settled("agent-a"));
+    }
+
     #[tokio::test]
     async fn repeated_delivery_is_a_noop() {
         let store = store_with_registry("parent", vec![entry("agent-a", "done", 100)]).await;
@@ -352,5 +463,23 @@ mod tests {
         ui.refresh_caps(&Config::default());
         assert!(ui.caps_refresh.is_none(), "no request was armed");
         assert!(ui.poll_caps().is_none());
+    }
+
+    /// A successful switch lands the staged `/subtasks` descent parent.
+    #[test]
+    fn switch_landing_adopts_staged_parent() {
+        let mut ui = SubtaskUi::new();
+        ui.main_task_id = Some("old".into());
+        ui.settle_switch(true, Some("parent".into()));
+        assert_eq!(ui.main_task_id.as_deref(), Some("parent"));
+    }
+
+    /// A failed switch keeps the current descent pointer and drops the intent.
+    #[test]
+    fn switch_error_drops_staged_arm_and_keeps_current_descent() {
+        let mut ui = SubtaskUi::new();
+        ui.main_task_id = Some("old".into());
+        ui.settle_switch(false, Some("parent".into()));
+        assert_eq!(ui.main_task_id.as_deref(), Some("old"));
     }
 }

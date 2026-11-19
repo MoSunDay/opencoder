@@ -7,12 +7,13 @@
 
 use std::collections::HashMap;
 
-use super::support::Fixture;
+use super::support::{Fixture, IndexReply};
 use crate::{
     chat::ChatView,
-    subtask_watcher::{spawn, WatchTarget},
+    subtask_watcher::{run_with, spawn, WatchTarget},
     worker::UiEvent,
 };
+use opencoder_core::fleet::ExecutionStatus;
 use opencoder_core::harness::{HarnessRuntime, SubtaskRef};
 use opencoder_core::Message;
 use opencoder_store::SessionMeta;
@@ -319,5 +320,214 @@ async fn watcher_maps_idle_agent_convergence_to_done() {
         entry.result_summary.as_deref(),
         Some("空闲收敛结果"),
         "stored summary is the bounded /result copy"
+    );
+}
+
+/// `/subtasks` cancel asks the server to CANCEL the execution (the old
+/// interrupt action left interrupted runs unsettled locally).
+#[tokio::test]
+async fn cancel_subtask_uses_cancel_command() {
+    let fixture = Fixture::new().await;
+    let client = crate::remote::client::ServerClient::new(&fixture.url, None).unwrap();
+    let outcome = crate::remote::subtasks::cancel(&client, "agent-sub-1")
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.status, None,
+        "the legacy {{ok:true}} body carries no terminal status"
+    );
+    let requests = fixture.state.lock().unwrap().requests.clone();
+    let (request, body) = requests
+        .iter()
+        .find(|(request, _)| request.ends_with("/api/executions/agent-sub-1/commands"))
+        .expect("cancel command reached the mock");
+    assert_eq!(request, "POST /api/executions/agent-sub-1/commands");
+    assert_eq!(body["action"], "cancel");
+    assert_ne!(body["action"], "interrupt");
+}
+
+/// A cancel response carrying a terminal `status` is surfaced so the caller
+/// can settle the registry without waiting for another watcher round.
+#[tokio::test]
+async fn cancel_returns_cancelled_status() {
+    let fixture = Fixture::new().await;
+    fixture.state.lock().unwrap().command_status = Some("cancelled".into());
+    let client = crate::remote::client::ServerClient::new(&fixture.url, None).unwrap();
+    let outcome = crate::remote::subtasks::cancel(&client, "agent-sub-1")
+        .await
+        .unwrap();
+    assert_eq!(outcome.status, Some(ExecutionStatus::Cancelled));
+}
+
+/// Missing `status` in the cancel response keeps the watcher observing.
+#[tokio::test]
+async fn cancel_without_status_is_not_terminal() {
+    let fixture = Fixture::new().await;
+    let client = crate::remote::client::ServerClient::new(&fixture.url, None).unwrap();
+    let outcome = crate::remote::subtasks::cancel(&client, "agent-sub-1")
+        .await
+        .unwrap();
+    assert!(outcome.status.is_none());
+}
+
+/// A scripted target helper (`session` = "parent-1").
+fn watch(execution_id: &str) -> WatchTarget {
+    WatchTarget {
+        session: "parent-1".into(),
+        execution_id: execution_id.into(),
+    }
+}
+
+fn script_status(status: &'static str, rounds: usize) -> Vec<IndexReply> {
+    vec![IndexReply::Status(status); rounds]
+}
+
+/// Receive `count` subtask updates as `id -> status`.
+async fn collect_updates(
+    rx: &mut tokio::sync::mpsc::Receiver<UiEvent>,
+    count: usize,
+) -> HashMap<String, String> {
+    let mut updates = HashMap::new();
+    for _ in 0..count {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("watcher update timeout")
+            .unwrap();
+        let UiEvent::SubtaskUpdate { id, status, .. } = event else {
+            panic!("expected a subtask update, got: {event:?}");
+        };
+        updates.insert(id, status);
+    }
+    updates
+}
+
+/// `interrupted` is locally terminal: one delivery with that status, no
+/// re-poll, and the watcher exits.
+#[tokio::test]
+async fn watcher_settles_interrupted_status_once() {
+    let fixture = Fixture::new().await;
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .index_script
+        .insert("agent-sub-1".into(), script_status("interrupted", 1));
+    let client = crate::remote::client::ServerClient::new(&fixture.url, None).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let handle = spawn(client, tx, vec![watch("agent-sub-1")]);
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("watcher update timeout")
+        .unwrap();
+    let UiEvent::SubtaskUpdate { id, status, .. } = event else {
+        panic!("expected a subtask update, got: {event:?}");
+    };
+    assert_eq!(id, "agent-sub-1");
+    assert_eq!(status, "interrupted");
+    assert!(
+        rx.try_recv().is_err(),
+        "interrupted target is not re-polled"
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .is_ok(),
+        "watcher exits once the interrupted target settles"
+    );
+}
+
+/// One permanently failing target settles as error on its own fifth failed
+/// poll while a healthy sibling keeps polling to `done`.
+#[tokio::test]
+async fn watcher_failing_target_does_not_error_healthy_pending_target() {
+    let fixture = Fixture::new().await;
+    {
+        let mut state = fixture.state.lock().unwrap();
+        state
+            .index_script
+            .insert("agent-bad".into(), vec![IndexReply::Fail]);
+        let mut good = script_status("running", 6);
+        good.push(IndexReply::Status("done"));
+        state.index_script.insert("agent-good".into(), good);
+    }
+    let client = crate::remote::client::ServerClient::new(&fixture.url, None).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let handle = tokio::spawn(run_with(
+        client,
+        tx,
+        vec![watch("agent-bad"), watch("agent-good")],
+        std::time::Duration::from_millis(10),
+    ));
+    let updates = collect_updates(&mut rx, 2).await;
+    assert_eq!(updates.get("agent-bad").map(String::as_str), Some("error"));
+    assert_eq!(
+        updates.get("agent-good").map(String::as_str),
+        Some("done"),
+        "healthy target must never be dragged into error"
+    );
+    {
+        let state = fixture.state.lock().unwrap();
+        assert_eq!(state.index_calls.get("agent-bad").copied(), Some(5));
+        assert_eq!(state.index_calls.get("agent-good").copied(), Some(7));
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .is_ok(),
+        "watcher exits after every target settles"
+    );
+}
+
+/// A healthy poll resets the target's failure streak: four fails, one
+/// running, one fail, then done never settles early.
+#[tokio::test]
+async fn watcher_resets_target_failure_streak_on_a_healthy_poll() {
+    let fixture = Fixture::new().await;
+    {
+        let mut state = fixture.state.lock().unwrap();
+        state.index_script.insert(
+            "agent-flaky".into(),
+            vec![
+                IndexReply::Fail,
+                IndexReply::Fail,
+                IndexReply::Fail,
+                IndexReply::Fail,
+                IndexReply::Status("running"),
+                IndexReply::Fail,
+                IndexReply::Status("done"),
+            ],
+        );
+        state
+            .index_script
+            .insert("agent-poison".into(), vec![IndexReply::Fail]);
+    }
+    let client = crate::remote::client::ServerClient::new(&fixture.url, None).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let handle = tokio::spawn(run_with(
+        client,
+        tx,
+        vec![watch("agent-flaky"), watch("agent-poison")],
+        std::time::Duration::from_millis(10),
+    ));
+    let updates = collect_updates(&mut rx, 2).await;
+    assert_eq!(
+        updates.get("agent-flaky").map(String::as_str),
+        Some("done"),
+        "a healthy poll resets the failed-poll streak"
+    );
+    assert_eq!(
+        updates.get("agent-poison").map(String::as_str),
+        Some("error")
+    );
+    {
+        let state = fixture.state.lock().unwrap();
+        assert_eq!(state.index_calls.get("agent-flaky").copied(), Some(7));
+        assert_eq!(state.index_calls.get("agent-poison").copied(), Some(5));
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .is_ok(),
+        "watcher exits after every target settles"
     );
 }

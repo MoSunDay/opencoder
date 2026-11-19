@@ -7,6 +7,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 ## 索引
 
 - `src/app.rs`、`src/app_loop.rs` — App 状态与主事件循环
+- [app_switch.rs](../../../crates/tui/src/app_switch.rs) — 会话切换意图原子化：
+  `PendingSwitch` 把 `TaskPick` 与切换成功后采用的父会话绑在一起；显式切换
+  （含 `/subtasks` Enter 下钻）先丢弃在途 `/agent` 查询，晚到的查询结果只在
+  暂存槽为空时接受，失败切换不采用父指针
 - [app_bootstrap.rs](../../../crates/tui/src/app_bootstrap.rs) — 恢复运行态或远端绑定
 - [app_task.rs](../../../crates/tui/src/app_task.rs) — 独立任务管理与本地新任务运行设置
 - [worker.rs](../../../crates/tui/src/worker.rs) — 分派 Server 或本地会话 actor，
@@ -52,7 +56,7 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   mid-run 压缩重建会丢弃在途 prompt 的 `User` 回显（保留尾部副本与
   `pending_turn_echo` 均不再重放），视图直接从 `Compaction` 摘要块继续；
   转录未记录该 prompt 的 clear-context 重建仍补回显边界；resume 回放不变
-- `src/model_menu/` — `/config` 表单（含 `local-memory` 开关）与
+- `src/model_menu/` — `/config` 表单（含 `subagent` 开关）与
   `list.rs` 的 `/model` provider 列表
 - [model_session_switch.rs](../../../crates/tui/src/model_session_switch.rs) —
   `/model` 会话级切换：改内存配置并热替换 LLM client，会话内即时生效、
@@ -63,20 +67,31 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   [remote/selection.rs](../../../crates/tui/src/remote/selection.rs) — `/agent` 菜单
 - [remote/](../../../crates/tui/src/remote/mod.rs) — Server HTTP/SSE、历史恢复与任务绑定
 - [remote/transcript.rs](../../../crates/tui/src/remote/transcript.rs) — 远端消息恢复
-- [remote/subtasks.rs](../../../crates/tui/src/remote/subtasks.rs) — `@capability` 派发
+- [remote/subtasks.rs](../../../crates/tui/src/remote/subtasks.rs) — `@capability` 派发；
+  `cancel` 返回 `CancelOutcome`（响应中的终态 status，缺失/未知为 `None`，
+  继续由观察器跟踪）
 - [subtask_watcher.rs](../../../crates/tui/src/subtask_watcher.rs) — 一次性
   `@capability` 子任务后台观察：5 秒轮询 Server 至注册项终结（终态或
   会话类 Idle 收敛，经 `settle_status` 映射）后经 UI 通道各回报一次；
-  连续 5 轮传输失败则剩余项按 error 结算。观察器独立于 session worker，
+  失败按目标隔离：某目标自身连续 5 轮传输失败只把该目标按 error 结算，
+  其余健康目标继续轮询。已由取消响应本地结算的目标从观察集移除（轮询
+  前后均检查），不再回报。观察器独立于 session worker，
   `/task` 切换后写回仍流入父会话注册表
 - [subtask_registry.rs](../../../crates/tui/src/subtask_registry.rs) — 纯函数
   注册表（`Vec<SubtaskRef>`）：`settle_status` 把 worker 只报 `Idle` 的
-  agent/operator 成功收敛结算为 `done`；`apply_update` 幂等应用回报并
-  折算 token 增量；`bound_summary` 截断摘要至 2048 字符
+  agent/operator 成功收敛结算为 `done`，并把 `Interrupted` 在本地结算为
+  终态 `interrupted`（Server 侧 `ExecutionStatus::terminal()` 不变，
+  `is_terminal` 已包含该状态）；`settle_status_only` 只改状态、保留摘要与
+  token（`cancelled` 清空摘要），供取消响应本地结算覆盖迟到的 `error`；
+  `apply_update` 幂等应用回报并折算 token 增量；`bound_summary` 截断摘要
+  至 2048 字符
 - [subtask_detail.rs](../../../crates/tui/src/subtask_detail.rs) — `/subtasks`
   全屏视图：列表 + 详情（问题、服务端时间线、结果摘要与 token）；
-  `j/k` 选择、`r` 刷新、`c` 取消、`Enter` 进入子会话、`Ctrl+Enter`
-  把结果追加回主任务
+  `j/k` 选择、`r` 刷新、`c` 取消（结果带回目标 id 与终态）、`Enter`
+  进入子会话、`Ctrl+Enter` 把结果追加回主任务
+- [app_subtask.rs](../../../crates/tui/src/app_subtask.rs) — `/subtasks` 键路由与
+  tick 轮询：先收取消响应的终态、再收 watcher 回报；本地已结算目标丢弃迟到
+  更新；追加回主任务前校验 `main_task_id`（无主任务时 flash 提示）
 - [tests/subtask_restore_floor.rs](../../../crates/tui/tests/subtask_restore_floor.rs) —
   `/task` 切换恢复下限回归：切回恢复
   `max(回放用量, 快照 + 休眠期注册表增量)`，不回退也不重复计数
@@ -97,6 +112,8 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - 本地任务复用共享 `SessionState`，Codex 执行与事件解码见
   [session](../../runtime/session/index.md)；远端任务使用 Server 注册的执行器。
 - 远端绑定保存在 Harness 运行态；凭据仅由连接层读取 `OPENCODER_SERVER_TOKEN`。
+- 切换意图（pick + 父指针）单点暂存与消费；取消响应的终态优先于观察器
+  迟到的 `error`。
 
 相关模块：[core](../../foundation/core/index.md)、[session](../../runtime/session/index.md)、
 [control](../../platform/control/index.md)、[web](../web/index.md)。行为规则见

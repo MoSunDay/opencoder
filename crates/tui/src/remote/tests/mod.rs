@@ -9,7 +9,7 @@ use serde_json::json;
 use support::{frame, until, Fixture};
 mod protocol;
 mod subtasks;
-mod support;
+pub(crate) mod support;
 
 #[tokio::test]
 async fn remote_operator_creates_once_continues_same_execution_and_never_calls_local_model() {

@@ -98,6 +98,12 @@ pub(super) async fn execute_call_with_timeout(
     timeout: Option<Duration>,
 ) -> ToolOutput {
     if tc.name == "task" {
+        // Defense in depth: the `subagent` toggle already removes `task` from
+        // the advertised schemas, but a hallucinated call must still be denied
+        // here (before any child session is created).
+        if !session.config.subagent_enabled() {
+            return ToolOutput::err("subagent dispatch is disabled (`subagent: false`)");
+        }
         // Plan admission admits `task` for evidence gathering, but the
         // sidecar kind is read-only-only by contract: gate the spawn here
         // (before any child session is created) so a sidecar cannot farm
@@ -428,9 +434,8 @@ async fn force_cancel_subagent(
 }
 
 /// Render a duration compactly (seconds when >= 1 s, milliseconds otherwise) so
-/// the timeout message reads naturally for both the 10-minute default and the
-/// sub-second durations used in tests. Shared with local_memory for
-/// block-footer durations.
+/// the timeout messages read naturally for both the 10-minute default and the
+/// sub-second durations used in tests.
 pub(super) fn fmt_dur(d: Duration) -> String {
     if d.as_secs() >= 1 {
         format!("{}s", d.as_secs())

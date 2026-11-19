@@ -218,11 +218,11 @@ async fn switch_restores_model_and_agent_both_ways() {
 #[tokio::test]
 async fn switched_model_used_by_next_turn() {
     // The switch path runs `Config::load(workdir)`, which merges the REAL
-    // `~/.opencoder` global config (see `Config::load_with_home`). On a dev
-    // machine with `local_memory: true` the resumed "act" session fires a
-    // maintenance child after the mock turn — a second LLM call this test's
-    // `call_count == 1` assertion must not see. HOME points at a fresh
-    // tempdir for the whole body (including awaits) to keep that out.
+    // `~/.opencoder` global config (see `Config::load_with_home`).
+    // Developer-wide settings there (e.g. autopilot) could fire extra
+    // model rounds this test's `call_count == 1` assertion must not see.
+    // HOME points at a fresh tempdir for the whole body (including awaits)
+    // to keep that out.
     let _env = ENV_LOCK.lock().await;
     let (home, prev_home) = isolated_home();
     let dir = tempfile::tempdir().unwrap();

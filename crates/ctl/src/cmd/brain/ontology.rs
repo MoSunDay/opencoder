@@ -121,7 +121,6 @@ pub async fn activate(
 ) -> Result<i32> {
     let context: serde_json::Value = serde_json::from_slice(&std::fs::read(context)?)?;
     let mut config: opencoder_core::Config = serde_json::from_slice(&std::fs::read(config)?)?;
-    config.local_memory = false;
     config.autopilot.mode = opencoder_core::ApMode::Off;
     config.compaction.auto = false;
     config.max_tokens = Some(opencoder_brain::layered::budget::OUTPUT_TOKENS);

@@ -95,12 +95,21 @@ pub(crate) async fn fetch_tokens(client: &ServerClient, id: &str) -> Result<u64>
     Ok(total)
 }
 
-/// Ask the server to interrupt a subtask; the response body is ignored.
-pub(crate) async fn cancel(client: &ServerClient, id: &str) -> Result<()> {
-    client
-        .command(id, "interrupt", serde_json::json!({}))
-        .await?;
-    Ok(())
+/// Terminal status reported by the server's cancel response (if any).
+/// Nonstandard bodies (e.g. `{"ok":true}`) degrade to `status: None`, which
+/// keeps the watcher observing the execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CancelOutcome {
+    pub status: Option<ExecutionStatus>,
+}
+
+/// Ask the server to cancel a subtask and report any terminal status the
+/// response carries (`None` for missing/unknown `status` fields).
+pub(crate) async fn cancel(client: &ServerClient, id: &str) -> Result<CancelOutcome> {
+    let body = client.command(id, "cancel", serde_json::json!({})).await?;
+    Ok(CancelOutcome {
+        status: serde_json::from_value(body["status"].clone()).ok(),
+    })
 }
 
 async fn paged_messages(client: &ServerClient, id: &str) -> Result<Vec<Message>> {

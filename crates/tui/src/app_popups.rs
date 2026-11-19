@@ -21,7 +21,7 @@ use crate::command::CommandMenu;
 use crate::keymap::KeyBindings;
 use crate::model_menu::ModelMenu;
 use crate::render::Term;
-use crate::task::{handle_task_key, TaskOutcome, TaskPick, TaskPicker};
+use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::worker::UiCmd;
 
 /// Outcome of one popup-chain evaluation. `Redraw` additionally asks the
@@ -42,7 +42,7 @@ pub(super) async fn handle_popup_key(
     k: KeyEvent,
     task_picker: &mut Option<TaskPicker>,
     selection: &mut crate::remote::Selection,
-    pending_task_pick: &mut Option<TaskPick>,
+    pending_task_pick: &mut Option<super::app_switch::PendingSwitch>,
     cmd_tx: &mpsc::Sender<UiCmd>,
     turn_gen: &mut u64,
     running: &mut bool,
@@ -87,8 +87,11 @@ pub(super) async fn handle_popup_key(
     if task_picker.is_some() {
         match handle_task_key(task_picker, k) {
             TaskOutcome::Pick(pick) => {
-                *selection = None;
-                *pending_task_pick = Some(pick);
+                super::app_switch::stage(
+                    pending_task_pick,
+                    selection,
+                    super::app_switch::plain(pick),
+                );
             }
             TaskOutcome::Quit => {
                 let _ = cmd_tx.send(UiCmd::Quit).await;

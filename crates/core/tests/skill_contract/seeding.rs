@@ -12,8 +12,6 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
         "task-plan",
         "task-plan-subagent",
         "do-and-done",
-        "repo-local-memory",
-        "repo-local-dreaming",
         "say-and-replay",
         "review",
         "summary",
@@ -26,10 +24,6 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
         names, expected,
         "fresh installs must seed exactly the built-in packs"
     );
-    // repo-local-memory ships sidecar files alongside SKILL.md.
-    let rlm = root.path().join("repo-local-memory");
-    assert!(rlm.join("EXAMPLES.md").exists());
-    assert!(rlm.join("TEMPLATES.md").exists());
     // Codex-standard task-plan uses progressive disclosure: its detailed
     // launch-closure protocol is bundled under references/.
     let task_plan = root.path().join("task-plan");
@@ -41,45 +35,6 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
     assert!(task_plan_subagent
         .join("references/subagent-delegation-checklist.md")
         .exists());
-}
-
-#[test]
-fn seeded_memory_template_uses_a_distinct_index_and_preserves_repository_instructions() {
-    let root = tempfile::tempdir().unwrap();
-    let repository = root.path().join("repository");
-    let instructions = repository.join("AGENTS.md");
-    write(
-        &instructions,
-        "Repository instructions must remain unchanged.\n",
-    );
-    let skills = root.path().join("skills");
-    seed_builtin_skills_in(&skills).unwrap();
-    let memory = skills.join("repo-local-memory");
-    let template = fs::read_to_string(memory.join("TEMPLATES.md")).unwrap();
-    let filename = template
-        .lines()
-        .find_map(|line| {
-            let name = line.strip_prefix("## Template: `")?.strip_suffix('`')?;
-            (!name.contains('/')).then_some(name)
-        })
-        .unwrap();
-    assert_eq!(filename, "repo-memory.md");
-    assert_ne!(filename.to_ascii_lowercase(), "agents.md");
-    write(&repository.join(filename), "Commit: test\nLogic index.\n");
-    assert_eq!(
-        fs::read_to_string(&instructions).unwrap(),
-        "Repository instructions must remain unchanged.\n"
-    );
-    assert_eq!(
-        fs::read_to_string(repository.join(filename)).unwrap(),
-        "Commit: test\nLogic index.\n"
-    );
-    let policy = fs::read_to_string(memory.join("SKILL.md")).unwrap();
-    assert!(policy.contains("Preserve `AGENTS.md`"));
-    assert!(policy.contains("distinct file from `AGENTS.md`"));
-    let dreaming = fs::read_to_string(skills.join("repo-local-dreaming/SKILL.md")).unwrap();
-    assert!(dreaming.contains("`repo-memory.md`"));
-    assert!(dreaming.contains("保留指令文件"));
 }
 
 #[test]

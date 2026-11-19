@@ -22,7 +22,7 @@ pub struct SubtaskRef {
     pub capability_id: String,
     /// The one-shot question submitted with the dispatch.
     pub question: String,
-    /// Lifecycle status: "pending" | "running" | "done" | "error" | "cancelled".
+    /// Lifecycle status: "pending" | "running" | "done" | "error" | "cancelled" | "interrupted".
     pub status: String,
     /// Bounded result summary fetched at completion (may be None).
     #[serde(default)]

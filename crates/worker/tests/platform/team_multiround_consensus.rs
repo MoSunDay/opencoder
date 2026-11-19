@@ -39,12 +39,6 @@ async fn team_multiround_consensus_runs_alignment_subturn_and_next_round_hint() 
     let _config = support::isolated_config();
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
-    let workdir = fleet.root().join("n0/work");
-    let config_path = workdir.join("opencoder.json");
-    let mut config = read_json(&config_path);
-    config["local_memory"] = json!(true);
-    std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
-    assert!(opencoder_core::Config::load(&workdir).unwrap().local_memory);
     let saved = fleet
         .call(
             "POST",

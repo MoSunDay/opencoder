@@ -156,9 +156,9 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "\u{2190}/\u{2192}/Space toggle",
         ),
         field_line(
-            "local-memory:",
-            &format!("[ {} ]", if form.local_memory { "on" } else { "off" }),
-            form.focus == ConfigField::LocalMemory,
+            "subagent:",
+            &format!("[ {} ]", if form.subagent { "on" } else { "off" }),
+            form.focus == ConfigField::Subagent,
             "\u{2190}/\u{2192}/Space toggle",
         ),
         button_line_cfg(form),

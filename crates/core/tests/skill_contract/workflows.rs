@@ -163,8 +163,6 @@ fn seeded_builtin_skills_carry_no_cross_skill_references() {
         "task-plan",
         "task-plan-subagent",
         "do-and-done",
-        "repo-local-memory",
-        "repo-local-dreaming",
         "say-and-replay",
         "review",
         "submit",
@@ -214,8 +212,6 @@ fn seeded_question_tool_docs_live_only_in_the_planning_pair() {
     seed_builtin_skills_in(root.path()).expect("seed");
     for skill in [
         "do-and-done",
-        "repo-local-memory",
-        "repo-local-dreaming",
         "say-and-replay",
         "review",
         "submit",

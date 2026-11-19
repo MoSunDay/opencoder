@@ -26,6 +26,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::remote::client::ServerClient;
+use crate::remote::subtasks::CancelOutcome;
 
 /// Timeline rows kept per subtask snapshot (server frames are unbounded).
 const TIMELINE_MAX_ROWS: usize = 200;
@@ -55,7 +56,7 @@ pub(crate) struct SubtaskView {
     /// renderer; bounds scrolling). A `Cell` keeps the renderer shared-ref.
     pub last_detail_lines: Cell<u32>,
     refresh: Option<oneshot::Receiver<anyhow::Result<Vec<SubtaskSnapshot>>>>,
-    cancel: Option<oneshot::Receiver<anyhow::Result<()>>>,
+    cancel: Option<(String, oneshot::Receiver<anyhow::Result<CancelOutcome>>)>,
 }
 
 impl SubtaskView {
@@ -136,13 +137,14 @@ impl SubtaskView {
         self.refresh = Some(request_refresh(config, ids));
     }
 
-    /// Ask the server to interrupt the selected subtask (no-op in flight).
+    /// Ask the server to cancel the selected subtask (no-op in flight).
     pub(crate) fn start_cancel(&mut self, config: &Config) {
         if self.cancel.is_some() {
             return;
         }
         if let Some(entry) = self.selected_entry() {
-            self.cancel = Some(request_cancel(config, entry.execution_id.clone()));
+            let id = entry.execution_id.clone();
+            self.cancel = Some(request_cancel(config, id));
         }
     }
 
@@ -175,16 +177,30 @@ impl SubtaskView {
         }
     }
 
-    /// Poll the in-flight cancel request (`None` while pending).
-    pub(crate) fn poll_cancel(&mut self) -> Option<anyhow::Result<()>> {
-        let receiver = self.cancel.as_mut()?;
+    /// Update ONLY the status of `id` in the registry copy and the live
+    /// snapshot (a locally settled cancel keeps summary/tokens intact).
+    pub(crate) fn apply_status(&mut self, id: &str, status: &str) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.execution_id == id) {
+            entry.status = status.to_string();
+        }
+        if let Some(snapshot) = self.snapshots.get_mut(id) {
+            snapshot.status = status.to_string();
+        }
+    }
+
+    /// Poll the in-flight cancel request (`None` while pending). The target
+    /// id is returned alongside the result so late completions can be
+    /// attributed even after the selection moved.
+    pub(crate) fn poll_cancel(&mut self) -> Option<(String, anyhow::Result<CancelOutcome>)> {
+        let (id, receiver) = self.cancel.as_mut()?;
+        let id = id.clone();
         let result = match receiver.try_recv() {
             Ok(result) => result,
             Err(oneshot::error::TryRecvError::Empty) => return None,
             Err(error) => Err(error.into()),
         };
         self.cancel = None;
-        Some(result)
+        Some((id, result))
     }
 }
 
@@ -352,17 +368,22 @@ async fn paged_frames(client: &ServerClient, id: &str) -> anyhow::Result<Vec<Val
     Ok(frames)
 }
 
-/// Spawn a server-side interrupt for `id` (one-shot request/poll pattern).
-pub(crate) fn request_cancel(config: &Config, id: String) -> oneshot::Receiver<anyhow::Result<()>> {
+/// Spawn a server-side cancel for `id` (one-shot request/poll pattern); the
+/// target id travels with the receiver so the completion stays attributable.
+pub(crate) fn request_cancel(
+    config: &Config,
+    id: String,
+) -> (String, oneshot::Receiver<anyhow::Result<CancelOutcome>>) {
     let (tx, rx) = oneshot::channel();
     let config = config.clone();
+    let target = id.clone();
     tokio::spawn(async move {
-        let _ = tx.send(send_cancel(&config, &id).await);
+        let _ = tx.send(send_cancel(&config, &target).await);
     });
-    rx
+    (id, rx)
 }
 
-async fn send_cancel(config: &Config, id: &str) -> anyhow::Result<()> {
+async fn send_cancel(config: &Config, id: &str) -> anyhow::Result<CancelOutcome> {
     crate::remote::subtasks::cancel(&ServerClient::configured(config)?, id).await
 }
 

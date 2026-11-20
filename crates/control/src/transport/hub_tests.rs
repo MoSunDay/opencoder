@@ -164,7 +164,7 @@ async fn old_generation_cannot_touch_or_complete_new_connection() {
 }
 
 #[tokio::test]
-async fn late_failure_cannot_reject_an_inflight_create_or_leak_claims() {
+async fn timed_out_call_releases_pending_and_claim_and_drops_late_reply() {
     let hub = Arc::new(Hub::new(vec![]));
     let (tx, mut rx) = mpsc::channel(1);
     hub.attach(registration(), snapshot("g1", 1), tx)
@@ -185,6 +185,18 @@ async fn late_failure_cannot_reject_an_inflight_create_or_leak_claims() {
     });
     let request_id = call_request_id(&mut rx).await;
     assert_eq!(call.await.unwrap().status, 504);
+    // The timeout reclaimed the pending slot and one claim, so a late reply
+    // for that request id is dropped instead of settling the dead call.
+    assert!(hub
+        .resolve(
+            "node-a",
+            "g1",
+            &request_id,
+            RpcReply::error(400, "late failure after timeout"),
+        )
+        .await
+        .is_none());
+    assert_eq!(hub.views().await[0].reserved_loops, 1);
 
     let active_hub = hub.clone();
     let active_index = index.clone();
@@ -194,32 +206,19 @@ async fn late_failure_cannot_reject_an_inflight_create_or_leak_claims() {
             .await
     });
     let active_request = call_request_id(&mut rx).await;
-    let failed = hub
-        .resolve(
-            "node-a",
-            "g1",
-            &request_id,
-            RpcReply::error(400, "first attempt failed"),
-        )
-        .await
-        .expect("timed-out create must retain settlement identity");
-    assert_eq!(failed.execution.id, "agent-late");
-    assert!(failed.late);
-    assert!(!failed.reject_pending);
-    assert_eq!(hub.views().await[0].reserved_loops, 1);
-
     let accepted = hub
         .resolve(
             "node-a",
             "g1",
             &active_request,
-            RpcReply::ok(json!(failed.execution)),
+            RpcReply::ok(json!(index)),
         )
         .await
         .expect("active create must settle its claim");
     assert!(!accepted.late);
     assert_eq!(active.await.unwrap().status, 200);
     assert_eq!(hub.views().await[0].reserved_loops, 0);
+    assert!(hub.state.lock().await.pending.is_empty());
 
     // A complete report is durable acceptance evidence. Even after the
     // successful request's own claim is gone, a conflicting peer reply cannot
@@ -255,6 +254,69 @@ async fn late_failure_cannot_reject_an_inflight_create_or_leak_claims() {
         hub.call("node-a", create(&accepted.execution)).await.status,
         503
     );
+    assert_eq!(hub.views().await[0].reserved_loops, 0);
+}
+
+#[tokio::test]
+async fn unanswered_timeouts_do_not_accumulate_pending_entries() {
+    let hub = Arc::new(Hub::new(vec![]));
+    let (tx, mut rx) = mpsc::channel(16);
+    hub.attach(registration(), snapshot("g1", 1), tx)
+        .await
+        .unwrap();
+    assert!(hub.mark_index_synced("node-a", "g1").await);
+
+    let indices: Vec<_> = (0..8)
+        .map(|n| ExecutionIndex {
+            id: format!("agent-unanswered-{n}"),
+            ..execution()
+        })
+        .collect();
+    for index in &indices {
+        hub.reserve(index).await;
+    }
+    assert_eq!(hub.views().await[0].reserved_loops, 8);
+
+    // Keep one execution id back to prove a retry with the same id still
+    // dispatches after every timeout reclaimed its slot.
+    let retry_index = indices[0].clone();
+    let mut calls = Vec::new();
+    for index in indices {
+        let call_hub = hub.clone();
+        calls.push(tokio::spawn(async move {
+            call_hub
+                .call_with_timeout("node-a", create(&index), Duration::from_millis(10))
+                .await
+        }));
+    }
+    for _ in 0..8 {
+        call_request_id(&mut rx).await;
+    }
+    for call in calls {
+        assert_eq!(call.await.unwrap().status, 504);
+    }
+    assert!(hub.state.lock().await.pending.is_empty());
+    assert_eq!(hub.views().await[0].reserved_loops, 0);
+
+    // Reclaimed slots keep the hub dispatching: retrying with the same
+    // execution id reaches the node and settles with a 200, no
+    // "control channel busy".
+    hub.reserve(&retry_index).await;
+    let retry_hub = hub.clone();
+    let retry_expected = retry_index.clone();
+    let retry = tokio::spawn(async move {
+        retry_hub
+            .call_with_timeout("node-a", create(&retry_expected), Duration::from_secs(1))
+            .await
+    });
+    let retry_request = call_request_id(&mut rx).await;
+    let settled = hub
+        .resolve("node-a", "g1", &retry_request, RpcReply::ok(json!(retry_index)))
+        .await
+        .expect("retry create must settle its claim");
+    assert!(!settled.late);
+    assert_eq!(retry.await.unwrap().status, 200);
+    assert!(hub.state.lock().await.pending.is_empty());
     assert_eq!(hub.views().await[0].reserved_loops, 0);
 }
 

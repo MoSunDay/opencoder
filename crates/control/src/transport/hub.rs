@@ -503,10 +503,23 @@ impl Hub {
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(reply)) => reply,
-            _ => RpcReply::error(
-                504,
-                "node request timed out; retry using the same execution id",
-            ),
+            _ => {
+                // A node that never replies must not hold a global pending
+                // slot and its capacity claim hostage until it disconnects:
+                // reclaim both here so the 1024 dispatch cap stays fleet-wide
+                // usable. Late replies for the reclaimed entry are dropped by
+                // `resolve`'s miss path.
+                let mut state = self.state.lock().await;
+                if let Some(pending) = state.pending.remove(&id) {
+                    if let Some(execution) = pending.execution {
+                        release_claim(&mut state, &execution);
+                    }
+                }
+                RpcReply::error(
+                    504,
+                    "node request timed out; retry using the same execution id",
+                )
+            }
         }
     }
 }

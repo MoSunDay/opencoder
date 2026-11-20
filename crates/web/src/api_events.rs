@@ -34,6 +34,12 @@ pub struct EventsQuery {
 /// live broadcast. Slow clients skip lagged events (backpressure never blocks
 /// the runner); a missing live handle still yields the replay window.
 ///
+/// Replay is the NEWEST bounded window (≤1000 events / 2 MiB, see
+/// `sse_replay`): a first-connect `after=0` never clones the full session
+/// history into memory. Clients needing older history page it via
+/// `/events-page`; truncation is observable by the first replayed seq
+/// exceeding `after + 1`.
+///
 /// The cursor comes from `?after=` or, when absent, the SSE-standard
 /// `Last-Event-ID` header (unparseable values ignored → fall back to 0).
 pub async fn get_events(
@@ -86,25 +92,19 @@ pub async fn get_events(
     // is a genuine subscribe/query overlap-window event that must seed `seen`.
     let baseline = state.store.last_event_seq(&id).await.unwrap_or(-1);
 
-    let persisted: Vec<SseEvt> = state
-        .store
-        .events_after(&id, after)
+    let persisted: Vec<SseEvt> = crate::sse_replay::bounded_replay(state.store.as_ref(), &id, after)
         .await
-        .map(|records| {
-            records
-                .into_iter()
-                .map(|r| SseEvt {
-                    kind: r
-                        .sse_kind
-                        .clone()
-                        .unwrap_or_else(|| crate::api::event_kind_str(r.kind).to_string()),
-                    data: r.payload,
-                    ts: r.ts,
-                    seq: r.seq,
-                })
-                .collect()
+        .into_iter()
+        .map(|r| SseEvt {
+            kind: r
+                .sse_kind
+                .clone()
+                .unwrap_or_else(|| crate::api::event_kind_str(r.kind).to_string()),
+            data: r.payload,
+            ts: r.ts,
+            seq: r.seq,
         })
-        .unwrap_or_default();
+        .collect();
 
     // Dedup live broadcast events against the replayed (persisted) window:
     // two-tier decision (exact seq, then content fingerprint) + overlap-window

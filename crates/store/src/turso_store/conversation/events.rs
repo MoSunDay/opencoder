@@ -175,6 +175,93 @@ pub async fn page(
     Ok(SessionEventPage { events, more })
 }
 
+/// Bounded newest-window read for SSE replay: the most recent events with
+/// `seq > after_seq`, returned in ASCENDING seq order. Mirrors `page()`'s
+/// two-phase metadata+payload walk and per-row budget rules
+/// (`EVENT_OVERHEAD_BYTES`, single-oversized-row placeholder, stop when the
+/// budget is exhausted), but walks DESC from the head so the bounded window
+/// keeps the NEWEST events — a capped tail still converges for clients,
+/// while first-connect replay never clones the full session history.
+pub async fn tail(
+    conn: &Connection,
+    session_id: &str,
+    after_seq: i64,
+    max_rows: u32,
+    payload_budget: usize,
+) -> Result<SessionEventPage> {
+    let max_rows = max_rows.clamp(1, 2000) as usize;
+    let mut rows = conn
+        .query(
+            "SELECT seq,type,sse_kind,ts,length(CAST(payload_json AS BLOB)) \
+             FROM session_events WHERE session_id=?1 AND seq>?2 ORDER BY seq DESC LIMIT ?3",
+            params![session_id, after_seq, max_rows as i64 + 1],
+        )
+        .await?;
+    let mut metas = Vec::with_capacity(max_rows + 1);
+    while let Some(row) = rows.next().await? {
+        metas.push((
+            row.get::<i64>(0)?,
+            row.get::<String>(1)?,
+            row.get::<Option<String>>(2)?,
+            row.get::<i64>(3)?,
+            row.get::<i64>(4)?.max(0) as usize,
+        ));
+    }
+    drop(rows);
+
+    let mut events = Vec::with_capacity(max_rows.min(metas.len()));
+    let mut used = 0usize;
+    for (seq, kind, sse_kind, ts, payload_len) in metas.iter().take(max_rows) {
+        let row_bytes = payload_len.saturating_add(EVENT_OVERHEAD_BYTES);
+        if row_bytes > payload_budget && events.is_empty() {
+            events.push(SessionEventRecord {
+                session_id: session_id.to_owned(),
+                kind: parse_kind(kind),
+                payload: serde_json::json!({
+                    "omitted": true,
+                    "reason": "event_payload_exceeds_page_budget",
+                    "total_bytes": payload_len,
+                    "read_via": "event_payload",
+                }),
+                ts: *ts,
+                seq: Some(*seq),
+                sse_kind: sse_kind.clone(),
+            });
+            break;
+        }
+        if used.saturating_add(row_bytes) > payload_budget {
+            break;
+        }
+        let mut payload_rows = conn
+            .query(
+                "SELECT payload_json FROM session_events WHERE session_id=?1 AND seq=?2",
+                params![session_id, *seq],
+            )
+            .await?;
+        let Some(row) = payload_rows.next().await? else {
+            anyhow::bail!("event {seq} disappeared during tail replay");
+        };
+        let payload_json: String = row.get(0)?;
+        let payload = serde_json::from_str(&payload_json).unwrap_or_else(|error| {
+            tracing::warn!(session_id, seq, %error, "failed to deserialize event payload, using null");
+            serde_json::Value::Null
+        });
+        events.push(SessionEventRecord {
+            session_id: session_id.to_owned(),
+            kind: parse_kind(kind),
+            payload,
+            ts: *ts,
+            seq: Some(*seq),
+            sse_kind: sse_kind.clone(),
+        });
+        used += row_bytes;
+    }
+    // Walked DESC (newest first); replay streams demand ascending seq order.
+    events.reverse();
+    let more = metas.len() > max_rows || events.len() < metas.len().min(max_rows);
+    Ok(SessionEventPage { events, more })
+}
+
 pub async fn payload_chunk(
     conn: &Connection,
     session_id: &str,

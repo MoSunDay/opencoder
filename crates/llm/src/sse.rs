@@ -1,7 +1,32 @@
 use serde_json::Value;
 
+/// Hard cap on unterminated bytes buffered by [`SseDecoder`]. The idle
+/// watchdog only resets on decoded data frames, so a degenerate/malicious
+/// upstream streaming terminator-less bytes would otherwise grow the pending
+/// buffer without bound until the node OOMs.
+pub const MAX_PENDING_BYTES: usize = 64 * 1024 * 1024;
+
+/// A single unterminated frame grew past the decoder's pending-byte cap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SseOverflow {
+    pub limit: usize,
+}
+
+impl std::fmt::Display for SseOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SSE frame exceeded {} bytes without a terminator",
+            self.limit
+        )
+    }
+}
+
+impl std::error::Error for SseOverflow {}
+
 pub struct SseDecoder {
     buf: Vec<u8>,
+    limit: usize,
 }
 
 impl Default for SseDecoder {
@@ -12,11 +37,27 @@ impl Default for SseDecoder {
 
 impl SseDecoder {
     pub fn new() -> Self {
-        SseDecoder { buf: Vec::new() }
+        SseDecoder::with_limit(MAX_PENDING_BYTES)
     }
 
-    pub fn push(&mut self, chunk: &[u8]) {
+    /// Build a decoder with a custom cap on unterminated pending bytes.
+    pub fn with_limit(limit: usize) -> Self {
+        SseDecoder {
+            buf: Vec::new(),
+            limit,
+        }
+    }
+
+    /// Buffer `chunk` for frame decoding. Returns [`SseOverflow`] — leaving
+    /// the buffer untouched — when the pending bytes would exceed the cap, so
+    /// the caller can terminate the stream instead of letting a
+    /// terminator-less upstream grow memory without bound.
+    pub fn push(&mut self, chunk: &[u8]) -> Result<(), SseOverflow> {
+        if self.buf.len() + chunk.len() > self.limit {
+            return Err(SseOverflow { limit: self.limit });
+        }
         self.buf.extend_from_slice(chunk);
+        Ok(())
     }
 
     pub fn drain(&mut self) -> Vec<String> {
@@ -172,7 +213,7 @@ mod tests {
     #[test]
     fn drain_splits_on_double_newline() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":1}\n\ndata:{\"a\":2}\n\n");
+        dec.push(b"data:{\"a\":1}\n\ndata:{\"a\":2}\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}"]);
     }
@@ -180,7 +221,7 @@ mod tests {
     #[test]
     fn drain_skips_done_marker() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":1}\n\ndata:[DONE]\n\n");
+        dec.push(b"data:{\"a\":1}\n\ndata:[DONE]\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}"]);
     }
@@ -189,7 +230,7 @@ mod tests {
     fn drain_trims_crlf_line_endings() {
         let mut dec = SseDecoder::new();
         // \r before \n\n separator — the \r must not break frame detection
-        dec.push(b"data:{\"a\":1}\r\n\ndata:{\"a\":2}\n\n");
+        dec.push(b"data:{\"a\":1}\r\n\ndata:{\"a\":2}\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}"]);
     }
@@ -200,7 +241,7 @@ mod tests {
         // joined with `\n` and dispatched as a single event (not separate
         // outputs).
         let mut dec = SseDecoder::new();
-        dec.push(b"data:line1\ndata:line2\ndata:line3\n\n");
+        dec.push(b"data:line1\ndata:line2\ndata:line3\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["line1\nline2\nline3"]);
     }
@@ -210,7 +251,7 @@ mod tests {
         // Each frame is independent: a frame with multiple data lines yields
         // one joined event; a frame with one data line yields one event.
         let mut dec = SseDecoder::new();
-        dec.push(b"data:a\ndata:b\n\ndata:c\n\n");
+        dec.push(b"data:a\ndata:b\n\ndata:c\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["a\nb", "c"]);
     }
@@ -220,7 +261,7 @@ mod tests {
         // The single leading space after `data:` is stripped per spec; the
         // join uses `\n`.
         let mut dec = SseDecoder::new();
-        dec.push(b"data: hello\ndata: world\n\n");
+        dec.push(b"data: hello\ndata: world\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["hello\nworld"]);
     }
@@ -228,16 +269,16 @@ mod tests {
     #[test]
     fn drain_holds_partial_until_complete() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":1}");
+        dec.push(b"data:{\"a\":1}").unwrap();
         assert!(dec.drain().is_empty());
-        dec.push(b"\n\n");
+        dec.push(b"\n\n").unwrap();
         assert_eq!(dec.drain(), vec!["{\"a\":1}"]);
     }
 
     #[test]
     fn flush_remaining_emits_without_terminator() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":99}");
+        dec.push(b"data:{\"a\":99}").unwrap();
         assert!(dec.drain().is_empty());
         let out = dec.flush_remaining();
         assert_eq!(out, vec!["{\"a\":99}"]);
@@ -246,7 +287,7 @@ mod tests {
     #[test]
     fn flush_remaining_concatenates_multi_line_data() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:a\ndata:b\ndata:c");
+        dec.push(b"data:a\ndata:b\ndata:c").unwrap();
         let out = dec.flush_remaining();
         assert_eq!(out, vec!["a\nb\nc"]);
     }
@@ -262,16 +303,16 @@ mod tests {
     fn drain_handles_split_utf8_across_chunks() {
         let mut dec = SseDecoder::new();
         // "héllo" = h + \xc3\xa9 + llo, split the é across two pushes
-        dec.push(b"data:h\xc3");
+        dec.push(b"data:h\xc3").unwrap();
         assert!(dec.drain().is_empty()); // incomplete char, wait
-        dec.push(b"\xa9llo\n\n");
+        dec.push(b"\xa9llo\n\n").unwrap();
         assert_eq!(dec.drain(), vec!["héllo"]);
     }
 
     #[test]
     fn drain_frames_on_crlf_crlf_separator() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\r\n\r\n");
+        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\r\n\r\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}"]);
     }
@@ -280,13 +321,13 @@ mod tests {
     fn drain_handles_entirely_incomplete_utf8_chunk() {
         let mut dec = SseDecoder::new();
         // A single continuation byte — not valid UTF-8 on its own
-        dec.push(b"\xc3");
+        dec.push(b"\xc3").unwrap();
         assert!(
             dec.drain().is_empty(),
             "incomplete UTF-8 should yield no frames"
         );
         // Now complete it
-        dec.push(b"\xa9\n\n");
+        dec.push(b"\xa9\n\n").unwrap();
         // \xc3\xa9 = é, but there's no data: prefix so nothing is extracted —
         // verify the buffer doesn't panic or corrupt
         assert!(dec.drain().is_empty());
@@ -302,7 +343,7 @@ mod tests {
         let mut dec = SseDecoder::new();
         // 0xFF is never a valid UTF-8 leading/continuation byte; it must be
         // skipped, leaving the valid `data: hello\n\n` frame to be decoded.
-        dec.push(b"\xffdata: hello\n\n");
+        dec.push(b"\xffdata: hello\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["hello"], "valid frame after bad byte must decode");
         // The bad byte is consumed (not retained), so the buffer is empty.
@@ -314,7 +355,7 @@ mod tests {
         // A contiguous run of invalid bytes at the head must all be skipped
         // before the valid frame decodes.
         let mut dec = SseDecoder::new();
-        dec.push(b"\xff\xfe\xfddata: ok\n\n");
+        dec.push(b"\xff\xfe\xfddata: ok\n\n").unwrap();
         assert_eq!(dec.drain(), vec!["ok"]);
         assert!(dec.drain().is_empty());
     }
@@ -322,7 +363,7 @@ mod tests {
     #[test]
     fn drain_handles_mixed_crlf_and_lf_separators() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\n\ndata:{\"a\":3}\r\n\r\n");
+        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\n\ndata:{\"a\":3}\r\n\r\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}", "{\"a\":3}"]);
     }
@@ -331,9 +372,9 @@ mod tests {
     fn drain_handles_split_at_frame_boundary() {
         let mut dec = SseDecoder::new();
         // Split right after the first \n of the \n\n separator
-        dec.push(b"data:{\"a\":1}\n");
+        dec.push(b"data:{\"a\":1}\n").unwrap();
         assert!(dec.drain().is_empty());
-        dec.push(b"\ndata:{\"a\":2}\n\n");
+        dec.push(b"\ndata:{\"a\":2}\n\n").unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}"]);
     }
@@ -344,12 +385,12 @@ mod tests {
         // arrives — the `\r` pairs with the following `\n` as ONE line
         // ending, so both data lines belong to a single event.
         let mut dec = SseDecoder::new();
-        dec.push(b"data:A\r");
+        dec.push(b"data:A\r").unwrap();
         assert!(
             dec.drain().is_empty(),
             "lone trailing CR must hold the frame"
         );
-        dec.push(b"\ndata:B\r\n\r\n");
+        dec.push(b"\ndata:B\r\n\r\n").unwrap();
         assert_eq!(dec.drain(), vec!["A\nB"]);
     }
 
@@ -358,9 +399,9 @@ mod tests {
         // A bare `\r` ends a line per spec, so `\r\r` is a frame boundary
         // even when the two CRs arrive in different chunks.
         let mut dec = SseDecoder::new();
-        dec.push(b"data:A\r");
+        dec.push(b"data:A\r").unwrap();
         assert!(dec.drain().is_empty());
-        dec.push(b"\rdata:B\r\r");
+        dec.push(b"\rdata:B\r\r").unwrap();
         assert_eq!(dec.drain(), vec!["A", "B"]);
     }
 
@@ -370,9 +411,9 @@ mod tests {
         // in different chunks; per the SSE line-ending rules that pair is a
         // frame boundary, so the events stay separate instead of merging.
         let mut dec = SseDecoder::new();
-        dec.push(b"data:A\n");
+        dec.push(b"data:A\n").unwrap();
         assert!(dec.drain().is_empty());
-        dec.push(b"\rdata:B\n\n");
+        dec.push(b"\rdata:B\n\n").unwrap();
         assert_eq!(dec.drain(), vec!["A", "B"]);
     }
 
@@ -381,7 +422,52 @@ mod tests {
         // `\r\n\r\n` must not be split into `\n\r\n` at offset+1: the frame
         // ends once, after the full four-byte terminator.
         let mut dec = SseDecoder::new();
-        dec.push(b"data:A\r\n\r\ndata:B\n\n");
+        dec.push(b"data:A\r\n\r\ndata:B\n\n").unwrap();
         assert_eq!(dec.drain(), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn unterminated_bytes_over_limit_error_out() {
+        // 512 pending + 600 incoming > 1024 cap: the second push errors out
+        // with the configured limit instead of growing the buffer.
+        let mut dec = SseDecoder::with_limit(1024);
+        let first = format!("data:{}\n", "x".repeat(506));
+        assert_eq!(first.len(), 512);
+        dec.push(first.as_bytes()).unwrap();
+        let second = "y".repeat(600);
+        assert_eq!(dec.push(second.as_bytes()), Err(SseOverflow { limit: 1024 }));
+    }
+
+    #[test]
+    fn frames_under_limit_still_drain() {
+        // A complete frame larger than 700 bytes drains normally, and the
+        // drain resets the buffer so subsequent pushes keep working.
+        let mut dec = SseDecoder::with_limit(1024);
+        let frame = format!("data:{}\n\n", "x".repeat(800));
+        assert!(frame.len() > 700);
+        dec.push(frame.as_bytes()).unwrap();
+        assert_eq!(dec.drain(), vec!["x".repeat(800)]);
+        dec.push(b"data:tail\n\n").unwrap();
+        assert_eq!(dec.drain(), vec!["tail"]);
+    }
+
+    #[test]
+    fn boundary_exact_limit_accepted() {
+        // buf.len() + chunk.len() == limit exactly is accepted; only
+        // strictly exceeding the cap errors out.
+        let mut dec = SseDecoder::with_limit(16);
+        dec.push(&[b'a'; 10]).unwrap();
+        dec.push(&[b'b'; 6]).unwrap();
+    }
+
+    #[test]
+    fn default_decoder_uses_max_pending_bytes() {
+        // Cheap smoke check: the default cap is the 64 MiB constant (stored,
+        // never allocated here) and small chunks still decode.
+        let dec = SseDecoder::new();
+        assert_eq!(dec.limit, MAX_PENDING_BYTES);
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:x\n\n").unwrap();
+        assert_eq!(dec.drain(), vec!["x"]);
     }
 }

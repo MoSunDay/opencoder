@@ -153,7 +153,12 @@ async fn run_stream_once(
                 });
             }
         };
-        decoder.push(&bytes);
+        // Terminal (non-retryable): a terminator-less upstream overflowing
+        // the decoder cap is protocol corruption, not a transient stall —
+        // retrying would just re-download the same unbounded garbage.
+        decoder
+            .push(&bytes)
+            .map_err(|overflow| OnceError::Connect(anyhow!("SSE decode overflow: {overflow}")))?;
         let frames = decoder.drain();
         let had_frames = !frames.is_empty();
         for data in frames {

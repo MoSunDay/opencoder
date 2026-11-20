@@ -102,7 +102,8 @@ async fn once(
         };
         let frames = match chunk {
             Some(Ok(chunk)) => {
-                sse.push(&chunk);
+                sse.push(&chunk)
+                    .map_err(|overflow| Failure::Terminal(anyhow!("{overflow}")))?;
                 sse.drain()
             }
             Some(Err(_)) => return Err(Failure::Interrupted(StreamInterruption::ChunkError)),

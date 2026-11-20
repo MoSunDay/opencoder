@@ -138,11 +138,12 @@ pub(super) async fn launch_locked(
             .is_ok_and(|status: &ExecutionStatus| status.terminal());
         if let Err(error) = persisted {
             tracing::error!(%id,%error,"could not persist terminal execution status");
-            *worker.inner.persistence_error.lock().unwrap() =
-                Some(format!("execution {id}: {error:#}"));
+            crate::runtime::persistence::record(&worker, format!("execution {id}: {error:#}"));
         } else if let Err(error) = worker.finish_slot(ticket.as_deref()).await {
-            *worker.inner.persistence_error.lock().unwrap() =
-                Some(format!("capacity completion {id}: {error:#}"));
+            crate::runtime::persistence::record(
+                &worker,
+                format!("capacity completion {id}: {error:#}"),
+            );
         }
         // Terminal operator executions release their dedicated Linux
         // account (produced files handed back to the node user). Idempotent,

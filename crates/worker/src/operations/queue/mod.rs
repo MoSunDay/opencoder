@@ -1,5 +1,5 @@
 //! Node-owned durable pending work. Admission serializes enqueue and dispatch.
-use crate::{journal::Record, Worker};
+use crate::{journal::Record, runtime::persistence, Worker};
 use anyhow::Result;
 use opencoder_core::{fleet::*, Config};
 use serde::{Deserialize, Serialize};
@@ -143,8 +143,7 @@ pub(crate) async fn dispatch_owned(
     worker.inner.tasks.spawn(async move {
         let result = dispatch_locked(&owned).await;
         if let Err(error) = &result {
-            *owned.inner.persistence_error.lock().unwrap() =
-                Some(format!("pending dispatch: {error:#}"));
+            persistence::record(&owned, format!("pending dispatch: {error:#}"));
         }
         // If the receiver disconnected, dropping the result releases admission
         // only after all claimed work was launched or explicitly failed.
@@ -167,16 +166,7 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<usize> {
     timing.mark("todo_recovery");
     if worker.admission_error().is_some()
         || worker.inner.stopping.is_cancelled()
-        || worker.inner.persistence_error.lock().unwrap().is_some()
-        || worker
-            .inner
-            .state
-            .project
-            .require()?
-            .persistence_error
-            .lock()
-            .unwrap()
-            .is_some()
+        || persistence::blocked(worker)
     {
         return Ok(started);
     }
@@ -315,6 +305,9 @@ pub(crate) async fn dispatch_locked(worker: &Worker) -> Result<usize> {
             worker.finish_slot(ticket.as_deref()).await?;
         }
     }
+    // Reaching here means capacity reconciliation, brain/todo recovery and
+    // every queue entry persisted cleanly: persistence works again.
+    persistence::recover(worker);
     Ok(started)
 }
 
@@ -352,8 +345,7 @@ pub(crate) fn start_scheduler(worker: &Worker) {
                 Ok(started) => started,
                 Err(error) => {
                     tracing::error!(%error, "node pending dispatch failed");
-                    *worker.inner.persistence_error.lock().unwrap() =
-                        Some(format!("pending dispatch: {error:#}"));
+                    persistence::record(&worker, format!("pending dispatch: {error:#}"));
                     0
                 }
             };

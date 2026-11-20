@@ -18,7 +18,7 @@ pub(super) async fn run(
     opencoder_session::loop_registry::notify_change();
     loop {
         if let Some(error) = deps.persistence_error.lock().unwrap().clone() {
-            *worker.inner.persistence_error.lock().unwrap() = Some(error.clone());
+            crate::runtime::persistence::record(worker, format!("project persistence: {error}"));
             anyhow::bail!("{error}");
         }
         if cancel.is_cancelled() {

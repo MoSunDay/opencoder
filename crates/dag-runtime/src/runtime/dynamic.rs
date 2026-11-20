@@ -98,8 +98,8 @@ pub(super) fn open(
                     serde_json::from_slice(&std::fs::read(dir.join("output.json"))?)?;
             }
         }
-        for i in 0..group.items.len() {
-            if group.outcomes[i].is_none()
+        for (i, outcome) in group.outcomes.iter().enumerate() {
+            if outcome.is_none()
                 && step.recovery_policy != opencoder_dag::RecoveryPolicy::Operator
             {
                 reset(root, &run.run_id, &step.name, Some(i), None, false)?;

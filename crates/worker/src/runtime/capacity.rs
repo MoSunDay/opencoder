@@ -164,13 +164,7 @@ impl crate::Worker {
                 .load(std::sync::atomic::Ordering::SeqCst)
                 == 0
             && opencoder_session::process::active_owned_processes() == 0
-            && self.inner.persistence_error.lock().unwrap().is_none()
-            && self
-                .inner
-                .state
-                .project
-                .require()
-                .is_ok_and(|p| p.persistence_error.lock().unwrap().is_none())
+            && !crate::runtime::persistence::active(self)
             && crate::brain::outbox::empty(self)
                 .await
                 .is_ok_and(|empty| empty)

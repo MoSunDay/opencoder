@@ -75,6 +75,21 @@ macro_rules! store_implementation_1 {
 
         }).await
     }
+    async fn events_tail(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+        max_rows: u32,
+        payload_budget: usize,
+    ) -> Result<SessionEventPage> {
+        let session_id = session_id.to_owned();
+        self.db.read(move |conn| async move {
+            let session_id = session_id.as_str();
+
+        events::tail(&conn, session_id, after_seq, max_rows, payload_budget).await
+
+        }).await
+    }
     async fn event_payload_chunk(
         &self,
         session_id: &str,

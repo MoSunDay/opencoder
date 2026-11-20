@@ -48,6 +48,7 @@ pub mod nodes_state;
 pub mod sse_dag;
 pub mod sse_dedup;
 pub mod sse_nodes;
+mod sse_replay;
 pub mod team_hub;
 pub mod team_state;
 pub mod todo_hub;

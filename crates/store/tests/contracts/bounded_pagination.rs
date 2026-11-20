@@ -398,3 +398,151 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
     assert_eq!(last.runs.len(), 5);
     assert!(last.next_version.is_none());
 }
+
+/// Seed `count` step events with `text_len`-byte payloads, returning seqs.
+async fn seed_tail_events(
+    store: &TursoStore,
+    sid: &str,
+    count: i64,
+    text_len: usize,
+) -> Vec<i64> {
+    let mut seqs = Vec::new();
+    for n in 0..count {
+        let seq = store
+            .append_event(&SessionEventRecord {
+                session_id: sid.into(),
+                kind: EventKind::Step,
+                payload: serde_json::json!({"n": n, "text": "x".repeat(text_len)}),
+                ts: n,
+                seq: None,
+                sse_kind: Some("step".into()),
+            })
+            .await
+            .unwrap();
+        seqs.push(seq);
+    }
+    seqs
+}
+
+#[tokio::test]
+async fn tail_returns_full_range_when_under_bounds() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = TursoStore::open(dir.path().join("runtime.db"))
+        .await
+        .unwrap();
+    store
+        .create_session(&session("session-tail"))
+        .await
+        .unwrap();
+    let seqs = seed_tail_events(&store, "session-tail", 5, 8).await;
+    let page = store
+        .events_tail("session-tail", 0, 10, 1_000_000)
+        .await
+        .unwrap();
+    assert!(!page.more);
+    let tail_seqs: Vec<i64> = page.events.iter().filter_map(|e| e.seq).collect();
+    // Under the bounds the tail equals the unbounded read, in ASC order.
+    let after = store.events_after("session-tail", 0).await.unwrap();
+    let after_seqs: Vec<i64> = after.iter().filter_map(|e| e.seq).collect();
+    assert_eq!(tail_seqs, seqs);
+    assert_eq!(tail_seqs, after_seqs);
+    assert_eq!(
+        page.events
+            .iter()
+            .map(|e| e.payload["n"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2, 3, 4]
+    );
+}
+
+#[tokio::test]
+async fn tail_keeps_newest_window_when_range_exceeds_bounds() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = TursoStore::open(dir.path().join("runtime.db"))
+        .await
+        .unwrap();
+    store
+        .create_session(&session("session-tail-window"))
+        .await
+        .unwrap();
+    let seqs = seed_tail_events(&store, "session-tail-window", 8, 8).await;
+    let page = store
+        .events_tail("session-tail-window", 0, 3, 1_000_000)
+        .await
+        .unwrap();
+    assert!(page.more);
+    let tail_seqs: Vec<i64> = page.events.iter().filter_map(|e| e.seq).collect();
+    // Newest window (events 6..=8) kept, still in ascending seq order.
+    assert_eq!(tail_seqs, seqs[5..8]);
+    assert_eq!(
+        page.events
+            .iter()
+            .map(|e| e.payload["n"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![5, 6, 7]
+    );
+}
+
+#[tokio::test]
+async fn tail_respects_after_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = TursoStore::open(dir.path().join("runtime.db"))
+        .await
+        .unwrap();
+    store
+        .create_session(&session("session-tail-cursor"))
+        .await
+        .unwrap();
+    let seqs = seed_tail_events(&store, "session-tail-cursor", 6, 8).await;
+    let page = store
+        .events_tail("session-tail-cursor", seqs[4], 10, 1_000_000)
+        .await
+        .unwrap();
+    assert!(!page.more);
+    // Only events strictly newer than the 5th event's seq replay.
+    let tail_seqs: Vec<i64> = page.events.iter().filter_map(|e| e.seq).collect();
+    assert_eq!(tail_seqs, seqs[5..6]);
+    // After the head cursor the window is empty, not an error.
+    let empty = store
+        .events_tail("session-tail-cursor", seqs[5], 10, 1_000_000)
+        .await
+        .unwrap();
+    assert!(empty.events.is_empty());
+    assert!(!empty.more);
+}
+
+#[tokio::test]
+async fn tail_respects_payload_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = TursoStore::open(dir.path().join("runtime.db"))
+        .await
+        .unwrap();
+    store
+        .create_session(&session("session-tail-budget"))
+        .await
+        .unwrap();
+    let seqs = seed_tail_events(&store, "session-tail-budget", 3, 32_000).await;
+    // Budget fits exactly one ~32 KiB row: only the NEWEST event survives.
+    let page = store
+        .events_tail("session-tail-budget", 0, 3, 40_000)
+        .await
+        .unwrap();
+    assert!(page.more);
+    let tail_seqs: Vec<i64> = page.events.iter().filter_map(|e| e.seq).collect();
+    assert_eq!(tail_seqs, seqs[2..3]);
+    // Budget smaller than any single row: newest row becomes the documented
+    // single-oversized-row placeholder (no panic, seq preserved for /event chunks).
+    let tiny = store
+        .events_tail("session-tail-budget", 0, 3, 100)
+        .await
+        .unwrap();
+    assert!(tiny.more);
+    assert_eq!(tiny.events.len(), 1);
+    assert_eq!(tiny.events[0].seq, Some(seqs[2]));
+    assert_eq!(tiny.events[0].payload["omitted"], true);
+    assert_eq!(
+        tiny.events[0].payload["reason"],
+        "event_payload_exceeds_page_budget"
+    );
+    assert_eq!(tiny.events[0].payload["read_via"], "event_payload");
+}

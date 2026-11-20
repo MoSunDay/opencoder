@@ -211,6 +211,18 @@ macro_rules! store_contract_0 {
     ) -> Result<SessionEventPage> {
         anyhow::bail!("bounded event pagination is unsupported by this store")
     }
+    /// Newest events with seq > after_seq, bounded by rows and payload bytes.
+    /// Returns the most recent `max_rows` events in ascending seq order;
+    /// `more` is true when the (after_seq, head] range exceeded the bounds.
+    async fn events_tail(
+        &self,
+        _session_id: &str,
+        _after_seq: i64,
+        _max_rows: u32,
+        _payload_budget: usize,
+    ) -> Result<SessionEventPage> {
+        anyhow::bail!("bounded event tail reads are unsupported by this store")
+    }
     async fn event_payload_chunk(
         &self,
         _session_id: &str,

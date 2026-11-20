@@ -103,12 +103,11 @@ pub async fn get_node_task_events(
     let (rx, _created) = state.nodes.subscribe(&sid).await;
     let baseline = state.store.last_event_seq(&sid).await.unwrap_or(-1);
 
-    let persisted: Vec<SseEvt> = state
-        .store
-        .events_after(&sid, after)
+    let persisted: Vec<SseEvt> = crate::sse_replay::bounded_replay(state.store.as_ref(), &sid, after)
         .await
-        .map(|records| records.into_iter().map(persisted_to_evt).collect())
-        .unwrap_or_default();
+        .into_iter()
+        .map(persisted_to_evt)
+        .collect();
 
     // Two-tier dedup of live events against the replayed window (exact seq,
     // then content fingerprint): shared logic in `sse_dedup`.

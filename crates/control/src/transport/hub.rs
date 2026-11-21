@@ -1,5 +1,8 @@
 use opencoder_core::{fleet::*, message::now_ms};
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::SocketCommand;
@@ -46,6 +49,11 @@ struct Pending {
 struct Reservation {
     node_id: String,
     claims: u64,
+    /// When this reservation was (re)established. Admission reserves
+    /// BEFORE the assignment is persisted (so concurrent submissions cannot
+    /// select the same capacity), so reconciliation must give that write a
+    /// wide grace window before treating a reservation as orphaned.
+    at_ms: i64,
 }
 pub(super) struct CreateReply {
     pub execution: ExecutionIndex,
@@ -332,6 +340,7 @@ impl Hub {
             .or_insert_with(|| Reservation {
                 node_id: record.node_id.clone(),
                 claims: 0,
+                at_ms: now_ms(),
             });
         if reservation.node_id != record.node_id {
             return;
@@ -341,16 +350,37 @@ impl Hub {
             node.reserved_loops = node.reserved_loops.saturating_add(1);
         }
     }
-    pub async fn clear_reservations(&self, records: &[ExecutionIndex]) {
+    /// Grace before a reservation missing from the Pending set may be
+    /// released: admission reserves before the assignment write, so a fresh
+    /// reservation legitimately lags the persisted set. Two reconcile rounds
+    /// (60s cadence) plus margin.
+    const ORPHAN_GRACE_MS: i64 = 150_000;
+
+    /// Reconcile in-memory reservations against the persisted Pending set:
+    /// drop reservations whose execution is no longer Pending (dispatched,
+    /// terminal or gone) and give the reserved loops back. Returns how many
+    /// orphan reservations were released. Pending entries stay untouched —
+    /// reservations participate in node selection by contract. A reservation
+    /// younger than [`ORPHAN_GRACE_MS`] is never dropped: its assignment
+    /// write may still be in flight.
+    pub async fn reconcile_reservations(&self, pending: &HashSet<String>, now: i64) -> usize {
         let mut state = self.state.lock().await;
-        for record in records {
-            let Some(reservation) = state.reservations.remove(&record.id) else {
-                continue;
-            };
-            if let Some(node) = state.nodes.get_mut(&reservation.node_id) {
-                node.reserved_loops = node.reserved_loops.saturating_sub(reservation.claims);
+        let orphans: Vec<String> = state
+            .reservations
+            .iter()
+            .filter(|(id, reservation)| {
+                !pending.contains(*id) && now.saturating_sub(reservation.at_ms) >= Self::ORPHAN_GRACE_MS
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &orphans {
+            if let Some(reservation) = state.reservations.remove(id) {
+                if let Some(node) = state.nodes.get_mut(&reservation.node_id) {
+                    node.reserved_loops = node.reserved_loops.saturating_sub(reservation.claims);
+                }
             }
         }
+        orphans.len()
     }
     pub async fn acknowledge_report(&self, node_id: &str, records: &[ExecutionIndex]) {
         self.acknowledge_report_changes(node_id, records, false, &[])

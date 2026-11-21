@@ -40,7 +40,27 @@ pub async fn serve(workdir: PathBuf, data: PathBuf, port: u16, token: String) ->
     crate::ontology::autostart(&config, &workdir, &data).await?;
     let app = build_app(state, token);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    axum::serve(listener, app).await?;
+    serve_until(
+        listener,
+        app,
+        async {
+            let _ = crate::bootstrap::shutdown_signal().await;
+        },
+    )
+    .await
+}
+
+/// Serve `app` until `shutdown` resolves, letting in-flight requests finish
+/// before the listener is released. Split from `serve` so shutdown behavior
+/// is testable without NFS exports or process signals.
+pub async fn serve_until(
+    listener: tokio::net::TcpListener,
+    app: axum::Router,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Result<()> {
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await?;
     Ok(())
 }
 

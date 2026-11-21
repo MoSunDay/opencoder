@@ -39,16 +39,36 @@ pub(crate) fn record(worker: &Worker, message: String) {
     tracing::error!(error = %message, backoff = ?delay, "node persistence latched; dispatch probes back off");
 }
 
-/// True while the project-side latch is set. An uninitialized project
-/// service holds no latch (see [`active`] for the conservative variant).
-fn deps_latched(worker: &Worker) -> bool {
+/// Project-side (deps) latch text, or `None` while the project service is
+/// not initialized: an uninitialized project holds no latch (see
+/// [`active`] for the conservative variant).
+fn deps_error(worker: &Worker) -> Option<String> {
     worker
         .inner
         .state
         .project
         .require()
-        .map(|deps| deps.persistence_error.lock().unwrap().is_some())
-        .unwrap_or(false)
+        .ok()
+        .and_then(|deps| deps.persistence_error.lock().unwrap().clone())
+}
+
+/// True while the project-side latch is set.
+fn deps_latched(worker: &Worker) -> bool {
+    deps_error(worker).is_some()
+}
+
+/// Node-side latch text only: admission rejects new executions while the
+/// node itself cannot persist, regardless of the project deps latch.
+pub(crate) fn node_error(worker: &Worker) -> Option<String> {
+    worker.inner.persistence_error.lock().unwrap().clone()
+}
+
+/// Current latched persistence error text: the node latch first, then the
+/// project-side latch. `None` while persistence is healthy on both sides.
+/// Snapshots read the latch through this accessor so the merge order stays
+/// owned by this module instead of every caller.
+pub(crate) fn error(worker: &Worker) -> Option<String> {
+    node_error(worker).or_else(|| deps_error(worker))
 }
 
 /// True while a latched failure is still inside its backoff window, so the

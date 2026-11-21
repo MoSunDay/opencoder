@@ -353,7 +353,7 @@ fn prepare_with_config(
         "{}",
         opencoder_core::brain::layered::LAYERED_MIGRATION
     );
-    if let Some(error) = worker.inner.persistence_error.lock().unwrap().as_ref() {
+    if let Some(error) = crate::runtime::persistence::node_error(worker) {
         bail!("node persistence unavailable: {error}");
     }
     if let Some(settings) = &assignment.runtime {

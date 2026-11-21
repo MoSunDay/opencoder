@@ -85,7 +85,7 @@ impl Host {
                 kinds: opencoder_core::platform::execution_kinds(true),
             },
             token,
-            client: reqwest::Client::builder().no_proxy().build()?,
+            client: client::http_client_with(client::HTTP_BACKSTOP)?,
             creations: admission::Creations::default(),
             activity: activity::RecentUse::default(),
             result_reader: opencoder_worker::result_reader::ResultReader::default(),

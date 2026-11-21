@@ -1,4 +1,4 @@
-Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
+Commit: ca91d2dee467cddc1669d5180867d5685ffefb6a
 
 # store 模块
 
@@ -38,6 +38,8 @@ Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
   — 会话读写；
   [messages.rs](../../../crates/store/src/turso_store/conversation/messages.rs)
   — 消息与分页读取（`load_transcript_page`）；
+  [events.rs](../../../crates/store/src/turso_store/conversation/events.rs)
+  — 事件追加与有界读取（`events_page` 翻页、`events_tail` 最新窗口 ≤max_rows+payload 预算，web SSE 首连回放在用）；
   [node_tasks.rs](../../../crates/store/src/turso_store/execution/node_tasks.rs)
   — 节点任务
 - [src/fleet/](../../../crates/store/src/fleet/mod.rs) — 独立 fleet 控制库：

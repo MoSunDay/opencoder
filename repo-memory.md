@@ -1,4 +1,4 @@
-Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
+Commit: ca91d2dee467cddc1669d5180867d5685ffefb6a
 
 # OpenCoder 逻辑地图
 
@@ -59,7 +59,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 **execution**
 
-- [agents/worker](agents/execution/worker/index.md) — 节点执行面：接受/恢复、资源快照、操作适配。
+- [agents/worker](agents/execution/worker/index.md) — 节点执行面：接受/恢复、资源快照、操作适配；持久化闩锁指数退避自愈（成功派发周期即清双闩锁）。
 - [agents/computer-use](agents/execution/computer-use/index.md) — 可选 `opencoder-computer`：Cua 桌面任务 CLI、独立模型与运行产物。
 
 OpenCoder 能力入口见 [features/index.md](features/index.md)。

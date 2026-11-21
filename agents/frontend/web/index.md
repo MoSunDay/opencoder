@@ -1,4 +1,4 @@
-Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
+Commit: d0e87cbca
 
 # web 模块
 
@@ -8,7 +8,11 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 
 - `src/lib.rs` — `AppState` 装配与 `serve` 入口（Operator `config_home`、drain 栈）
 - `src/api.rs`、`src/api_*.rs` — 各域 HTTP API
-  （prompt/events/agents/dag/todo/team/…）
+  （prompt/events/agents/dag/todo/team/…）；`map_broadcast_result`/`lag_payload`
+  为 SSE 广播 lag 帧的共享 wire 契约（`error` + 数值 `lag` 标记）
+- [sse_dag.rs](../../../crates/web/src/sse_dag.rs) — DAG 运行事件流（回放+直播、
+  Last-Event-ID 续传、exact-seq 去重）；直播 `Lagged` 合成带 `lag` 标记的
+  `error` 帧（id 复用回放头作重连游标），不再静默丢弃
 - [api_transcript.rs](../../../crates/web/src/api_transcript.rs) — 会话完整展示消息块
   按序号与字节偏移读取
 - `src/api_agents.rs`、`src/api_agent_resources.rs` — agent 目录/卡片与资源文件 API

@@ -1,4 +1,4 @@
-Commit: ca91d2dee467cddc1669d5180867d5685ffefb6a
+Commit: d0e87cbca
 
 # OpenCoder 逻辑地图
 
@@ -14,7 +14,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 - [agents/core](agents/foundation/core/index.md) — 共享类型与 Config。
 - [agents/llm](agents/foundation/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
-- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的内嵌 turso 引擎，全部写路径经 `database::busy` 的 BEGIN IMMEDIATE 有界 Busy 重试（25ms→1s，预算 120s）取跨进程写锁；schema 就绪的暖打开经只读版本探针跳过写锁引导（不等待跨进程写锁）。
+- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的内嵌 turso 引擎（池打开即挂载周期 PASSIVE checkpoint：60s/1MiB 门限、busy 即跳过），全部写路径经 `database::busy` 的 BEGIN IMMEDIATE 有界 Busy 重试（25ms→1s，预算 120s）取跨进程写锁；schema 就绪的暖打开经只读版本探针跳过写锁引导（不等待跨进程写锁）。
 - [agents/event](agents/foundation/event/index.md) — `opencoder-event`：事件日志、监听器、广播总线、触发执行与全局暂停门；纯内存、零存储引擎依赖；通用基建，未接生产 dispatcher。
 
 **runtime**
@@ -59,7 +59,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 **execution**
 
-- [agents/worker](agents/execution/worker/index.md) — 节点执行面：接受/恢复、资源快照、操作适配；持久化闩锁指数退避自愈（成功派发周期即清双闩锁）。
+- [agents/worker](agents/execution/worker/index.md) — 节点执行面：接受/恢复、资源快照、操作适配；持久化闩锁指数退避自愈（成功派发周期即清双闩锁，读取统一走 node_error/error 访问器）。
 - [agents/computer-use](agents/execution/computer-use/index.md) — 可选 `opencoder-computer`：Cua 桌面任务 CLI、独立模型与运行产物。
 
 OpenCoder 能力入口见 [features/index.md](features/index.md)。

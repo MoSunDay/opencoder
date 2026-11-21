@@ -1,4 +1,4 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: d0e87cbca
 
 # agent 模块
 
@@ -11,7 +11,7 @@ Windows 的 `opencoder-agent --remote` 提供原生 Operator 节点；安装与�
 - [main.rs](../../../crates/agent/src/main.rs) — 二进制入口；binarytime/runc 依赖链只在此处链接
 - [host/mod.rs](../../../crates/agent/src/host/mod.rs) — Host 装配与 fleet channel
 - [host/service.rs](../../../crates/agent/src/host/service.rs) — 维护命令中继与索引上报（`index_changes`）
-- [host/client.rs](../../../crates/agent/src/host/client.rs) — 按 Runtime 归属的 RPC 转发；只读结果复用 result_reader
+- [host/client.rs](../../../crates/agent/src/host/client.rs) — 按 Runtime 归属的 RPC 转发；只读结果复用 result_reader；HTTP 客户端 builder 级 300s 背压超时（`HTTP_BACKSTOP`，调用点的 per-request/包裹超时经 `RequestBuilder::timeout` 覆盖语义不受影响）
 - [host/lifecycle.rs](../../../crates/agent/src/host/lifecycle.rs)（含 `lifecycle/activity.rs`）— retired Runtime 回收
 - [host/runtime.rs](../../../crates/agent/src/host/runtime.rs) — Runtime inventory 状态查询
 - [host/inventory/](../../../crates/agent/src/host/inventory/mod.rs) — 各 Runtime 清单变化的增量获取

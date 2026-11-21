@@ -7,6 +7,19 @@ use opencoder_core::fleet::{NodeAdmissionCommand, NodeOperation, RpcReply};
 use opencoder_store::fleet::handoff::RuntimeRecord;
 use std::time::Duration;
 
+/// Builder-level backstop for the host HTTP client. Every call site already
+/// carries a tighter budget (per-request 15s timeouts or the 10–45s
+/// admission wrapping timeout, which `RequestBuilder::timeout` overrides),
+/// so this only exists to keep a future call site without its own timeout
+/// from hanging a fleet channel permit forever.
+pub(super) const HTTP_BACKSTOP: Duration = Duration::from_secs(300);
+
+/// Shared client construction so tests can exercise the backstop behavior
+/// with a compressed duration.
+pub(super) fn http_client_with(backstop: Duration) -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder().no_proxy().timeout(backstop).build()?)
+}
+
 impl Host {
     pub async fn runtime(&self, id: &str) -> Result<RuntimeRecord> {
         self.store

@@ -21,6 +21,8 @@ mod inventory_changes;
 mod result_upgrade;
 #[path = "tests/runtime_lifecycle.rs"]
 mod runtime_lifecycle;
+#[path = "tests/http_backstop.rs"]
+mod http_backstop;
 
 struct HeldModel {
     entered: AtomicUsize,

@@ -58,44 +58,55 @@ impl Database {
                         .join(absolute.file_name().context("database filename")?)
                 })
             };
-            if let Some(inner) = key
+            let inner = if let Some(inner) = key
                 .as_ref()
                 .and_then(|key| registry.get(key))
                 .and_then(Weak::upgrade)
             {
-                return Ok(Self(inner));
-            }
-            let name = path.to_str().context("database path must be UTF-8")?;
-            crate::marker::record(key.as_deref().unwrap_or(&path))?;
-            let db = turso::Builder::new_local(name)
-                .experimental_multiprocess_wal(name != ":memory:")
-                .build()
-                .await
-                .with_context(|| format!("open Turso database {}", path.display()))?;
-            let inner = Arc::new(Inner {
-                db,
-                admission: Arc::new(Semaphore::new(ACTIVE_OPERATIONS)),
-                reads: Lane::new(4),
-                writes: Lane::new(1),
-                connections: RwLock::new(()),
-            });
-            let database = Self(inner.clone());
-            // Turso reconciles shared WAL state when a connection is opened.
-            // Establish the bounded pool before any transaction can be active.
-            for write in [true, false, false, false, false] {
-                let connection = database.new_connection().await?;
-                if !write {
-                    connection.execute("PRAGMA query_only=1", ()).await?;
+                inner
+            } else {
+                let name = path.to_str().context("database path must be UTF-8")?;
+                crate::marker::record(key.as_deref().unwrap_or(&path))?;
+                let db = turso::Builder::new_local(name)
+                    .experimental_multiprocess_wal(name != ":memory:")
+                    .build()
+                    .await
+                    .with_context(|| format!("open Turso database {}", path.display()))?;
+                let inner = Arc::new(Inner {
+                    db,
+                    admission: Arc::new(Semaphore::new(ACTIVE_OPERATIONS)),
+                    reads: Lane::new(4),
+                    writes: Lane::new(1),
+                    connections: RwLock::new(()),
+                });
+                let database = Self(inner.clone());
+                // Turso reconciles shared WAL state when a connection is opened.
+                // Establish the bounded pool before any transaction can be active.
+                for write in [true, false, false, false, false] {
+                    let connection = database.new_connection().await?;
+                    if !write {
+                        connection.execute("PRAGMA query_only=1", ()).await?;
+                    }
+                    let lane = if write { &inner.writes } else { &inner.reads };
+                    lane.idle
+                        .lock()
+                        .expect("database idle pool poisoned")
+                        .push(connection);
                 }
-                let lane = if write { &inner.writes } else { &inner.reads };
-                lane.idle
-                    .lock()
-                    .expect("database idle pool poisoned")
-                    .push(connection);
-            }
-            if let Some(key) = key {
-                registry.retain(|_, db| db.strong_count() > 0);
-                registry.insert(key, Arc::downgrade(&inner));
+                if let Some(key) = &key {
+                    registry.retain(|_, db| db.strong_count() > 0);
+                    registry.insert(key.clone(), Arc::downgrade(&inner));
+                }
+                inner
+            };
+            // Every file-backed database opened through the pool automatically
+            // gains the periodic passive WAL checkpoint loop (memory databases
+            // have no WAL file).
+            if let Some(key) = &key {
+                crate::checkpoint::start_periodic(
+                    key.clone(),
+                    crate::checkpoint::CheckpointPolicy::default(),
+                );
             }
             Ok(Self(inner))
         })

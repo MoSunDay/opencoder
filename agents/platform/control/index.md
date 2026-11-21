@@ -1,4 +1,4 @@
-Commit: ca91d2dee467cddc1669d5180867d5685ffefb6a
+Commit: d0e87cbca
 
 # control 模块
 
@@ -17,7 +17,8 @@ Commit: ca91d2dee467cddc1669d5180867d5685ffefb6a
 - [bootstrap.rs](../../../crates/control/src/bootstrap.rs) — control.db / definitions.db
   / ontology.db 装配与就绪检查
 - `src/role_gate.rs` — 角色门禁
-- `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）；`call_with_timeout` 超时即回收 pending 槽位与容量声明（`release_claim`），迟到回复由 `resolve` 丢弃——慢节点不能耗尽全局派发上限
+- `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）；`call_with_timeout` 超时即回收 pending 槽位与容量声明（`release_claim`），迟到回复由 `resolve` 丢弃——慢节点不能耗尽全局派发上限；`reconcile_reservations` 按持久 Pending 集释放孤儿预留（预留带 `at_ms`，150s 宽限窗防 reserve-先于-持久化竞态误删）
+- [transport/reconcile.rs](../../../crates/control/src/transport/reconcile.rs) — 预留对账周期任务（60s；整页 ≥10000 跳过防误删活预留），与开机重预留、acknowledge/release_claim/unregister 三条既有释放路径互补
 - `src/transport/socket.rs`、`socket_io.rs` — 连接帧处理、心跳与背压写出
 - `src/transport/report.rs`、`socket_report/` — 索引报告提交与逐批确认
 - `src/transport/layered_tests.rs`、`layered_tests/` — 分层 wake 的 generation

@@ -425,3 +425,43 @@ async fn unregister_sweeps_per_node_acceptances_and_reservations() {
     );
     assert!(state.reservations.contains_key(&other.id));
 }
+
+#[tokio::test]
+async fn reconcile_reservations_releases_only_non_pending_entries() {
+    let hub = Hub::new(vec![]);
+    let (tx, _rx) = mpsc::channel(1);
+    hub.attach(registration(), snapshot("g1", 1), tx)
+        .await
+        .unwrap();
+    let live = execution();
+    let mut orphan = execution();
+    orphan.id = "agent-gone".into();
+    hub.reserve(&live).await;
+    hub.reserve(&orphan).await;
+    hub.reserve(&orphan).await;
+    assert_eq!(hub.views().await[0].reserved_loops, 3);
+
+    let pending = std::iter::once(live.id.clone()).collect();
+
+    // A fresh orphan is still inside the admission grace window: its
+    // assignment write may lag the persisted Pending set, so it must NOT be
+    // released yet.
+    let now = opencoder_core::message::now_ms();
+    assert_eq!(hub.reconcile_reservations(&pending, now).await, 0);
+    assert_eq!(hub.views().await[0].reserved_loops, 3, "grace window holds");
+
+    // Past the grace window the orphan is provably stale and is released.
+    let late = now + 151_000;
+    assert_eq!(hub.reconcile_reservations(&pending, late).await, 1);
+    let view = hub.views().await.remove(0);
+    assert_eq!(view.reserved_loops, 1, "orphan claims return, live claim stays");
+    {
+        let state = hub.state.lock().await;
+        assert!(state.reservations.contains_key(&live.id));
+        assert!(!state.reservations.contains_key(&orphan.id));
+    }
+
+    // Idempotent: a clean sweep has nothing left to release.
+    assert_eq!(hub.reconcile_reservations(&pending, late).await, 0);
+    assert_eq!(hub.views().await[0].reserved_loops, 1);
+}

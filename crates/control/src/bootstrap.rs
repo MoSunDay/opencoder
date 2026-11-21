@@ -129,7 +129,7 @@ async fn state_with_projects(
         }
     }
     let lifecycle = Arc::new(crate::release::Lifecycle::default());
-    Ok(Arc::new(AppState {
+    let state = Arc::new(AppState {
         lifecycle,
         ontology,
         workdir,
@@ -142,7 +142,11 @@ async fn state_with_projects(
         brain_gate: Default::default(),
         admission,
         placement: tokio::sync::Mutex::new(()),
-    }))
+    });
+    // Orphan reservations (execution left Pending without a release path)
+    // would otherwise inflate reserved_loops and skew node selection forever.
+    crate::transport::reconcile::start(&state);
+    Ok(state)
 }
 
 /// Record the startup token as the bootstrap admin user (idempotent). The
@@ -374,7 +378,10 @@ fn resolve_data_dir(workdir: &std::path::Path, explicit: Option<PathBuf>) -> Res
     Ok(data)
 }
 
-async fn shutdown_signal() -> Result<()> {
+/// Resolve when the process is asked to exit (SIGTERM / Ctrl-C). Shared by
+/// the main server loop and the auxiliary resource servers so they drain
+/// in-flight requests the same way.
+pub(crate) async fn shutdown_signal() -> Result<()> {
     #[cfg(unix)]
     {
         let mut terminate =

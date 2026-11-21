@@ -3,6 +3,7 @@ mod handoff_report;
 mod hub;
 #[cfg(test)]
 mod layered_tests;
+pub(crate) mod reconcile;
 mod report;
 mod socket;
 mod socket_io;

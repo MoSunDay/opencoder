@@ -1,4 +1,4 @@
-Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
+Commit: ca91d2dee467cddc1669d5180867d5685ffefb6a
 
 # control 模块
 
@@ -17,7 +17,7 @@ Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 - [bootstrap.rs](../../../crates/control/src/bootstrap.rs) — control.db / definitions.db
   / ontology.db 装配与就绪检查
 - `src/role_gate.rs` — 角色门禁
-- `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）
+- `src/transport/hub.rs` — Node WS Hub（协议校验、RPC）；`call_with_timeout` 超时即回收 pending 槽位与容量声明（`release_claim`），迟到回复由 `resolve` 丢弃——慢节点不能耗尽全局派发上限
 - `src/transport/socket.rs`、`socket_io.rs` — 连接帧处理、心跳与背压写出
 - `src/transport/report.rs`、`socket_report/` — 索引报告提交与逐批确认
 - `src/transport/layered_tests.rs`、`layered_tests/` — 分层 wake 的 generation

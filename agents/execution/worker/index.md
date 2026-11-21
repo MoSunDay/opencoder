@@ -1,4 +1,4 @@
-Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
+Commit: ca91d2dee467cddc1669d5180867d5685ffefb6a
 
 # worker 模块
 
@@ -25,6 +25,7 @@ Windows 节点只接受 `ExecutionKind::Operator`，用户边界见
   为共享 `Arc`，harness task-local 作用域旁路缓存、加载错误不缓存；
   回归 `configuration_cache_reuses_the_load_until_input_files_change`
 - [runtime/](../../../crates/worker/src/runtime/mod.rs)、[resources.rs](../../../crates/worker/src/resources.rs) — 容量与健康准入、NFS 资源快照
+- [runtime/persistence.rs](../../../crates/worker/src/runtime/persistence.rs) — 持久化闩锁指数退避自愈（纯函数模块）：失败按 1s→60s 封顶排定探测（`backoff`），完整成功的派发周期 `recover` 清节点与项目依赖双闩锁，瞬态 DB/NFS 抖动不再永久停摆派发
 - [inventory/](../../../crates/worker/src/inventory/mod.rs) — 由 journal、数据库与活动运行合成的增量清单
 - [result_reader/](../../../crates/worker/src/result_reader/mod.rs) — 不唤醒归属 Runtime 的持久化结果读取
 - [brain/](../../../crates/worker/src/brain/mod.rs) — Brain 运行投影与回执；`brain/v4/` 为节点侧实现

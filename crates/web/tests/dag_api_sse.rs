@@ -364,3 +364,72 @@ async fn cancel_collapses_pending_and_piggybacks_running_via_heartbeat() {
         .is_none_or(|a| a.is_empty());
     assert!(ids_empty, "{hb}");
 }
+
+// ── Live lag contract ──────────────────────────────────────────────────────
+
+/// A live consumer that falls behind the hub ring (capacity 256) must see a
+/// synthetic `error` frame carrying a numeric `lag` marker — the same wire
+/// contract as `map_broadcast_result` — instead of the old silent `.ok()`
+/// drop that could swallow a terminal event and freeze the UI.
+#[tokio::test]
+async fn sse_live_lag_is_surfaced_as_error_frame_with_lag_marker() {
+    let ctx = app().await;
+    let (_node, rid) = setup_run(&ctx.app, "sse-lag").await;
+
+    // Open the stream first so its hub receiver is registered, then flood
+    // the ring without draining: the live side must lag.
+    let resp = ctx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dag/runs/{rid}/events"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let mut stream = resp.into_body().into_data_stream();
+
+    let flood: Vec<Value> = (0..400)
+        .map(|i| json!({"kind":"step_started","step":format!("s{i}"),"at_ms":i}))
+        .collect();
+    let (s, b) = upload(&ctx.app, &rid, json!(flood)).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+
+    // Drain the stream until the lag frame shows up (bounded wait).
+    let mut text = String::new();
+    for _ in 0..200 {
+        match tokio::time::timeout(Duration::from_millis(200), stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
+                text.push_str(&String::from_utf8_lossy(&bytes));
+                let found = frames(&text)
+                    .iter()
+                    .any(|(_, name, data)| name == "error" && data["payload"].get("lag").is_some());
+                if found {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    let lag_frames: Vec<_> = frames(&text)
+        .into_iter()
+        .filter(|(_, name, data)| name == "error" && data["payload"].get("lag").is_some())
+        .collect();
+    assert!(
+        !lag_frames.is_empty(),
+        "a lagged live stream must surface a synthetic lag error frame, got: {text}"
+    );
+    // Wire shape: a DagEventView frame, so the marker lives in `payload`.
+    let dropped = lag_frames[0].2["payload"]["lag"].as_i64().unwrap();
+    assert!(dropped >= 1, "lag marker counts dropped frames: {dropped}");
+    assert!(
+        lag_frames[0].2["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("lag"),
+        "lag frame error text mentions lag"
+    );
+}

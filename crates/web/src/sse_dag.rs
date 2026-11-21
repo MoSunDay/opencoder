@@ -121,12 +121,27 @@ pub async fn get_dag_run_events(
     let max_replay_seq: i64 = persisted.iter().map(|v| v.seq).max().unwrap_or(after);
 
     let replay = futures::stream::iter(persisted);
-    let live = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|r| async move { r.ok() })
-        .filter_map(move |v| {
-            let keep = v.seq > max_replay_seq;
-            async move { keep.then_some(v) }
-        });
+    // Live frames share the lag contract of the node/event streams
+    // (`api::map_broadcast_result`): a consumer that fell behind must see a
+    // synthetic `error` frame with a numeric `lag` marker, never a silent
+    // drop that could swallow a terminal event and freeze the UI. The lag
+    // frame bypasses the seq dedup (it is not a real event) and reuses the
+    // replay head as its SSE id, so a reconnect resumes from the persisted
+    // tail instead of an arbitrary cursor.
+    let live = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(move |r| {
+        futures::future::ready(match r {
+            Ok(v) => (v.seq > max_replay_seq).then_some(v),
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+                Some(DagEventView {
+                    seq: max_replay_seq,
+                    kind: "error".into(),
+                    step: None,
+                    payload: crate::api::lag_payload(n),
+                    at_ms: opencoder_core::message::now_ms(),
+                })
+            }
+        })
+    });
     let merged = replay
         .chain(live)
         .map(|v| Ok::<_, std::convert::Infallible>(view_to_frame(v)));

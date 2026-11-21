@@ -770,9 +770,16 @@ pub fn map_broadcast_result(
         Ok(evt) => Some(evt),
         Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => Some(SseEvt {
             kind: "error".into(),
-            data: json!({ "error": format!("event lag: {n} events dropped"), "lag": n }),
+            data: lag_payload(n),
             ts: opencoder_core::message::now_ms(),
             seq: None,
         }),
     }
+}
+
+/// Shared payload for the synthetic lag frame emitted by SSE broadcast
+/// consumers that fell behind ([`map_broadcast_result`] and the DAG run
+/// stream). Pure so the wire shape stays single-sourced and testable.
+pub fn lag_payload(dropped: u64) -> serde_json::Value {
+    json!({ "error": format!("event lag: {dropped} events dropped"), "lag": dropped })
 }

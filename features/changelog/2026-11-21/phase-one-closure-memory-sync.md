@@ -85,14 +85,36 @@ WAL          1635768 → 1652248 B（+16 KB，仅受理执行的追加量，无�
   全站 UI 验收；文档改动按规则 02 只检查内容与链接，冒烟与预检为收尾
   验证项。
 
+## 发布上线（2026-11-21，批准后执行）
+
+本机部署形态为 `/usr/local/bin` 直装二进制 + systemd 单元（server:18080 +
+agent node02/node04），无 `/srv/releases` bundle 布局；按既有安装惯例
+（`scripts/install.sh` 原子换装 + `.bak` 备份，见历史 `.bak` 文件）执行：
+
+- 构建：`cargo build --release -p opencoder-server -p opencoder-agent`
+  （工作区 `426fc98a1`）；产物指纹 sha256 前 16 位：server
+  `ec07f27c299d5451`、agent `b8a78d53f3e5e96f`。
+- 换装：`install.sh --source … --dest /usr/local/bin/… --no-build --backup`，
+  回滚点 `opencoder-server.bak.20261121103223`（原 11-08 构建）与
+  `opencoder-agent.bak.20261121103225`（原 11-07 构建）；换装期间旧进程
+  不受影响（rename 原子换 inode）。
+- 滚动顺序：先 `systemctl restart opencoder-server`（两节点自动重连，
+  online/idle/ready 全真、`GET /` 200、`/api/time` 200）→ 再
+  `restart opencoder-agent@node02 @node04`（重注册全真）。
+- 观察期：10:33–10:37 三次采样（约每 2 分钟）：三单元 active、双节点
+  online+ready、`GET /` 200、二进制指纹三次采样稳定不变、换装后
+  （10:33:00 起）journal ERROR 行为零——仅滚动瞬间 2 条预期
+  `node channel failed`（连接重置，与 agent 重启一一对应）。
+- 回滚路径：恢复上述 `.bak` 并 restart 对应单元即回到换装前版本；
+  代码层回滚点不变（单点 revert `4a7d9000b`）。
+
 ## 状态与后续
 
-- 全量 soak：待时间窗批准（预检已通过，随时可启动）。
-- 发布（rolling bundle → server 滚动 → 观察期）：待用户决策；四修复均为
-  server/节点侧，无客户端兼容前置，先滚 server 即可。
+- soak：已执行（分段，见上文执行记录），四曲线判定通过；连续多小时
+  驻留可在专用测试机补跑。
+- 发布：已上线（见上文发布记录），观察期通过。
 - 阶段二 P1（agent host reqwest 超时、control 优雅关停+GC、web 句柄/队列、
   WAL checkpoint）：WAL checkpoint 涉规则 04 不变量，启动前需策略评审。
-- 回滚点不变：单点 revert `4a7d9000b`。
 
 ## 回滚
 

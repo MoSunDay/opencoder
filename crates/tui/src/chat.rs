@@ -426,6 +426,26 @@ impl ChatView {
                     // pre-steer ladder is complete (it never gets its own
                     // say), so its progress animation is frozen here.
                     self.reanchor_turn_after_user_echo();
+                } else {
+                    // No echo to show: a consumed BARE clear-context folds the
+                    // transcript, discarding the turn that produced the
+                    // remembered echo — drop it so the TranscriptReset rebuild
+                    // cannot resurrect the cancelled turn's prompt. Other bare
+                    // control commands (mode switches) never fold: untouched.
+                    let raw = if !text.is_empty() {
+                        Some(text.as_str())
+                    } else {
+                        self.steer_items
+                            .iter()
+                            .find(|(s, _)| s == seq)
+                            .map(|(_, d)| d.as_str())
+                    };
+                    if matches!(
+                        raw.and_then(opencoder_session::split_control_prefix),
+                        Some((opencoder_session::ControlCmd::ClearContext, None))
+                    ) {
+                        self.pending_turn_echo = None;
+                    }
                 }
                 self.steer_items.retain(|(s, _)| s != seq);
             }

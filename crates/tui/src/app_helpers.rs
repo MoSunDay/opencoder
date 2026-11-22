@@ -628,6 +628,29 @@ pub(crate) fn push_user(
     }
 }
 
+/// Echo discipline for firing `/act_clear_context` (the confirm path): a
+/// compound tail (`/act_clear_context <rest>`) runs as a real user turn in
+/// the fresh context, so it is echoed and remembered across the
+/// TranscriptReset rebuild — same rule as `push_user`. A BARE command
+/// records nothing, and the fold discards the turn that produced any
+/// remembered echo (e.g. left over from an interrupted in-flight turn, which
+/// `cancel_running_turn` deliberately keeps): drop the residue so the
+/// rebuild can never resurrect the cancelled turn's prompt.
+pub(crate) fn echo_clear_context_fire(chat: &mut ChatView, text: &str) {
+    match opencoder_session::consumed_echo_text(text) {
+        Some(echo) => {
+            chat.blocks.push(crate::chat::ChatBlock::User {
+                rendered: crate::markdown::render(&echo),
+            });
+            chat.push_marker(Line::from(""));
+            if !echo.trim().is_empty() {
+                chat.pending_turn_echo = Some(echo);
+            }
+        }
+        None => chat.pending_turn_echo = None,
+    }
+}
+
 pub(crate) use opencoder_core::data_dir_for;
 
 /// Open (creating its data dir if needed) the on-disk sqlite store rooted at

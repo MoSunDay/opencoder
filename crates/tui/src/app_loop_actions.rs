@@ -472,21 +472,10 @@ pub(crate) async fn fire_clear_confirm(
         crate::app_helpers::push_history(history, hist_idx, &text);
         return LoopFlow::Proceed;
     }
-    // Echo the model-facing tail: the compound rest runs as a real user
-    // turn in the fresh context, so it must be echoed; the command token
-    // itself never is (applied inline, never recorded).
-    if let Some(echo) = opencoder_session::consumed_echo_text(&text) {
-        chat.blocks.push(crate::chat::ChatBlock::User {
-            rendered: crate::markdown::render(&echo),
-        });
-        chat.push_marker(Line::from(""));
-        // Remember the echo across the TranscriptReset rebuild — same rule as
-        // `push_user`: without it the rebuilt view opens the new turn with no
-        // User boundary (steps read as merged into the pre-reset turn).
-        if !echo.trim().is_empty() {
-            chat.pending_turn_echo = Some(echo);
-        }
-    }
+    // Echo discipline for the fired command lives in
+    // `echo_clear_context_fire`: the compound tail echoes and is remembered;
+    // a BARE command drops any echo residue from the interrupted turn.
+    crate::app_helpers::echo_clear_context_fire(chat, &text);
     let name = crate::clear_confirm::CLEAR_CONTEXT_CMD.trim_start_matches('/');
     *sys_tokens = sys_tokens_for(name, workdir, None);
     *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));

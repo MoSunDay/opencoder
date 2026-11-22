@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use opencoder_core::Message;
+use opencoder_core::{ContentBlock, Message};
 use opencoder_session::SessionEvent;
 use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::chat::{ChatBlock, ChatView};
@@ -108,10 +108,10 @@ async fn resume_replay_renders_summary_head() {
     let _ = dir;
     assert_eq!(compaction_count(&chat), 1);
     assert!(compaction_text(&chat).contains("turn two fixed a bug"));
-    // UI order: retained tail turn first, folded-history marker after it.
+    // UI order: summary head first, retained tail turn below it.
     assert!(
-        compaction_index(&chat) > user_index(&chat),
-        "summary block must render below the retained tail turns"
+        compaction_index(&chat) < user_index(&chat),
+        "summary block renders at the transcript head, matching the live finalize order"
     );
 }
 
@@ -216,8 +216,8 @@ async fn transcript_reset_keeps_prior_tail_turns_but_drops_in_flight_echo() {
         "in-flight prompt must not be retained above or re-pushed below"
     );
     assert!(
-        compaction_index(&chat) > user_index(&chat),
-        "summary renders below the retained prior turn"
+        compaction_index(&chat) < user_index(&chat),
+        "summary renders at its persisted head position, above the retained prior turn"
     );
     assert_eq!(compaction_count(&chat), 1);
     assert!(chat.pending_turn_echo.is_none());
@@ -280,4 +280,37 @@ async fn clear_context_reset_keeps_in_flight_echo() {
         Some("the running prompt")
     );
     let _ = dir;
+}
+
+/// `/task` switch replays the persisted folded transcript
+/// `[summary, tail, continued run]`; the Compaction block must render at the
+/// summary's persisted head position so the view matches what execution time
+/// showed when compaction completed (continued turns below the marker).
+#[tokio::test]
+async fn task_switch_replay_matches_execution_order() {
+    let (dir, store) = fresh().await;
+    store
+        .create_session(&SessionMeta {
+            id: "s-switch".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let mut reply = Message::assistant("a1");
+    reply.blocks.push(ContentBlock::text("kept going"));
+    let msgs = vec![
+        summary_message("folded: earlier work"),
+        Message::user("u2", "continued question"),
+        reply,
+    ];
+    let chat = replay_into_chat("act", &msgs, &store, "s-switch", 0).await;
+    let _ = dir;
+
+    assert_eq!(compaction_count(&chat), 1);
+    assert!(matches!(chat.blocks.first(), Some(ChatBlock::Compaction { .. })));
+    assert!(
+        compaction_index(&chat) < user_index(&chat),
+        "continued turns render below the head-position summary block"
+    );
 }

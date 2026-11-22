@@ -359,3 +359,135 @@ async fn remote_reset_still_replays_synchronously() {
         "the pre-reset local view is gone after the inline replay"
     );
 }
+
+/// Unit contract of `echo_clear_context_fire` (the confirm-path echo
+/// discipline): a compound tail echoes and is remembered; a BARE command
+/// records nothing and DROPS any echo residue left by an interrupted
+/// in-flight turn (`cancel_running_turn` deliberately keeps pending rows).
+#[test]
+fn echo_clear_context_fire_variants() {
+    // Compound: the tail echoes as the fresh turn's user boundary and is
+    // remembered across the rebuild.
+    let mut chat = ChatView::default();
+    crate::app_helpers::echo_clear_context_fire(&mut chat, "/act_clear_context 实现诊断工具");
+    // The User block is followed by the boundary marker push.
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::User { .. })),
+        "the compound tail echoes as a User block"
+    );
+    assert_eq!(chat.pending_turn_echo.as_deref(), Some("实现诊断工具"));
+
+    // Bare: no echo is pushed and any remembered residue is cleared — the
+    // fold discards the turn that produced it, so it must not resurface.
+    let mut chat = ChatView {
+        pending_turn_echo: Some("cancelled turn prompt".into()),
+        ..Default::default()
+    };
+    crate::app_helpers::echo_clear_context_fire(&mut chat, "/act_clear_context");
+    assert!(chat.pending_turn_echo.is_none());
+    assert!(
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::User { .. })),
+        "a bare fire never pushes a User block"
+    );
+}
+
+/// The in-flight bare-clear regression: the previous prompt was submitted
+/// (echo remembered) and the turn is still running when the armed guard is
+/// manually confirmed. The fired BARE `/act_clear_context` must drop that
+/// residue BEFORE the TranscriptReset lands — otherwise the rebuild pushes
+/// the cancelled turn's prompt back as a resurrected User block.
+#[tokio::test]
+async fn bare_clear_fire_drops_in_flight_echo_before_rebuild() {
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+    store
+        .create_session(&SessionMeta {
+            id: "sess-bare-fire".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut chat = ChatView::default();
+
+    // --- Turn 1 still in flight: the submitted prompt's echo is remembered.
+    crate::app_helpers::push_user(
+        &mut chat,
+        &mut Vec::new(),
+        &mut None,
+        "旧任务提示词",
+        "旧任务提示词",
+    );
+    chat.begin_turn();
+    chat.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 1_000,
+    });
+    chat.apply(&SessionEvent::ReasoningDelta("mid-run".into()));
+    assert_eq!(chat.pending_turn_echo.as_deref(), Some("旧任务提示词"));
+
+    // --- Manual confirm: cancel_running_turn keeps the pending row, then
+    // the BARE command fires and must fold the residue away.
+    crate::app_helpers::echo_clear_context_fire(&mut chat, "/act_clear_context");
+    assert!(
+        chat.pending_turn_echo.is_none(),
+        "bare fire drops the interrupted turn's echo residue"
+    );
+
+    // --- The fold's TranscriptReset rebuilds from the (now empty) view.
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut plan_skill_active = false;
+    let mut admit = crate::queue_admitter::AdmitUiState::default();
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut question_menu = None;
+    let question_hub = std::sync::Arc::new(opencoder_session::QuestionHub::default());
+    let mut turn_gen = 0u64;
+    let mut reset = crate::reset_rebuild::ResetRebuildState::default();
+    let _ = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
+        &mut chat,
+        &store,
+        "sess-bare-fire",
+        &mut queue_items,
+        &mut plan_skill_active,
+        &mut admit,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut turn_gen,
+        &mut evt_rx,
+        &mut notepad,
+        &mut question_menu,
+        &question_hub,
+        &mut reset,
+    )
+    .await;
+    if let Some(rebuilt) = reset.wait_done("sess-bare-fire").await {
+        chat = rebuilt;
+    }
+    assert!(
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::User { .. })),
+        "no User block may resurrect after a bare clear fold"
+    );
+    assert!(
+        chat.pending_turn_echo.is_none(),
+        "the rebuilt view carries no echo memory"
+    );
+}

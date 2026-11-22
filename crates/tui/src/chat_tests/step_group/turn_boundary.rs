@@ -281,3 +281,55 @@ fn bare_control_consumed_leaves_pending_echo_untouched() {
     });
     assert_eq!(v.pending_turn_echo.as_deref(), Some("original prompt"));
 }
+
+/// A consumed BARE `/act_clear_context` steer folds the transcript: the
+/// remembered echo belongs to the turn being discarded, so it is dropped —
+/// the TranscriptReset rebuild must not resurrect that prompt.
+#[test]
+fn bare_clear_context_steer_drops_pending_echo() {
+    let mut v = ChatView {
+        pending_turn_echo: Some("original prompt".into()),
+        ..Default::default()
+    };
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 9,
+        text: "/act_clear_context".into(),
+    });
+    assert!(v.pending_turn_echo.is_none());
+}
+
+/// Mirror variant: legacy persisted events carry an empty `text`; the raw
+/// input is recovered from the `steer_items` mirror. A bare clear still
+/// drops the echo, while other bare control commands (mode switches never
+/// fold) keep it — pinning both sides of the defense.
+#[test]
+fn bare_clear_via_mirror_drops_echo_but_mode_switch_keeps_it() {
+    let mut v = ChatView {
+        pending_turn_echo: Some("original prompt".into()),
+        ..Default::default()
+    };
+    v.steer_items.push((11, "/act_clear_context".into()));
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 11,
+        text: String::new(),
+    });
+    assert!(
+        v.pending_turn_echo.is_none(),
+        "bare clear folds: echo dropped"
+    );
+
+    let mut v = ChatView {
+        pending_turn_echo: Some("original prompt".into()),
+        ..Default::default()
+    };
+    v.steer_items.push((12, "/plan".into()));
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 12,
+        text: String::new(),
+    });
+    assert_eq!(
+        v.pending_turn_echo.as_deref(),
+        Some("original prompt"),
+        "a bare mode switch never folds: the running turn's echo survives"
+    );
+}

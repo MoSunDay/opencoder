@@ -49,9 +49,10 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
   `chat_steps.rs` 共用阶梯语义）
 - `session_ui/replay.rs` — 压缩摘要合成消息（标记来自 session
-  `SUMMARY_PREFIX`）由回放入口拦截并延迟渲染为 `Compaction` 折叠块：
-  排在保留的最近交互之后、继续执行之前（`tail + summary + 续跑`），
-  与发给 LLM 的 `[summary, tail...]` 列表顺序解耦；其余合成消息仍跳过；
+  `SUMMARY_PREFIX`）由回放入口拦截并就地渲染为 `Compaction` 折叠块，
+  位于摘要消息的持久化位置（转录头部），`/task` 切换、resume 与
+  mid-run 重建共用同一顺序（`summary + tail + 续跑`），与执行时
+  `TranscriptReset` 重建所见一致；其余合成消息仍跳过；
   `compaction_block.rs` 的 `finalize_compaction` 对回放孪生块幂等去重。
   mid-run 压缩重建会丢弃在途 prompt 的 `User` 回显（保留尾部副本与
   `pending_turn_echo` 均不再重放），视图直接从 `Compaction` 摘要块继续；

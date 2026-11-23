@@ -11,11 +11,15 @@
 //! - [`MAX_STREAM_ATTEMPTS`] — mid-stream retries after the connection is up and
 //!   bytes have started flowing (chunk read errors, truncated streams, idle
 //!   stalls). See `run_stream` in `client.rs`.
+//!
+//! Both loops back off exponentially (0.5 s doubling per attempt); no single
+//! wait — computed backoff or server `Retry-After` hint — exceeds
+//! [`BACKOFF_MAX_MS`] (5 minutes).
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Total pre-stream connection attempts (1 initial + 4 retries).
-pub const MAX_ATTEMPTS: u8 = 5;
+/// Total pre-stream connection attempts (1 initial + 9 retries).
+pub const MAX_ATTEMPTS: u8 = 10;
 
 /// Total mid-stream attempts (1 initial + 2 retries). Capped low because each
 /// retry discards the partial response and regenerates it from scratch, so the
@@ -23,8 +27,14 @@ pub const MAX_ATTEMPTS: u8 = 5;
 pub const MAX_STREAM_ATTEMPTS: u8 = 3;
 
 /// Base backoff in ms; actual delay is `BASE_BACKOFF_MS * 2^(attempt-1)` plus
-/// up to 250 ms jitter, giving roughly 0.5/1/2/4/8 s between attempts.
+/// up to 250 ms jitter, giving roughly 0.5/1/2/4/8/16/32/64/128/256 s between
+/// attempts 1-10, clamped to [`BACKOFF_MAX_MS`].
 const BASE_BACKOFF_MS: u64 = 500;
+
+/// Hard ceiling on a single wait between attempts (5 minutes). Applies both to
+/// the computed exponential backoff and to any server `Retry-After` hint, so no
+/// single sleep can stall a session beyond this bound.
+pub const BACKOFF_MAX_MS: u64 = 300_000;
 
 /// Whether an HTTP status is transient enough to warrant a retry. Network/send
 /// errors (no status) are always retried; only these status codes qualify.
@@ -88,10 +98,13 @@ pub fn retry_decision(outcome: AttemptOutcome, attempt: u8, max: u8) -> RetryDec
 }
 
 /// Exponential backoff delay (ms) for the given 1-based `attempt`, BEFORE
-/// jitter: `BASE_BACKOFF_MS * 2^(attempt-1)` → 500/1000/2000/4000/8000 ms.
-/// Extracted as a pure function so the growth curve is unit-testable.
+/// jitter: `BASE_BACKOFF_MS * 2^(attempt-1)` → 500/1000/2000/.../256000 ms,
+/// clamped to [`BACKOFF_MAX_MS`]. Extracted as a pure function so the growth
+/// curve and the ceiling are unit-testable.
 pub fn backoff_millis(attempt: u8) -> u64 {
-    BASE_BACKOFF_MS.saturating_mul(2u64.saturating_pow(attempt.saturating_sub(1) as u32))
+    BASE_BACKOFF_MS
+        .saturating_mul(2u64.saturating_pow(attempt.saturating_sub(1) as u32))
+        .min(BACKOFF_MAX_MS)
 }
 
 /// Exponential backoff for the given 1-based `attempt`, with up to 250 ms of
@@ -110,14 +123,15 @@ pub fn backoff_duration(attempt: u8) -> Duration {
         .duration_since(UNIX_EPOCH)
         .map(|d| (d.subsec_nanos() as u64) % 250)
         .unwrap_or(0);
-    Duration::from_millis(exp + jitter)
+    Duration::from_millis(exp.saturating_add(jitter).min(BACKOFF_MAX_MS))
 }
 
 /// Upper bound on how much of a server-sent `Retry-After` hint (seconds, or an
 /// HTTP-date) we are willing to honor. A hostile or misbehaving server replying
 /// `429` + `Retry-After: 86400` must not stall a session for a full day — the
 /// retry loop would sit in `sleep` with nothing but channel-close to break it.
-pub const RETRY_AFTER_MAX_SECS: u64 = 120;
+/// Aligned with [`BACKOFF_MAX_MS`] so a single wait never exceeds 5 minutes.
+pub const RETRY_AFTER_MAX_SECS: u64 = 300;
 
 /// Pure function deciding the delay to sleep before the next attempt when the
 /// server supplied a `Retry-After` hint. The hint is floored at 1 s, capped at
@@ -195,16 +209,36 @@ mod tests {
         assert!(!is_retryable_status(reqwest::StatusCode::OK));
     }
 
-    /// The backoff curve doubles each attempt: 0.5/1/2/4/8 s for attempts 1–5.
+    /// The backoff curve doubles each attempt: 0.5/1/2/4/8/16/32/64/128/256 s
+    /// for attempts 1-10 (the full [`MAX_ATTEMPTS`] budget).
     #[test]
     fn backoff_millis_doubles_each_attempt() {
-        assert_eq!(backoff_millis(1), 500);
-        assert_eq!(backoff_millis(2), 1000);
-        assert_eq!(backoff_millis(3), 2000);
-        assert_eq!(backoff_millis(4), 4000);
-        assert_eq!(backoff_millis(5), 8000);
-        assert_eq!(MAX_ATTEMPTS, 5);
+        let expected = [
+            500u64, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000,
+        ];
+        for (idx, ms) in expected.iter().enumerate() {
+            assert_eq!(backoff_millis(idx as u8 + 1), *ms, "attempt {}", idx + 1);
+        }
+        assert_eq!(MAX_ATTEMPTS, 10);
         assert_eq!(MAX_STREAM_ATTEMPTS, 3);
+    }
+
+    /// A single wait never exceeds [`BACKOFF_MAX_MS`] (5 minutes), even far
+    /// beyond the budget or at the extreme of the attempt counter.
+    #[test]
+    fn backoff_is_capped_at_five_minutes() {
+        assert_eq!(BACKOFF_MAX_MS, 300_000);
+        for attempt in [11u8, 12, 20, u8::MAX] {
+            assert_eq!(
+                backoff_millis(attempt),
+                BACKOFF_MAX_MS,
+                "attempt {attempt} must be clamped"
+            );
+            assert!(
+                backoff_duration(attempt) <= Duration::from_millis(BACKOFF_MAX_MS),
+                "attempt {attempt}: jitter pushed the wait past the ceiling"
+            );
+        }
     }
 
     #[test]
@@ -212,7 +246,7 @@ mod tests {
         // backoff_duration must be the pure backoff plus at most 250 ms of
         // jitter, so a caller can safely combine it with a Retry-After hint via
         // `Duration::max` without surprising bounds.
-        for attempt in 1..=5u8 {
+        for attempt in 1..=10u8 {
             let lo = backoff_millis(attempt);
             let hi = lo + 250;
             let d = backoff_duration(attempt);
@@ -229,15 +263,15 @@ mod tests {
     /// be capped at [`RETRY_AFTER_MAX_SECS`].
     #[test]
     fn retry_delay_caps_server_hint_at_max() {
-        assert_eq!(RETRY_AFTER_MAX_SECS, 120);
+        assert_eq!(RETRY_AFTER_MAX_SECS, 300);
         assert_eq!(
             retry_delay(Some(86_400), Duration::from_secs(5)),
             Duration::from_secs(RETRY_AFTER_MAX_SECS)
         );
         // Exactly at the cap is honored as-is.
         assert_eq!(
-            retry_delay(Some(120), Duration::from_secs(5)),
-            Duration::from_secs(120)
+            retry_delay(Some(300), Duration::from_secs(5)),
+            Duration::from_secs(300)
         );
     }
 
@@ -300,11 +334,11 @@ mod tests {
     #[test]
     fn retry_decision_success_stops() {
         assert_eq!(
-            retry_decision(AttemptOutcome::Success, 1, 5),
+            retry_decision(AttemptOutcome::Success, 1, MAX_ATTEMPTS),
             RetryDecision::Done
         );
         assert_eq!(
-            retry_decision(AttemptOutcome::Success, 5, 5),
+            retry_decision(AttemptOutcome::Success, MAX_ATTEMPTS, MAX_ATTEMPTS),
             RetryDecision::Done
         );
     }
@@ -312,9 +346,9 @@ mod tests {
     /// A non-retryable error fails FAST on every attempt — never retries.
     #[test]
     fn retry_decision_non_retryable_fails_fast() {
-        for attempt in 1..=5u8 {
+        for attempt in 1..=MAX_ATTEMPTS {
             assert_eq!(
-                retry_decision(AttemptOutcome::NonRetryableError, attempt, 5),
+                retry_decision(AttemptOutcome::NonRetryableError, attempt, MAX_ATTEMPTS),
                 RetryDecision::Fail,
                 "non-retryable must fail fast at attempt {attempt}"
             );
@@ -325,15 +359,15 @@ mod tests {
     /// attempt == max (no sixth attempt). This is the off-by-one canary.
     #[test]
     fn retry_decision_retryable_retries_then_fails_at_max() {
-        for attempt in 1..=4u8 {
+        for attempt in 1..MAX_ATTEMPTS {
             assert_eq!(
-                retry_decision(AttemptOutcome::RetryableError, attempt, 5),
+                retry_decision(AttemptOutcome::RetryableError, attempt, MAX_ATTEMPTS),
                 RetryDecision::Retry,
-                "attempt {attempt} (< max=5) should retry"
+                "attempt {attempt} (< max={MAX_ATTEMPTS}) should retry"
             );
         }
         assert_eq!(
-            retry_decision(AttemptOutcome::RetryableError, 5, 5),
+            retry_decision(AttemptOutcome::RetryableError, MAX_ATTEMPTS, MAX_ATTEMPTS),
             RetryDecision::Fail,
             "attempt == max must fail (no attempt beyond max)"
         );
@@ -343,7 +377,7 @@ mod tests {
     /// retryable failures then success.
     #[test]
     fn retry_decision_sequence_recover_on_third_attempt() {
-        let max = 5u8;
+        let max = MAX_ATTEMPTS;
         assert_eq!(
             retry_decision(AttemptOutcome::RetryableError, 1, max),
             RetryDecision::Retry

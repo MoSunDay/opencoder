@@ -459,44 +459,74 @@ impl SessionState {
             None => return Ok(()),
         };
         if !self.session_created {
-            let now = now_ms();
-            let meta = SessionMeta {
-                kind: self.session_kind.clone(),
-                id: self.id.clone(),
-                title: first_user_text(self.messages.as_slice()),
-                agent: if self.ts_origin {
-                    None
-                } else {
-                    Some(self.agent.name.clone())
-                },
-                model: if self.ts_origin {
-                    None
-                } else {
-                    Some(self.config.model.clone())
-                },
-                workdir_hash: None,
-                created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
-                updated_at: now,
-                summary: self.summary.clone(),
-                summary_seq: self.summary_seq,
-                summary_images: vec![],
-                handoff_seq: self.handoff_seq,
-                handoff_plan: self.handoff_plan.clone(),
-                skill: self.skill_prompt_cloned(),
-                task_type: None,
-                requirement: None,
-            };
-            store.create_session(&meta).await?;
-            if self.harness.harness == opencoder_core::harness::Harness::Codex
-                || self.harness.resource_root.is_some()
-                || !self.harness.envs.is_empty()
-            {
-                store.set_harness_runtime(&self.id, &self.harness).await?;
-            }
-            self.session_created = true;
+            self.create_session_row(&store).await?;
         }
-        store.append_message(&self.id, msg).await?;
+        match store.append_message(&self.id, msg).await {
+            Ok(_) => {}
+            Err(error) if opencoder_store::is_foreign_key_violation(&error) => {
+                // The sessions row is gone from the storage layer's point of
+                // view: another process sharing this project database deleted
+                // it (`/task clear all`, web clear, `dialogs_clear`, `session
+                // delete` — their gates only see the deleting process), or a
+                // storage-level desync hid it from the FK probe. Without the
+                // retry the running turn dies AND every later persist fails
+                // too, because `session_created` stays set. Recreate the row
+                // from the in-memory state and append once more; messages
+                // persisted before the deletion are gone from the store.
+                tracing::warn!(
+                    session_id = %self.id,
+                    error = %format!("{error:#}"),
+                    "session row missing on append; recreating"
+                );
+                self.session_created = false;
+                self.create_session_row(&store).await?;
+                store.append_message(&self.id, msg).await?;
+            }
+            Err(error) => return Err(error),
+        }
         self.persisted_count = self.messages.len();
+        Ok(())
+    }
+
+    /// Create the durable session row (`INSERT OR IGNORE`: an existing row
+    /// keeps its stored metadata) and mark the session created so later
+    /// persists skip straight to the append.
+    async fn create_session_row(&mut self, store: &Arc<dyn Store>) -> Result<()> {
+        let now = now_ms();
+        let meta = SessionMeta {
+            kind: self.session_kind.clone(),
+            id: self.id.clone(),
+            title: first_user_text(self.messages.as_slice()),
+            agent: if self.ts_origin {
+                None
+            } else {
+                Some(self.agent.name.clone())
+            },
+            model: if self.ts_origin {
+                None
+            } else {
+                Some(self.config.model.clone())
+            },
+            workdir_hash: None,
+            created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
+            updated_at: now,
+            summary: self.summary.clone(),
+            summary_seq: self.summary_seq,
+            summary_images: vec![],
+            handoff_seq: self.handoff_seq,
+            handoff_plan: self.handoff_plan.clone(),
+            skill: self.skill_prompt_cloned(),
+            task_type: None,
+            requirement: None,
+        };
+        store.create_session(&meta).await?;
+        if self.harness.harness == opencoder_core::harness::Harness::Codex
+            || self.harness.resource_root.is_some()
+            || !self.harness.envs.is_empty()
+        {
+            store.set_harness_runtime(&self.id, &self.harness).await?;
+        }
+        self.session_created = true;
         Ok(())
     }
 

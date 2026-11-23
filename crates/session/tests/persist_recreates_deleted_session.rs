@@ -55,7 +55,10 @@ async fn record_recreates_a_session_cleared_by_another_process() {
     s.record(Message::user("u1", "first prompt")).await;
     assert_eq!(stored_ids(&store, "parallel").await, ["u1"]);
 
-    store.clear_other_sessions("other-window-session").await.unwrap();
+    store
+        .clear_other_sessions("other-window-session")
+        .await
+        .unwrap();
     assert!(store.get_session("parallel").await.unwrap().is_none());
 
     // Before the fix: `insert message in tx: FOREIGN KEY constraint failed`
@@ -81,7 +84,11 @@ async fn record_recreates_a_session_cleared_by_another_process() {
     s.record(Message::user("u2", "follow-up")).await;
     assert_eq!(stored_ids(&store, "parallel").await, ["a1", "u2"]);
     assert_eq!(
-        store.list_sessions(&Default::default()).await.unwrap().len(),
+        store
+            .list_sessions(&Default::default())
+            .await
+            .unwrap()
+            .len(),
         1,
         "exactly one session row after the recreation"
     );

@@ -133,7 +133,10 @@ mod tests {
         assert_eq!(attempts.get(), 2);
         // The index still exists and is usable after the rebuild.
         let mut rows = conn
-            .query("SELECT id FROM sessions INDEXED BY idx_sessions_activity", ())
+            .query(
+                "SELECT id FROM sessions INDEXED BY idx_sessions_activity",
+                (),
+            )
             .await
             .unwrap();
         assert!(rows.next().await.unwrap().is_some());

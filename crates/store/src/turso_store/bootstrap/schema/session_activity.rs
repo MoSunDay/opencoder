@@ -135,7 +135,10 @@ async fn backfill_row_by_row(conn: &Connection) -> Result<()> {
     // it never reads table pages, so it survives rows the table scan cannot.
     // Without a usable index there is nothing better than giving up.
     let mut rows = match conn
-        .query(&format!("SELECT id FROM sessions INDEXED BY {ACTIVITY_INDEX}"), ())
+        .query(
+            &format!("SELECT id FROM sessions INDEXED BY {ACTIVITY_INDEX}"),
+            (),
+        )
         .await
     {
         Ok(rows) => rows,
@@ -169,8 +172,7 @@ async fn backfill_row_by_row(conn: &Connection) -> Result<()> {
                 );
             }
             Err(error) => {
-                return Err(anyhow::Error::new(error))
-                    .context("backfill session activity stamp")
+                return Err(anyhow::Error::new(error)).context("backfill session activity stamp")
             }
         }
     }

@@ -42,7 +42,10 @@ fn msg(id: &str, created_at: i64) -> Message {
 }
 
 async fn checkpoint_truncate(conn: &turso::Connection) {
-    let mut rows = conn.query("PRAGMA wal_checkpoint(TRUNCATE)", ()).await.unwrap();
+    let mut rows = conn
+        .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
+        .await
+        .unwrap();
     let row = rows.next().await.unwrap().expect("checkpoint result row");
     assert_eq!(row.get::<i64>(0).unwrap(), 0, "checkpoint was busy");
 }
@@ -104,7 +107,10 @@ async fn append_self_heals_a_desynced_activity_index() {
         };
         let table_root = {
             let mut rows = conn
-                .query("SELECT rootpage FROM sqlite_master WHERE name = 'sessions'", ())
+                .query(
+                    "SELECT rootpage FROM sqlite_master WHERE name = 'sessions'",
+                    (),
+                )
                 .await
                 .unwrap();
             rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
@@ -164,10 +170,7 @@ async fn append_self_heals_a_desynced_activity_index() {
             .await
             .unwrap();
         let row = rows.next().await.unwrap().unwrap();
-        (
-            row.get::<i64>(0).unwrap(),
-            row.get::<i64>(1).unwrap(),
-        )
+        (row.get::<i64>(0).unwrap(), row.get::<i64>(1).unwrap())
     };
     assert_eq!(table_stamp, 600);
     assert_eq!(index_stamp, 600, "index rebuilt from table data");
@@ -218,7 +221,10 @@ async fn migration_v40_rebuilds_expression_index_and_backfills_activity() {
     let conn = store.conn().await.unwrap();
     let backfill = {
         let mut rows = conn
-            .query("SELECT updated_at FROM sessions WHERE id = 's_backfill'", ())
+            .query(
+                "SELECT updated_at FROM sessions WHERE id = 's_backfill'",
+                (),
+            )
             .await
             .unwrap();
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
@@ -239,5 +245,8 @@ async fn migration_v40_rebuilds_expression_index_and_backfills_activity() {
         )
         .await
         .unwrap();
-    assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 700);
+    assert_eq!(
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+        700
+    );
 }

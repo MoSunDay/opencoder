@@ -59,9 +59,12 @@ async fn seed(conn: &Connection) {
             "s_step" => (TASK_TYPE_AGENT_STEP, None, None),
             _ => (TASK_TYPE_PARENT, None, None),
         };
-        super::super::create(conn, &meta(id, created_at, updated_at, task_type, kind, workdir_hash))
-            .await
-            .unwrap();
+        super::super::create(
+            conn,
+            &meta(id, created_at, updated_at, task_type, kind, workdir_hash),
+        )
+        .await
+        .unwrap();
     }
     conn.execute(
         "INSERT INTO subagent_tasks(task_id,parent_session_id,child_session_id,agent,prompt,status,started_at) VALUES('t1','s_hot','s_sub','act','p','done',1)",

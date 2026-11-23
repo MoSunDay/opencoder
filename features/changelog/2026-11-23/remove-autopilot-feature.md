@@ -9,8 +9,10 @@ autopilot 场景、`SessionEvent::AutoPilot` 一并删除；SPA 侧同步移除�
 未同步，`/ap` 必 404），`dist/static/app.js` 随源码重建。
 `reduce.js` 的 `autopilot` 帧渲染臂保留：历史会话的 SSE 回放仍会透传旧帧。
 
+> 后续修正（2026-11-24）：提交树中的 `dist/static/app.js` 仍含该回放臂（源码已无），已重建移除；运行时 `ap.json` 与 `config.json` 的 `autopilot` 键同步清理，见 [remove-autopilot-leftovers.md](../2026-11-24/remove-autopilot-leftovers.md)。
+
 旧行为降级（均为刻意）：
-- 旧 config.json 的 `autopilot` 键由 `REMOVED_KEYS` 吞掉，不再解析、不外露；
+- 旧 config.json 的 `autopilot` 键按未知字段忽略，不再解析、不外露；
   `ap.json` 退出域文件表（`DOMAIN_FILES` 5 → 4），磁盘遗留文件不再加载。
 - store：`SessionMeta`/`SessionPatch` 去掉 `autopilot_mode` /
   `clear_autopilot_mode`，建表与增删改查 SQL 同步去掉该列；v11 加列迁移删除，

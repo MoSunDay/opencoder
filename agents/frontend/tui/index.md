@@ -1,4 +1,4 @@
-Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
+Commit: 0abfe0c77
 
 # tui 模块
 
@@ -16,7 +16,8 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - [worker.rs](../../../crates/tui/src/worker.rs) — 分派 Server 或本地会话 actor，
   桥接 `SessionEvent` 到聊天渲染；turn 代标：`ResetCancel(CancellationToken, gen)`
   重置取消令牌并携带代数、`TurnDone(String, gen)` 回显同代，app 状态逐 turn
-  `turn_gen` 比对，旧代残留的 cancel/act/drain 结果直接丢弃
+  `turn_gen` 比对，旧代残留的 cancel/act/drain 结果直接丢弃；回合失败以
+  per-turn `Arc<AtomicBool>` 去重 Error 事件（runner 已发则不再补发兜底）
 - `src/key_handler.rs`、`src/keymap.rs` — 键盘分发与映射（模式切换门禁）
 - `src/composer.rs`、`src/chat.rs`、`src/render.rs` — 输入、消息渲染与渲染入口
 - `src/chat_step_render.rs` — Step 阶梯渲染：阶梯纯用户控制、默认折叠，

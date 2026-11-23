@@ -1,4 +1,4 @@
-Commit: d0e87cbca
+Commit: 0abfe0c77
 
 # store 模块
 
@@ -12,6 +12,9 @@ Commit: d0e87cbca
   `lib.rs` re-export）；[contract/](../../../crates/store/src/store/contract) 与
   [impl_methods/](../../../crates/store/src/turso_store/impl_methods) 分组
   组装接口与实现
+- [src/store/errors.rs](../../../crates/store/src/store/errors.rs) — 存储错误分类：
+  FK 违例 / `SQLITE_CORRUPT` / worker panic；session 持久化重建与列表坏行降级共用，
+  crate 根导出 `is_foreign_key_violation`、`is_storage_corruption`
 - [src/turso_store/](../../../crates/store/src/turso_store) — Turso 实现（WAL）；池打开即挂载周期 PASSIVE checkpoint（`opencoder-database/src/checkpoint.rs`：60s/1MiB 门限、独立诊断连接、busy 即跳过；PASSIVE 只回填已提交帧不截断文件，TRUNCATE 仍 CLI-only）；全部写路径经 `opencoder-database::busy`（BEGIN IMMEDIATE 有界 Busy 重试）取跨进程写锁，`tx.rs` 为其 re-export 垫片
 - [src/jsonl.rs](../../../crates/store/src/jsonl.rs) — `JsonlStore`
 - [src/project.rs](../../../crates/store/src/project.rs) — `ProjectStore`
@@ -29,13 +32,17 @@ Commit: d0e87cbca
   （bootstrap/）— schema 初始化与版本升级；只读版本探针让 schema 就绪的
   暖打开跳过写锁引导+checkpoint（不等待跨进程写锁）；升级链与专项迁移在
   [bootstrap/schema/](../../../crates/store/src/turso_store/bootstrap/schema)
-  （migrations.rs、catalog.rs、access.rs、project_links.rs 等）
+  （migrations.rs、catalog.rs、access.rs、project_links.rs、session_activity.rs 等；v41 活跃索引换形与坏页探测/回填）
 - [tokens.rs](../../../crates/store/src/turso_store/identity/users/tokens.rs) —
   用户身份与独立 Token；公共身份面另经
   [src/users.rs](../../../crates/store/src/users.rs) 暴露
   （`AccessToken`/`PlatformUser`，lib.rs re-export）
 - [sessions.rs](../../../crates/store/src/turso_store/conversation/sessions.rs)
-  — 会话读写；
+  — 会话读写；活跃索引维护
+  [sessions/activity.rs](../../../crates/store/src/turso_store/conversation/sessions/activity.rs)
+  （`IdxDelete` 重建并重试一次）、列表分页/坏行降级
+  [sessions/listing.rs](../../../crates/store/src/turso_store/conversation/sessions/listing.rs)
+  （`updated_at` 活跃时间、点查 fallback 跳过坏行）；
   [messages.rs](../../../crates/store/src/turso_store/conversation/messages.rs)
   — 消息与分页读取（`load_transcript_page`）；
   [events.rs](../../../crates/store/src/turso_store/conversation/events.rs)

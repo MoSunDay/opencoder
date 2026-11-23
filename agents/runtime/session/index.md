@@ -1,4 +1,4 @@
-Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
+Commit: 0abfe0c77
 
 # session 模块
 
@@ -7,7 +7,9 @@ Commit: 4a6a4181c3cce8359e1668735b4e69695a0daf2a
 
 ## 索引
 - [src/lib.rs](../../../crates/session/src/lib.rs) — 模块根与公共导出
-  （`run`、`run_once`、`run_with_images`、`run_with_registry`、`SessionEvent`）
+  （`run`、`run_once`、`run_with_images`、`run_with_registry`、`SessionEvent`）；
+  `SessionState::record` 在 append 外键失败时按内存状态重建已删除的会话行并重试一次
+  （`INSERT OR IGNORE`，不恢复级联删除的子行）
 - [src/runner/](../../../crates/session/src/runner) — drain/执行/sidecar/steer；
   [subagent.rs](../../../crates/session/src/runner/subagent.rs) 子代理
   （`subagent` 配置开关默认开启，关闭后隐藏 `task` 工具并拒绝派发、跳过

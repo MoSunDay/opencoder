@@ -1,4 +1,4 @@
-Commit: d0e87cbca
+Commit: 0abfe0c77
 
 # OpenCoder 逻辑地图
 
@@ -13,19 +13,19 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 **foundation**
 
 - [agents/core](agents/foundation/core/index.md) — 共享类型与 Config。
-- [agents/llm](agents/foundation/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算。
-- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的内嵌 turso 引擎（池打开即挂载周期 PASSIVE checkpoint：60s/1MiB 门限、busy 即跳过），全部写路径经 `database::busy` 的 BEGIN IMMEDIATE 有界 Busy 重试（25ms→1s，预算 120s）取跨进程写锁；schema 就绪的暖打开经只读版本探针跳过写锁引导（不等待跨进程写锁）。
+- [agents/llm](agents/foundation/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` + `MockChatClient` + token 估算；pre-stream 重试 10 次、单次等待 ≤5 min。
+- [agents/store](agents/foundation/store/index.md) — `Store` trait 与 Turso（WAL）主后端；Store、Fleet、TsRegistry、Ontology 共用 crates/database 的内嵌 turso 引擎（池打开即挂载周期 PASSIVE checkpoint：60s/1MiB 门限、busy 即跳过），全部写路径经 `database::busy` 的 BEGIN IMMEDIATE 有界 Busy 重试（25ms→1s，预算 120s）取跨进程写锁；schema 就绪的暖打开经只读版本探针跳过写锁引导（不等待跨进程写锁）；会话活跃索引 v41 改为普通 `(updated_at DESC, id DESC)`，`IdxDelete` 失步自动重建，坏行列表降级点查。
 - [agents/event](agents/foundation/event/index.md) — `opencoder-event`：事件日志、监听器、广播总线、触发执行与全局暂停门；纯内存、零存储引擎依赖；通用基建，未接生产 dispatcher。
 
 **runtime**
 
-- [agents/session](agents/runtime/session/index.md) — 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel。
+- [agents/session](agents/runtime/session/index.md) — 会话运行时：drain 循环、工具注册、subagent、plan 写拦截、压缩、resume、cancel；append 外键失败时按内存重建已删除会话行并重试。
 - [agents/shellguard](agents/runtime/shellguard/index.md) — shell 安全分类器：rable AST 判定、释放集仅 `/tmp`+`/dev/null`、fail-closed。
 
 **frontend**
 
 - [agents/local](agents/frontend/local/index.md) — 本地 CLI 前端：参数解析、headless、tmux 会话入口。
-- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区经 flatten 内联在运行中阶梯下方、Subagent 块之上（阶梯只渲染已落定 step，首个 in-flight step 期间阶梯零行），`> streaming` 头行默认展开、点击/Ctrl+L 可收起，与转录共用同一滚动窗，settle 后完整 step 落入阶梯：`chat_live_turn`（见 features/changelog/2026-11-09/live-region-inline-below-ladder-collapsible.md）；open Say 一开始其阶梯整体退场（与 live 区同时清空，流式期间转录仅 `say:` 头行 + running 提示 + raw body 全量，共享滚动），seal 后合并为 `Say(n steps)` 头行、步数回归（见 features/changelog/2026-11-09/tui-ladder-retires-on-say-stream.md）；一次性 `@capability` 子任务派发）。
+- [agents/tui](agents/frontend/tui/index.md) — ratatui 交互界面（Step 阶梯默认折叠、计数样式不变（运行中折叠组行 + running 提示）+ turn 实时区经 flatten 内联在运行中阶梯下方、Subagent 块之上（阶梯只渲染已落定 step，首个 in-flight step 期间阶梯零行），`> streaming` 头行默认展开、点击/Ctrl+L 可收起，与转录共用同一滚动窗，settle 后完整 step 落入阶梯：`chat_live_turn`（见 features/changelog/2026-11-09/live-region-inline-below-ladder-collapsible.md）；open Say 一开始其阶梯整体退场（与 live 区同时清空，流式期间转录仅 `say:` 头行 + running 提示 + raw body 全量，共享滚动），seal 后合并为 `Say(n steps)` 头行、步数回归（见 features/changelog/2026-11-09/tui-ladder-retires-on-say-stream.md）；一次性 `@capability` 子任务派发）；回合失败 Error 事件按 per-turn 标志去重。
 - [agents/web](agents/frontend/web/index.md) — axum HTTP + SSE 会话管理 + 内嵌 SPA（Step 阶梯默认折叠、计数样式不变 + turn 实时区 `TurnLiveRegion` 位于 transcript 滚动容器内、消息列表之下、与消息共用滚动条：头部 `> streaming` 展开 / `▸ streaming` 收起（dim warn、默认展开、点击头行或 Ctrl/Cmd+L 收起、每个新 turn 重新展开，折叠仅隐藏主体以保留嵌套调用开合状态），主体仅 thinking + 与阶梯 L3 同款调用行（无 Step(k) 计数、无 Say 块）；流式 Say 由 `StreamingSay`（`pendingSay` 原文）渲染在同一滚动流、flush 边界落地为消息，auto-stick 仅贴底跟随；settle 后实时区清空（`findRunningStepsTurn`）：`stepsBlock.jsx`）。
 
 **ontology**

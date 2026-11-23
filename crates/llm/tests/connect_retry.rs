@@ -7,6 +7,7 @@
 //!   stop issuing further requests instead of looping until the retry budget is
 //!   exhausted.
 
+use opencoder_llm::retry::MAX_ATTEMPTS;
 use opencoder_llm::{ChatClient, ChatRequest, LlmEvent};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -182,9 +183,13 @@ async fn retry_after_header_delays_retry_then_completes() {
     let elapsed = start.elapsed();
 
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, LlmEvent::Retrying { attempt: 1, max: 5 })),
+        events.iter().any(|e| matches!(
+            e,
+            LlmEvent::Retrying {
+                attempt: 1,
+                max: MAX_ATTEMPTS
+            }
+        )),
         "expected one connect-level retry: {events:?}"
     );
     match events.last() {

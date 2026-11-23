@@ -30,7 +30,7 @@ async fn send_request(
 
 /// Retry the request up to `MAX_ATTEMPTS` times, but only before any streamed
 /// bytes are produced. Emits `LlmEvent::Retrying` before each backoff so the UI
-/// can surface "↻ retry n/5". Non-retryable HTTP errors (4xx other than the
+/// can surface "↻ retry n/10". Non-retryable HTTP errors (4xx other than the
 /// whitelisted set) fail immediately. Every retry-vs-fail-vs-done decision
 /// delegates to the pure `retry_decision` policy.
 pub(super) async fn connect_with_retry(

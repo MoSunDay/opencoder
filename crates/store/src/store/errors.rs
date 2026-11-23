@@ -26,9 +26,11 @@ pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
 /// one row is unreadable, so callers that can work around the damaged row
 /// (listing page by page, best-effort backfills) branch on this.
 pub fn is_storage_corruption(error: &anyhow::Error) -> bool {
-    error
-        .chain()
-        .any(|cause| cause.downcast_ref::<turso::Error>().is_some_and(is_corruption_error))
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<turso::Error>()
+            .is_some_and(is_corruption_error)
+    })
 }
 
 /// Whether the error chain reports storage the database worker could not

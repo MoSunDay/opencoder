@@ -312,7 +312,8 @@ mod tests {
     #[test]
     fn drain_frames_on_crlf_crlf_separator() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\r\n\r\n").unwrap();
+        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\r\n\r\n")
+            .unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}"]);
     }
@@ -363,7 +364,8 @@ mod tests {
     #[test]
     fn drain_handles_mixed_crlf_and_lf_separators() {
         let mut dec = SseDecoder::new();
-        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\n\ndata:{\"a\":3}\r\n\r\n").unwrap();
+        dec.push(b"data:{\"a\":1}\r\n\r\ndata:{\"a\":2}\n\ndata:{\"a\":3}\r\n\r\n")
+            .unwrap();
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}", "{\"a\":3}"]);
     }
@@ -435,7 +437,10 @@ mod tests {
         assert_eq!(first.len(), 512);
         dec.push(first.as_bytes()).unwrap();
         let second = "y".repeat(600);
-        assert_eq!(dec.push(second.as_bytes()), Err(SseOverflow { limit: 1024 }));
+        assert_eq!(
+            dec.push(second.as_bytes()),
+            Err(SseOverflow { limit: 1024 })
+        );
     }
 
     #[test]

@@ -26,8 +26,7 @@ const FALLBACK_BATCH_MIN: i64 = 100;
 /// invariant, so it equals `ACTIVITY_EXPR` and cursors stay interchangeable.
 const COVERING_ACTIVITY: &str = "MAX(s.updated_at, s.created_at)";
 
-const ITEM_COLUMNS: &str =
-    "s.id, s.kind, s.title, s.agent, s.model, s.created_at, s.updated_at";
+const ITEM_COLUMNS: &str = "s.id, s.kind, s.title, s.agent, s.model, s.created_at, s.updated_at";
 /// Short JSON needs no character-by-character substring copy. Preserve
 /// substr's character limit and embedded-NUL behavior for all other rows.
 const PREVIEW_SUBQUERY: &str = "(SELECT CASE WHEN octet_length(m.blocks_json) <= 8192 AND \
@@ -62,7 +61,10 @@ impl ListPlan {
             row_clauses.push(
                 "(s.id LIKE ? ESCAPE '\\' OR COALESCE(s.title,'') LIKE ? ESCAPE '\\')".into(),
             );
-            let escaped = s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
             let like = format!("%{escaped}%");
             row_args.push(like.clone().into());
             row_args.push(like.into());
@@ -109,7 +111,9 @@ impl ListPlan {
     /// Append the keyset predicate on `activity` and bind its parameters.
     fn push_cursor(&self, sql: &mut String, args: &mut Vec<Value>, activity: &str) {
         if let Some((ts, id)) = &self.cursor {
-            sql.push_str(&format!("({activity} < ? OR ({activity} = ? AND s.id < ?))"));
+            sql.push_str(&format!(
+                "({activity} < ? OR ({activity} = ? AND s.id < ?))"
+            ));
             args.push((*ts).into());
             args.push((*ts).into());
             args.push(id.clone().into());
@@ -218,17 +222,23 @@ async fn next_candidates(
     cursor: &Option<(i64, String)>,
     batch: i64,
 ) -> Result<Vec<(i64, String)>> {
-    let mut sql = format!("SELECT {COVERING_ACTIVITY}, s.id FROM sessions s INDEXED BY idx_sessions_activity WHERE ");
+    let mut sql = format!(
+        "SELECT {COVERING_ACTIVITY}, s.id FROM sessions s INDEXED BY idx_sessions_activity WHERE "
+    );
     let mut args: Vec<Value> = Vec::new();
     if let Some((ts, id)) = cursor {
-        sql.push_str(&format!("({COVERING_ACTIVITY} < ? OR ({COVERING_ACTIVITY} = ? AND s.id < ?))"));
+        sql.push_str(&format!(
+            "({COVERING_ACTIVITY} < ? OR ({COVERING_ACTIVITY} = ? AND s.id < ?))"
+        ));
         args.push((*ts).into());
         args.push((*ts).into());
         args.push(id.clone().into());
     } else {
         sql.push('1');
     }
-    sql.push_str(&format!(" ORDER BY {COVERING_ACTIVITY} DESC, s.id DESC LIMIT ?"));
+    sql.push_str(&format!(
+        " ORDER BY {COVERING_ACTIVITY} DESC, s.id DESC LIMIT ?"
+    ));
     args.push(batch.into());
     let mut stmt = conn.prepare_cached(&sql).await?;
     let mut rows = stmt.query(params_from_iter(args)).await?;
@@ -248,14 +258,23 @@ async fn next_candidates(
 /// seek asserts instead), which would take the whole listing down. A list
 /// without previews beats no list; previews return once the database is
 /// repaired and the fast path serves the page again.
-async fn fetch_item(conn: &Connection, plan: &ListPlan, id: &str) -> Result<Option<SessionListItem>> {
-    let mut sql = format!("SELECT {ITEM_COLUMNS}, NULL, s.skill FROM sessions s WHERE s.id = ? AND ");
+async fn fetch_item(
+    conn: &Connection,
+    plan: &ListPlan,
+    id: &str,
+) -> Result<Option<SessionListItem>> {
+    let mut sql =
+        format!("SELECT {ITEM_COLUMNS}, NULL, s.skill FROM sessions s WHERE s.id = ? AND ");
     let mut args = vec![id.to_string().into()];
     plan.push_row_predicate(&mut sql, &mut args);
     Ok(query_items(conn, &sql, args).await?.into_iter().next())
 }
 
-async fn query_items(conn: &Connection, sql: &str, args: Vec<Value>) -> Result<Vec<SessionListItem>> {
+async fn query_items(
+    conn: &Connection,
+    sql: &str,
+    args: Vec<Value>,
+) -> Result<Vec<SessionListItem>> {
     let mut stmt = conn.prepare_cached(sql).await?;
     let mut rows = stmt.query(params_from_iter(args)).await?;
     let mut out = Vec::new();

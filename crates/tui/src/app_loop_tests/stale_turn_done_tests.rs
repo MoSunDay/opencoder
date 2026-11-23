@@ -64,10 +64,13 @@ async fn armed_drain(
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
-    assert!(*drain_pending, "fixture: Done with a stranded row arms the drain");
+    assert!(
+        *drain_pending,
+        "fixture: Done with a stranded row arms the drain"
+    );
 }
 
 /// A TurnDone carrying an outdated generation is dropped wholesale: the
@@ -139,8 +142,8 @@ async fn stale_turn_done_is_dropped_entirely() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     assert!(
@@ -224,8 +227,8 @@ async fn matching_turn_done_still_processes() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     assert!(!drain_pending, "matching TurnDone consumes the drain arm");

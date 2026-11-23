@@ -3,8 +3,8 @@ use super::store::{digest_id, Store};
 use crate::{
     database::{model::inputs::TextWrite, text_revision::TextContent},
     domain::{
-        truncate_candidate, AttributeKind, FreshnessItemStatus, FreshnessReview,
-        FreshnessVerdict, StorageMode,
+        truncate_candidate, AttributeKind, FreshnessItemStatus, FreshnessReview, FreshnessVerdict,
+        StorageMode,
     },
     error::AppError,
     text_store::TextStore,
@@ -63,7 +63,11 @@ impl Store {
             .iter()
             .find(|item| item.entity_id == entity_id)
             .ok_or(AppError::NotFound)?;
-        if self.freshness_review(env, run_id, entity_id).await?.is_some() {
+        if self
+            .freshness_review(env, run_id, entity_id)
+            .await?
+            .is_some()
+        {
             return Err(AppError::Conflict("item already reviewed".into()));
         }
         let mut entity = self.entity(env, entity_id).await?;
@@ -154,7 +158,8 @@ impl Store {
             actor: actor.into(),
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        self.put("freshness_reviews", env, review.id, &review).await?;
+        self.put("freshness_reviews", env, review.id, &review)
+            .await?;
         self.audit(
             env,
             actor,

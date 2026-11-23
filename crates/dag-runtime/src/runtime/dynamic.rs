@@ -99,8 +99,7 @@ pub(super) fn open(
             }
         }
         for (i, outcome) in group.outcomes.iter().enumerate() {
-            if outcome.is_none()
-                && step.recovery_policy != opencoder_dag::RecoveryPolicy::Operator
+            if outcome.is_none() && step.recovery_policy != opencoder_dag::RecoveryPolicy::Operator
             {
                 reset(root, &run.run_id, &step.name, Some(i), None, false)?;
             }

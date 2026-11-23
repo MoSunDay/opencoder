@@ -197,7 +197,13 @@ pub(crate) async fn handle_submit_action(
             // trigger body. (The runner-side activation is idempotent against
             // resolve_persist's: same body lands on the shared handle.)
             let image_uris = snapshot_image_uris(pending_images);
-            if !start_turn(cmd_tx, cancel, turn_gen, UiCmd::Prompt(text.clone(), image_uris)).await
+            if !start_turn(
+                cmd_tx,
+                cancel,
+                turn_gen,
+                UiCmd::Prompt(text.clone(), image_uris),
+            )
+            .await
             {
                 worker_dead(chat);
                 return LoopFlow::Quit;

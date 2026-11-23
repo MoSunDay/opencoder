@@ -207,12 +207,7 @@ async fn timed_out_call_releases_pending_and_claim_and_drops_late_reply() {
     });
     let active_request = call_request_id(&mut rx).await;
     let accepted = hub
-        .resolve(
-            "node-a",
-            "g1",
-            &active_request,
-            RpcReply::ok(json!(index)),
-        )
+        .resolve("node-a", "g1", &active_request, RpcReply::ok(json!(index)))
         .await
         .expect("active create must settle its claim");
     assert!(!accepted.late);
@@ -311,7 +306,12 @@ async fn unanswered_timeouts_do_not_accumulate_pending_entries() {
     });
     let retry_request = call_request_id(&mut rx).await;
     let settled = hub
-        .resolve("node-a", "g1", &retry_request, RpcReply::ok(json!(retry_index)))
+        .resolve(
+            "node-a",
+            "g1",
+            &retry_request,
+            RpcReply::ok(json!(retry_index)),
+        )
         .await
         .expect("retry create must settle its claim");
     assert!(!settled.late);
@@ -392,7 +392,9 @@ async fn delta_membership_preserves_unmentioned_acceptances_and_reservations() {
 
 #[tokio::test]
 async fn unregister_sweeps_per_node_acceptances_and_reservations() {
-    let fleet = opencoder_store::fleet::FleetStore::open_memory().await.unwrap();
+    let fleet = opencoder_store::fleet::FleetStore::open_memory()
+        .await
+        .unwrap();
     let hub = Hub::new(vec![registration()]);
     let own = execution();
     let other = ExecutionIndex {
@@ -454,7 +456,10 @@ async fn reconcile_reservations_releases_only_non_pending_entries() {
     let late = now + 151_000;
     assert_eq!(hub.reconcile_reservations(&pending, late).await, 1);
     let view = hub.views().await.remove(0);
-    assert_eq!(view.reserved_loops, 1, "orphan claims return, live claim stays");
+    assert_eq!(
+        view.reserved_loops, 1,
+        "orphan claims return, live claim stays"
+    );
     {
         let state = hub.state.lock().await;
         assert!(state.reservations.contains_key(&live.id));

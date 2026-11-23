@@ -48,9 +48,7 @@ pub(super) async fn fork(worker: &Worker, parent: &str) -> Result<RpcReply> {
         worker.inner.state.store.as_ref(),
         parent,
         &id,
-        environment
-            .as_ref()
-            .map(|env| env.workspace.as_path()),
+        environment.as_ref().map(|env| env.workspace.as_path()),
     )
     .await?;
     if let Some(env) = &environment {

@@ -451,10 +451,7 @@ mod tests {
         // The escape hatch must point at the act agent without naming a
         // command: there is no `/agent act` — the canonical commands are
         // `/act` and `/plan`.
-        assert!(
-            msg.contains("switch to the act agent"),
-            "got: {msg}"
-        );
+        assert!(msg.contains("switch to the act agent"), "got: {msg}");
         assert!(
             !msg.contains("/agent act"),
             "escape hatch must not name a nonexistent command, got: {msg}"

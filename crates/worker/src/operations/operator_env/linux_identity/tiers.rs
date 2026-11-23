@@ -2,9 +2,9 @@
 //! group read grants over node-owned roots and the read-only tree freeze.
 
 use super::{account_lock, LinuxIdentity};
-use opencoder_core::config::OperatorAccessMode;
 use crate::layout::DirectoryLayout;
 use anyhow::{ensure, Context, Result};
+use opencoder_core::config::OperatorAccessMode;
 use opencoder_core::fleet::ExecutionKind;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -106,9 +106,7 @@ pub fn ensure_read_only_group_gid() -> Result<u32> {
 pub fn read_only_roots(layout: &DirectoryLayout, id: &str) -> Vec<PathBuf> {
     let kind = ExecutionKind::Operator;
     let mut roots = vec![layout.resources_dir(kind, id).unwrap_or_default()];
-    roots.push(
-        crate::operations::operator_config::dir(layout).join("skills"),
-    );
+    roots.push(crate::operations::operator_config::dir(layout).join("skills"));
     roots.retain(|root| !root.as_os_str().is_empty());
     roots
 }
@@ -127,10 +125,7 @@ pub fn grantable_root(path: &Path) -> bool {
     if normal.next().is_none() {
         return false;
     }
-    !matches!(
-        first.to_str(),
-        Some("home") | Some("root") | Some("Users")
-    )
+    !matches!(first.to_str(), Some("home") | Some("root") | Some("Users"))
 }
 
 fn grant_one(path: &Path, metadata: &std::fs::Metadata, gid: u32) -> Result<()> {
@@ -168,9 +163,7 @@ fn grant_tree(path: &Path, metadata: &std::fs::Metadata, gid: u32) -> Result<()>
     }
     grant_one(path, metadata, gid)?;
     if metadata.is_dir() {
-        for entry in std::fs::read_dir(path)
-            .with_context(|| format!("read {}", path.display()))?
-        {
+        for entry in std::fs::read_dir(path).with_context(|| format!("read {}", path.display()))? {
             let entry = entry?;
             let metadata = entry.metadata()?;
             grant_tree(&entry.path(), &metadata, gid)?;
@@ -181,7 +174,11 @@ fn grant_tree(path: &Path, metadata: &std::fs::Metadata, gid: u32) -> Result<()>
 
 fn freeze_one(path: &Path, metadata: &std::fs::Metadata) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let mode = if metadata.is_dir() { DIR_MODE } else { FILE_MODE };
+    let mode = if metadata.is_dir() {
+        DIR_MODE
+    } else {
+        FILE_MODE
+    };
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
         .with_context(|| format!("freeze {} read-only", path.display()))
 }
@@ -219,7 +216,10 @@ pub fn prepare_private_tmp(home: &Path) -> Result<()> {
 /// Pure: the env tier's TMPDIR requirement — only read-write executions
 /// get a writable scratch directory.
 pub fn wants_tmpdir(access: opencoder_core::config::OperatorAccessMode) -> bool {
-    matches!(access, opencoder_core::config::OperatorAccessMode::ReadWrite)
+    matches!(
+        access,
+        opencoder_core::config::OperatorAccessMode::ReadWrite
+    )
 }
 
 #[cfg(test)]
@@ -253,7 +253,11 @@ mod tests {
 
     #[test]
     fn only_read_write_tiers_get_a_tmpdir() {
-        assert!(wants_tmpdir(opencoder_core::config::OperatorAccessMode::ReadWrite));
-        assert!(!wants_tmpdir(opencoder_core::config::OperatorAccessMode::ReadOnly));
+        assert!(wants_tmpdir(
+            opencoder_core::config::OperatorAccessMode::ReadWrite
+        ));
+        assert!(!wants_tmpdir(
+            opencoder_core::config::OperatorAccessMode::ReadOnly
+        ));
     }
 }

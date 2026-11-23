@@ -399,12 +399,7 @@ async fn todo_items_and_project_runs_use_bounded_keyset_pages() {
 }
 
 /// Seed `count` step events with `text_len`-byte payloads, returning seqs.
-async fn seed_tail_events(
-    store: &TursoStore,
-    sid: &str,
-    count: i64,
-    text_len: usize,
-) -> Vec<i64> {
+async fn seed_tail_events(store: &TursoStore, sid: &str, count: i64, text_len: usize) -> Vec<i64> {
     let mut seqs = Vec::new();
     for n in 0..count {
         let seq = store

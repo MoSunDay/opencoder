@@ -104,7 +104,11 @@ fn active_round_inputs_steer_queue_idempotent_and_promoted() {
 
     stub.release();
     let doc = fleet.wait_idle(SESSION);
-    assert_eq!(doc["execution"]["node_id"], fleet.node_id(), "node fold: {doc}");
+    assert_eq!(
+        doc["execution"]["node_id"],
+        fleet.node_id(),
+        "node fold: {doc}"
+    );
 
     // The transcript holds each prompt exactly once (no loss, no duplicates).
     let (status, detail) = fleet.http("GET", &format!("/api/sessions/{SESSION}"), &json!({}));
@@ -135,7 +139,11 @@ fn active_round_inputs_steer_queue_idempotent_and_promoted() {
         vec![
             vec!["first task".to_string()],
             vec!["first task".into(), "extra context".into()],
-            vec!["first task".into(), "extra context".into(), "second task".into()],
+            vec![
+                "first task".into(),
+                "extra context".into(),
+                "second task".into()
+            ],
         ],
         "round promotion: {promoted:?}"
     );
@@ -144,8 +152,16 @@ fn active_round_inputs_steer_queue_idempotent_and_promoted() {
     // and after a settle window still no duplicate round.
     let (status, retry) = fleet.http("POST", &format!("/api/sessions/{SESSION}/prompt"), &queued);
     assert_eq!(status, 200, "queue retry: {retry}");
-    assert_eq!(retry["admitted_seq"], json!(queued_seq), "same row: {retry}");
-    assert_eq!(retry["driver_ensured"], json!(false), "no drain re-kick: {retry}");
+    assert_eq!(
+        retry["admitted_seq"],
+        json!(queued_seq),
+        "same row: {retry}"
+    );
+    assert_eq!(
+        retry["driver_ensured"],
+        json!(false),
+        "no drain re-kick: {retry}"
+    );
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(wait_for_rounds(&stub, 3).len(), 3, "no duplicate round");
 

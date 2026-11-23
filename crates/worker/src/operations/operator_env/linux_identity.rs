@@ -9,8 +9,8 @@
 //! mutation fails closed with context-rich errors.
 
 use super::snapshot_path;
-use anyhow::{anyhow, ensure, Context, Result};
 use crate::layout::DirectoryLayout;
+use anyhow::{anyhow, ensure, Context, Result};
 use opencoder_core::config::{LinuxIdentityMode, OperatorAccessMode};
 use opencoder_core::platform::RunAsIdentity;
 use std::path::{Path, PathBuf};
@@ -77,7 +77,10 @@ pub fn username_for(execution_id: &str) -> Result<String> {
         .into_iter()
         .rev()
         .collect();
-    ensure!(!suffix.is_empty(), "execution id {execution_id:?} has no ulid");
+    ensure!(
+        !suffix.is_empty(),
+        "execution id {execution_id:?} has no ulid"
+    );
     let name = format!("ocop-{prefix}-{suffix}").to_ascii_lowercase();
     ensure!(
         valid_username(&name),
@@ -135,10 +138,7 @@ pub fn admission(mode: LinuxIdentityMode, capable: bool) -> Result<()> {
 
 /// Admission decision for an operator execution from its config plane.
 pub fn admit(config: &opencoder_core::Config) -> Result<()> {
-    admission(
-        config.operator.linux_identity,
-        ensure_capability().is_ok(),
-    )
+    admission(config.operator.linux_identity, ensure_capability().is_ok())
 }
 
 /// useradd/userdel race on the account database; serialize mutations.
@@ -230,9 +230,8 @@ pub(super) fn release_account(username: &str, home: &Path, workspace: &Path) -> 
     }
     for directory in [home, workspace] {
         if directory.is_dir() {
-            chown_tree(directory, node_uid(), node_gid()).with_context(|| {
-                format!("hand {} back to the node user", directory.display())
-            })?;
+            chown_tree(directory, node_uid(), node_gid())
+                .with_context(|| format!("hand {} back to the node user", directory.display()))?;
         }
     }
     let userdel = locate_binary("userdel").context("userdel binary not found")?;

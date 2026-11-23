@@ -46,10 +46,7 @@ fn acceptor(cert_pem: &str, key_pem: &str) -> tokio_rustls::TlsAcceptor {
 /// axum 0.7 serves plain TCP listeners only, so drive its Router over rustls
 /// streams with hyper's http1 builder (upgrades enabled for the WebSocket
 /// route). This is the TLS-terminator deployment shape.
-async fn serve_tls(
-    app: axum::Router,
-    tls: tokio_rustls::TlsAcceptor,
-) -> SocketAddr {
+async fn serve_tls(app: axum::Router, tls: tokio_rustls::TlsAcceptor) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -161,22 +158,17 @@ async fn wss_channel_registers_reports_and_stays_online_over_tls() {
     let (changes, _) = watch::channel(0);
     let service: Arc<dyn NodeService> = Arc::new(TlsInventory { changes });
     let remote = format!("https://{addr}");
-    let node = tokio::spawn(async move {
-        opencoder_node::fleet::run(&remote, "tls-test", service).await
-    });
+    let node =
+        tokio::spawn(async move { opencoder_node::fleet::run(&remote, "tls-test", service).await });
 
     // The channel is up: registered, reported, and live over wss.
     let online = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
-            if state
-                .hub
-                .views()
-                .await
-                .iter()
-                .any(|view| view.registration.id == "node-tls"
+            if state.hub.views().await.iter().any(|view| {
+                view.registration.id == "node-tls"
                     && view.online
-                    && view.snapshot.as_ref().is_some_and(|s| s.ready))
-            {
+                    && view.snapshot.as_ref().is_some_and(|s| s.ready)
+            }) {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

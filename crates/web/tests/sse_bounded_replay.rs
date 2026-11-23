@@ -100,10 +100,7 @@ async fn first_connect_replays_bounded_newest_window() {
     let mut text = String::new();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
-        let ids = text
-            .lines()
-            .filter(|l| l.starts_with("id: "))
-            .count();
+        let ids = text.lines().filter(|l| l.starts_with("id: ")).count();
         if ids >= 1000 {
             break;
         }

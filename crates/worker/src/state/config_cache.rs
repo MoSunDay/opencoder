@@ -77,10 +77,7 @@ pub(crate) fn file_stats(paths: &[PathBuf]) -> FileStats {
         stats.file_count += 1;
         stats.total_bytes = stats.total_bytes.saturating_add(metadata.len());
         let modified = metadata.modified().ok();
-        stats.newest_mtime = [stats.newest_mtime, modified]
-            .into_iter()
-            .flatten()
-            .max();
+        stats.newest_mtime = [stats.newest_mtime, modified].into_iter().flatten().max();
     }
     stats
 }
@@ -95,17 +92,11 @@ pub(crate) fn config_key(workdir: &Path) -> ConfigKey {
     let global_dir = Config::global_config_path()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
-    let mut xdg_dirs: Vec<PathBuf> = opencoder_core::platform::config_dir()
-        .into_iter()
-        .collect();
+    let mut xdg_dirs: Vec<PathBuf> = opencoder_core::platform::config_dir().into_iter().collect();
     if let Some(root) = global_dir.as_deref().and_then(Path::parent) {
         xdg_dirs.push(root.to_path_buf());
     }
-    let files = file_stats(&candidate_files(
-        workdir,
-        global_dir.as_deref(),
-        &xdg_dirs,
-    ));
+    let files = file_stats(&candidate_files(workdir, global_dir.as_deref(), &xdg_dirs));
     ConfigKey {
         workdir: workdir.to_path_buf(),
         global_dir,
@@ -132,13 +123,11 @@ mod tests {
         let xdg_dirs = vec![PathBuf::from("/xdg")];
         // The config.json chain is core's own candidate list for the same
         // home view (project files, global dir, redirected XDG root) ...
-        let mut expected: Vec<String> = opencoder_core::config::candidates_with_home(
-            workdir,
-            Some(Path::new("/home")),
-        )
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect();
+        let mut expected: Vec<String> =
+            opencoder_core::config::candidates_with_home(workdir, Some(Path::new("/home")))
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
         // ... plus every domain file core routes out of config.json ...
         for dir in ["/work/.opencoder", "/home/.opencoder"] {
             for file in opencoder_core::config::domain_file_names() {
@@ -176,7 +165,10 @@ mod tests {
 
         write(&config, r#"{"model":"a/much-longer-model-name"}"#);
         let rewritten = stats(&candidates());
-        assert_ne!(created, rewritten, "a rewritten file must change the fingerprint");
+        assert_ne!(
+            created, rewritten,
+            "a rewritten file must change the fingerprint"
+        );
     }
 
     #[test]

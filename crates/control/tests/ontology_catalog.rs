@@ -186,7 +186,10 @@ async fn capability_detail_returns_the_listed_document() {
         .await;
     // The detail document wraps the very row the list serves.
     assert_eq!(detail["item"], row);
-    assert_eq!(detail["item"]["capability"]["kind"], row["capability"]["kind"]);
+    assert_eq!(
+        detail["item"]["capability"]["kind"],
+        row["capability"]["kind"]
+    );
 
     // Unknown but well-formed id: the store misses and the handler maps it to
     // the not-found error contract.

@@ -17,7 +17,10 @@ pub(super) const HTTP_BACKSTOP: Duration = Duration::from_secs(300);
 /// Shared client construction so tests can exercise the backstop behavior
 /// with a compressed duration.
 pub(super) fn http_client_with(backstop: Duration) -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder().no_proxy().timeout(backstop).build()?)
+    Ok(reqwest::Client::builder()
+        .no_proxy()
+        .timeout(backstop)
+        .build()?)
 }
 
 impl Host {

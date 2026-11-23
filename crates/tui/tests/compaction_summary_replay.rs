@@ -308,7 +308,10 @@ async fn task_switch_replay_matches_execution_order() {
     let _ = dir;
 
     assert_eq!(compaction_count(&chat), 1);
-    assert!(matches!(chat.blocks.first(), Some(ChatBlock::Compaction { .. })));
+    assert!(matches!(
+        chat.blocks.first(),
+        Some(ChatBlock::Compaction { .. })
+    ));
     assert!(
         compaction_index(&chat) < user_index(&chat),
         "continued turns render below the head-position summary block"

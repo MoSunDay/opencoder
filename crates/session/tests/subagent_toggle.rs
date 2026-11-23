@@ -116,7 +116,10 @@ async fn disabled_toggle_denies_task_call_and_starts_no_child() {
     // The task call is denied with the canonical disabled-toggle error.
     let denial = events.iter().find_map(|e| match e {
         SessionEvent::ToolEnd {
-            name, output, is_error, ..
+            name,
+            output,
+            is_error,
+            ..
         } if name == "task" => Some((output.clone(), *is_error)),
         _ => None,
     });
@@ -166,7 +169,9 @@ async fn disabled_toggle_hides_task_from_advertised_tools() {
         dir.path().to_path_buf(),
     );
 
-    run(&mut session, "do the thing".into(), |_| {}).await.unwrap();
+    run(&mut session, "do the thing".into(), |_| {})
+        .await
+        .unwrap();
 
     let names = advertised_tool_names(&mock);
     assert!(
@@ -311,11 +316,13 @@ async fn replay_cancelled_tasks_skips_children_when_subagent_disabled() {
     // The dangling tool_use got an error tool_result backfill.
     let backfilled = session.messages.iter().any(|m| {
         m.role == Role::Tool
-            && m.blocks.iter().any(|b| matches!(
-                b,
-                ContentBlock::ToolResult { tool_use_id, is_error: true, .. }
-                    if tool_use_id.as_str() == "task-off"
-            ))
+            && m.blocks.iter().any(|b| {
+                matches!(
+                    b,
+                    ContentBlock::ToolResult { tool_use_id, is_error: true, .. }
+                        if tool_use_id.as_str() == "task-off"
+                )
+            })
     });
     assert!(
         backfilled,

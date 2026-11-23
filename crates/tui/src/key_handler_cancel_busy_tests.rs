@@ -62,8 +62,13 @@ fn press_busy(
 /// Quit exactly when the user only wanted to stop the draining batch.
 #[test]
 fn ctrl_c_during_subagent_drain_cancels_instead_of_quitting() {
-    let (action, _input) =
-        press_busy(KeyCode::Char('c'), KeyModifiers::CONTROL, false, true, &mut None);
+    let (action, _input) = press_busy(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL,
+        false,
+        true,
+        &mut None,
+    );
     assert!(matches!(action, KeyAction::Cancel), "got {action:?}");
 }
 
@@ -78,16 +83,20 @@ fn double_esc_during_subagent_drain_cancels() {
     assert!(matches!(first, KeyAction::None), "got {first:?}");
     assert_eq!(input, "", "single Esc clears the draft");
     // Second Esc inside the 350ms window: hard abort.
-    let (second, _input) =
-        press_busy(KeyCode::Esc, KeyModifiers::NONE, false, true, &mut last_esc);
+    let (second, _input) = press_busy(KeyCode::Esc, KeyModifiers::NONE, false, true, &mut last_esc);
     assert!(matches!(second, KeyAction::Cancel), "got {second:?}");
 }
 
 /// Control: with no work in flight at all, Ctrl+C keeps its Quit meaning.
 #[test]
 fn ctrl_c_when_fully_idle_still_quits() {
-    let (action, _) =
-        press_busy(KeyCode::Char('c'), KeyModifiers::CONTROL, false, false, &mut None);
+    let (action, _) = press_busy(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL,
+        false,
+        false,
+        &mut None,
+    );
     assert!(matches!(action, KeyAction::Quit), "got {action:?}");
 }
 
@@ -95,8 +104,20 @@ fn ctrl_c_when_fully_idle_still_quits() {
 #[test]
 fn double_esc_when_fully_idle_stays_input_clear() {
     let mut last_esc = None;
-    let (first, _) = press_busy(KeyCode::Esc, KeyModifiers::NONE, false, false, &mut last_esc);
+    let (first, _) = press_busy(
+        KeyCode::Esc,
+        KeyModifiers::NONE,
+        false,
+        false,
+        &mut last_esc,
+    );
     assert!(matches!(first, KeyAction::None));
-    let (second, _) = press_busy(KeyCode::Esc, KeyModifiers::NONE, false, false, &mut last_esc);
+    let (second, _) = press_busy(
+        KeyCode::Esc,
+        KeyModifiers::NONE,
+        false,
+        false,
+        &mut last_esc,
+    );
     assert!(matches!(second, KeyAction::None), "got {second:?}");
 }

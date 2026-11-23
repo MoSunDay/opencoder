@@ -59,7 +59,6 @@ pub(crate) use crate::app::app_display::{compute_display, DisplayState};
 #[cfg(test)]
 pub(crate) use crate::app::app_display::body_is_top_level;
 
-
 /// Advance the task-total clock using a single `last_clock` dt baseline.
 /// Provider/model round timing is event-driven in `ChatView`; it is distinct
 /// from this outer task clock because one running task can contain many rounds.
@@ -394,8 +393,13 @@ pub(crate) async fn fold_ui_events(
                     // the drain loop to promote pending steers.
                     *drain_pending = false;
                     *cancelled = false;
-                    if !start_turn(cmd_tx, cancel, turn_gen, UiCmd::Prompt(String::new(), Vec::new()))
-                        .await
+                    if !start_turn(
+                        cmd_tx,
+                        cancel,
+                        turn_gen,
+                        UiCmd::Prompt(String::new(), Vec::new()),
+                    )
+                    .await
                     {
                         worker_dead(chat);
                         return LoopFlow::Quit;
@@ -459,9 +463,26 @@ pub(crate) async fn handle_ui_events(
     body_refresh_pending: &mut bool,
 ) -> LoopFlow {
     let np_flow = fold_ui_events(
-        maybe_ev, chat, store, session_id, queue_items, plan_skill_active, admit, running,
-        cancelled, drain_pending, skip_next_render, follow, cmd_tx, cancel, turn_gen, evt_rx,
-        notepad, question_menu, question_hub, reset,
+        maybe_ev,
+        chat,
+        store,
+        session_id,
+        queue_items,
+        plan_skill_active,
+        admit,
+        running,
+        cancelled,
+        drain_pending,
+        skip_next_render,
+        follow,
+        cmd_tx,
+        cancel,
+        turn_gen,
+        evt_rx,
+        notepad,
+        question_menu,
+        question_hub,
+        reset,
     )
     .await;
     match np_flow {
@@ -599,7 +620,10 @@ pub(crate) async fn handle_quit(
     if !chat.remote {
         cancel.cancel();
         if busy {
-            chat.push_marker(Line::from(Span::styled("[exiting…]", Style::default().fg(theme::warn_color()))));
+            chat.push_marker(Line::from(Span::styled(
+                "[exiting…]",
+                Style::default().fg(theme::warn_color()),
+            )));
         }
     }
     let _ = cmd_tx.try_send(UiCmd::Quit);

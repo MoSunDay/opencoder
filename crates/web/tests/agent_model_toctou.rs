@@ -2,8 +2,8 @@
 //! setting changes must contend on the same per-session mutex, so whichever
 //! operation wins is complete before the other observes `draining`.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::response::IntoResponse;

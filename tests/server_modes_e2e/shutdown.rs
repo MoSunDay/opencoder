@@ -82,7 +82,10 @@ fn sigterm_drains_open_sse_and_exits_cleanly() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(
-        fleet.log.tail(400).contains("Server HTTP retirement complete"),
+        fleet
+            .log
+            .tail(400)
+            .contains("Server HTTP retirement complete"),
         "graceful retirement never finished\n--- fleet log tail ---\n{}",
         fleet.log.tail(60)
     );

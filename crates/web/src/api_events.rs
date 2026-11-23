@@ -92,19 +92,20 @@ pub async fn get_events(
     // is a genuine subscribe/query overlap-window event that must seed `seen`.
     let baseline = state.store.last_event_seq(&id).await.unwrap_or(-1);
 
-    let persisted: Vec<SseEvt> = crate::sse_replay::bounded_replay(state.store.as_ref(), &id, after)
-        .await
-        .into_iter()
-        .map(|r| SseEvt {
-            kind: r
-                .sse_kind
-                .clone()
-                .unwrap_or_else(|| crate::api::event_kind_str(r.kind).to_string()),
-            data: r.payload,
-            ts: r.ts,
-            seq: r.seq,
-        })
-        .collect();
+    let persisted: Vec<SseEvt> =
+        crate::sse_replay::bounded_replay(state.store.as_ref(), &id, after)
+            .await
+            .into_iter()
+            .map(|r| SseEvt {
+                kind: r
+                    .sse_kind
+                    .clone()
+                    .unwrap_or_else(|| crate::api::event_kind_str(r.kind).to_string()),
+                data: r.payload,
+                ts: r.ts,
+                seq: r.seq,
+            })
+            .collect();
 
     // Dedup live broadcast events against the replayed (persisted) window:
     // two-tier decision (exact seq, then content fingerprint) + overlap-window

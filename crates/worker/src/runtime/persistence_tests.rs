@@ -28,7 +28,11 @@ fn backoff_progresses_and_caps() {
         (5, Duration::from_secs(16)),
         (6, Duration::from_secs(32)),
     ] {
-        assert_eq!(persistence::backoff(attempts), expected, "attempt {attempts}");
+        assert_eq!(
+            persistence::backoff(attempts),
+            expected,
+            "attempt {attempts}"
+        );
     }
     for attempts in [7u32, 8, 100, u32::MAX] {
         assert_eq!(persistence::backoff(attempts), persistence::RETRY_MAX);
@@ -62,21 +66,30 @@ async fn latched_worker_recovers_after_backoff_window() {
             .unwrap(),
         0
     );
-    assert!(persistence::active(&worker), "a blocked cycle must not clear the latch");
+    assert!(
+        persistence::active(&worker),
+        "a blocked cycle must not clear the latch"
+    );
     assert!(persistence::blocked(&worker));
 
     // Force the probe deadline into the past: the next cycle runs against
     // the healthy store and proves persistence works again.
     worker.inner.persistence_retry.lock().unwrap().next_probe_at =
         Some(Instant::now() - Duration::from_secs(1));
-    assert!(!persistence::blocked(&worker), "an expired deadline is probeable");
+    assert!(
+        !persistence::blocked(&worker),
+        "an expired deadline is probeable"
+    );
     assert_eq!(
         crate::operations::queue::dispatch_locked(&worker)
             .await
             .unwrap(),
         0
     );
-    assert!(!persistence::active(&worker), "a healthy cycle clears the latch");
+    assert!(
+        !persistence::active(&worker),
+        "a healthy cycle clears the latch"
+    );
     assert!(!persistence::blocked(&worker));
     assert!(worker.inner.persistence_error.lock().unwrap().is_none());
     let retry = worker.inner.persistence_retry.lock().unwrap();
@@ -144,8 +157,14 @@ async fn accessors_merge_own_then_deps_latch_into_snapshots() {
     let deps = worker.inner.state.project.require().unwrap();
     *deps.persistence_error.lock().unwrap() = Some("project store down".into());
     drop(deps);
-    assert_eq!(persistence::node_error(&worker).as_deref(), Some("own store down"));
-    assert_eq!(persistence::error(&worker).as_deref(), Some("own store down"));
+    assert_eq!(
+        persistence::node_error(&worker).as_deref(),
+        Some("own store down")
+    );
+    assert_eq!(
+        persistence::error(&worker).as_deref(),
+        Some("own store down")
+    );
     let snapshot = opencoder_node::fleet::NodeService::snapshot(&worker);
     assert!(!snapshot.ready, "a latched worker must not look ready");
     assert_eq!(
@@ -157,7 +176,10 @@ async fn accessors_merge_own_then_deps_latch_into_snapshots() {
     // Clearing the node latch falls through to the deps latch text.
     *worker.inner.persistence_error.lock().unwrap() = None;
     assert_eq!(persistence::node_error(&worker), None);
-    assert_eq!(persistence::error(&worker).as_deref(), Some("project store down"));
+    assert_eq!(
+        persistence::error(&worker).as_deref(),
+        Some("project store down")
+    );
     let snapshot = opencoder_node::fleet::NodeService::snapshot(&worker);
     assert!(!snapshot.ready);
     assert_eq!(

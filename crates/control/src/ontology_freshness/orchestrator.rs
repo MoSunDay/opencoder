@@ -8,7 +8,10 @@ use super::planning::{
 use crate::{api::executions, AppState};
 use futures::StreamExt;
 use opencoder_core::fleet::{CreateExecution, RpcReply};
-use opencoder_ontology::{AppError, FreshnessItemStatus, FreshnessOperation, FreshnessRun, FreshnessRunItem, FreshnessRunStatus};
+use opencoder_ontology::{
+    AppError, FreshnessItemStatus, FreshnessOperation, FreshnessRun, FreshnessRunItem,
+    FreshnessRunStatus,
+};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -64,7 +67,9 @@ async fn entities_of_type(state: &AppState, env: &str, policy: &Value) -> HashMa
             .unwrap_or_default()
             .into_iter()
             .filter_map(|entity| {
-                Uuid::parse_str(entity["id"].as_str()?).ok().map(|id| (id, entity))
+                Uuid::parse_str(entity["id"].as_str()?)
+                    .ok()
+                    .map(|id| (id, entity))
             })
             .collect(),
         Err(error) => {

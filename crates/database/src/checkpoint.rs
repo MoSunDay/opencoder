@@ -84,7 +84,9 @@ pub async fn checkpoint_passive(db: &Path) -> Result<CheckpointStats> {
             .with_context(|| format!("open checkpoint connection {}", path.display()))?;
         let connection = database.connect()?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
-        let mut rows = connection.query("PRAGMA wal_checkpoint(PASSIVE)", ()).await?;
+        let mut rows = connection
+            .query("PRAGMA wal_checkpoint(PASSIVE)", ())
+            .await?;
         let mut stats: Option<CheckpointStats> = None;
         while let Some(row) = rows.next().await? {
             anyhow::ensure!(

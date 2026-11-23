@@ -3,7 +3,7 @@ use anyhow::{ensure, Context, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
 
 /// How long an open write transaction may outlive the last input line before
 /// the watchdog rolls it back. An unbounded hold blocks every other process
@@ -51,8 +51,11 @@ async fn execute(connection: &turso::Connection, request: Value) -> Result<Value
 pub async fn serve(path: PathBuf, read_only: bool) -> Result<()> {
     let input = tokio::io::BufReader::new(tokio::io::stdin());
     let output = tokio::io::stdout();
-    crate::runtime::run(true, serve_streams(path, read_only, IDLE_WRITE_TX_LIMIT, input, output))
-        .await
+    crate::runtime::run(
+        true,
+        serve_streams(path, read_only, IDLE_WRITE_TX_LIMIT, input, output),
+    )
+    .await
 }
 
 /// The bridge body over generic streams so tests can drive the watchdog.
@@ -74,12 +77,11 @@ where
     W: AsyncWrite + Unpin,
 {
     ensure!(path.is_file(), "database file does not exist");
-    let database =
-        turso::Builder::new_local(path.to_str().context("database path must be UTF-8")?)
-            .experimental_multiprocess_wal(true)
-            .read_only(read_only)
-            .build()
-            .await?;
+    let database = turso::Builder::new_local(path.to_str().context("database path must be UTF-8")?)
+        .experimental_multiprocess_wal(true)
+        .read_only(read_only)
+        .build()
+        .await?;
     let connection = database.connect()?;
     connection.busy_timeout(Duration::from_secs(30))?;
     connection

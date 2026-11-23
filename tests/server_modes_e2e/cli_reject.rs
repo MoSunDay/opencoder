@@ -83,12 +83,22 @@ fn invalid_startup_flags_fail_fast_before_binding() {
         ),
         (
             "whitespace-only metrics token file",
-            strings(["--metrics-token-file", &path(&metrics_empty), "--token", "t"]),
+            strings([
+                "--metrics-token-file",
+                &path(&metrics_empty),
+                "--token",
+                "t",
+            ]),
             "metrics token file contains an empty bearer token",
         ),
         (
             "metrics token must differ from server token",
-            strings(["--token-file", &path(&token), "--metrics-token-file", &path(&metrics_same)]),
+            strings([
+                "--token-file",
+                &path(&token),
+                "--metrics-token-file",
+                &path(&metrics_same),
+            ]),
             "metrics token must differ from server token",
         ),
         (

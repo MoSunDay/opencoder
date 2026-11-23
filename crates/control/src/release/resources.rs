@@ -40,13 +40,9 @@ pub async fn serve(workdir: PathBuf, data: PathBuf, port: u16, token: String) ->
     crate::ontology::autostart(&config, &workdir, &data).await?;
     let app = build_app(state, token);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    serve_until(
-        listener,
-        app,
-        async {
-            let _ = crate::bootstrap::shutdown_signal().await;
-        },
-    )
+    serve_until(listener, app, async {
+        let _ = crate::bootstrap::shutdown_signal().await;
+    })
     .await
 }
 

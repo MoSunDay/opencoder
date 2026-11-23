@@ -31,7 +31,8 @@ pub fn fork_environment(
         copy_directory(&codex, &home.join(".codex"))?;
     }
     #[cfg(target_os = "linux")]
-    let run_as = super::linux_identity::materialize_ownership(layout, config, &home, &workspace, id)?;
+    let run_as =
+        super::linux_identity::materialize_ownership(layout, config, &home, &workspace, id)?;
     #[cfg(not(target_os = "linux"))]
     let run_as = None;
     Ok(Some(OperatorEnvironment {
@@ -104,16 +105,9 @@ mod tests {
         std::fs::create_dir(parent.join(".codex")).unwrap();
         std::fs::write(parent.join(".codex/thread"), "original thread").unwrap();
         let version = serde_json::json!(1);
-        let child = fork_environment(
-            &layout,
-            kind,
-            "parent",
-            "child",
-            Some(&version),
-            &config(),
-        )
-        .unwrap()
-        .unwrap();
+        let child = fork_environment(&layout, kind, "parent", "child", Some(&version), &config())
+            .unwrap()
+            .unwrap();
         let (home, workspace) = (child.home, child.workspace);
         assert!(child.run_as.is_none());
         assert_ne!(home, parent);
@@ -129,8 +123,10 @@ mod tests {
         assert!(resolve(&layout, kind, "child", Some(&version))
             .unwrap()
             .is_some());
-        assert!(fork_environment(&layout, kind, "parent", "legacy", None, &config())
-            .unwrap()
-            .is_none());
+        assert!(
+            fork_environment(&layout, kind, "parent", "legacy", None, &config())
+                .unwrap()
+                .is_none()
+        );
     }
 }

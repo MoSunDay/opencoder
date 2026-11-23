@@ -44,11 +44,11 @@ async fn entity_mounts_multiple_directories_but_duplicate_membership_conflicts()
         .find(|item| item["is_directory_membership"] == true)
         .map(|item| item["id"].clone())
         .unwrap();
-    let mount = |target: String| {
-        json!({"relationship_type_id":membership,"source_entity_id":e,"target_entity_id":target})
-    };
-    f.ok("POST", "/envs/debug/relationships", mount(a.clone())).await;
-    f.ok("POST", "/envs/debug/relationships", mount(b.clone())).await;
+    let mount = |target: String| json!({"relationship_type_id":membership,"source_entity_id":e,"target_entity_id":target});
+    f.ok("POST", "/envs/debug/relationships", mount(a.clone()))
+        .await;
+    f.ok("POST", "/envs/debug/relationships", mount(b.clone()))
+        .await;
     assert_eq!(
         f.call("POST", "/envs/debug/relationships", mount(a.clone()))
             .await

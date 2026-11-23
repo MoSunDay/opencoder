@@ -130,18 +130,16 @@ async fn delta_commit_fence_survives_other_server_reports_and_rolls_back_failure
         .unwrap();
     let mut changed = original.clone();
     changed.status = ExecutionStatus::Running;
-    assert!(
-        store
-            .apply_index_report_committed(
-                "node-scale",
-                std::slice::from_ref(&changed),
-                None,
-                ("host-2", 12),
-                Some(9)
-            )
-            .await
-            .is_err()
-    );
+    assert!(store
+        .apply_index_report_committed(
+            "node-scale",
+            std::slice::from_ref(&changed),
+            None,
+            ("host-2", 12),
+            Some(9)
+        )
+        .await
+        .is_err());
     assert_eq!(store.index(&original.id).await.unwrap().unwrap(), original);
     // A coexisting old Server advances the same durable watermark.
     store
@@ -153,18 +151,16 @@ async fn delta_commit_fence_survives_other_server_reports_and_rolls_back_failure
         )
         .await
         .unwrap();
-    assert!(
-        store
-            .apply_index_report_committed(
-                "node-scale",
-                std::slice::from_ref(&changed),
-                None,
-                ("host-2", 12),
-                Some(10)
-            )
-            .await
-            .is_err()
-    );
+    assert!(store
+        .apply_index_report_committed(
+            "node-scale",
+            std::slice::from_ref(&changed),
+            None,
+            ("host-2", 12),
+            Some(10)
+        )
+        .await
+        .is_err());
     store
         .apply_index_report_committed(
             "node-scale",
@@ -177,48 +173,36 @@ async fn delta_commit_fence_survives_other_server_reports_and_rolls_back_failure
         .unwrap();
     let mut conflict = changed.clone();
     conflict.created_at = 99;
-    assert!(
-        store
-            .apply_index_report_committed("node-scale", &[conflict], None, ("host-2", 14), Some(13))
-            .await
-            .is_err()
-    );
+    assert!(store
+        .apply_index_report_committed("node-scale", &[conflict], None, ("host-2", 14), Some(13))
+        .await
+        .is_err());
     store
         .apply_index_report_committed("node-scale", &[], None, ("host-2", 15), Some(13))
         .await
         .unwrap();
     // Empty/removal-only deltas retain historical records and never recover missing pending IDs.
     assert_eq!(store.index(&original.id).await.unwrap().unwrap(), changed);
-    assert!(
-        store
-            .apply_index_report_committed("node-scale", &[], Some(&[]), ("host-2", 16), Some(15))
-            .await
-            .is_err()
-    );
-    assert!(
-        store
-            .apply_index_report_committed("node-scale", &[], None, ("host-1", 99), None)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        store
-            .apply_index_report_committed("node-scale", &[], None, ("host-2", 15), Some(15))
-            .await
-            .is_err()
-    );
-    assert!(
-        store
-            .apply_index_report_committed("node-scale", &[], None, ("host-2", u64::MAX), Some(15))
-            .await
-            .is_err()
-    );
+    assert!(store
+        .apply_index_report_committed("node-scale", &[], Some(&[]), ("host-2", 16), Some(15))
+        .await
+        .is_err());
+    assert!(store
+        .apply_index_report_committed("node-scale", &[], None, ("host-1", 99), None)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(store
+        .apply_index_report_committed("node-scale", &[], None, ("host-2", 15), Some(15))
+        .await
+        .is_err());
+    assert!(store
+        .apply_index_report_committed("node-scale", &[], None, ("host-2", u64::MAX), Some(15))
+        .await
+        .is_err());
     let other = FleetStore::open_memory().await.unwrap();
-    assert!(
-        other
-            .apply_index_report_committed("node-scale", &[], None, ("host-2", 16), Some(15))
-            .await
-            .is_err()
-    );
+    assert!(other
+        .apply_index_report_committed("node-scale", &[], None, ("host-2", 16), Some(15))
+        .await
+        .is_err());
 }

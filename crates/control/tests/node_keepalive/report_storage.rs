@@ -3,8 +3,9 @@ use futures::{SinkExt, StreamExt};
 use opencoder_core::fleet::*;
 use std::{sync::Arc, time::Duration};
 use tokio_tungstenite::{
-    MaybeTlsStream, WebSocketStream, connect_async,
-    tungstenite::{Message, client::IntoClientRequest},
+    connect_async,
+    tungstenite::{client::IntoClientRequest, Message},
+    MaybeTlsStream, WebSocketStream,
 };
 
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -350,15 +351,13 @@ async fn invalid_report_closes_without_handoff_or_ready_promotion() {
             .unwrap()
             .ready
     );
-    assert!(
-        fixture
-            .state
-            .fleet
-            .index("dag-storage")
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(fixture
+        .state
+        .fleet
+        .index("dag-storage")
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

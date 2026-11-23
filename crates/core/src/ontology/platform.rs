@@ -195,8 +195,16 @@ mod tests {
             Some("ontology")
         );
         assert_eq!(platform_for_path("/api/project/todos"), Some("project"));
-        assert_eq!(platform_for_path("/api/project/todos/task/comments/1"), Some("project"));
-        assert!(entries.iter().find(|entry| entry.source_id == "project").unwrap().description.contains("编辑和删除"));
+        assert_eq!(
+            platform_for_path("/api/project/todos/task/comments/1"),
+            Some("project")
+        );
+        assert!(entries
+            .iter()
+            .find(|entry| entry.source_id == "project")
+            .unwrap()
+            .description
+            .contains("编辑和删除"));
         assert_eq!(platform_for_path("/api/project-unregistered"), None);
         assert_eq!(platform_for_path("/api/unknown"), None);
         assert!(entries

@@ -177,7 +177,13 @@ async fn unknown_agent_name_errors_and_keeps_current_agent() {
         std::path::Path::new("."),
     );
 
-    let quit = process_cmd(UiCmd::Prompt("/agent nope".into(), vec![]), &mut sess, &tx, 0).await;
+    let quit = process_cmd(
+        UiCmd::Prompt("/agent nope".into(), vec![]),
+        &mut sess,
+        &tx,
+        0,
+    )
+    .await;
     assert!(!quit, "a failed switch must not break the worker loop");
 
     assert_eq!(sess.agent.name, "act", "an unknown name must not switch");

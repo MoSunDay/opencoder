@@ -130,9 +130,8 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
     // And the rebuild itself keeps that boundary: replay the reset path
     // directly and confirm the tail echo still renders below the new view.
     {
-        let store: Arc<dyn Store> = Arc::new(
-            opencoder_store::TursoStore::open_memory().await.unwrap(),
-        );
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "test".into(),
@@ -142,7 +141,9 @@ async fn fired_guard_submits_canonical_prompt_when_idle() {
             .unwrap();
         crate::session_ui::rebuild_after_reset(&mut chat, &[], &store, "test").await;
         assert!(
-            chat.blocks.iter().any(|b| matches!(b, ChatBlock::User { rendered }
+            chat.blocks
+                .iter()
+                .any(|b| matches!(b, ChatBlock::User { rendered }
                 if rendered.iter().any(|l| l.to_string().contains("finish the summary")))),
             "the rebuilt view still opens the new turn with the User boundary"
         );

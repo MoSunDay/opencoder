@@ -50,7 +50,10 @@ async fn run_tx_survives_cross_connection_write_lock_contention() {
     lease.await.unwrap();
 
     let verify = connect(&path, Duration::from_secs(30)).await;
-    let mut rows = verify.query("SELECT count(*) FROM probe", ()).await.unwrap();
+    let mut rows = verify
+        .query("SELECT count(*) FROM probe", ())
+        .await
+        .unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
         1,
@@ -85,13 +88,21 @@ async fn immediate_with_retry_requeues_past_write_lock_contention() {
     let tx = busy::immediate_with_retry(&victim)
         .await
         .expect("the begin must retry past the holder lease");
-    tx.execute("INSERT INTO probe VALUES (1)", ()).await.unwrap();
+    tx.execute("INSERT INTO probe VALUES (1)", ())
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
     lease.await.unwrap();
 
     let verify = connect(&path, Duration::from_secs(30)).await;
-    let mut rows = verify.query("SELECT count(*) FROM probe", ()).await.unwrap();
-    assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 1);
+    let mut rows = verify
+        .query("SELECT count(*) FROM probe", ())
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+        1
+    );
 }
 
 /// A non-busy begin failure must surface immediately instead of retrying.
@@ -101,7 +112,9 @@ async fn immediate_with_retry_surfaces_non_busy_failures() {
     let path = dir.path().join("nested.db");
     let path = path.to_str().unwrap().to_owned();
     let conn = connect(&path, Duration::from_secs(30)).await;
-    conn.execute("CREATE TABLE probe(id INTEGER)", ()).await.unwrap();
+    conn.execute("CREATE TABLE probe(id INTEGER)", ())
+        .await
+        .unwrap();
 
     let first = busy::immediate_with_retry(&conn).await.unwrap();
     let nested = busy::immediate_with_retry(&conn).await;

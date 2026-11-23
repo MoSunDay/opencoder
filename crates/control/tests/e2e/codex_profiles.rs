@@ -15,7 +15,9 @@ fn item<'a>(body: &'a Value, name: &str) -> &'a Value {
 #[tokio::test]
 async fn profiles_list_roundtrip_and_empty_start() {
     let h = Harness::new().await;
-    let (status, body) = h.req(Method::GET, "/api/harnesses/codex/profiles", None).await;
+    let (status, body) = h
+        .req(Method::GET, "/api/harnesses/codex/profiles", None)
+        .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["items"], json!([]));
 
@@ -32,7 +34,9 @@ async fn profiles_list_roundtrip_and_empty_start() {
         assert_eq!(body["revision"], 1);
     }
 
-    let (status, list) = h.req(Method::GET, "/api/harnesses/codex/profiles", None).await;
+    let (status, list) = h
+        .req(Method::GET, "/api/harnesses/codex/profiles", None)
+        .await;
     assert_eq!(status, 200, "{list}");
     assert_eq!(list["items"].as_array().unwrap().len(), 2);
     for name in ["alpha", "beta"] {
@@ -51,7 +55,9 @@ async fn profiles_list_roundtrip_and_empty_start() {
         .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["revision"], 2);
-    let (status, list) = h.req(Method::GET, "/api/harnesses/codex/profiles", None).await;
+    let (status, list) = h
+        .req(Method::GET, "/api/harnesses/codex/profiles", None)
+        .await;
     assert_eq!(status, 200, "{list}");
     assert_eq!(list["items"].as_array().unwrap().len(), 2);
     let alpha = item(&list, "alpha");

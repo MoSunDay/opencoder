@@ -223,14 +223,17 @@ async fn fold_returns_and_ticks_flow_while_reset_rebuild_is_blocked() {
         agent: "act".into(),
         ..Default::default()
     };
-    chat.blocks
-        .push(ChatBlock::Marker(vec![Line::from("stale-pre-reset-marker")]));
+    chat.blocks.push(ChatBlock::Marker(vec![Line::from(
+        "stale-pre-reset-marker",
+    )]));
     chat.pending_turn_echo = Some("tail echo".into());
 
     let mut ctx = FoldCtx::new(chat, store, "sess-slow-reset");
     let t0 = Instant::now();
     let flow = ctx
-        .fold(Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))))
+        .fold(Some(UiEvent::Session(SessionEvent::TranscriptReset(
+            Vec::new(),
+        ))))
         .await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(
@@ -240,10 +243,9 @@ async fn fold_returns_and_ticks_flow_while_reset_rebuild_is_blocked() {
     );
     assert!(ctx.reset.is_pending(), "the rebuild is in flight");
     assert!(
-        ctx.chat
-            .blocks
-            .iter()
-            .any(|b| marker_text(b).as_deref().is_some_and(|t| t.contains("stale-pre-reset-marker"))),
+        ctx.chat.blocks.iter().any(|b| marker_text(b)
+            .as_deref()
+            .is_some_and(|t| t.contains("stale-pre-reset-marker"))),
         "the old view stays in place until install"
     );
 
@@ -266,14 +268,16 @@ async fn fold_returns_and_ticks_flow_while_reset_rebuild_is_blocked() {
             v = ctx.reset.wait_done("sess-slow-reset") => rebuilt = v,
         }
     }
-    assert!(ticks >= 5, "frames kept flowing during the rebuild: {ticks}");
+    assert!(
+        ticks >= 5,
+        "frames kept flowing during the rebuild: {ticks}"
+    );
     assert!(keys >= 1, "input kept flowing during the rebuild");
     ctx.chat = rebuilt.expect("the rebuild delivers a view");
     assert!(
-        !ctx.chat
-            .blocks
-            .iter()
-            .any(|b| marker_text(b).as_deref().is_some_and(|t| t.contains("stale-pre-reset-marker"))),
+        !ctx.chat.blocks.iter().any(|b| marker_text(b)
+            .as_deref()
+            .is_some_and(|t| t.contains("stale-pre-reset-marker"))),
         "the pre-reset marker is gone after install"
     );
     assert_eq!(
@@ -314,7 +318,9 @@ async fn events_after_reset_stay_queued_until_install() {
     .await;
 
     let flow = ctx
-        .fold(Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))))
+        .fold(Some(UiEvent::Session(SessionEvent::TranscriptReset(
+            Vec::new(),
+        ))))
         .await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(ctx.reset.is_pending());
@@ -343,20 +349,18 @@ async fn events_after_reset_stay_queued_until_install() {
     if let Some(rebuilt) = ctx.reset.wait_done("sess-queued-reset").await {
         ctx.chat = rebuilt;
     }
-    let user_idx = ctx
-        .chat
-        .blocks
-        .iter()
-        .position(|b| matches!(b, ChatBlock::User { rendered } if rendered
+    let user_idx = ctx.chat.blocks.iter().position(|b| {
+        matches!(b, ChatBlock::User { rendered } if rendered
             .iter()
-            .any(|l| l.to_string().contains("post-reset turn"))));
+            .any(|l| l.to_string().contains("post-reset turn")))
+    });
     let user_idx = user_idx.expect("the rebuilt view opens with the echo boundary");
     for ev in queued {
         let _ = ctx.fold(Some(ev)).await;
     }
-    let assistant_idx = ctx.chat.blocks.iter().position(|b| {
-        matches!(b, ChatBlock::Assistant { raw, .. } if raw.contains("streamed-after-reset"))
-    });
+    let assistant_idx = ctx.chat.blocks.iter().position(
+        |b| matches!(b, ChatBlock::Assistant { raw, .. } if raw.contains("streamed-after-reset")),
+    );
     let assistant_idx = assistant_idx.expect("the queued delta folded after install");
     assert!(
         assistant_idx > user_idx,
@@ -386,7 +390,9 @@ async fn stale_rebuild_for_other_session_is_dropped() {
         "sess-original",
     );
     let flow = ctx
-        .fold(Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))))
+        .fold(Some(UiEvent::Session(SessionEvent::TranscriptReset(
+            Vec::new(),
+        ))))
         .await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(ctx.reset.is_pending());

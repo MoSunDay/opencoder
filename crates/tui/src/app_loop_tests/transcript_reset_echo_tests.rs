@@ -116,7 +116,10 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
         &mut reset,
     )
     .await;
-    assert!(matches!(flow, LoopFlow::Proceed), "reset fold returns at once");
+    assert!(
+        matches!(flow, LoopFlow::Proceed),
+        "reset fold returns at once"
+    );
     assert!(reset.is_pending(), "the rebuild is in flight");
     if let Some(rebuilt) = reset.wait_done("sess-reset-echo").await {
         chat = rebuilt;
@@ -346,16 +349,15 @@ async fn remote_reset_still_replays_synchronously() {
         _ => None,
     };
     assert!(
-        chat.blocks
-            .iter()
-            .any(|b| user_text(b).as_deref().is_some_and(|t| t.contains("remote replayed prompt"))),
+        chat.blocks.iter().any(|b| user_text(b)
+            .as_deref()
+            .is_some_and(|t| t.contains("remote replayed prompt"))),
         "the view is replaced synchronously from the reset's message list"
     );
     assert!(
-        !chat
-            .blocks
-            .iter()
-            .any(|b| user_text(b).as_deref().is_some_and(|t| t.contains("stale-local-tail"))),
+        !chat.blocks.iter().any(|b| user_text(b)
+            .as_deref()
+            .is_some_and(|t| t.contains("stale-local-tail"))),
         "the pre-reset local view is gone after the inline replay"
     );
 }

@@ -26,10 +26,7 @@ pub(super) async fn create_in_tx(conn: &Connection, token: &AccessToken, hash: &
 }
 
 pub async fn create(conn: &Connection, token: &AccessToken, hash: &str) -> Result<()> {
-    super::super::tx::run_tx(conn, "BEGIN IMMEDIATE", || {
-        create_in_tx(conn, token, hash)
-    })
-    .await
+    super::super::tx::run_tx(conn, "BEGIN IMMEDIATE", || create_in_tx(conn, token, hash)).await
 }
 
 pub async fn revoke(conn: &Connection, id: &str, now: i64) -> Result<bool> {

@@ -209,7 +209,9 @@ async fn cancellation_before_remote_acceptance_keeps_conversation_lists_empty() 
 async fn default_provider_read_reflects_configured_state() {
     let h = Harness::new().await;
     // Unconfigured default read: disabled, and the reply is a plain document.
-    let (status, body) = h.req(Method::GET, "/api/resource-admission-provider", None).await;
+    let (status, body) = h
+        .req(Method::GET, "/api/resource-admission-provider", None)
+        .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body, json!({"enabled": false}));
 
@@ -235,7 +237,9 @@ async fn default_provider_read_reflects_configured_state() {
         .await;
     assert_eq!(status, 200, "{body}");
 
-    let (status, body) = h.req(Method::GET, "/api/resource-admission-provider", None).await;
+    let (status, body) = h
+        .req(Method::GET, "/api/resource-admission-provider", None)
+        .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body, json!({"enabled": true}));
     provider.abort();

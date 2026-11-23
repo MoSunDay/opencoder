@@ -71,12 +71,7 @@ pub(super) async fn synchronize(
     cycle(state, env, check, None).await.result
 }
 
-async fn cycle(
-    state: &Arc<AppState>,
-    env: String,
-    check: bool,
-    memo: Option<Memo>,
-) -> Outcome {
+async fn cycle(state: &Arc<AppState>, env: String, check: bool, memo: Option<Memo>) -> Outcome {
     let active = {
         let _gate = state.lifecycle.request_gate.lock().unwrap();
         if state.lifecycle.retiring.load(Ordering::SeqCst) {

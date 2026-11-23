@@ -568,15 +568,8 @@ pub(crate) fn steer_submit_flash(
     anim_tick: u32,
     mode_flash: &mut Option<(String, u32)>,
 ) {
-    if !crate::steer_admit::submit_steer(
-        tx,
-        st,
-        steer_items,
-        pending_images,
-        session_id,
-        raw,
-        turn,
-    ) {
+    if !crate::steer_admit::submit_steer(tx, st, steer_items, pending_images, session_id, raw, turn)
+    {
         *mode_flash = Some((
             crate::steer_admit::STEER_SUBMIT_FAILED_FLASH.to_string(),
             anim_tick,

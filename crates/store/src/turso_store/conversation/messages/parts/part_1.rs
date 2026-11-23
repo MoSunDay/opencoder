@@ -27,7 +27,13 @@ pub async fn append_many(
 ) -> Result<Vec<i64>> {
     let mut all_seqs = Vec::with_capacity(msgs.len());
     for chunk in msgs.chunks(BATCH_CHUNK) {
-        let seqs = append_chunk_in_tx(conn, session_id, chunk).await?;
+        // A desynced session-activity index (Turso rollback bug) makes the
+        // transaction's `UPDATE sessions` fail with `IdxDelete: no matching
+        // index entry`; rebuild the derived index and retry the chunk once.
+        let seqs = super::sessions::activity::repair_and_retry(conn, || {
+            append_chunk_in_tx(conn, session_id, chunk)
+        })
+        .await?;
         all_seqs.extend(seqs);
     }
     Ok(all_seqs)
@@ -73,12 +79,17 @@ async fn append_chunk_in_tx(
         // backfills) inside the same tx, so listings ordered by recent
         // activity reflect the last persisted message. `messages::import`
         // deliberately bypasses this — bulk history load is not activity.
+        // `AND updated_at < ?` skips the row rewrite (and the indexed-column
+        // mutation) when the append does not advance activity — replays and
+        // backfills with older timestamps must not churn the index.
         if let Some(last_ts) = msgs.iter().map(|m| m.created_at).max() {
-            conn.prepare_cached("UPDATE sessions SET updated_at = MAX(updated_at, ?) WHERE id = ?")
-                .await?
-                .execute(params![last_ts, session_id])
-                .await
-                .context("touch session activity in tx")?;
+            conn.prepare_cached(
+                "UPDATE sessions SET updated_at = MAX(updated_at, ?) WHERE id = ? AND updated_at < ?",
+            )
+            .await?
+            .execute(params![last_ts, session_id, last_ts])
+            .await
+            .context("touch session activity in tx")?;
         }
         Ok(seqs)
     })

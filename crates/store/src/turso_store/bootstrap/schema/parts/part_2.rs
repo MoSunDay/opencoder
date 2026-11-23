@@ -100,7 +100,7 @@ async fn bootstrap_tx(conn: &Connection, runtime_reporting: bool) -> Result<()> 
     // older databases, so it must run AFTER `migrate` rather than in the
     // pre-migration index batch above.
     conn.execute(CREATE_INDEX_SESSION_TASK_TYPE, ()).await?;
-    conn.execute(CREATE_INDEX_SESSION_ACTIVITY, ()).await?;
+    session_activity::ensure_index(conn).await?;
     conn.execute(CREATE_INDEX_TODO_STATUS, ()).await?;
     conn.execute(CREATE_INDEX_TODO_EVENTS, ()).await?;
     // The node_tasks index targets tables that only exist on fresh databases

@@ -39,6 +39,7 @@ pub use schedule_types::{
 };
 pub use session_store::SessionStore;
 pub use store::Store;
+pub use store::errors::{is_foreign_key_violation, is_storage_corruption};
 pub use team_types::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
 pub use todo_types::{
     TodoEventPage, TodoEventRecord, TodoItemPage, TodoItemRecord, TodoItemSummary,

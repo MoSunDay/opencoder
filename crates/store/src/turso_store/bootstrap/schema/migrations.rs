@@ -2,14 +2,38 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 41 {
+        // v41: replace the derived expression index `idx_sessions_activity`
+        // (`MAX(updated_at, created_at)`) with a plain `(updated_at, id)`
+        // index and backfill `updated_at >= created_at`, which makes the plain
+        // column the activity stamp. Turso 0.8.3 does not maintain derived
+        // indexes atomically across a rolled-back/aborted transaction; the
+        // index can end up holding a newer activity value than its table row,
+        // after which every `UPDATE sessions SET updated_at = ...` fails with
+        // `IdxDelete: no matching index entry found` and the session can
+        // never persist another message. Rebuilding the index from table data
+        // repairs every existing desynced database on upgrade. Both steps are
+        // best-effort against page-corrupt rows so the database stays
+        // openable (see `session_activity`).
+        session_activity::migrate(conn).await?;
+    }
     if from < 40 {
         // v40: the session-scoped autopilot mode column was removed with the
         // feature. Databases created before the removal still carry the dead
         // column; drop it so old and fresh schemas converge. Fresh databases
         // never create it, and the existence guard keeps legacy shapes safe.
         if column_exists(conn, "sessions", "autopilot_mode").await? {
-            conn.execute("ALTER TABLE sessions DROP COLUMN autopilot_mode", ())
-                .await?;
+            // DROP COLUMN rewrites every row. On a page-corrupt table that
+            // fails mid-way, so check readability first and keep the dead
+            // column instead - it is harmless, an unopenable database is not.
+            if session_activity::table_readable(conn).await? {
+                conn.execute("ALTER TABLE sessions DROP COLUMN autopilot_mode", ())
+                    .await?;
+            } else {
+                tracing::warn!(
+                    "sessions table has unreadable rows; keeping the dead autopilot_mode column"
+                );
+            }
         }
     }
     if from < 37 {

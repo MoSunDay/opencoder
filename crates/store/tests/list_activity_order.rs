@@ -96,7 +96,7 @@ async fn existing_schema_reopens_with_activity_pagination_and_unchanged_history(
             .append_message("s_old", &msg("retained", 7_000))
             .await
             .unwrap();
-        // Reproduce an existing v39 file written before the optional index.
+        // Reproduce an existing file written before the optional index.
         store
             .conn()
             .await
@@ -126,7 +126,8 @@ async fn existing_schema_reopens_with_activity_pagination_and_unchanged_history(
         .unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        40
+        opencoder_store::turso_store::schema_watermark(),
+        "the pre-index file is stamped with the current schema version"
     );
 }
 

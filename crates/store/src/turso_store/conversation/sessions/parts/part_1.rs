@@ -50,7 +50,10 @@ pub(super) async fn create_in_tx(conn: &Connection, meta: &SessionMeta) -> Resul
             meta.model.as_deref(),
             meta.workdir_hash.as_deref(),
             meta.created_at,
-            meta.updated_at,
+            // `updated_at` is the activity sort key (see ACTIVITY_EXPR); keep
+            // it >= `created_at` so backfilled rows (updated_at = 0) order by
+            // their creation time exactly like the old MAX() expression did.
+            meta.updated_at.max(meta.created_at),
             meta.summary.as_deref(),
             meta.summary_seq,
             serde_json::to_string(&meta.summary_images).unwrap_or_else(|_| "[]".into()),
@@ -82,7 +85,7 @@ pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
 }
 
 pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<SessionListItem>> {
-    list_inner(conn, filter, false).await
+    listing::list(conn, filter, false).await
 }
 
 /// Execution inventory includes DAG Agent-step sessions in addition to
@@ -92,116 +95,7 @@ pub async fn list_execution_sessions(
     conn: &Connection,
     filter: &SessionFilter,
 ) -> Result<Vec<SessionListItem>> {
-    list_inner(conn, filter, true).await
-}
-
-async fn list_inner(
-    conn: &Connection,
-    filter: &SessionFilter,
-    include_execution_details: bool,
-) -> Result<Vec<SessionListItem>> {
-    let limit = filter.limit.clamp(1, 500) as i64;
-    let mut where_clauses: Vec<String> = Vec::new();
-    let mut args: Vec<Value> = Vec::new();
-
-    if let Some(h) = &filter.workdir_hash {
-        where_clauses.push("s.workdir_hash = ?".into());
-        args.push(h.clone().into());
-    }
-    if let Some(s) = &filter.search {
-        // Escape LIKE metacharacters (`\`, `%`, `_`) in the user-supplied term
-        // so they match literally. `ESCAPE '\'` declares the escape character.
-        where_clauses
-            .push("(s.id LIKE ? ESCAPE '\\' OR COALESCE(s.title,'') LIKE ? ESCAPE '\\')".into());
-        let escaped = s
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like = format!("%{escaped}%");
-        args.push(like.clone().into());
-        args.push(like.into());
-    }
-    if let Some(cursor) = &filter.cursor {
-        // A malformed cursor is a real error, not a silent fallback to page 1.
-        // Cursor ts is the *activity* key (see ACTIVITY_EXPR), matching the
-        // ORDER BY so keyset pagination is stable across pages.
-        let (ts, id) = decode_cursor(cursor)
-            .ok_or_else(|| anyhow::anyhow!("invalid list cursor: {cursor}"))?;
-        where_clauses.push(format!(
-            "({ACTIVITY_EXPR} < ? OR ({ACTIVITY_EXPR} = ? AND s.id < ?))"
-        ));
-        args.push(ts.into());
-        args.push(ts.into());
-        args.push(id.into());
-    }
-    // `include_subagents` widens the visible types from "top-level parents
-    // only" to parents + subagent children. DAG Agent-step sessions are
-    // durable execution detail and remain queryable by their session ID; they
-    // are filtered from the chat lane by the control API's visibility fence.
-    if include_execution_details {
-        where_clauses.push(format!(
-            "((s.task_type = '{TASK_TYPE_PARENT}' AND NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)) OR s.task_type = '{TASK_TYPE_AGENT_STEP}')"
-        ));
-    } else if filter.include_subagents {
-        where_clauses.push(format!(
-            "s.task_type IN ('{TASK_TYPE_PARENT}','{TASK_TYPE_SUBAGENT}')"
-        ));
-    } else {
-        where_clauses.push(format!(
-            "((s.task_type = '{TASK_TYPE_PARENT}' AND NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)) OR s.task_type = '{TASK_TYPE_AGENT_STEP}')"
-        ));
-    }
-
-    // Lane fence: operator-tagged sessions are execution detail, never chat
-    // history, so every lane hides them unless explicitly requested. Legacy
-    // rows (kind NULL) keep the caller-side prefix resolution.
-    match filter.kind.as_deref() {
-        Some(kind) => {
-            where_clauses.push("s.kind = ?".into());
-            args.push(kind.into());
-        }
-        None => where_clauses.push("(s.kind IS NULL OR s.kind <> 'operator')".into()),
-    }
-    // Walk the activity index until the page is full. The task-type index
-    // otherwise makes Turso sort every matching session before LIMIT. Keep
-    // previews outside that page so discarded sessions never load messages.
-    let mut sql = String::from(
-        "WITH page AS MATERIALIZED (SELECT s.id, s.kind, s.title, s.agent, s.model, \
-         s.created_at, s.updated_at, s.skill FROM sessions s INDEXED BY idx_sessions_activity",
-    );
-    if !where_clauses.is_empty() {
-        sql.push_str(" WHERE ");
-        sql.push_str(&where_clauses.join(" AND "));
-    }
-    // Short JSON needs no character-by-character substring copy. Preserve
-    // substr's character limit and embedded-NUL behavior for all other rows.
-    sql.push_str(&format!(
-        " ORDER BY {ACTIVITY_EXPR} DESC, s.id DESC LIMIT ?) \
-         SELECT s.id, s.kind, s.title, s.agent, s.model, s.created_at, s.updated_at, \
-         (SELECT CASE WHEN octet_length(m.blocks_json) <= 8192 AND instr(m.blocks_json, char(0)) = 0 \
-          THEN m.blocks_json ELSE substr(m.blocks_json, 1, 8192) END FROM messages m \
-          WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.seq ASC LIMIT 1), s.skill \
-         FROM page s ORDER BY {ACTIVITY_EXPR} DESC, s.id DESC"
-    ));
-    args.push(limit.into());
-
-    let mut stmt = conn.prepare_cached(&sql).await?;
-    let mut rows = stmt.query(params_from_iter(args)).await?;
-    let mut out = Vec::new();
-    while let Some(r) = rows.next().await? {
-        out.push(SessionListItem {
-            id: r.get::<String>(0)?,
-            kind: r.get::<Option<String>>(1)?,
-            title: r.get::<Option<String>>(2)?,
-            agent: normalize_agent(r.get::<Option<String>>(3)?),
-            model: r.get::<Option<String>>(4)?,
-            created_at: r.get::<i64>(5)?,
-            updated_at: r.get::<i64>(6)?,
-            preview: extract_preview(&r.get::<Option<String>>(7)?),
-            skill: r.get::<Option<String>>(8)?,
-        });
-    }
-    Ok(out)
+    listing::list(conn, filter, true).await
 }
 
 pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result<()> {
@@ -301,7 +195,9 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         sets.push("model = NULL");
     }
     if let Some(v) = patch.updated_at {
-        sets.push("updated_at = ?");
+        // Never move the activity stamp below creation time (invariant the
+        // plain activity index relies on).
+        sets.push("updated_at = MAX(?, created_at)");
         args.push(v.into());
     }
     if let Some(v) = &patch.requirement {
@@ -316,9 +212,15 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     }
     let sql = format!("UPDATE sessions SET {} WHERE id = ?", sets.join(", "));
     args.push(id.to_string().into());
-    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
-        conn.execute(&sql, params_from_iter(args)).await?;
-        Ok(())
+    // `updated_at` is indexed; if that index desynced (Turso rollback bug),
+    // rebuild it and retry instead of failing the patch forever.
+    activity::repair_and_retry(conn, || {
+        let sql = sql.clone();
+        let args = args.clone();
+        super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+            conn.execute(&sql, params_from_iter(args)).await?;
+            Ok(())
+        })
     })
     .await
 }

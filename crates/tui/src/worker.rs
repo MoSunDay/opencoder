@@ -292,14 +292,23 @@ pub async fn process_cmd(
             // `completed_assistant_text` and the shed-delta repair silently
             // lost. Track the reset so the floor follows the new list.
             let message_floor = std::sync::atomic::AtomicUsize::new(sess.messages.len());
+            // The runner reports fatal failures as a `SessionEvent::Error`
+            // before returning `Err`; remember that so the fallback below only
+            // fires for failures that never produced an error event. Otherwise
+            // every failed turn is shown (and persisted) twice.
+            let run_emitted_error = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
             let sink_for_run = sink.clone();
             let res = if images.is_empty() {
                 let tx = ui_tx.clone();
                 let floor = &message_floor;
+                let emitted = Arc::clone(&run_emitted_error);
                 run_session(sess, prompt, move |sev| {
                     if let SessionEvent::TranscriptReset(msgs) = &sev {
                         floor.store(msgs.len(), std::sync::atomic::Ordering::Relaxed);
+                    }
+                    if matches!(sev, SessionEvent::Error(_)) {
+                        emitted.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                     let _ = sink_for_run.push(&sev);
                     forward_event(&tx, sev);
@@ -308,9 +317,13 @@ pub async fn process_cmd(
             } else {
                 let tx = ui_tx.clone();
                 let floor = &message_floor;
+                let emitted = Arc::clone(&run_emitted_error);
                 run_with_images(sess, prompt, images, move |sev| {
                     if let SessionEvent::TranscriptReset(msgs) = &sev {
                         floor.store(msgs.len(), std::sync::atomic::Ordering::Relaxed);
+                    }
+                    if matches!(sev, SessionEvent::Error(_)) {
+                        emitted.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                     let _ = sink_for_run.push(&sev);
                     forward_event(&tx, sev);
@@ -318,9 +331,11 @@ pub async fn process_cmd(
                 .await
             };
             if let Err(e) = res {
-                let ev = SessionEvent::Error(format!("{e:#}"));
-                let _ = sink.push(&ev);
-                forward_event(&ui_tx, ev);
+                if !run_emitted_error.load(std::sync::atomic::Ordering::Relaxed) {
+                    let ev = SessionEvent::Error(format!("{e:#}"));
+                    let _ = sink.push(&ev);
+                    forward_event(&ui_tx, ev);
+                }
             }
             // Drop every sender clone so the flusher's channel closes and it
             // performs a final flush — guaranteeing zero event loss this turn.

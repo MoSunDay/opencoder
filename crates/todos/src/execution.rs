@@ -22,7 +22,7 @@ pub struct TodoExecution {
 pub async fn execute(
     store: Arc<dyn Store>,
     client: Arc<dyn ChatStream>,
-    mut config: Config,
+    config: Config,
     workdir: &Path,
     workflow: &WorkflowSpec,
     state: &WorkflowState,
@@ -31,7 +31,6 @@ pub async fn execute(
     session_id: String,
     cancel: CancellationToken,
 ) -> Result<TodoExecution> {
-    config.autopilot.mode = opencoder_core::ApMode::Off;
     let agent =
         opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
             resolve_agent(&todo.agent)
@@ -174,8 +173,6 @@ pub async fn prepare_session(
             title: Some(format!("{} / {}", workflow.name, todo.title)),
             agent: Some(todo.agent.clone()),
             model: Some(config.model.clone()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,

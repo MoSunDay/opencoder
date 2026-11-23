@@ -158,7 +158,7 @@ fn tab_while_idle_submits() {
 
 #[test]
 fn tab_with_live_subagents_admits_queue() {
-    // Idle parent + live subagents (autopilot stage gap, cancel grace,
+    // Idle parent + live subagents (stage gap, cancel grace,
     // reabsorb tail): Tab must queue, not submit — the queued item is
     // consumed by the same serial worker after the subagent batch ends.
     let mut input = String::from("follow-up");

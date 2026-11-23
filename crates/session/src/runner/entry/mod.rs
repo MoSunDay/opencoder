@@ -175,25 +175,5 @@ async fn run_with_registry_scoped(
         return Ok(());
     }
 
-    // Autopilot mode dispatch: after the initial task completes, `ap` hands
-    // control to the PLAN -> ACT -> VERIFY self-driving loop, `review` runs a
-    // one-shot review pass (no ACT/VERIFY), and `off` does nothing. A
-    // session-scoped override (`effective_ap_mode`) wins over the config.
-    // The review pass runs in ANY agent mode: it is read-only (no switch, no
-    // fold), so it is equally valid after an act run or a plan run.
-    match session.effective_ap_mode() {
-        opencoder_core::ApMode::Ap => {
-            Box::pin(crate::autopilot::drive(session, registry, &mut on_event)).await?;
-        }
-        opencoder_core::ApMode::Review => {
-            Box::pin(crate::autopilot::review_pass(
-                session,
-                registry,
-                &mut on_event,
-            ))
-            .await?;
-        }
-        opencoder_core::ApMode::Off => {}
-    }
     Ok(())
 }

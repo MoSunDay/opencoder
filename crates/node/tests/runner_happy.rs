@@ -27,23 +27,11 @@ fn test_opts(base: &str, workdir: &std::path::Path, data: &std::path::Path) -> N
     }
 }
 
-/// Pin autopilot off via the project domain file so a developer's global
-/// `~/.opencoder/ap.json` cannot append a review turn to the one-round mock.
-fn pin_autopilot_off(workdir: &std::path::Path) {
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn claims_executes_uploads_and_reports_done() {
     let (base, st) = support::spawn_stub().await;
     let workdir = tempfile::tempdir().unwrap().keep();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(&workdir);
 
     let task = st.push_task("say hello twice");
     let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![

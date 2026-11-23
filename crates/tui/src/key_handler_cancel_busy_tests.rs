@@ -1,7 +1,7 @@
 //! Cancel-key regression tests for the subagent-drain busy window.
 //!
 //! During the drain window (`running == false` but `chat.subagents_running >
-//! 0` — autopilot stage gap, cancel grace, reabsorb tail) the parent turn
+//! 0` — cancel grace, reabsorb tail) the parent turn
 //! already reports idle while the worker is still inside its turn. Both
 //! abort chords (Ctrl+C and double-Esc) must treat live subagents as busy:
 //! CANCEL the in-flight work, never degrade to Quit (Ctrl+C) or a silent

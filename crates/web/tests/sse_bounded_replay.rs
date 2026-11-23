@@ -51,7 +51,6 @@ async fn first_connect_replays_bounded_newest_window() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

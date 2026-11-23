@@ -246,7 +246,7 @@ async fn unknown_run_reads_as_none_and_forged_operations_rejected() {
 fn brain_v4_tables_do_not_increment_current_schema_version() {
     // v4 tables bootstrap unconditionally, so they must not move the
     // The layered tables remain additive at the current schema watermark.
-    assert_eq!(opencoder_store::turso_store::schema_watermark(), 39);
+    assert_eq!(opencoder_store::turso_store::schema_watermark(), 40);
 }
 
 fn recovery_change(old: &LayeredSnapshot) -> LayeredChange {

@@ -27,8 +27,6 @@ pub(crate) fn write_config_save(target: &Path, body: &str) -> std::io::Result<()
 
 #[path = "config/runtime/agent.rs"]
 mod agent;
-#[path = "config/runtime/autopilot.rs"]
-mod autopilot;
 #[path = "config/runtime/cli.rs"]
 mod cli;
 #[path = "config/runtime/compaction.rs"]
@@ -59,7 +57,6 @@ mod skill;
 pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 
 pub use agent::{AgentDefaults, AgentNfsConfig, ToolsScope};
-pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
 pub use compaction::{CompactionConfig, OutputStreamlineConfig};
 pub use dag::DagConfig;
@@ -218,9 +215,6 @@ pub struct Config {
         skip_serializing_if = "Option::is_none"
     )]
     pub subagent: Option<bool>,
-    /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
-    #[serde(default)]
-    pub autopilot: AutoPilotConfig,
     /// Cron-scheduled control-plane jobs. Hard-cut into the `schedules.json`
     /// domain file (never carried in config.json); see [`config::domain`].
     #[serde(default, skip_serializing_if = "SchedulesConfig::is_empty")]
@@ -349,7 +343,6 @@ impl Default for Config {
             task_timeout_secs: None,
             replay_timeout_secs: None,
             subagent_drain_secs: None,
-            autopilot: AutoPilotConfig::default(),
             schedules: SchedulesConfig::default(),
             enable_tmux_session: None,
             keymap: KeymapConfig::default(),
@@ -394,7 +387,7 @@ impl Config {
 
     /// Return a cloned config with `patch` applied using the same merge rules
     /// as disk loading/saving. The source config is never mutated. Domain
-    /// keys (`mcp_servers` / `cli` / `skills` / `autopilot`) still apply
+    /// keys (`mcp_servers` / `cli` / `skills` / `schedules`) still apply
     /// here — they are routed through the same per-entry domain merge, so
     /// building configs
     /// from JSON patches keeps working even though `config.json` itself no
@@ -439,7 +432,7 @@ impl Config {
 
     /// Operator-plane configuration source: the ONLY file candidates are
     /// `dir/config.json` + `dir/opencoder.json` and the domain files
-    /// `dir/<mcp|cli|skills|ap|schedules>.json`. Project candidates
+    /// `dir/<mcp|cli|skills|schedules>.json`. Project candidates
     /// (`<workdir>/opencoder.json`, `<workdir>/.opencoder/*`), the interactive
     /// user's real `~/.opencoder`, XDG dirs and env overlays are all
     /// deliberately out of scope: the node operator plane reads exclusively
@@ -550,8 +543,8 @@ impl Config {
                 merge::merge_into(&mut cfg, parsed);
             }
         }
-        // Domain files (mcp.json / cli.json / skills.json / ap.json):
-        // `mcp_servers` / `cli` / `skills` / `autopilot` are hard-cut from
+        // Domain files (mcp.json / cli.json / skills.json / schedules.json):
+        // `mcp_servers` / `cli` / `skills` / `schedules` are hard-cut from
         // config.json and load from exactly one file — the project one when
         // it exists, else the global one (project shadows global entirely;
         // no per-key merge across files).

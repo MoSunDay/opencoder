@@ -91,12 +91,6 @@ pub(super) async fn run_subagent(
         parent.client.clone(),
         parent.working_dir.clone(),
     );
-    // Autopilot is top-level orchestration only: the child inherits the
-    // parent's config (which may carry `autopilot.mode = "ap"|"review"`),
-    // but a subagent running its own PLAN->ACT->VERIFY loop or review pass
-    // after the scoped task would double-drive and desync the parent's
-    // result backfill. Force it off.
-    child.config.autopilot.mode = opencoder_core::ApMode::Off;
     child.steer_gate = Some(steer_gate.clone());
     // Derive a child token from the parent's hard-cancel token. A parent
     // double-Esc (parent cancelled) cascades to the child via the parent-child
@@ -132,8 +126,6 @@ pub(super) async fn run_subagent(
                 title: Some(prompt.chars().take(60).collect()),
                 agent: Some(kind.clone()),
                 model: Some(parent.config.model.clone()),
-
-                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: now_ms(),
                 updated_at: now_ms(),

@@ -34,7 +34,6 @@ async fn create_execute_session(
             title: Some(format!("项目执行 / {}", todo.title)),
             agent: Some(todo.agent.clone()),
             model: Some(config.model.clone()),
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,

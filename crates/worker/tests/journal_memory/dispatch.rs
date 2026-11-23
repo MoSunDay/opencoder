@@ -6,8 +6,7 @@ async fn empty_outbox_releases_the_last_parsed_dispatch_without_another_frame_po
     let _guard = opencoder_core::config::scoped_config_home(home.path().into());
     let root = tempfile::tempdir().unwrap();
     let workdir = root.path().join("work");
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    std::fs::create_dir_all(&workdir).unwrap();
     let worker = Worker::open(
         crate::WorkerOptions {
             name: "memory-test".into(),

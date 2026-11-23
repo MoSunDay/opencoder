@@ -131,7 +131,7 @@ pub async fn native_state(
                 return Ok((with_workdir(state, workspace, Some(home)), None));
             }
             if managed(&record) {
-                // Keep admitted model/provider/AP settings in process. They do
+                // Keep admitted model/provider settings in process. They do
                 // not belong in the managed child workspace.
                 let config = record
                     .queue

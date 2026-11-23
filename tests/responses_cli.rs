@@ -75,7 +75,6 @@ async fn cli_edits_file_and_next_process_replays_responses_state() {
         .to_string(),
     )
     .unwrap();
-    std::fs::write(dir.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     for resume in [false, true] {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_opencoder"));
         command

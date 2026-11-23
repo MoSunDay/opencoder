@@ -56,7 +56,6 @@ pub async fn create_session(
             .or_else(|| Some("act".into())),
         model: body.as_ref().and_then(|b| b.model.clone()),
 
-        autopilot_mode: None,
         // Stamp the server workdir so `?workdir=` filters can match (legacy
         // NULL-hash rows never match).
         workdir_hash: Some(opencoder_core::workdir_hash(&state.workdir)),
@@ -380,7 +379,6 @@ async fn ensure_session_row(
             agent: Some(config.agent.default.clone()),
             model: Some(config.model.clone()),
 
-            autopilot_mode: None,
             // Same stamping as create_session: `?workdir=` filters match.
             workdir_hash: Some(opencoder_core::workdir_hash(&state.workdir)),
             created_at: now,

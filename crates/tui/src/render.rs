@@ -78,7 +78,6 @@ pub(crate) fn render<B: Backend + 'static>(
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
     cli_menu: Option<&crate::cli_menu::CliMenu>,
     skill_toggle_menu: Option<&crate::skill_menu::SkillMenu>,
-    ap_menu: Option<&crate::ap_menu::ApMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     keymap_menu: Option<&KeymapMenu>,
     question_menu: Option<&crate::question_menu::QuestionMenu>,
@@ -93,7 +92,6 @@ pub(crate) fn render<B: Backend + 'static>(
     tail_ms: u64,
     task_ms: u64,
     is_top_level: bool,
-    ap_mode: opencoder_core::ApMode,
     display_mode: &str,
     plan_skill_active: bool,
     notepad: Option<&crate::notepad::NotepadView>,
@@ -308,14 +306,10 @@ pub(crate) fn render<B: Backend + 'static>(
             mcp_menu,
             cli_menu,
             skill_toggle_menu,
-            ap_menu,
             cache_salt_menu,
             keymap_menu,
             question_menu,
         );
-        if let Some(label) = crate::ap_menu::chip_label(ap_mode) {
-            render_status_chip(f, composer_area, label, theme::local_color());
-        }
         if let Some(text) = mode_flash {
             // Warn hue for the plan (read-only) side of the family: the
             // agent-switch flash "→ plan mode" and the plan-text editor

@@ -113,7 +113,6 @@ async fn run_one_task() -> (Server, String, String, Runner, Dirs) {
     let store = srv.store.clone();
     let workdir = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
-    node_e2e_support::pin_autopilot_off(workdir.path());
 
     let client = Arc::new(MockChatClient::new());
     let runner = spawn_node(

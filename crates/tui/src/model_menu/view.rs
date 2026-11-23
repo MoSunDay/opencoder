@@ -133,16 +133,6 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "1-30, \u{2190}/\u{2192} cursor, digits, Backspace",
         ),
         field_line(
-            "ap max_iter:",
-            &if form.ap_max_iter_input.is_empty() {
-                "(empty)".to_string()
-            } else {
-                form.ap_max_iter_input.clone()
-            },
-            form.focus == ConfigField::ApMaxIter,
-            "1+, \u{2190}/\u{2192} cursor, digits, Backspace",
-        ),
-        field_line(
             "tmux:",
             &format!(
                 "[ {} ]",
@@ -190,7 +180,6 @@ fn text_field_row(field: ConfigField) -> Option<usize> {
         ConfigField::ContextSize => Some(3),
         ConfigField::Threshold => Some(4),
         ConfigField::Fps => Some(5),
-        ConfigField::ApMaxIter => Some(6),
         _ => None,
     }
 }
@@ -202,7 +191,6 @@ fn focused_raw_input(form: &ConfigForm) -> Option<&str> {
         ConfigField::ContextSize => Some(&form.context_size_input),
         ConfigField::Threshold => Some(&form.threshold_input),
         ConfigField::Fps => Some(&form.fps_input),
-        ConfigField::ApMaxIter => Some(&form.ap_max_iter_input),
         _ => None,
     }
 }
@@ -214,7 +202,6 @@ fn focused_cursor(form: &ConfigForm) -> Option<usize> {
         ConfigField::ContextSize => Some(form.context_size_cursor),
         ConfigField::Threshold => Some(form.threshold_cursor),
         ConfigField::Fps => Some(form.fps_cursor),
-        ConfigField::ApMaxIter => Some(form.ap_max_iter_cursor),
         _ => None,
     }
 }

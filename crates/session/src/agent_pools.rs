@@ -5,7 +5,7 @@
 //! [`SessionState`] snapshots both surfaces into `tools_path`/`skill_roots`
 //! and every site that changes the session agent (construction, resume,
 //! `/agent` + mode switches, config reload) re-derives them via [`refresh`].
-//! The skill choke points in the live session (`skill_resolve`, autopilot)
+//! The skill choke points in the live session (`skill_resolve`)
 //! discover through [`discover_session_skills`] so an `/agent`-switched
 //! session uses ITS agent's skill pools, shadowing same-name global skills
 //! (first-wins, `discover_all`). TUI/store/cli callers of the plain marker-

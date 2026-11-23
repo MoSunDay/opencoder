@@ -34,73 +34,6 @@ async fn create_get_update_delete_session_contract() {
     assert!(store.get_session("s1").await.unwrap().is_none());
 }
 
-/// v11: the session-scoped `autopilot_mode` column must survive the full
-/// create -> patch -> clear lifecycle, mirroring how `model` is treated.
-#[tokio::test]
-async fn autopilot_mode_column_round_trips() {
-    let (_dir, store) = fresh().await;
-    let meta = SessionMeta {
-        id: "s-ap".into(),
-        autopilot_mode: Some("ap".into()),
-        ..Default::default()
-    };
-    store.create_session(&meta).await.unwrap();
-    assert_eq!(
-        store
-            .get_session("s-ap")
-            .await
-            .unwrap()
-            .unwrap()
-            .autopilot_mode
-            .as_deref(),
-        Some("ap"),
-        "created autopilot_mode must round-trip"
-    );
-
-    store
-        .update_session(
-            "s-ap",
-            &opencoder_store::SessionPatch {
-                autopilot_mode: Some("review".into()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        store
-            .get_session("s-ap")
-            .await
-            .unwrap()
-            .unwrap()
-            .autopilot_mode
-            .as_deref(),
-        Some("review"),
-        "patched autopilot_mode must round-trip"
-    );
-
-    store
-        .update_session(
-            "s-ap",
-            &opencoder_store::SessionPatch {
-                clear_autopilot_mode: true,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        store
-            .get_session("s-ap")
-            .await
-            .unwrap()
-            .unwrap()
-            .autopilot_mode,
-        None,
-        "clear_autopilot_mode must NULL the column"
-    );
-}
-
 #[tokio::test]
 async fn clear_other_sessions_keeps_current_and_cascades() {
     let (_dir, store) = fresh().await;
@@ -166,7 +99,6 @@ async fn session_handoff_and_skill_fields_round_trip() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

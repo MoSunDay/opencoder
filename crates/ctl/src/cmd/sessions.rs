@@ -9,7 +9,7 @@
 //!   the authoritative worker routes in `crates/web/src/lib.rs`:
 //!   messages / prompt / agent / model / interrupt / fork / compact /
 //!   handoff / skill / questions[/{qid}/answer|skip] / inputs[/reorder|/{seq}]
-//!   / annotation / autopilot / subagents[/{task}/steer], plus
+//!   / annotation / subagents[/{task}/steer], plus
 //!   `DELETE /api/sessions/{id}`.
 
 use anyhow::Result;
@@ -161,14 +161,6 @@ pub enum SessionCmd {
         #[arg(long)]
         json: Option<String>,
     },
-    /// Set/clear autopilot override; optional `{"mode":..}` (relay POST).
-    Autopilot {
-        /// Session id.
-        id: String,
-        /// Optional request body: inline JSON or @file (absent/null = clear).
-        #[arg(long)]
-        json: Option<String>,
-    },
     /// List subagent tasks of the session (relay GET).
     Subagents {
         /// Session id.
@@ -241,10 +233,6 @@ pub fn plan(sub: &SessionCmd) -> Result<RequestPlan> {
         }
         SessionCmd::Annotation { id, json } => {
             RequestPlan::post(format!("{SESSIONS}/{id}/annotation"))
-                .with_opt_body(parse_body(json.as_deref())?)
-        }
-        SessionCmd::Autopilot { id, json } => {
-            RequestPlan::post(format!("{SESSIONS}/{id}/autopilot"))
                 .with_opt_body(parse_body(json.as_deref())?)
         }
         SessionCmd::Subagents { id } => RequestPlan::get(format!("{SESSIONS}/{id}/subagents")),

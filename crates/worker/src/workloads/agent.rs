@@ -37,7 +37,6 @@ pub(crate) async fn create_session(
         created_at,
         updated_at: created_at,
         workdir_hash: Some(opencoder_core::workdir_hash(workdir)),
-        autopilot_mode: None,
         summary: None,
         summary_seq: None,
         summary_images: vec![],

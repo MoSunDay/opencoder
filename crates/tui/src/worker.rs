@@ -24,11 +24,6 @@ pub enum UiCmd {
     SetSkill(Option<String>),
     /// Hot-reload config at the next turn boundary. Sent by the `/config` menu.
     ReloadConfig(Box<Config>),
-    /// Session-scoped autopilot-mode switch (`/ap` confirm dialog, both `y`
-    /// and `n`): pins `SessionState.ap_mode_override`, mirrors the mode into
-    /// the in-memory config, and persists `sessions.autopilot_mode` so resume
-    /// honors it. Never rebuilds the client (mode doesn't affect the endpoint).
-    ApModeSwitch(opencoder_core::ApMode),
     /// Replace the plan text in the last non-empty Assistant message in-memory.
     /// Does not touch the append-only store (consistent with compaction/handoff
     /// which also rewrite the in-memory `messages` without appending a record).
@@ -431,8 +426,8 @@ pub async fn process_cmd(
             // Persist the switched model to the store so resume() honors it
             // (otherwise the stale `sessions.model` column reverts the switch
             // on the next /task resume or `opencoder -s <id>` restart). Only
-            // when the model string actually changed: `/ap` and pure
-            // max_iterations saves also land here, and must not surface a
+            // when the model string actually changed: pure parameter
+            // saves also land here, and must not surface a
             // spurious `[model]` marker or rewrite the store column.
             if applied_model && sess.config.model != prev_model {
                 // The store column keeps the full `provider/model` string
@@ -463,23 +458,6 @@ pub async fn process_cmd(
                 .map(|(n, c)| (n, c.clone()))
                 .collect();
             opencoder_session::mcp::pool::sync(&sess.id, &desired).await;
-            false
-        }
-        UiCmd::ApModeSwitch(mode) => {
-            sess.ap_mode_override = Some(mode);
-            sess.config.autopilot.mode = mode;
-            if let Some(store) = &sess.store {
-                let _ = store
-                    .update_session(
-                        &sess.id,
-                        &opencoder_store::SessionPatch {
-                            autopilot_mode: Some(mode.as_str().to_string()),
-                            updated_at: Some(now_ms()),
-                            ..Default::default()
-                        },
-                    )
-                    .await;
-            }
             false
         }
         UiCmd::EditPlan(new_text) => {

@@ -2,6 +2,16 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 40 {
+        // v40: the session-scoped autopilot mode column was removed with the
+        // feature. Databases created before the removal still carry the dead
+        // column; drop it so old and fresh schemas converge. Fresh databases
+        // never create it, and the existence guard keeps legacy shapes safe.
+        if column_exists(conn, "sessions", "autopilot_mode").await? {
+            conn.execute("ALTER TABLE sessions DROP COLUMN autopilot_mode", ())
+                .await?;
+        }
+    }
     if from < 37 {
         for table in ["project_goals", "project_initiatives"] {
             add_column_if_absent(conn, table, "current_summary", "TEXT NOT NULL DEFAULT ''")
@@ -235,12 +245,6 @@ pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         )
         .await
         .context("backfill recorded")?;
-    }
-    if from < 11 {
-        // v11: session-scoped autopilot mode for the `/ap` "session-only"
-        // switch. NULL = follow the global config; "off"/"ap"/"review" pins
-        // this session's mode so resume honors it (same role as `model`).
-        add_column_if_absent(conn, "sessions", "autopilot_mode", "TEXT").await?;
     }
     if from < 12 {
         // v12: multi-node distributed execution plane — the worker-node

@@ -280,10 +280,6 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
             "/api/sessions/:id/annotation",
             post(api_meta::post_annotation),
         )
-        .route(
-            "/api/sessions/:id/autopilot",
-            post(api_meta::post_autopilot),
-        )
         .route("/api/models", get(api_meta::get_models))
         .route("/api/skills", get(api_meta::get_skills))
         .route("/api/config", get(api_ops::get_config))

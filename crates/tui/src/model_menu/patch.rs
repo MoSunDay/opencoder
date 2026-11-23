@@ -8,7 +8,6 @@ pub struct ConfigPatch {
     pub context_threshold: u64,
     pub context_limit: u64,
     pub fps: u32,
-    pub ap_max_iter: u32,
     pub enable_tmux_session: Option<bool>,
     pub subagent: bool,
 }
@@ -23,9 +22,6 @@ impl ConfigPatch {
             "compaction": { "context_threshold": self.context_threshold },
             "fps": self.fps,
             "subagent": self.subagent,
-            "autopilot": {
-                "max_iterations": self.ap_max_iter,
-            },
         });
         if let Some(mt) = self.max_tokens {
             root["max_tokens"] = serde_json::json!(mt);

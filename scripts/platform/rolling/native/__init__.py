@@ -38,7 +38,6 @@ def runtime_config(settings, record, rootfs, home=None):
         data_dir=str(Path(record['runtime_data']) / 'dag/runs'))
     write(path, config)
     path.chmod(0o600)
-    write(workdir / '.opencoder/ap.json', {'mode': 'off'})
     return workdir
 
 

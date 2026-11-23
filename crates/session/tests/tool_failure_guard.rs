@@ -84,8 +84,8 @@ async fn threshold_stops_after_max_consecutive_failures() {
     let mut s = make_session(fast_config(), client).await;
 
     let result = run(&mut s, "test".into(), |_| {}).await;
-    // Tool-failure now returns Err so autopilot cannot continue on an aborted
-    // task. The guard still stops after 20 failures.
+    // Tool-failure now returns Err so the runner cannot continue on an
+    // aborted task. The guard still stops after 20 failures.
     assert!(
         result.is_err(),
         "tool-failure should cause run to return Err"

@@ -135,8 +135,8 @@ pub(super) async fn drain_to_completion(
     // ensure_run_error_frame). Emitted first so no later Done can mask it.
     ensure_run_error_frame(&store, &handle, &sid, &result, run_emitted_error).await;
 
-    // Apply endpoint-forwarded drain commands (autopilot/annotation/...)
-    // once the run settles.
+    // Apply endpoint-forwarded drain commands (annotation/...) once the run
+    // settles.
     process_drain_cmds(
         &mut session,
         &mut rx_guard,

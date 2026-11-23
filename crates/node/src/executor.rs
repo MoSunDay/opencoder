@@ -264,7 +264,6 @@ async fn create_local_meta(
             title: task.title.clone(),
             agent: task.agent.clone().or_else(|| Some("act".into())),
             model: task.model.clone(),
-            autopilot_mode: None,
             workdir_hash: Some(opencoder_core::workdir_hash(workdir)),
             created_at: now,
             updated_at: now,

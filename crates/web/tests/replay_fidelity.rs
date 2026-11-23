@@ -18,7 +18,6 @@ use opencoder_web::handle::sse_from_session_event;
 
 /// Build representative SessionEvent variants (one of each display kind).
 fn all_variants() -> Vec<SessionEvent> {
-    use opencoder_session::autopilot::ApPhase;
     vec![
         SessionEvent::LlmRoundStart { started_at_ms: 1 },
         SessionEvent::LlmRoundEnd,
@@ -71,10 +70,6 @@ fn all_variants() -> Vec<SessionEvent> {
             seq: 7,
             text: "steered".into(),
         },
-        SessionEvent::AutoPilot {
-            phase: ApPhase::Plan,
-            iteration: 0,
-        },
         SessionEvent::Done,
         SessionEvent::Error("oops".into()),
     ]
@@ -93,8 +88,6 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 1,
             updated_at: 1,
@@ -114,8 +107,8 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
     let variants = all_variants();
     assert_eq!(
         variants.len(),
-        21,
-        "expected exactly 21 SessionEvent variants — if you added one, extend \
+        20,
+        "expected exactly 20 SessionEvent variants — if you added one, extend \
          all_variants() so the replay-fidelity round-trip covers it"
     );
 

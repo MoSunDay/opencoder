@@ -31,11 +31,9 @@ pub fn client_for(
     ))
 }
 
-/// 运行前置：加载 workdir 配置、关掉 autopilot（项目运行是显式触发，
-/// 不允许代理自动续跑）、解析 LLM 客户端。
+/// 运行前置：加载 workdir 配置、解析 LLM 客户端。
 pub fn runtime_config(deps: &Deps) -> Result<Config> {
     let mut config = Config::load(&deps.workdir).context("load config")?;
-    config.autopilot.mode = opencoder_core::ApMode::Off;
     if let Some(root) = opencoder_core::agent::scope::current_root() {
         config.agent.agents_dir = Some(root);
     }
@@ -216,7 +214,6 @@ async fn create_plan_session(
             title: Some(format!("项目计划 / {}", todo.title)),
             agent: Some("plan".into()),
             model: Some(config.model.clone()),
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,

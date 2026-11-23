@@ -1,6 +1,6 @@
 //! `schedules.json` domain config: cron-scheduled control-plane jobs
-//! (`schedules`), the fifth hard-cut domain file next to
-//! mcp.json / cli.json / skills.json / ap.json.
+//! (`schedules`), the fourth hard-cut domain file next to
+//! mcp.json / cli.json / skills.json.
 
 mod validate;
 
@@ -243,8 +243,8 @@ pub fn load_schedules(working_dir: &Path) -> SchedulesConfig {
     }
 }
 
-/// Domain merge: `schedules.json`'s body IS the config (autopilot-style
-/// whole-object merge; the array replaces wholesale).
+/// Domain merge: `schedules.json`'s body IS the config (whole-object
+/// merge; the array replaces wholesale).
 pub(crate) fn merge(cfg: &mut SchedulesConfig, entries: &serde_json::Map<String, Value>) {
     if let Some(raw) = entries.get("schedules") {
         match serde_json::from_value::<Vec<ScheduleJob>>(raw.clone()) {

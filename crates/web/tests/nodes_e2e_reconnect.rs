@@ -40,7 +40,6 @@ async fn mid_stream_disconnect_resumes_without_loss_or_duplication() {
     let srv = spawn_server().await;
     let workdir = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(workdir.path());
 
     let client = Arc::new(MockChatClient::new());
     let _runner = spawn_node(

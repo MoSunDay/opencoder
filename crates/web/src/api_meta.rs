@@ -1,5 +1,5 @@
-//! Metadata endpoints for the web UI: requirement annotation, session
-//! autopilot mode, provider/model catalog, skill catalog.
+//! Metadata endpoints for the web UI: requirement annotation, provider/model
+//! catalog, skill catalog.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -10,10 +10,10 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
 
-use opencoder_core::{ApMode, Config};
+use opencoder_core::Config;
 use opencoder_store::SessionPatch;
 
-use crate::api::{error_400, error_500};
+use crate::api::error_500;
 use crate::cmd::DrainCmd;
 use crate::handle::send_cmd;
 use crate::AppState;
@@ -72,64 +72,6 @@ pub async fn post_annotation(
         .and_then(|m| m.requirement);
     Json(json!({ "ok": true, "requirement": requirement })).into_response()
 }
-
-#[derive(Deserialize, Default)]
-pub struct AutopilotBody {
-    #[serde(default)]
-    pub mode: Option<String>,
-}
-
-/// POST /api/sessions/:id/autopilot — set or clear the session-scoped
-/// autopilot override (TUI `/ap` parity). `null` mode clears the override
-/// ("follow the global config") — deliberately WITHOUT a live-drain command
-/// (the TUI has no clear path either; a clear takes effect on the next
-/// drain/resume, since there is no DrainCmd for "un-override").
-pub async fn post_autopilot(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    body: Option<Json<AutopilotBody>>,
-) -> Response {
-    let mode_str = body.and_then(|Json(b)| b.mode);
-    if store_missing(&state, &id).await {
-        return not_found(&id);
-    }
-    let patch = match &mode_str {
-        None => SessionPatch {
-            clear_autopilot_mode: true,
-            updated_at: Some(opencoder_core::message::now_ms()),
-            ..Default::default()
-        },
-        Some(s) => match ApMode::parse(s) {
-            None => {
-                return error_400(format!(
-                    "invalid mode {s:?}: expected one of \"off\" / \"ap\" / \"review\""
-                ))
-            }
-            Some(mode) => SessionPatch {
-                autopilot_mode: Some(mode.as_str().to_string()),
-                updated_at: Some(opencoder_core::message::now_ms()),
-                ..Default::default()
-            },
-        },
-    };
-    if let Err(e) = state.store.update_session(&id, &patch).await {
-        return error_500(format!("update_session: {e:#}"));
-    }
-    if mode_str.is_some() && live_and_draining(&state, &id).await {
-        // Unwrap-safe: parsing succeeded in the patch match above.
-        let mode = ApMode::parse(mode_str.as_deref().unwrap()).unwrap();
-        send_cmd(&state.handles, &id, DrainCmd::SetApMode(mode)).await;
-    }
-    let mode = state
-        .store
-        .get_session(&id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|m| m.autopilot_mode);
-    Json(json!({ "ok": true, "mode": mode })).into_response()
-}
-
 /// GET /api/models — provider/model catalog for a dropdown of
 /// "provider/model" ids. Sanitized by construction: api_key and header
 /// VALUES are never serialized — only provider name, model id, base_url.

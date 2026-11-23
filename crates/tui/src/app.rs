@@ -125,7 +125,6 @@ pub(super) async fn run_app(
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cli_menu: Option<crate::cli_menu::CliMenu> = None;
     let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
-    let mut ap_menu: Option<crate::ap_menu::ApMenu> = None;
     let mut cache_salt_menu: Option<CacheSaltMenu> = None;
     let mut keymap_menu: Option<crate::keymap_menu::KeymapMenu> = None;
     let mut keymap = crate::keymap::KeyBindings::from_config(&config);
@@ -334,7 +333,6 @@ pub(super) async fn run_app(
                     mcp_menu.as_ref(),
                     cli_menu.as_ref(),
                     skill_toggle_menu.as_ref(),
-                    ap_menu.as_ref(),
                     cache_salt_menu.as_ref(),
                     keymap_menu.as_ref(),
                     question_menu.as_ref(),
@@ -347,7 +345,6 @@ pub(super) async fn run_app(
                     tail_ms,
                     task_elapsed_ms,
                     app_display::body_is_top_level(&chat, subagent_focus),
-                    config.autopilot.mode,
                     &display_mode,
                     plan_skill_active,
                     notepad.as_ref(),
@@ -413,7 +410,7 @@ pub(super) async fn run_app(
                             &cmd_tx, &mut turn_gen, &mut running, &mut chat, &store,
                             &mut model_menu, &mut client, &mut config, &mut compaction_threshold,
                             &mut context_limit, &mut frame_ms, &mut frame_ticker, &mut mcp_menu,
-                            &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu, &mut question_menu,
+                            &mut cli_menu, &mut skill_toggle_menu, &mut question_menu,
                             &question_hub, terminal, &mut cache_salt_menu, &mut keymap,
                             &mut keymap_menu, &mut command_menu, &sidecar_ask, &mut cancel,
                             &mut follow, &session_id, &agent_name, &mut input, &mut cursor_idx,
@@ -498,7 +495,7 @@ pub(super) async fn run_app(
                                     &mut plan_skill_active, &mut clear_confirm, &mut mode_flash,
                                     anim_tick, &mut plan_edit, &mut notepad, &mut task_picker,
                                     &mut model_menu, &mut mcp_menu,
-                                    &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
+                                    &mut cli_menu, &mut skill_toggle_menu,
                                     &mut cache_salt_menu, &mut config, &cmd_tx, &mut cancel,
                                     &mut task_elapsed_ms, &mut cancelled, &mut follow,
                                     &mut body_refresh_pending, &mut agent_menu,

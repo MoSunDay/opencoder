@@ -41,7 +41,6 @@ async fn dispatch_stream_cancel_and_node_state_machine() {
     let srv = spawn_server().await;
     let workdir = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(workdir.path());
 
     // Scripted round for task #1: four distinct deltas then completion.
     let texts = ["alpha ", "beta ", "gamma ", "delta"];

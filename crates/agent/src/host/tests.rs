@@ -66,8 +66,7 @@ async fn runtime(
     )
     .unwrap();
     let workdir = root.join("work");
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    std::fs::create_dir_all(&workdir).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     host.store.register_runtime(&opencoder_store::fleet::handoff::RuntimeRecord {

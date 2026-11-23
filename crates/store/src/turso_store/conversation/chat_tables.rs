@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   requirement  TEXT,
   plan_snapshot TEXT,
   plan_input_count INTEGER NOT NULL DEFAULT 0,
-  autopilot_mode TEXT,
   harness_runtime TEXT,
   kind TEXT
 )";

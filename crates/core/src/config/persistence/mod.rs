@@ -26,9 +26,9 @@ impl Config {
     }
 
     /// Split-routing save (分流): top-level domain keys (`mcp_servers` /
-    /// `cli` / `skills` / `autopilot`) are written to their dedicated domain
-    /// files (`mcp.json` / `cli.json` / `skills.json` / `ap.json`); the
-    /// remainder follows the
+    /// `cli` / `skills` / `schedules`) are written to their dedicated domain
+    /// files (`mcp.json` / `cli.json` / `skills.json` / `schedules.json`);
+    /// the remainder follows the
     /// normal [`save_target`](Self::save_target) + [`save_to`] config.json
     /// flow.
     ///

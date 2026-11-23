@@ -1,6 +1,6 @@
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, kind, title, agent, model, autopilot_mode, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, kind, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn harness_runtime(
     conn: &Connection,
@@ -48,7 +48,6 @@ pub(super) async fn create_in_tx(conn: &Connection, meta: &SessionMeta) -> Resul
             meta.title.as_deref(),
             meta.agent.as_deref(),
             meta.model.as_deref(),
-            meta.autopilot_mode.as_deref(),
             meta.workdir_hash.as_deref(),
             meta.created_at,
             meta.updated_at,
@@ -73,7 +72,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
     let mut stmt = conn
-        .prepare_cached("SELECT id, kind, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, autopilot_mode FROM sessions WHERE id = ?")
+        .prepare_cached("SELECT id, kind, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement FROM sessions WHERE id = ?")
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
@@ -235,11 +234,6 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if patch.model.is_some() && patch.clear_model {
         anyhow::bail!("SessionPatch: model field and clear_model are mutually exclusive");
     }
-    if patch.autopilot_mode.is_some() && patch.clear_autopilot_mode {
-        anyhow::bail!(
-            "SessionPatch: autopilot_mode field and clear_autopilot_mode are mutually exclusive"
-        );
-    }
     if patch.requirement.is_some() && patch.clear_requirement {
         anyhow::bail!(
             "SessionPatch: requirement field and clear_requirement are mutually exclusive"
@@ -258,10 +252,6 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     }
     if let Some(v) = &patch.model {
         sets.push("model = ?");
-        args.push(v.clone().into());
-    }
-    if let Some(v) = &patch.autopilot_mode {
-        sets.push("autopilot_mode = ?");
         args.push(v.clone().into());
     }
     if let Some(v) = &patch.summary {
@@ -309,9 +299,6 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     }
     if patch.clear_model {
         sets.push("model = NULL");
-    }
-    if patch.clear_autopilot_mode {
-        sets.push("autopilot_mode = NULL");
     }
     if let Some(v) = patch.updated_at {
         sets.push("updated_at = ?");

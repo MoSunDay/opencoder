@@ -63,7 +63,6 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
   const [launchOpen, setLaunchOpen] = useState(false);
   const [operatorHarness, setOperatorHarness] = useState('opencoder');
   const [operatorEnvs, setOperatorEnvs] = useState('');
-  const [apOpen, setApOpen] = useState(false);
   const [annoOpen, setAnnoOpen] = useState(false);
   const [annoText, setAnnoText] = useState('');
   // 创建链路模式（Operator / Agent）。mode 经 useLocalStorage 持久化；
@@ -176,7 +175,7 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
   useEffect(() => {
     resetTranscript();
     setDialogSel(null);
-    setModelOpen(false); setApOpen(false); setAnnoOpen(false);
+    setModelOpen(false); setAnnoOpen(false);
     setSessionAgent(modeKind === 'agent' ? (registeredAgents[0]?.name || '') : 'act');
     createAttempt.current = null;
     loadDialogs(nodeSel, modeKind);
@@ -456,10 +455,6 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
       setModelOpen(true);
       return;
     }
-    if (kind === 'ap') {
-      setApOpen(true);
-      return;
-    }
     if (kind === 'annotation') {
       setAnnoOpen(true);
       return;
@@ -555,20 +550,6 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
         }
       },
     });
-  };
-
-  const setAutopilot = async (mode) => {
-    setApOpen(false);
-    if (!dialogSel) {
-      notice(warn('先发送一条提示词新建对话'));
-      return;
-    }
-    try {
-      await apiPost('/api/sessions/' + encodeURIComponent(dialogSel) + '/autopilot', { mode });
-      notice(ok(mode ? 'autopilot → ' + mode : 'autopilot 已清除'));
-    } catch (e) {
-      notice(err('autopilot 设置失败: ' + ((e && e.message) || '')));
-    }
   };
 
   const setAnnotation = async (text) => {
@@ -759,20 +740,6 @@ export function ChatPanel({ onNotice, onCreated, initialPrompt = '', launchKind 
         <Space orientation="vertical" style={{ width: '100%' }}>
           <Select aria-label="Operator Harness" value={operatorHarness} options={[{ value: 'opencoder', label: 'OpenCoder' }, { value: 'codex', label: 'Codex' }]} onChange={setOperatorHarness} popupMatchSelectWidth={180} style={{ width: '100%' }} />
           <Input.TextArea aria-label="Operator 环境变量" value={operatorEnvs} onChange={(e) => setOperatorEnvs(e.target.value)} rows={5} placeholder="每行一个 KEY=VALUE；仅在创建会话时注入" autoComplete="off" spellCheck={false} />
-        </Space>
-      </Modal>
-
-      <Modal
-        title="autopilot 模式"
-        open={apOpen}
-        footer={null}
-        onCancel={() => setApOpen(false)}
-      >
-        <Space wrap>
-          <Button onClick={() => setAutopilot('off')}>off</Button>
-          <Button onClick={() => setAutopilot('ap')}>ap</Button>
-          <Button onClick={() => setAutopilot('review')}>review</Button>
-          <Button onClick={() => setAutopilot(null)}>清除</Button>
         </Space>
       </Modal>
 

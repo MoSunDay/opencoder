@@ -1,4 +1,6 @@
-//! Requirement, autopilot, and supporting-index migrations.
+//! Requirement and supporting-index migrations.
+
+use std::path::Path;
 
 use opencoder_store::{SessionPatch, Store, TursoStore};
 
@@ -122,121 +124,148 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
 }
 
 // ===========================================================================
-// v10 -> v11 migration: the `sessions.autopilot_mode` column.
+// Latest-schema convergence of `sessions`: the session-scoped autopilot mode
+// column was removed together with its feature (v40 drops it). Pre-removal
+// databases must never gain or keep it, while their rows survive the upgrade.
 // ===========================================================================
 
-/// Hand-write a faithful v10 sessions table (carries `plan_snapshot` and
-/// `plan_input_count` but NOT `autopilot_mode`), then reopen through
-/// `TursoStore::open` so `migrate(conn, 10)` runs the `if from < 11` block.
-/// Asserts the column is added (NULL by default), round-trips through
-/// `SessionPatch`, and that the schema version bumps to the latest (12).
-#[tokio::test]
-async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
+/// Column names of `sessions`, in declaration order.
+async fn session_columns(store: &TursoStore) -> Vec<String> {
+    let conn = store.conn().await.unwrap();
+    let mut stmt = conn.prepare("PRAGMA table_info(sessions)").await.unwrap();
+    let mut rows = stmt.query(()).await.unwrap();
+    let mut names = Vec::new();
+    while let Some(row) = rows.next().await.unwrap() {
+        let name: String = row.get(1).unwrap();
+        names.push(name);
+    }
+    names
+}
+
+/// The single recorded schema watermark row.
+async fn recorded_schema_version(store: &TursoStore) -> i64 {
+    let conn = store.conn().await.unwrap();
+    let mut stmt = conn
+        .prepare("SELECT version FROM schema_version LIMIT 1")
+        .await
+        .unwrap();
+    let mut rows = stmt.query(()).await.unwrap();
+    let r = rows.next().await.unwrap().unwrap();
+    r.get(0).unwrap()
+}
+
+/// Hand-write a legacy database holding only `schema_version` and a `sessions`
+/// table built from `sessions_ddl`: stamped at `version` and seeded with one
+/// row (`row_id`, created 1, updated 1). Enough for `TursoStore::open` to run
+/// the migration chain followed by the additive bootstrap batch.
+async fn write_legacy_sessions_db(db_path: &Path, version: i64, sessions_ddl: &str, row_id: &str) {
     use turso::Builder;
 
+    let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await
+        .unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+        .await
+        .unwrap();
+    conn.execute(sessions_ddl, ()).await.unwrap();
+    conn.execute(
+        "INSERT INTO schema_version (version) VALUES (?1)",
+        turso::params![version],
+    )
+    .await
+    .unwrap();
+    conn.execute(
+        "INSERT INTO sessions (id, created_at, updated_at) VALUES (?1, 1, 1)",
+        turso::params![row_id.to_string()],
+    )
+    .await
+    .unwrap();
+}
+
+/// sessions at v10: full column set with `plan_snapshot` / `plan_input_count`,
+/// predating the removed column.
+const V10_SESSIONS_DDL: &str = "CREATE TABLE sessions (\
+     id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
+     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\
+     summary TEXT, summary_seq INTEGER, summary_images_json TEXT,\
+     handoff_seq INTEGER, handoff_plan TEXT, skill TEXT,\
+     task_type TEXT NOT NULL DEFAULT 'parent', requirement TEXT,\
+     plan_snapshot TEXT, plan_input_count INTEGER NOT NULL DEFAULT 0)";
+
+/// A v10 database upgraded through the full chain must NOT regain the removed
+/// column; pre-existing rows survive and the schema version reaches the
+/// watermark.
+#[tokio::test]
+async fn schema_migration_v10_to_latest_preserves_rows_without_removed_column() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("migrate-v11.db");
+    let db_path = dir.path().join("migrate-v10-latest.db");
+    write_legacy_sessions_db(&db_path, 10, V10_SESSIONS_DDL, "s10").await;
 
-    // Phase 1: hand-write a v10 sessions table. It has the full v10 column
-    // set (including plan_snapshot / plan_input_count) but NO autopilot_mode.
-    {
-        let db = Builder::new_local(db_path.to_str().expect("UTF-8 database path"))
-            .experimental_multiprocess_wal(true)
-            .build()
-            .await
-            .unwrap();
-        let conn = db.connect().unwrap();
-        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
-            .await
-            .unwrap();
-        // sessions at v10: full column set EXCEPT autopilot_mode.
-        conn.execute(
-            "CREATE TABLE sessions (\
-               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
-               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\
-               summary TEXT, summary_seq INTEGER, summary_images_json TEXT,\
-               handoff_seq INTEGER, handoff_plan TEXT, skill TEXT,\
-               task_type TEXT NOT NULL DEFAULT 'parent', requirement TEXT,\
-               plan_snapshot TEXT, plan_input_count INTEGER NOT NULL DEFAULT 0)",
-            (),
-        )
-        .await
-        .unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (10)", ())
-            .await
-            .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s10', 1, 1)",
-            (),
-        )
-        .await
-        .unwrap();
-    }
-
-    // Phase 2: reopen — migrate(conn, 10) runs the `if from < 11` block,
-    // adding the autopilot_mode column to sessions.
+    // Reopen: migrate(conn, 10) runs the whole chain up to the watermark.
     let store = TursoStore::open(&db_path).await.unwrap();
 
-    // (1) The autopilot_mode column now exists on sessions (and is NULL).
-    {
-        let conn = store.conn().await.unwrap();
-        let mut stmt = conn.prepare("PRAGMA table_info(sessions)").await.unwrap();
-        let mut rows = stmt.query(()).await.unwrap();
-        let mut found = false;
-        while let Some(row) = rows.next().await.unwrap() {
-            let name: String = row.get(1).unwrap();
-            if name == "autopilot_mode" {
-                found = true;
-                break;
-            }
-        }
-        assert!(
-            found,
-            "sessions.autopilot_mode column must exist after v10->v11 migration"
-        );
-    }
+    // (1) The removed column is absent from sessions.
+    assert!(
+        !session_columns(&store)
+            .await
+            .iter()
+            .any(|c| c == "autopilot_mode"),
+        "sessions.autopilot_mode must stay absent after v10->latest migration"
+    );
 
-    // (2) Pre-existing row survives; the new column reads back as NULL/None.
+    // (2) Pre-existing row survives the migration.
     let m0 = store.get_session("s10").await.unwrap().unwrap();
     assert_eq!(m0.id, "s10");
-    assert_eq!(
-        m0.autopilot_mode, None,
-        "v10 row: autopilot_mode reads as NULL after migration"
-    );
 
-    // (3) The migrated column round-trips through SessionPatch.
-    store
-        .update_session(
-            "s10",
-            &SessionPatch {
-                autopilot_mode: Some("ap".into()),
-                updated_at: Some(2),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    let m1 = store.get_session("s10").await.unwrap().unwrap();
+    // (3) Schema version bumped to the watermark.
     assert_eq!(
-        m1.autopilot_mode.as_deref(),
-        Some("ap"),
-        "migrated autopilot_mode round-trips"
+        recorded_schema_version(&store).await,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema version must be current watermark after v10->latest migration"
     );
+}
 
-    // (4) Schema version bumped to 12.
-    {
-        let conn = store.conn().await.unwrap();
-        let mut stmt = conn
-            .prepare("SELECT version FROM schema_version LIMIT 1")
+/// sessions at v39: the current column set plus the since-removed column.
+const V39_SESSIONS_DDL: &str = "CREATE TABLE sessions (\
+     id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
+     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\
+     summary TEXT, summary_seq INTEGER, summary_images_json TEXT,\
+     handoff_seq INTEGER, handoff_plan TEXT, skill TEXT,\
+     task_type TEXT NOT NULL DEFAULT 'parent', requirement TEXT,\
+     plan_snapshot TEXT, plan_input_count INTEGER NOT NULL DEFAULT 0,\
+     harness_runtime TEXT, kind TEXT, autopilot_mode TEXT)";
+
+/// A v39 database still carries the removed column; the v40 step must drop it
+/// while preserving rows and stamping the new watermark.
+#[tokio::test]
+async fn schema_migration_v39_to_v40_drops_removed_autopilot_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migrate-v39-v40.db");
+    write_legacy_sessions_db(&db_path, 39, V39_SESSIONS_DDL, "s39").await;
+
+    // Reopen: migrate(conn, 39) runs the `if from < 40` block.
+    let store = TursoStore::open(&db_path).await.unwrap();
+
+    // (1) The removed column is gone.
+    assert!(
+        !session_columns(&store)
             .await
-            .unwrap();
-        let mut rows = stmt.query(()).await.unwrap();
-        let r = rows.next().await.unwrap().unwrap();
-        let v: i64 = r.get(0).unwrap();
-        assert_eq!(
-            v,
-            opencoder_store::turso_store::schema_watermark(),
-            "schema version must be current watermark after v10->v11 migration"
-        );
-    }
+            .iter()
+            .any(|c| c == "autopilot_mode"),
+        "sessions.autopilot_mode must be dropped by the v40 migration"
+    );
+
+    // (2) Pre-existing row survives the migration.
+    let m0 = store.get_session("s39").await.unwrap().unwrap();
+    assert_eq!(m0.id, "s39");
+
+    // (3) Schema version bumped to the watermark.
+    assert_eq!(
+        recorded_schema_version(&store).await,
+        opencoder_store::turso_store::schema_watermark(),
+        "schema version must be current watermark after v39->v40 migration"
+    );
 }

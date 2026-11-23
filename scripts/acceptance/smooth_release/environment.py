@@ -86,8 +86,6 @@ class Environment:
         storage.prepare(self.settings, {**self.model.config(), **self.resources.server_config(),
             'deployment': {key: str(value) if isinstance(value, Path) else value
                            for key, value in self.settings.__dict__.items()}})
-        for directory in [s.server_workdir,s.agent_workdir]:
-            write(directory / '.opencoder/ap.json',{'mode':'off'})
         self.env = {**os.environ,'HOME':str(self.root),'XDG_CONFIG_HOME':str(self.root / 'config'),
             'XDG_DATA_HOME':str(self.root / 'data')}
         try:

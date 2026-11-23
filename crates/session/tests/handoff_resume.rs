@@ -38,8 +38,6 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -80,7 +78,7 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     .mark_session_created();
     session.messages = head_msgs.clone();
     // The handoff extracts the newest non-synthetic assistant text as the
-    // brief (the autopilot ACT phase calls exactly this).
+    // brief (the directive reset path calls exactly this).
     let display = handoff::reset_to_directive(&mut session, "").expect("brief present");
     assert_eq!(
         session.messages.len(),

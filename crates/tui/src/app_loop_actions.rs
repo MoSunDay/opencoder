@@ -127,7 +127,7 @@ pub(crate) async fn dispatch_mode_switch(
 ///
 /// Returns [`LoopFlow::Proceed`] for commands that only open a menu or
 /// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
-/// Notepad, Ps, Stop, Ap, Sidecar). For mode-switch commands
+/// Notepad, Ps, Stop, Sidecar). For mode-switch commands
 /// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
 /// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]). While
 /// a turn is running, Act/Plan queue through `admit_tx` (apply at the idle
@@ -148,7 +148,6 @@ pub(crate) async fn dispatch_slash_action(
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
-    ap_menu: &mut Option<crate::ap_menu::ApMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     agent_name: &str,
     config: &mut Config,
@@ -311,9 +310,6 @@ pub(crate) async fn dispatch_slash_action(
             } else {
                 local_cmd::run("/stop", chat).await;
             }
-        }
-        SlashAction::Ap => {
-            *ap_menu = Some(crate::ap_menu::ApMenu::new(config));
         }
         SlashAction::Subtasks => {
             // Fullscreen detail view over this session's subtask registry
@@ -525,7 +521,7 @@ pub(crate) async fn fire_clear_confirm_now(
     body_refresh_pending: &mut bool,
 ) -> LoopFlow {
     // Interrupt on ANY in-flight work, not just `running`: during the
-    // autopilot stage gap / subagent drain window the parent already reports
+    // subagent drain window the parent already reports
     // idle while the worker is still inside its (continuing) turn — without
     // this gate the manual confirm would queue the fold behind that turn
     // instead of executing act immediately.

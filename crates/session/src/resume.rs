@@ -54,15 +54,6 @@ pub async fn resume(
     if let Some(m) = &meta.model {
         config.model = m.clone();
     }
-    // Session-scoped autopilot mode (`/ap` session-only): the override wins
-    // over the global config at the runner's dispatch point. NULL follows the
-    // global config; unknown values warn and are ignored.
-    let ap_mode_override = meta.autopilot_mode.as_deref().and_then(|v| {
-        opencoder_core::ApMode::parse(v).or_else(|| {
-            tracing::warn!(session_id = %id, mode = %v, "unknown sessions.autopilot_mode; ignoring");
-            None
-        })
-    });
     let agent_name = meta.agent.as_deref().unwrap_or(&config.agent.default);
     let snapshot = harness
         .resource_root
@@ -245,7 +236,6 @@ pub async fn resume(
         messages,
         agent,
         model,
-        ap_mode_override,
         working_dir,
         config,
         client,
@@ -666,11 +656,6 @@ async fn replay_child(
         working_dir.to_path_buf(),
     )
     .await?;
-
-    // Same force-off as `run_subagent`: a replayed child session runs a
-    // scoped task, never autopilot passes — even when the resumed config
-    // carries `autopilot.mode = "ap"|"review"` for the parent.
-    child.config.autopilot.mode = opencoder_core::ApMode::Off;
 
     // resume() leaves `cancel` as `None`; without a token the run loop's
     // interrupt check is skipped entirely, so a parent cancel or the replay

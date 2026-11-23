@@ -82,8 +82,6 @@ async fn seed_session(store: &Arc<dyn Store>) {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -109,8 +107,6 @@ async fn seed_session_id(store: &Arc<dyn Store>, id: &str) {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

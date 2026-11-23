@@ -34,18 +34,6 @@ fn test_opts(base: &str, workdir: &std::path::Path, data: &std::path::Path) -> N
     }
 }
 
-/// Pin autopilot off via the project domain file (same reason as the other
-/// runner tests: a developer's global `~/.opencoder/ap.json` must not extend
-/// the one-round mock).
-fn pin_autopilot_off(workdir: &std::path::Path) {
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
-}
-
 /// A heartbeat endpoint that never answers within the injected budget must
 /// surface as a fast `Err` — the caller-side contract is "log a warning and
 /// retry next tick", which only works if the call actually returns.
@@ -121,7 +109,6 @@ async fn runner_keeps_beating_after_a_timed_out_beat() {
 
     let workdir = tempfile::tempdir().unwrap().keep();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(&workdir);
     let task = st.push_task("say hello twice");
 
     let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![

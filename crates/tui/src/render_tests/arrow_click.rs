@@ -64,7 +64,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             None,
             None,
-            None,
             None, // agent_menu
             &mut hits,
             &mut None,
@@ -77,7 +76,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             0,
             0,
             true,
-            opencoder_core::ApMode::Off,
             "act",
             false,
             None,
@@ -155,7 +153,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             None,
             None,
-            None,
             None, // agent_menu
             &mut hits,
             &mut None,
@@ -168,7 +165,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             0,
             0,
             true,
-            opencoder_core::ApMode::Off,
             "act",
             false,
             None,

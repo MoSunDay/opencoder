@@ -101,7 +101,6 @@ pub(crate) async fn create_session_meta(
             title: Some(format!("dag/{}/{}", run_id, step.name)),
             agent: agent.or_else(|| Some("act".into())),
             model: Some(deps.config.model.clone()),
-            autopilot_mode: None,
             workdir_hash: Some(opencoder_core::workdir_hash(&deps.workdir)),
             created_at: now,
             updated_at: now,

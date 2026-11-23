@@ -1,5 +1,5 @@
 //! Modal-interception key chain extracted from `app.rs`'s `Event::Key` arm
-//! (task picker, model/mcp/cli/skill/ap menus, question dialog, cache-salt
+//! (task picker, model/mcp/cli/skill menus, question dialog, cache-salt
 //! and keymap pickers, `/` command menu). Pure move: same order, same
 //! side effects — `break` maps to [`PopupFlow::Quit`], every `continue` to
 //! [`PopupFlow::Consumed`] (redraw-flavored `continue` to
@@ -58,7 +58,6 @@ pub(super) async fn handle_popup_key(
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
-    ap_menu: &mut Option<crate::ap_menu::ApMenu>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
     question_hub: &Arc<opencoder_session::QuestionHub>,
     terminal: &mut Term,
@@ -155,11 +154,6 @@ pub(super) async fn handle_popup_key(
         .await;
         return PopupFlow::Consumed;
     }
-    // `/ap` mode-picker modal (same slot.take() pattern as /skill).
-    if ap_menu.is_some() {
-        let _ = super::app_loop::handle_ap_outcome(ap_menu, k, config, cmd_tx, chat, workdir).await;
-        return PopupFlow::Consumed;
-    }
     // Question dialog: answers resolve on the hub, mid-turn.
     if question_menu.is_some() {
         // Wrap width mirrors the popup renderer so Up/Down cursor movement
@@ -209,7 +203,6 @@ pub(super) async fn handle_popup_key(
             mcp_menu,
             cli_menu,
             skill_toggle_menu,
-            ap_menu,
             cache_salt_menu,
             keymap_menu,
             agent_name,

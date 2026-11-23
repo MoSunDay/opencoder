@@ -163,7 +163,7 @@ fn running_tab_compound_mode_command_becomes_queue() {
 }
 
 /// Bug case: the parent turn already reports idle (`running = false`) while
-/// its subagent batch is still draining — autopilot stage gap (PLAN Done →
+/// its subagent batch is still draining — stage gap (PLAN Done →
 /// ACT dispatches task subagents), cancel grace window, or reabsorb tail.
 /// Tab must still queue: a submit would bypass the queue row and start a new
 /// run immediately, betraying the follow-up intent.

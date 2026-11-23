@@ -80,7 +80,6 @@ fn parses_session_subcommands() {
     assert!(matches!(session(&["session", "input-reorder", "s1", "--json", r#"{"a":1,"b":2}"#]), SessionCmd::InputReorder { .. }));
     assert!(matches!(session(&["session", "input-delete", "s1", "42"]), SessionCmd::InputDelete { seq: 42, .. }));
     assert!(matches!(session(&["session", "annotation", "s1", "--json", r#"{"text":"t"}"#]), SessionCmd::Annotation { json: Some(_), .. }));
-    assert!(matches!(session(&["session", "autopilot", "s1"]), SessionCmd::Autopilot { json: None, .. }));
     assert!(matches!(session(&["session", "subagents", "s1"]), SessionCmd::Subagents { .. }));
     assert!(matches!(session(&["session", "steer", "s1", "t7", "--json", r#"{"prompt":"go"}"#]), SessionCmd::Steer { task, .. } if task == "t7"));
     assert!(matches!(session(&["session", "task", "s1"]), SessionCmd::Task { id } if id == "s1"));
@@ -173,15 +172,14 @@ fn session_plan_relay_posts_without_bodies() {
 #[test]
 #[rustfmt::skip]
 fn session_plan_relay_optional_bodies() {
-    // handoff/annotation/autopilot accept absent bodies (the server treats
+    // handoff/annotation accept absent bodies (the server treats
     // them as defaults/clear) and forward a JSON body when one is given.
-    for argv in [vec!["session", "handoff", "s1"], vec!["session", "annotation", "s1"], vec!["session", "autopilot", "s1"]] {
+    for argv in [vec!["session", "handoff", "s1"], vec!["session", "annotation", "s1"]] {
         assert_eq!(session_plan(&session(&argv)).unwrap().body, None, "{argv:?}");
     }
     let cases = [
         (vec!["session", "handoff", "s1", "--json", r#"{"extra":"e"}"#], "/api/sessions/s1/handoff", json!({"extra": "e"})),
         (vec!["session", "annotation", "s1", "--json", r#"{"text":"t"}"#], "/api/sessions/s1/annotation", json!({"text": "t"})),
-        (vec!["session", "autopilot", "s1", "--json", r#"{"mode":"auto"}"#], "/api/sessions/s1/autopilot", json!({"mode": "auto"})),
     ];
     for (argv, path, body) in cases {
         check(session_plan(&session(&argv)).unwrap(), reqwest::Method::POST, path, &[], Some(body));

@@ -51,7 +51,6 @@ fn draw(
         mcp_menu,
         cli_menu,
         None, // skill_toggle_menu
-        None, // ap_menu
         None, // cache_salt_menu
         None, // keymap_menu
         None, // question_menu
@@ -66,7 +65,6 @@ fn draw(
         0,
         0,
         true,
-        opencoder_core::ApMode::Off,
         "act",
         false,
         None,

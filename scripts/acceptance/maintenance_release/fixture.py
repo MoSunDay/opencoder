@@ -82,8 +82,6 @@ def source_configs(settings, root, rootfs):
               'nfs': {'enabled': True, 'host': '127.0.0.1', 'port': ports['agent'], 'read_only': True}}}
     write(settings.agent_workdir / 'opencoder.json', agent)
     write(settings.server_workdir / 'opencoder.json', server)
-    for workdir in (settings.agent_workdir, settings.server_workdir):
-        write(workdir / '.opencoder/ap.json', {'mode': 'off'})
     write(settings.agent_config, {**agent, 'dag': {'rootfs_dir': str(rootfs),
           'binary_dir': str(targets['binary']), 'workspace_dir': str(targets['workspace'])}})
     write(settings.server_config, {**server, 'dag': {'binary_dir': str(sources['binary']),
@@ -143,7 +141,6 @@ def launch(settings, operations, old_bundle, old_manifest, candidate_bin, rootfs
     write(data / 'host-binding.json', {'database': str(settings.state_dir / 'host/host.db'), 'runtime_id': old['id']})
     runtime_workdir = data / 'workdir'
     write(runtime_workdir / 'opencoder.json', json.loads((settings.agent_workdir / 'opencoder.json').read_text()))
-    write(runtime_workdir / '.opencoder/ap.json', {'mode': 'off'})
     service(settings, old['runtime_unit'], [agent, '--data-dir', data, '--workdir', runtime_workdir,
             '--max-runs', 65535, '--token-file', settings.token_file, 'runtime', '--port', old['runtime_port']], True)
     operations.http(host, '/runtimes', 'POST', {'id': old['id'], 'release_id': old['id'], 'mode': 'staged',

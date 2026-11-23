@@ -43,7 +43,6 @@ fn row_to_meta(r: &turso::Row) -> Result<SessionMeta> {
         title: r.get::<Option<String>>(2)?,
         agent: normalize_agent(r.get::<Option<String>>(3)?),
         model: r.get::<Option<String>>(4)?,
-        autopilot_mode: r.get::<Option<String>>(16)?,
         workdir_hash: r.get::<Option<String>>(5)?,
         created_at: r.get::<i64>(6)?,
         updated_at: r.get::<i64>(7)?,

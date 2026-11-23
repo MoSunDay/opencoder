@@ -58,7 +58,6 @@ impl TeamDispatcher for LocalTeamDispatcher {
                 title: Some(format!("项目团队 / {}", self.title)),
                 agent: Some(node_id.to_string()),
                 model: Some(self.config.model.clone()),
-                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: now,
                 updated_at: now,

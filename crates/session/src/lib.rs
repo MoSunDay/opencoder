@@ -1,5 +1,4 @@
 pub mod agent_pools;
-pub mod autopilot;
 pub mod bash_guard;
 pub mod compaction;
 pub mod control_cmd;
@@ -46,7 +45,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use opencoder_core::{message::now_ms, Agent, ApMode, Config, Message, Role};
+use opencoder_core::{message::now_ms, Agent, Config, Message, Role};
 use opencoder_llm::ChatStream;
 use opencoder_store::{SessionMeta, Store};
 use tokio_util::sync::CancellationToken;
@@ -142,11 +141,6 @@ pub struct SessionState {
     pub messages: Vec<Message>,
     pub agent: Agent,
     pub model: String,
-    /// Session-scoped autopilot-mode override: the `/ap` "session-only"
-    /// choice, persisted to `sessions.autopilot_mode` and restored on resume.
-    /// `None` = follow `config.autopilot.mode`; `Some` wins over any config
-    /// reload at the runner's post-task dispatch point.
-    pub ap_mode_override: Option<ApMode>,
     pub working_dir: PathBuf,
     pub config: Config,
     pub client: Arc<dyn ChatStream>,
@@ -159,7 +153,7 @@ pub struct SessionState {
     pub tools_path: Vec<PathBuf>,
     /// Agent-private skill-pool roots for the CURRENT agent (0–1 entries,
     /// empty for builtins). Snapshot of [`crate::agent_pools::skill_roots_for`];
-    /// the live-session skill choke points (`skill_resolve`, autopilot)
+    /// the live-session skill choke points (`skill_resolve`)
     /// discover these BEFORE the global skills dir so a `/agent`-switched
     /// session uses its own agent's skills (first-wins shadowing).
     pub skill_roots: Vec<PathBuf>,
@@ -238,7 +232,7 @@ pub struct SessionState {
     /// only for in-memory bookkeeping symmetry with `summary`/`summary_seq`.
     pub summary_images: Vec<String>,
     /// Transcript handoff boundary: number of store messages predating the
-    /// reset (autopilot ACT handoff, clear-context, legacy plan boundaries).
+    /// reset (clear-context, legacy plan boundaries).
     /// On resume these are trimmed and the boundary marker message is
     /// re-attached. `None` = no handoff occurred.
     pub handoff_seq: Option<i64>,
@@ -287,7 +281,6 @@ impl SessionState {
             messages: Vec::new(),
             agent,
             model,
-            ap_mode_override: None,
             working_dir,
             config,
             client,
@@ -315,12 +308,6 @@ impl SessionState {
             requirement: None,
             question_hub: QuestionHub::new(),
         }
-    }
-
-    /// Autopilot mode dispatched at run end: the session override (set by
-    /// `/ap` session-only or restored on resume) wins over the global config.
-    pub fn effective_ap_mode(&self) -> ApMode {
-        self.ap_mode_override.unwrap_or(self.config.autopilot.mode)
     }
 
     /// Attach a durable store so subsequent `record` calls persist messages.
@@ -487,7 +474,6 @@ impl SessionState {
                 } else {
                     Some(self.config.model.clone())
                 },
-                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
                 updated_at: now,

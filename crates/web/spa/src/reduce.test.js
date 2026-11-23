@@ -384,11 +384,6 @@ describe('status-line frames', () => {
     expect(st.turns[0]).toMatchObject({ kind: 'sys', text: '🗜 folding 40 turns' });
   });
 
-  it('autopilot renders phase + iteration', () => {
-    const st = reduceFrame(emptyStream(), { event: 'autopilot', data: { phase: 'Plan', iteration: 2 } }, 0);
-    expect(st.turns[0]).toMatchObject({ kind: 'sys', text: '🛸 autopilot plan #2' });
-  });
-
   it('interrupted renders a sys line', () => {
     const st = reduceFrame(emptyStream(), { event: 'interrupted', data: {} }, 0);
     expect(st.turns[0]).toMatchObject({ kind: 'sys', text: '⏹ interrupted' });

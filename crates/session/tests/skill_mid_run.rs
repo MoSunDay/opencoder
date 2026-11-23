@@ -125,8 +125,6 @@ async fn seed_session(store: &Arc<dyn Store>) {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -300,8 +298,6 @@ async fn skill_set_mid_run_delivers_once_before_queue_followup() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -464,8 +460,6 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_tail_reminder() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -556,8 +550,6 @@ async fn skill_only_empty_prompt_records_user_trigger_message() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -636,8 +628,6 @@ async fn image_only_turn_with_skill_records_both_user_image_and_trigger() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

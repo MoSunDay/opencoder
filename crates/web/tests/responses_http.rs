@@ -35,7 +35,6 @@ async fn web_prompt_builds_responses_client_executes_edit_and_persists_sse() {
         serde_json::to_vec(&config(&server.url)).unwrap(),
     )
     .unwrap();
-    std::fs::write(dir.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let handles = opencoder_web::handle::new_handle_map();
     let app = opencoder_web::build_app(

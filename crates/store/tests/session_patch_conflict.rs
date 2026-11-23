@@ -84,14 +84,6 @@ async fn field_and_clear_combinations_are_rejected() {
             },
         ),
         (
-            "autopilot_mode + clear_autopilot_mode",
-            SessionPatch {
-                autopilot_mode: Some("ap".into()),
-                clear_autopilot_mode: true,
-                ..Default::default()
-            },
-        ),
-        (
             "requirement + clear_requirement",
             SessionPatch {
                 requirement: Some("r".into()),

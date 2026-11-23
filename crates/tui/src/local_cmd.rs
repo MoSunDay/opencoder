@@ -6,9 +6,6 @@
 //! `session.messages` — they are purely user-facing chrome. The popup is the
 //! primary entry path (`/` opens the picker); an idle free-text/paste path
 //! (`app.rs` Submit) is the fallback.
-//!
-//! `/ap` used to live here as a direct on/off toggle; it now opens the
-//! `ap_menu` tri-state picker instead (see `crate::ap_menu`).
 
 use ratatui::text::{Line, Span};
 

@@ -151,9 +151,8 @@ async fn released_runtime_results_survive_host_upgrade_sleep_wake_and_rollback()
     });
     let work = dir.as_path().join("work");
     let data = dir.as_path().join("old");
-    std::fs::create_dir_all(work.join(".opencoder")).unwrap();
+    std::fs::create_dir_all(&work).unwrap();
     std::fs::create_dir_all(&data).unwrap();
-    std::fs::write(work.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     std::fs::write(
         work.join("opencoder.json"),
         json!({"model":"fixture/model","context_limit":2_000_000,"cache_salt":false,

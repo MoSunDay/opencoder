@@ -22,7 +22,6 @@ fn meta(id: &str) -> SessionMeta {
         title: Some(id.into()),
         agent: Some("act".into()),
         model: Some("m".into()),
-        autopilot_mode: None,
         workdir_hash: None,
         created_at: 0,
         updated_at: 0,
@@ -70,7 +69,7 @@ async fn clear_summary_nulls_all_compaction_fields() {
     assert_eq!(after.title.as_deref(), Some("s1"));
 }
 
-/// Mirrors the real `persist_clear` / autopilot-handoff call shape: a single
+/// Mirrors the real `persist_clear` / handoff call shape: a single
 /// update that sets the NEW handoff boundary AND clears the STALE compaction
 /// metadata. Both must coexist in one patch without clobbering each other.
 #[tokio::test]
@@ -124,7 +123,6 @@ async fn create_persists_summary_images() {
             title: Some("s3".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

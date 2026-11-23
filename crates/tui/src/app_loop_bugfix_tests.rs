@@ -110,7 +110,6 @@ async fn done_with_pending_queue_arms_drain_pending() {
             agent: Some("act".into()),
             model: Some("m/g".into()),
 
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -201,7 +200,6 @@ async fn done_with_empty_store_goes_idle() {
             agent: Some("act".into()),
             model: Some("m/g".into()),
 
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

@@ -84,10 +84,6 @@ fn from_sse_roundtrips_all_variants() {
             seq: 9,
             text: "s".into(),
         },
-        SessionEvent::AutoPilot {
-            phase: ApPhase::Plan,
-            iteration: 0,
-        },
         SessionEvent::Done,
         SessionEvent::Error("kaboom".into()),
     ];
@@ -96,8 +92,8 @@ fn from_sse_roundtrips_all_variants() {
     kinds.dedup();
     assert_eq!(
         kinds.len(),
-        25,
-        "expected all 25 unique kinds, got {kinds:?}"
+        24,
+        "expected all 24 unique kinds, got {kinds:?}"
     );
 
     for ev in &cases {
@@ -273,28 +269,6 @@ fn tool_end_without_images_field_is_backward_compatible() {
             );
         }
         other => panic!("expected ToolEnd, got {other:?}"),
-    }
-}
-
-/// P2-6: `from_sse` must saturate `iteration` to u32::MAX when the JSON
-/// value exceeds u32's range (e.g. u64::MAX). The old `as u32` cast
-/// silently wrapped to a small number, producing a wrong iteration index.
-#[test]
-fn from_sse_autopilot_large_iteration_saturates() {
-    let data = serde_json::json!({
-        "phase": "act",
-        "iteration": u64::MAX,
-    });
-    let ev = SessionEvent::from_sse("autopilot", data).expect("must parse");
-    match ev {
-        SessionEvent::AutoPilot { iteration, .. } => {
-            assert_eq!(
-                iteration,
-                u32::MAX,
-                "iteration must saturate to u32::MAX, not wrap"
-            );
-        }
-        other => panic!("expected AutoPilot, got {other:?}"),
     }
 }
 

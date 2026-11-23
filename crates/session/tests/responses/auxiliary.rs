@@ -73,14 +73,10 @@ async fn child_tools_and_parent_continuation_use_responses_and_keep_separate_sta
 }
 
 #[tokio::test]
-async fn title_and_verify_route_to_responses_small_model_with_usable_output_budget() {
+async fn title_routes_to_responses_small_model_with_usable_output_budget() {
     let dir = tempfile::tempdir().unwrap();
     let _home = opencoder_core::scoped_config_home(dir.path().to_path_buf());
-    let server = serve(vec![
-        Reply::json(response(vec![answer("Fixed task")])),
-        Reply::json(response(vec![answer("yes")])),
-    ])
-    .await;
+    let server = serve(vec![Reply::json(response(vec![answer("Fixed task")]))]).await;
     let mut config = config("http://127.0.0.1:1");
     config.provider.protocol = "chat_completions".into();
     config.small_model = Some("small/gpt-6".into());
@@ -122,19 +118,8 @@ async fn title_and_verify_route_to_responses_small_model_with_usable_output_budg
             .as_deref(),
         Some("Fixed task")
     );
-    let verdict = opencoder_session::autopilot::verify(
-        &session,
-        &opencoder_session::autopilot::state::ApState::new("Fix task".into()),
-        1,
-    )
-    .await
-    .unwrap();
-    assert!(matches!(
-        verdict,
-        opencoder_session::autopilot::VerifyVerdict::Complete
-    ));
     let requests = server.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 1);
     for (_, body) in requests.iter() {
         assert_eq!(body["model"], "gpt-6");
         assert_eq!(body["reasoning"]["effort"], "low");

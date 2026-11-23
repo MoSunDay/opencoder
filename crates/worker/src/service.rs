@@ -66,8 +66,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
         let workdir = root.path().join("work");
-        std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-        std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+        std::fs::create_dir_all(&workdir).unwrap();
         let worker = Worker::open(
             WorkerOptions {
                 name: "inventory".into(),
@@ -164,8 +163,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let _scope = opencoder_core::config::scoped_config_home(root.path().join("home"));
         let workdir = root.path().join("work");
-        std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-        std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+        std::fs::create_dir_all(&workdir).unwrap();
         let worker = Worker::open(
             WorkerOptions {
                 name: "dag-inventory".into(),

@@ -74,7 +74,7 @@ async fn schema_migration_v13_to_v14_adds_message_display() {
             .await
             .unwrap();
         conn.execute(
-            "CREATE TABLE sessions (               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,               summary TEXT, summary_seq INTEGER, summary_images_json TEXT,               handoff_seq INTEGER, handoff_plan TEXT, skill TEXT,               task_type TEXT NOT NULL DEFAULT 'parent', requirement TEXT,               plan_snapshot TEXT, plan_input_count INTEGER NOT NULL DEFAULT 0,               autopilot_mode TEXT)",
+            "CREATE TABLE sessions (               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,               summary TEXT, summary_seq INTEGER, summary_images_json TEXT,               handoff_seq INTEGER, handoff_plan TEXT, skill TEXT,               task_type TEXT NOT NULL DEFAULT 'parent', requirement TEXT,               plan_snapshot TEXT, plan_input_count INTEGER NOT NULL DEFAULT 0)",
             (),
         )
         .await

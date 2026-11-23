@@ -5,7 +5,7 @@ from pathlib import Path
 import shlex
 from ... import units
 from ...native import effective_config
-from ...state import atomic_bytes, write
+from ...state import atomic_bytes
 from ...storage.database import query
 
 
@@ -103,7 +103,6 @@ def stage_one(settings, bundle, candidate, record, fallback):
     if target.exists() and target.read_bytes() != config_bytes:
         raise ValueError('staged Runtime configuration changed')
     atomic_bytes(target, config_bytes)
-    write(workdir / '.opencoder/ap.json', {'mode': 'off'})
     agent = settings.state_dir / 'releases' / candidate['release_id'] / 'bundle/bin/opencoder-agent'
     arguments[arguments.index(old_agent)] = str(agent)
     arguments[arguments.index('--workdir') + 1] = str(workdir)

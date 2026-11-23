@@ -7,7 +7,7 @@
 //! root:
 //!
 //! - `operator-config/config.json` — the operator-plane base config.
-//! - `operator-config/<mcp|cli|skills|ap|schedules>.json` — domain files.
+//! - `operator-config/<mcp|cli|skills|schedules>.json` — domain files.
 //! - `operator-config/skills/` — operator-owned skill packs (see
 //!   `operator_env` materialization).
 //!
@@ -46,12 +46,12 @@ pub(crate) fn bootstrap(dir: &std::path::Path, node_workdir: &std::path::Path) -
         let live = opencoder_core::Config::load(node_workdir)?;
         super::operator_env::write_snapshot(&config, &serde_json::to_string_pretty(&live)?)?;
     }
-    // Carry the live domain view (mcp/cli/skills/ap/schedules) across once:
+    // Carry the live domain view (mcp/cli/skills/schedules) across once:
     // without this the first operator execution would silently lose the
     // node's MCP servers / skills toggles. Files that do not resolve stay
     // absent — the plane then treats them as "unset", exactly like a
     // project without domain files.
-    for key in ["mcp_servers", "cli", "skills", "autopilot", "schedules"] {
+    for key in ["mcp_servers", "cli", "skills", "schedules"] {
         let Some(value) = opencoder_core::Config::effective_domain_value(node_workdir, key) else {
             continue;
         };

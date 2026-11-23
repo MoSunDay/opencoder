@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 
 fn options(root: &std::path::Path) -> WorkerOptions {
     let workdir = root.join("work");
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    std::fs::create_dir_all(&workdir).unwrap();
     WorkerOptions {
         name: "persistence-latch-test".into(),
         workdir,

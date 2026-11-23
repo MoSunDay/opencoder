@@ -19,7 +19,6 @@ async fn make_session(store: &TursoStore, id: &str) {
         agent: Some("act".into()),
         model: Some("m".into()),
 
-        autopilot_mode: None,
         workdir_hash: None,
         created_at: now,
         updated_at: now,

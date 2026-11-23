@@ -82,7 +82,7 @@ fn clear_seed_marker(text: &str) -> String {
 const CLEAR_CONTEXT_BODY: &str = "[Context cleared - starting fresh.]";
 
 /// Neutral wrapper for the preserved last say. Deliberately NOT an execution
-/// directive ([`crate::handoff`] prefixes the autopilot handoff instead): the
+/// directive ([`crate::handoff`] prefixes its directive instead): the
 /// preserved text is a plain prior answer ("task done"), not a task, and an
 /// execution directive would fabricate a task out of finished work.
 const CLEAR_SEED_BODY_PREFIX: &str = "[Context cleared. The previous assistant reply below \

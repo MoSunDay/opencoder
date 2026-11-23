@@ -526,8 +526,16 @@ pub(crate) async fn fire_clear_confirm_now(
     // this gate the manual confirm would queue the fold behind that turn
     // instead of executing act immediately.
     if *running || chat.subagents_running > 0 {
-        cancel_running_turn(chat, cancel, turn_gen, child_runtime, running, cancelled, follow)
-            .await;
+        cancel_running_turn(
+            chat,
+            cancel,
+            turn_gen,
+            child_runtime,
+            running,
+            cancelled,
+            follow,
+        )
+        .await;
     }
     fire_clear_confirm(
         cc,

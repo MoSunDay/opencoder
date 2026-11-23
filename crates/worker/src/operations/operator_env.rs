@@ -278,9 +278,7 @@ mod tests {
         }
     }
 
-    fn expect_environment(
-        environment: Result<Option<OperatorEnvironment>>,
-    ) -> (PathBuf, PathBuf) {
+    fn expect_environment(environment: Result<Option<OperatorEnvironment>>) -> (PathBuf, PathBuf) {
         let environment = environment.unwrap().expect("operator materializes");
         (environment.home, environment.workspace)
     }
@@ -289,8 +287,12 @@ mod tests {
     fn materialize_writes_snapshot_once_and_keeps_permissions_private() {
         let root = tempfile::tempdir().unwrap();
         let layout = layout(root.path());
-        let (home, workspace) =
-            expect_environment(materialize(&layout, ExecutionKind::Operator, "op-1", &config()));
+        let (home, workspace) = expect_environment(materialize(
+            &layout,
+            ExecutionKind::Operator,
+            "op-1",
+            &config(),
+        ));
         assert!(workspace.is_dir());
         let snapshot = snapshot_path(&home);
         let raw = std::fs::read_to_string(&snapshot).unwrap();
@@ -330,8 +332,12 @@ mod tests {
             .unwrap()
             .is_none());
         materialize(&layout, ExecutionKind::Operator, "op-2", &config()).unwrap();
-        let (home, workspace) =
-            expect_environment(resolve(&layout, ExecutionKind::Operator, "op-2", Some(&json!(1))));
+        let (home, workspace) = expect_environment(resolve(
+            &layout,
+            ExecutionKind::Operator,
+            "op-2",
+            Some(&json!(1)),
+        ));
         assert_eq!(
             workspace,
             layout
@@ -365,8 +371,12 @@ mod tests {
         let layout = layout(root.path());
         let version = json!(1);
         assert!(resolve(&layout, ExecutionKind::Operator, "missing", Some(&version)).is_err());
-        let (home, workspace) =
-            expect_environment(materialize(&layout, ExecutionKind::Operator, "op-broken", &config()));
+        let (home, workspace) = expect_environment(materialize(
+            &layout,
+            ExecutionKind::Operator,
+            "op-broken",
+            &config(),
+        ));
         let snapshot = snapshot_path(&home);
         std::fs::write(&snapshot, "{incomplete").unwrap();
         assert!(resolve(
@@ -439,10 +449,16 @@ mod tests {
         if cfg!(target_os = "linux") {
             assert_eq!(
                 read_write[1],
-                ("TMPDIR".to_string(), "/node/operator/x/home/tmp".to_string())
+                (
+                    "TMPDIR".to_string(),
+                    "/node/operator/x/home/tmp".to_string()
+                )
             );
         }
-        let read_only = env_pairs(Path::new("/node/operator/x/home"), OperatorAccessMode::ReadOnly);
+        let read_only = env_pairs(
+            Path::new("/node/operator/x/home"),
+            OperatorAccessMode::ReadOnly,
+        );
         assert_eq!(
             read_only[0],
             ("HOME".to_string(), "/node/operator/x/home".to_string())
@@ -462,8 +478,12 @@ mod tests {
         let working = root.path().join("workspace");
         std::fs::create_dir_all(&working).unwrap();
         let layout = layout(root.path());
-        let (home, _) =
-            expect_environment(materialize(&layout, ExecutionKind::Operator, "op-5", &config()));
+        let (home, _) = expect_environment(materialize(
+            &layout,
+            ExecutionKind::Operator,
+            "op-5",
+            &config(),
+        ));
         let loaded = opencoder_core::Config::load_with_home(&working, Some(&home)).unwrap();
         assert_eq!(loaded.model, "openai/gpt-isolation");
     }

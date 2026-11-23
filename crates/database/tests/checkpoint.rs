@@ -52,9 +52,7 @@ async fn run_once_skips_below_threshold() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("small.db");
     populate(&path, 10).await;
-    let outcome = checkpoint::run_once(&path, 64 * 1024 * 1024)
-        .await
-        .unwrap();
+    let outcome = checkpoint::run_once(&path, 64 * 1024 * 1024).await.unwrap();
     assert_eq!(
         outcome,
         Outcome::Skipped {

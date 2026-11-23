@@ -193,7 +193,8 @@ fn body_pending_flag_refreshes_cache_before_the_same_turn_render() {
     g.iter_top();
     assert_eq!(g.cache, Some(3), "body_pending refreshes the cache");
     assert_eq!(
-        g.last_rendered, Some(3),
+        g.last_rendered,
+        Some(3),
         "and the same-turn render shows the refreshed body"
     );
 }

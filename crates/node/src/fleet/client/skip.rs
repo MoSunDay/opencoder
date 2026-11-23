@@ -61,7 +61,8 @@ impl PublishedInventory {
     /// has not already acknowledged — not even brain frames count, those are
     /// delivered outside index reports.
     pub(super) fn covers(&self, report: &PreparedReport) -> bool {
-        self.load.as_ref() == Some(&NodeLoad::of(&report.snapshot)) && self.records == report.records
+        self.load.as_ref() == Some(&NodeLoad::of(&report.snapshot))
+            && self.records == report.records
     }
 }
 

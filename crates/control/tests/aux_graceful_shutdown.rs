@@ -34,17 +34,15 @@ async fn graceful_shutdown_finishes_inflight_requests_before_stopping() {
             "done"
         }),
     );
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let addr = listener.local_addr().unwrap();
     let (fire_shutdown, shutdown) = tokio::sync::oneshot::channel::<()>();
     let server = tokio::spawn(async move {
-        opencoder_control::release::resources::serve_until(
-            listener,
-            app,
-            async {
-                let _ = shutdown.await;
-            },
-        )
+        opencoder_control::release::resources::serve_until(listener, app, async {
+            let _ = shutdown.await;
+        })
         .await
     });
 
@@ -55,10 +53,16 @@ async fn graceful_shutdown_finishes_inflight_requests_before_stopping() {
     drop(fire_shutdown);
 
     let body = reply.await.unwrap();
-    assert!(body.starts_with("HTTP/1.1 200"), "in-flight reply delivered: {body}");
+    assert!(
+        body.starts_with("HTTP/1.1 200"),
+        "in-flight reply delivered: {body}"
+    );
     assert!(body.ends_with("done"));
 
-    server.await.unwrap().expect("serve_until returns Ok after drain");
+    server
+        .await
+        .unwrap()
+        .expect("serve_until returns Ok after drain");
 
     // Once the listener is released, new connections are refused.
     assert!(

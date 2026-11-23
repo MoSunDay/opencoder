@@ -22,10 +22,16 @@ pub(super) fn routes() -> Router<AppState> {
             "/envs/:env/freshness/policies",
             get(policies).post(create_policy),
         )
-        .route("/envs/:env/freshness/policies/:id", patch(update_policy).get(policy))
+        .route(
+            "/envs/:env/freshness/policies/:id",
+            patch(update_policy).get(policy),
+        )
         .route("/envs/:env/freshness/runs", get(runs))
         .route("/envs/:env/freshness/runs/:id", get(run))
-        .route("/envs/:env/freshness/reviews", get(reviews).post(create_review))
+        .route(
+            "/envs/:env/freshness/reviews",
+            get(reviews).post(create_review),
+        )
 }
 
 async fn policies(

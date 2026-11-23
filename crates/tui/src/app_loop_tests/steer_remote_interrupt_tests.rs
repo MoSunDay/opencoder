@@ -66,7 +66,10 @@ async fn remote_running_steer_click_sends_interrupt() {
         running,
         "no StartTurn fired — running must stay true (nothing else on the channel)"
     );
-    assert!(cmd_rx.try_recv().is_err(), "channel must be drained after the Interrupt");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "channel must be drained after the Interrupt"
+    );
 }
 
 /// Local contract unchanged: the same click fires the LOCAL shared turn_cancel

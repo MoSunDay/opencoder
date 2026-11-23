@@ -29,10 +29,9 @@ impl Fixture {
             json!({"ontology":{"files_dir":files,"nfs":{"port":0}}}).to_string(),
         )
         .unwrap();
-        let state =
-            opencoder_control::new_state(work, root.path().join("data"), None)
-                .await
-                .unwrap();
+        let state = opencoder_control::new_state(work, root.path().join("data"), None)
+            .await
+            .unwrap();
         let app = opencoder_control::build_app(state.clone(), None, false);
         Self {
             _root: root,
@@ -71,12 +70,13 @@ impl Fixture {
     }
 
     async fn seeded_policy(&self) -> String {
-        let kind = self.ok(
-            "POST",
-            "/api/ontology/envs/debug/entity-types",
-            json!({"key":"dataset","name":"datasets"}),
-        )
-        .await["item"]["id"]
+        let kind = self
+            .ok(
+                "POST",
+                "/api/ontology/envs/debug/entity-types",
+                json!({"key":"dataset","name":"datasets"}),
+            )
+            .await["item"]["id"]
             .as_str()
             .unwrap()
             .to_string();
@@ -145,7 +145,10 @@ async fn triggering_a_run_settles_items_gracefully_without_nodes() {
     let settled = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             let run = f.ok("GET", &read, Value::Null).await["item"].clone();
-            if matches!(run["status"].as_str(), Some("succeeded" | "partial" | "failed")) {
+            if matches!(
+                run["status"].as_str(),
+                Some("succeeded" | "partial" | "failed")
+            ) {
                 break run;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -177,7 +180,11 @@ async fn triggering_with_an_unknown_policy_fails_before_creating_a_run() {
     let (status, body) = f.call("POST", &trigger, Value::Null).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{status} {body}");
     let runs = f
-        .ok("GET", "/api/ontology/envs/debug/freshness/runs", Value::Null)
+        .ok(
+            "GET",
+            "/api/ontology/envs/debug/freshness/runs",
+            Value::Null,
+        )
         .await;
     assert_eq!(runs["items"].as_array().unwrap().len(), 0);
 }

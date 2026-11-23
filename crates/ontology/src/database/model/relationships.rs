@@ -204,10 +204,9 @@ impl Store {
             }
             let relations = self.relationships(env, Some(source), false).await?;
             if source_entity.entity_type_id == DIRECTORY_TYPE_ID {
-                if relations
-                    .iter()
-                    .any(|item| item.relationship_type_id == kind && item.source_entity_id == source)
-                {
+                if relations.iter().any(|item| {
+                    item.relationship_type_id == kind && item.source_entity_id == source
+                }) {
                     return Err(AppError::Conflict(
                         "directory already has a parent directory".into(),
                     ));
@@ -220,10 +219,11 @@ impl Store {
                     .map(|item| (item.source_entity_id, item.target_entity_id))
                     .collect::<std::collections::HashMap<_, _>>();
                 crate::domain::validate_directory_move(source, target, &parents)?;
-            } else if relations
-                .iter()
-                .any(|item| item.relationship_type_id == kind && item.source_entity_id == source && item.target_entity_id == target)
-            {
+            } else if relations.iter().any(|item| {
+                item.relationship_type_id == kind
+                    && item.source_entity_id == source
+                    && item.target_entity_id == target
+            }) {
                 return Err(AppError::Conflict(
                     "entity already belongs to this directory".into(),
                 ));

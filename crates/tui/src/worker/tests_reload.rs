@@ -24,8 +24,13 @@ async fn reload_config_success_swaps_model() {
         },
         ..Config::default()
     };
-    let should_break =
-        process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx, 0).await;
+    let should_break = process_cmd(
+        UiCmd::ReloadConfig(Box::new(new_cfg)),
+        &mut sess,
+        &evt_tx,
+        0,
+    )
+    .await;
     assert!(!should_break, "ReloadConfig must not break the worker loop");
     assert_eq!(sess.model, "test-model", "model must be swapped on success");
 }
@@ -57,8 +62,13 @@ async fn reload_config_same_model_emits_no_model_switch() {
         },
         ..Config::default()
     };
-    let should_break =
-        process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx, 0).await;
+    let should_break = process_cmd(
+        UiCmd::ReloadConfig(Box::new(new_cfg)),
+        &mut sess,
+        &evt_tx,
+        0,
+    )
+    .await;
     assert!(!should_break, "ReloadConfig must not break the worker loop");
     assert_eq!(
         sess.config.model, prev_model,
@@ -100,8 +110,13 @@ async fn reload_config_bad_proxy_keeps_client_and_emits_error() {
         },
         ..Config::default()
     };
-    let should_break =
-        process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx, 0).await;
+    let should_break = process_cmd(
+        UiCmd::ReloadConfig(Box::new(new_cfg)),
+        &mut sess,
+        &evt_tx,
+        0,
+    )
+    .await;
     assert!(!should_break, "ReloadConfig must not break the worker loop");
     // model updated via keep-client fallback (consistent with on-disk config)
     assert_eq!(
@@ -159,8 +174,13 @@ async fn reload_config_missing_api_key_keeps_client_and_emits_error() {
         },
         ..Config::default()
     };
-    let should_break =
-        process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx, 0).await;
+    let should_break = process_cmd(
+        UiCmd::ReloadConfig(Box::new(new_cfg)),
+        &mut sess,
+        &evt_tx,
+        0,
+    )
+    .await;
     assert!(!should_break, "ReloadConfig must not break the worker loop");
     // model updated via keep-client fallback (consistent with on-disk config)
     assert_eq!(

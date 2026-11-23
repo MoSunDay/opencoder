@@ -18,6 +18,6 @@ pub mod domain;
 pub mod executor;
 pub mod ledger;
 
-pub use consumer::{PumpFailure, PumpRequest, PumpRun, run_pump};
+pub use consumer::{run_pump, PumpFailure, PumpRequest, PumpRun};
 pub use domain::{EventKind, EventRecord, ListenerSpec, SchedulerGate, TriggerAction};
 pub use ledger::{EventLedger, MemoryLedger};

@@ -72,22 +72,18 @@ fn malformed_sequence_and_duplicate_ids_fail_closed() {
 
     let mut collector = ReportCollector::default();
     collector.begin(1).unwrap();
-    assert!(
-        collector
-            .batch(1, (0..=INDEX_REPORT_BATCH_SIZE).map(record).collect())
-            .is_err()
-    );
+    assert!(collector
+        .batch(1, (0..=INDEX_REPORT_BATCH_SIZE).map(record).collect())
+        .is_err());
     assert!(collector.end(1).is_err());
 }
 
 #[test]
 fn delta_requires_commit_and_tracks_removals_without_pending_recovery() {
     let mut collector = ReportCollector::default();
-    assert!(
-        collector
-            .begin_sync(1, true, IndexReportMode::Delta, Some(1))
-            .is_err()
-    );
+    assert!(collector
+        .begin_sync(1, true, IndexReportMode::Delta, Some(1))
+        .is_err());
     collector
         .begin_sync(1, true, IndexReportMode::Full, None)
         .unwrap();
@@ -101,16 +97,12 @@ fn delta_requires_commit_and_tracks_removals_without_pending_recovery() {
         "assembly is not a commit"
     );
     collector.committed(10);
-    assert!(
-        collector
-            .begin_sync(2, false, IndexReportMode::Delta, Some(10))
-            .is_err()
-    );
-    assert!(
-        collector
-            .begin_sync(2, true, IndexReportMode::Delta, Some(11))
-            .is_err()
-    );
+    assert!(collector
+        .begin_sync(2, false, IndexReportMode::Delta, Some(10))
+        .is_err());
+    assert!(collector
+        .begin_sync(2, true, IndexReportMode::Delta, Some(11))
+        .is_err());
     collector
         .begin_sync(2, true, IndexReportMode::Delta, Some(10))
         .unwrap();

@@ -369,7 +369,8 @@ impl Hub {
             .reservations
             .iter()
             .filter(|(id, reservation)| {
-                !pending.contains(*id) && now.saturating_sub(reservation.at_ms) >= Self::ORPHAN_GRACE_MS
+                !pending.contains(*id)
+                    && now.saturating_sub(reservation.at_ms) >= Self::ORPHAN_GRACE_MS
             })
             .map(|(id, _)| id.clone())
             .collect();

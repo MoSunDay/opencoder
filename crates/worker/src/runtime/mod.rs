@@ -1,9 +1,9 @@
 mod admission;
 pub(crate) mod capacity;
 mod health;
+pub(crate) mod persistence;
 #[cfg(all(test, not(windows)))]
 mod persistence_tests;
-pub(crate) mod persistence;
 mod scheduling;
 pub use capacity::HostBinding;
 pub(crate) use scheduling::SchedulingState;

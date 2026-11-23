@@ -39,7 +39,10 @@ async fn builder_backstop_times_out_a_stalled_server() {
         .send()
         .await
         .unwrap_err();
-    assert!(error.is_timeout(), "backstop must surface as a timeout: {error}");
+    assert!(
+        error.is_timeout(),
+        "backstop must surface as a timeout: {error}"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(3),
         "backstop fired near the configured duration, not after a hang"
@@ -65,7 +68,10 @@ async fn per_request_timeout_overrides_the_builder_backstop() {
     })
     .await;
     let (error, elapsed) = outcome.expect("the per-request timeout must override the backstop");
-    assert!(error.is_timeout(), "override must surface as a timeout: {error}");
+    assert!(
+        error.is_timeout(),
+        "override must surface as a timeout: {error}"
+    );
     assert!(
         elapsed < Duration::from_secs(3),
         "request finished on its own budget, not on the 300s backstop"

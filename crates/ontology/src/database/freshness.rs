@@ -6,9 +6,8 @@ use super::{
 use crate::{
     domain::{
         recompute_stats, run_status_allows_next, settle_status, truncate_candidate,
-        validate_policy_fields,
-        Entity, FreshnessExecutor, FreshnessItemStatus, FreshnessPolicy, FreshnessRun,
-        FreshnessRunItem, FreshnessRunStatus, MAX_RUN_ITEMS,
+        validate_policy_fields, Entity, FreshnessExecutor, FreshnessItemStatus, FreshnessPolicy,
+        FreshnessRun, FreshnessRunItem, FreshnessRunStatus, MAX_RUN_ITEMS,
     },
     error::AppError,
 };
@@ -253,10 +252,14 @@ impl Store {
         }
         if matches!(
             run.status,
-            FreshnessRunStatus::Succeeded | FreshnessRunStatus::Partial | FreshnessRunStatus::Failed
+            FreshnessRunStatus::Succeeded
+                | FreshnessRunStatus::Partial
+                | FreshnessRunStatus::Failed
         ) && run.status != settle_status(&run)
         {
-            return Err(AppError::invalid("terminal run status must match its items"));
+            return Err(AppError::invalid(
+                "terminal run status must match its items",
+            ));
         }
         let scope = |run: &FreshnessRun| {
             let mut ids: Vec<Uuid> = run.items.iter().map(|item| item.entity_id).collect();

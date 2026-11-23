@@ -77,8 +77,8 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
     assert!(
         drain_pending,
@@ -112,8 +112,8 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
     assert!(!drain_pending, "TurnDone consumed the drain_pending arm");
     assert!(running, "the rekick turn must be running");

@@ -46,8 +46,8 @@ macro_rules! fold {
             &mut None,
             &mut None,
             &opencoder_session::QuestionHub::new(),
-
-        &mut crate::reset_rebuild::ResetRebuildState::default(),)
+            &mut crate::reset_rebuild::ResetRebuildState::default(),
+        )
         .await
     }};
 }

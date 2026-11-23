@@ -259,7 +259,11 @@ mod tests {
     #[test]
     fn web_defaults_on_and_takes_an_explicit_boolean() {
         assert!(Args::try_parse_from(["server"]).unwrap().web);
-        assert!(!Args::try_parse_from(["server", "--web", "false"]).unwrap().web);
+        assert!(
+            !Args::try_parse_from(["server", "--web", "false"])
+                .unwrap()
+                .web
+        );
         assert!(!Args::try_parse_from(["server", "--web=false"]).unwrap().web);
         assert!(Args::try_parse_from(["server", "--web", "disable"]).is_err());
     }

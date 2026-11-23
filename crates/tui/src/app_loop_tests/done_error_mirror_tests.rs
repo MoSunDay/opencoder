@@ -99,8 +99,8 @@ async fn fold_error_resyncs_mirrors_from_store() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     assert!(
@@ -166,8 +166,8 @@ async fn fold_done_clears_queue_items() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     assert!(!running, "running should flip false on Done");
@@ -228,8 +228,8 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     // A ChatBlock::User with the consumed prompt is pushed at consume time.
@@ -297,8 +297,8 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     assert_eq!(
@@ -348,8 +348,8 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     assert!(
@@ -408,8 +408,8 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     assert!(
@@ -448,8 +448,8 @@ async fn fold_queue_consumed_bare_control_command_echoes_nothing() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     let text = crate::chat::block_text(&chat);
@@ -525,8 +525,8 @@ async fn fold_queue_consumed_reanchors_ladder_below_echo() {
         &mut notepad,
         &mut None,
         &opencoder_session::QuestionHub::new(),
-
-    &mut crate::reset_rebuild::ResetRebuildState::default(),)
+        &mut crate::reset_rebuild::ResetRebuildState::default(),
+    )
     .await;
 
     // The echo lands AT the stale floor position (blocks were exactly

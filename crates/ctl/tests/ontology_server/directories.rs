@@ -79,7 +79,13 @@ async fn cli_directory_tree_mounts_new_and_existing_entities_and_rejects_invalid
         .await["item"]
         .clone();
     let contents = s
-        .ok(&["ontology", "relationships", "list", "--anchor", id(&existing)])
+        .ok(&[
+            "ontology",
+            "relationships",
+            "list",
+            "--anchor",
+            id(&existing),
+        ])
         .await;
     for directory in [&child, &parent] {
         assert!(contents["items"]

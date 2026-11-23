@@ -39,11 +39,7 @@ fn token_file_boot_enforces_bearer() {
     let file = tmp.path().join("server.token");
     // Trailing newline is the normal credential-file shape; the server trims.
     std::fs::write(&file, format!("{TOKEN}\n")).unwrap();
-    let (_server, base) = boot(
-        tmp.path(),
-        &["--token-file", file.to_str().unwrap()],
-        &[],
-    );
+    let (_server, base) = boot(tmp.path(), &["--token-file", file.to_str().unwrap()], &[]);
 
     let (status, _) = http(&base, "GET", "/api/health", "", "");
     assert_eq!(status, 401, "missing Bearer must be refused");
@@ -152,7 +148,10 @@ fn web_disabled_drops_spa_keeps_api() {
         "root must not leak the SPA shell, got: {body}"
     );
     let (status, body) = http_text(&base, "GET", "/static/app.js", "", &[], None);
-    assert_ne!(status, 200, "static assets must be unmounted: {status} {body}");
+    assert_ne!(
+        status, 200,
+        "static assets must be unmounted: {status} {body}"
+    );
     // API surface intact: unsigned readiness + a bearer-gated route.
     let (status, body) = http(&base, "GET", "/api/time", "", "");
     assert_eq!(status, 200, "{body}");

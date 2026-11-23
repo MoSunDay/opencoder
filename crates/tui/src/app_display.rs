@@ -231,7 +231,10 @@ pub(crate) fn compute_display<'a>(
                 let model = if chat.model.is_empty() {
                     config.model_id()
                 } else {
-                    chat.model.split_once('/').map(|(_, m)| m).unwrap_or(&chat.model)
+                    chat.model
+                        .split_once('/')
+                        .map(|(_, m)| m)
+                        .unwrap_or(&chat.model)
                 };
                 compose_top_title(workdir, model, config.reasoning_effort.as_deref())
             };

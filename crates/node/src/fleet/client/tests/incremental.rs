@@ -1,5 +1,5 @@
 use super::*;
-use std::sync::{Mutex, atomic::AtomicU64};
+use std::sync::{atomic::AtomicU64, Mutex};
 
 struct Changing {
     changes: watch::Sender<u64>,

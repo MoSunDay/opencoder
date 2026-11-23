@@ -139,9 +139,7 @@ async fn settle_run(state: &Arc<AppState>, env: &str, run: FreshnessRun) -> Resu
                         }
                         PollOutcome::Failed(outcome) => apply(item, outcome),
                     },
-                    Ok(None) => {
-                        apply(item, failed_outcome("execution record missing"))
-                    }
+                    Ok(None) => apply(item, failed_outcome("execution record missing")),
                     Err(error) => {
                         tracing::warn!(%error, execution, "Freshness fleet index read failed");
                         in_flight = true;
@@ -165,7 +163,9 @@ async fn settle_run(state: &Arc<AppState>, env: &str, run: FreshnessRun) -> Resu
         let Some(running) =
             orchestrator::save(state, env, &fresh, FreshnessRunStatus::Running).await
         else {
-            return Err(AppError::dependency("freshness run cannot advance to running"));
+            return Err(AppError::dependency(
+                "freshness run cannot advance to running",
+            ));
         };
         fresh = running;
     }

@@ -189,9 +189,7 @@ mod tests {
             Duration::from_millis(100),
             "an already-due retry never sleeps past the floor"
         );
-        let overdue = now
-            .checked_sub(Duration::from_secs(1))
-            .unwrap_or(now);
+        let overdue = now.checked_sub(Duration::from_secs(1)).unwrap_or(now);
         assert_eq!(backoff_wait(Some(overdue), now), Duration::from_millis(100));
         assert_eq!(
             backoff_wait(Some(now + Duration::from_secs(2)), now),

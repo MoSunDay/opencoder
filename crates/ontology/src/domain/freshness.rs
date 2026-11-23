@@ -8,7 +8,8 @@ pub const MAX_CONCURRENCY: u32 = 30;
 /// Upper bound for entities captured by one run snapshot.
 pub const MAX_RUN_ITEMS: usize = 500;
 /// Upper bound for a candidate body kept with a run item.
-pub const MAX_CANDIDATE_CHARS: usize = 8000;/// Freshness ladder for entity bodies; approval advances one rank at a time.
+pub const MAX_CANDIDATE_CHARS: usize = 8000;
+/// Freshness ladder for entity bodies; approval advances one rank at a time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", try_from = "String")]
 pub enum DataLevel {
@@ -23,7 +24,10 @@ impl DataLevel {
     pub const ALL: [DataLevel; 4] = [Self::Draft, Self::Stable, Self::Verified, Self::Confident];
 
     pub fn parse(level: &str) -> Option<DataLevel> {
-        Self::ALL.iter().copied().find(|item| item.as_str() == level)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|item| item.as_str() == level)
     }
 
     pub fn rank(self) -> u8 {
@@ -188,7 +192,9 @@ pub fn validate_policy_fields(
         return Err(AppError::invalid("executor target is required"));
     }
     if executor.kind == FreshnessExecutorKind::Agent && executor.prompt_template.trim().is_empty() {
-        return Err(AppError::invalid("agent executors require a prompt template"));
+        return Err(AppError::invalid(
+            "agent executors require a prompt template",
+        ));
     }
     if concurrency == 0 || concurrency > MAX_CONCURRENCY {
         return Err(AppError::invalid(format!(
@@ -283,7 +289,6 @@ mod tests {
         }
     }
 
-
     fn policy_error(name: &str, executor: &FreshnessExecutor, concurrency: u32) -> bool {
         validate_policy_fields(name, Uuid::new_v4(), executor, concurrency, None).is_err()
     }
@@ -298,7 +303,9 @@ mod tests {
         for bad in [0u32, MAX_CONCURRENCY + 1] {
             assert!(policy_error("p", &agent, bad));
         }
-        let valid = |concurrency| validate_policy_fields("p", Uuid::new_v4(), &agent, concurrency, Some("source"));
+        let valid = |concurrency| {
+            validate_policy_fields("p", Uuid::new_v4(), &agent, concurrency, Some("source"))
+        };
         assert!(valid(MAX_CONCURRENCY).is_ok());
         assert!(validate_policy_fields("p", Uuid::new_v4(), &agent, 1, Some(" ")).is_err());
     }
@@ -333,12 +340,18 @@ mod tests {
     #[test]
     fn settle_status_covers_the_full_matrix() {
         use FreshnessRunStatus::*;
-        assert_eq!(settle_status(&run_of(FreshnessItemStatus::Pending, 0)), Failed);
+        assert_eq!(
+            settle_status(&run_of(FreshnessItemStatus::Pending, 0)),
+            Failed
+        );
         assert_eq!(
             settle_status(&run_of(FreshnessItemStatus::Succeeded, 2)),
             Succeeded
         );
-        assert_eq!(settle_status(&run_of(FreshnessItemStatus::Failed, 2)), Failed);
+        assert_eq!(
+            settle_status(&run_of(FreshnessItemStatus::Failed, 2)),
+            Failed
+        );
         let mut mixed = run_of(FreshnessItemStatus::Succeeded, 2);
         mixed.items.push(item(FreshnessItemStatus::Failed));
         assert_eq!(settle_status(&mixed), Partial);
@@ -361,7 +374,10 @@ mod tests {
                 failed: 1
             }
         );
-        assert_eq!(recompute_stats(&run_of(FreshnessItemStatus::Pending, 0)).total, 0);
+        assert_eq!(
+            recompute_stats(&run_of(FreshnessItemStatus::Pending, 0)).total,
+            0
+        );
     }
 
     #[test]
@@ -387,6 +403,9 @@ mod tests {
     fn candidates_are_truncated_by_characters() {
         assert_eq!(truncate_candidate("abc"), "abc");
         let long: String = "ab".repeat(MAX_CANDIDATE_CHARS + 5);
-        assert_eq!(truncate_candidate(&long).chars().count(), MAX_CANDIDATE_CHARS);
+        assert_eq!(
+            truncate_candidate(&long).chars().count(),
+            MAX_CANDIDATE_CHARS
+        );
     }
 }

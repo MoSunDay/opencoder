@@ -44,9 +44,9 @@ fn begin_retry_delay(attempt: u32, elapsed_ms: u64, jitter_entropy: u64) -> Opti
 /// fcntl try, so this is the only shape a contended `BEGIN IMMEDIATE` takes.
 pub fn is_busy_conflict(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
-        cause
-            .downcast_ref::<turso::Error>()
-            .is_some_and(|error| matches!(error, turso::Error::Busy(_) | turso::Error::BusySnapshot(_)))
+        cause.downcast_ref::<turso::Error>().is_some_and(|error| {
+            matches!(error, turso::Error::Busy(_) | turso::Error::BusySnapshot(_))
+        })
     })
 }
 
@@ -117,9 +117,7 @@ pub async fn begin_with_retry(conn: &Connection, begin_sql: &str) -> Result<()> 
 /// conflicts with bounded backoff. `Transaction::new_unchecked` only wraps
 /// the connection once the BEGIN succeeded, so a failed begin leaves no
 /// transaction and every retry is side-effect free.
-pub async fn immediate_with_retry<'conn>(
-    conn: &'conn Connection,
-) -> Result<Transaction<'conn>> {
+pub async fn immediate_with_retry<'conn>(conn: &'conn Connection) -> Result<Transaction<'conn>> {
     let started = std::time::Instant::now();
     let mut attempt: u32 = 0;
     loop {

@@ -47,7 +47,10 @@ fn render_prompt_substitutes_known_and_blanks_unknown_fields() {
     );
     // Missing fields and unterminated placeholders degrade instead of leaking.
     let sparse = json!({"name": "alpha"});
-    assert_eq!(render_prompt("{{entity.name}}: {{entity.description}}", &sparse), "alpha: ");
+    assert_eq!(
+        render_prompt("{{entity.name}}: {{entity.description}}", &sparse),
+        "alpha: "
+    );
     assert_eq!(render_prompt("{{entity.name", &sparse), "{{entity.name");
     assert_eq!(render_prompt("no placeholders", &sparse), "no placeholders");
 }
@@ -164,8 +167,14 @@ fn merge_progress_moves_items_forward_only_by_entity_id() {
 
 #[test]
 fn poll_and_read_outcomes_map_statuses_and_bounds() {
-    assert!(matches!(poll_from_index(ExecutionStatus::Running), PollOutcome::Pending));
-    assert!(matches!(poll_from_index(ExecutionStatus::Done), PollOutcome::Done));
+    assert!(matches!(
+        poll_from_index(ExecutionStatus::Running),
+        PollOutcome::Pending
+    ));
+    assert!(matches!(
+        poll_from_index(ExecutionStatus::Done),
+        PollOutcome::Done
+    ));
     for failed in [ExecutionStatus::Error, ExecutionStatus::Cancelled] {
         assert!(matches!(
             poll_from_index(failed),
@@ -185,5 +194,8 @@ fn poll_and_read_outcomes_map_statuses_and_bounds() {
     assert!(error.unwrap().starts_with("result 404: "));
     // Bounds protect the stored record size.
     let long = "ab".repeat(MAX_ERROR_CHARS + 10);
-    assert_eq!(bound(&long, MAX_ERROR_CHARS).chars().count(), MAX_ERROR_CHARS);
+    assert_eq!(
+        bound(&long, MAX_ERROR_CHARS).chars().count(),
+        MAX_ERROR_CHARS
+    );
 }

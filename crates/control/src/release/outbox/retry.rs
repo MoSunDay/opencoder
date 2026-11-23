@@ -111,12 +111,31 @@ mod tests {
         retry.completed("b".into(), "host-1".into(), 503, now);
         assert_eq!(retry.next_due(), Some(now + Duration::from_secs(1)));
         // A later retry for "a" must not move the earliest due time.
-        retry.completed("a".into(), "host-1".into(), 503, now + Duration::from_secs(2));
+        retry.completed(
+            "a".into(),
+            "host-1".into(),
+            503,
+            now + Duration::from_secs(2),
+        );
         assert_eq!(retry.next_due(), Some(now + Duration::from_secs(1)));
-        retry.completed("a".into(), "host-1".into(), 202, now + Duration::from_secs(2));
+        retry.completed(
+            "a".into(),
+            "host-1".into(),
+            202,
+            now + Duration::from_secs(2),
+        );
         assert_eq!(retry.next_due(), Some(now + Duration::from_secs(1)));
-        retry.completed("b".into(), "host-1".into(), 202, now + Duration::from_secs(2));
-        assert_eq!(retry.next_due(), None, "accepted dispatches clear the due time");
+        retry.completed(
+            "b".into(),
+            "host-1".into(),
+            202,
+            now + Duration::from_secs(2),
+        );
+        assert_eq!(
+            retry.next_due(),
+            None,
+            "accepted dispatches clear the due time"
+        );
     }
 
     #[test]

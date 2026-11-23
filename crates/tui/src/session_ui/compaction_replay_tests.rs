@@ -61,7 +61,10 @@ fn replay_renders_summary_block_at_transcript_head() {
     // Summary head first, continued turn below it. The user echo is
     // followed by a blank-line marker block, so assert on the last
     // non-marker content block.
-    assert!(matches!(chat.blocks.first(), Some(ChatBlock::Compaction { .. })));
+    assert!(matches!(
+        chat.blocks.first(),
+        Some(ChatBlock::Compaction { .. })
+    ));
     let last_content = chat
         .blocks
         .iter()

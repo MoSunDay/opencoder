@@ -34,7 +34,11 @@ fn layout(root: &Path) -> DirectoryLayout {
 }
 
 fn mode_of(path: &Path) -> u32 {
-    std::fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    std::fs::symlink_metadata(path)
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777
 }
 
 fn owner_of(path: &Path) -> (u32, u32) {
@@ -82,9 +86,14 @@ fn read_write_tier_sets_the_tmpdir_pair_and_a_private_tmp() {
     let username = identity::username_for(&id).unwrap();
     let guard = AccountGuard::capture(username.clone());
 
-    let environment = identity::materialize(&layout, ExecutionKind::Operator, &id, &config(OperatorAccessMode::ReadWrite))
-        .unwrap()
-        .unwrap();
+    let environment = identity::materialize(
+        &layout,
+        ExecutionKind::Operator,
+        &id,
+        &config(OperatorAccessMode::ReadWrite),
+    )
+    .unwrap()
+    .unwrap();
     let run_as_identity = environment.run_as.unwrap();
     let pairs = identity::env_pairs(&environment.home, OperatorAccessMode::ReadWrite);
     let tmpdir = pairs
@@ -115,24 +124,43 @@ fn read_only_tier_freezes_trees_and_rejects_operator_writes() {
     let username = identity::username_for(&id).unwrap();
     let guard = AccountGuard::capture(username.clone());
 
-    let environment = identity::materialize(&layout, ExecutionKind::Operator, &id, &config(OperatorAccessMode::ReadOnly))
-        .unwrap()
-        .unwrap();
+    let environment = identity::materialize(
+        &layout,
+        ExecutionKind::Operator,
+        &id,
+        &config(OperatorAccessMode::ReadOnly),
+    )
+    .unwrap()
+    .unwrap();
     assert!(environment.run_as.is_some());
     for directory in [&environment.home, &environment.workspace] {
-        assert_eq!(owner_of(directory), (0, 0), "{} stays node-owned", directory.display());
+        assert_eq!(
+            owner_of(directory),
+            (0, 0),
+            "{} stays node-owned",
+            directory.display()
+        );
         assert_eq!(mode_of(directory), 0o555);
     }
     let snapshot = environment.home.join(".opencoder/config.json");
     assert_eq!(mode_of(&snapshot), 0o440);
     // Traversal and reads work; writes inside the frozen trees fail.
-    assert!(run_as(&username, &format!("ls {:?}", environment.workspace)));
+    assert!(run_as(
+        &username,
+        &format!("ls {:?}", environment.workspace)
+    ));
     assert!(
-        !run_as(&username, &format!("touch {:?}", environment.workspace.join("x"))),
+        !run_as(
+            &username,
+            &format!("touch {:?}", environment.workspace.join("x"))
+        ),
         "read-only operator must not write its workspace"
     );
     assert!(
-        !run_as(&username, &format!("touch {:?}", environment.home.join("x"))),
+        !run_as(
+            &username,
+            &format!("touch {:?}", environment.home.join("x"))
+        ),
         "read-only operator must not write its home"
     );
     drop(guard);
@@ -153,14 +181,23 @@ fn read_only_tier_joins_the_shared_group_and_grants_read_roots() {
     // snapshot and the operator skill pool.
     let resources = layout.resources_dir(ExecutionKind::Operator, &id).unwrap();
     std::fs::create_dir_all(resources.join("pack")).unwrap();
-    std::fs::write(resources.join("pack").join("how.md"), "shared read-only body").unwrap();
+    std::fs::write(
+        resources.join("pack").join("how.md"),
+        "shared read-only body",
+    )
+    .unwrap();
     let skills = layout.root().join("operator-config").join("skills");
     std::fs::create_dir_all(&skills).unwrap();
     std::fs::write(skills.join("runbook.md"), "operator runbook").unwrap();
 
-    let environment = identity::materialize(&layout, ExecutionKind::Operator, &id, &config(OperatorAccessMode::ReadOnly))
-        .unwrap()
-        .unwrap();
+    let environment = identity::materialize(
+        &layout,
+        ExecutionKind::Operator,
+        &id,
+        &config(OperatorAccessMode::ReadOnly),
+    )
+    .unwrap()
+    .unwrap();
     let gid = identity::ensure_read_only_group_gid().unwrap();
     let run_as_identity = environment.run_as.unwrap();
     assert!(
@@ -172,11 +209,24 @@ fn read_only_tier_joins_the_shared_group_and_grants_read_roots() {
         resources.join("pack").join("how.md"),
         skills.join("runbook.md"),
     ] {
-        assert_eq!(owner_of(&granted).1, gid, "{} granted to the group", granted.display());
-        assert_eq!(mode_of(&granted) & 0o040, 0o040, "{} group-readable", granted.display());
+        assert_eq!(
+            owner_of(&granted).1,
+            gid,
+            "{} granted to the group",
+            granted.display()
+        );
+        assert_eq!(
+            mode_of(&granted) & 0o040,
+            0o040,
+            "{} group-readable",
+            granted.display()
+        );
     }
     assert!(
-        run_as(&username, &format!("cat {:?}", resources.join("pack").join("how.md"))),
+        run_as(
+            &username,
+            &format!("cat {:?}", resources.join("pack").join("how.md"))
+        ),
         "the operator can read granted roots"
     );
     drop(guard);
@@ -195,13 +245,22 @@ fn read_write_tier_grants_no_shared_group_membership() {
 
     let resources = layout.resources_dir(ExecutionKind::Operator, &id).unwrap();
     std::fs::create_dir_all(&resources).unwrap();
-    let environment = identity::materialize(&layout, ExecutionKind::Operator, &id, &config(OperatorAccessMode::ReadWrite))
-        .unwrap()
-        .unwrap();
+    let environment = identity::materialize(
+        &layout,
+        ExecutionKind::Operator,
+        &id,
+        &config(OperatorAccessMode::ReadWrite),
+    )
+    .unwrap()
+    .unwrap();
     let run_as_identity = environment.run_as.unwrap();
     let gid = identity::ensure_read_only_group_gid().unwrap();
     assert!(!run_as_identity.groups.contains(&gid));
-    assert_ne!(owner_of(&resources).1, gid, "read-write roots keep their group");
+    assert_ne!(
+        owner_of(&resources).1,
+        gid,
+        "read-write roots keep their group"
+    );
     drop(guard);
 }
 
@@ -217,12 +276,21 @@ fn sweep_releases_directory_less_and_terminal_but_keeps_fresh_accounts() {
     let orphan = format!("operator-{}", ulid::Ulid::new());
     let orphan_name = identity::username_for(&orphan).unwrap();
     let guard = AccountGuard::capture(orphan_name.clone());
-    let environment = identity::materialize(&layout, ExecutionKind::Operator, &orphan, &config(OperatorAccessMode::ReadWrite))
-        .unwrap()
-        .unwrap();
+    let environment = identity::materialize(
+        &layout,
+        ExecutionKind::Operator,
+        &orphan,
+        &config(OperatorAccessMode::ReadWrite),
+    )
+    .unwrap()
+    .unwrap();
     let _ = environment;
-    std::fs::remove_dir_all(layout.execution_dir(ExecutionKind::Operator, &orphan).unwrap())
-        .unwrap();
+    std::fs::remove_dir_all(
+        layout
+            .execution_dir(ExecutionKind::Operator, &orphan)
+            .unwrap(),
+    )
+    .unwrap();
     identity::sweep_stale(&layout);
     assert!(!account_exists(&orphan_name), "orphaned account swept");
 
@@ -230,11 +298,18 @@ fn sweep_releases_directory_less_and_terminal_but_keeps_fresh_accounts() {
     let terminal = format!("operator-{}", ulid::Ulid::new());
     let terminal_name = identity::username_for(&terminal).unwrap();
     let guard_terminal = AccountGuard::capture(terminal_name.clone());
-    identity::materialize(&layout, ExecutionKind::Operator, &terminal, &config(OperatorAccessMode::ReadWrite))
-        .unwrap()
-        .unwrap();
+    identity::materialize(
+        &layout,
+        ExecutionKind::Operator,
+        &terminal,
+        &config(OperatorAccessMode::ReadWrite),
+    )
+    .unwrap()
+    .unwrap();
     std::fs::write(
-        layout.record_path(ExecutionKind::Operator, &terminal).unwrap(),
+        layout
+            .record_path(ExecutionKind::Operator, &terminal)
+            .unwrap(),
         r#"{"assignment":{"index":{"status":"done"}}}"#,
     )
     .unwrap();
@@ -245,9 +320,14 @@ fn sweep_releases_directory_less_and_terminal_but_keeps_fresh_accounts() {
     let fresh = format!("operator-{}", ulid::Ulid::new());
     let fresh_name = identity::username_for(&fresh).unwrap();
     let guard_fresh = AccountGuard::capture(fresh_name.clone());
-    identity::materialize(&layout, ExecutionKind::Operator, &fresh, &config(OperatorAccessMode::ReadWrite))
-        .unwrap()
-        .unwrap();
+    identity::materialize(
+        &layout,
+        ExecutionKind::Operator,
+        &fresh,
+        &config(OperatorAccessMode::ReadWrite),
+    )
+    .unwrap()
+    .unwrap();
     identity::sweep_stale(&layout);
     assert!(account_exists(&fresh_name), "in-flight account kept");
     // Idempotent: a second sweep changes nothing.

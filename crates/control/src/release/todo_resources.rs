@@ -19,13 +19,9 @@ pub async fn serve(workdir: PathBuf, data: PathBuf, port: u16, token: String) ->
     if config.project.todo_storage.nfs.enabled {
         nfs::start(&config, &workdir, &data).await?;
     }
-    crate::release::resources::serve_until(
-        listener,
-        build_app(workdir, data, token),
-        async {
-            let _ = crate::bootstrap::shutdown_signal().await;
-        },
-    )
+    crate::release::resources::serve_until(listener, build_app(workdir, data, token), async {
+        let _ = crate::bootstrap::shutdown_signal().await;
+    })
     .await
 }
 

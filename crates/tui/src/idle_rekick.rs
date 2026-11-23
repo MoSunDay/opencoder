@@ -390,10 +390,7 @@ pub(crate) async fn on_admit_done(
         pending_images,
         session_id,
     );
-    if !admit_ok
-        || running
-        || done_turn != *turn_gen
-        || !stranded_pending(store, session_id).await
+    if !admit_ok || running || done_turn != *turn_gen || !stranded_pending(store, session_id).await
     {
         return AdmitDoneOutcome {
             flash,

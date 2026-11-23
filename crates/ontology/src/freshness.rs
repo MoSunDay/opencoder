@@ -14,8 +14,12 @@ pub enum FreshnessOperation {
     /// Active environments able to schedule freshness work.
     Environments,
     PolicyGet(Uuid),
-    EntitiesOfType { type_id: Uuid },
-    RunCreate { policy_id: Uuid },
+    EntitiesOfType {
+        type_id: Uuid,
+    },
+    RunCreate {
+        policy_id: Uuid,
+    },
     RunGet(Uuid),
     RunSave {
         run: FreshnessRun,

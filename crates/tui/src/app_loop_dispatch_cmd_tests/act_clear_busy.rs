@@ -79,13 +79,18 @@ async fn manual_confirm_during_subagent_drain_fires_now() {
     )
     .await;
 
-    assert!(clear_confirm.is_none(), "the manual confirm consumes the arm");
+    assert!(
+        clear_confirm.is_none(),
+        "the manual confirm consumes the arm"
+    );
     assert!(
         cancelled,
         "live subagents count as busy: the drain is hard-cancelled"
     );
     assert!(
-        chat.blocks.iter().any(|b| matches!(b, ChatBlock::Marker(lines)
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
             if lines.iter().any(|l| l.to_string().contains("[interrupted] stopping")))),
         "the interruption must be visible; blocks: {:?}",
         chat.blocks

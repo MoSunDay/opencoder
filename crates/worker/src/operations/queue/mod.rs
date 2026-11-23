@@ -351,7 +351,10 @@ pub(crate) fn start_scheduler(worker: &Worker) {
             };
             delay = dispatch_delay(
                 started,
-                worker.inner.pending_runs.load(std::sync::atomic::Ordering::SeqCst),
+                worker
+                    .inner
+                    .pending_runs
+                    .load(std::sync::atomic::Ordering::SeqCst),
             );
         }
     });
@@ -393,11 +396,7 @@ mod tests {
         let stop = tokio_util::sync::CancellationToken::new();
         let woken = tokio::time::timeout(
             std::time::Duration::from_millis(500),
-            await_cycle(
-                &stop,
-                std::time::Duration::from_secs(60),
-                &mut changes,
-            ),
+            await_cycle(&stop, std::time::Duration::from_secs(60), &mut changes),
         )
         .await
         .expect("the queued notify must wake the scheduler at once");

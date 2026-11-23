@@ -1,10 +1,10 @@
 //! Transcript handoff: collapse the live transcript into a single synthetic
 //! directive message.
 //!
-//! Used by the autopilot ACT phase: the read-only exploration pass (plan
-//! agent + review skill) produces a brief, then the transcript is reset so
-//! the act agent starts from only that brief — not the full exploration
-//! chatter (subagent noise, clarifying Q&A).
+//! Used by a read-only exploration pass (plan agent + review skill): it
+//! produces a brief, then the transcript is reset so the act agent starts
+//! from only that brief — not the full exploration chatter (subagent noise,
+//! clarifying Q&A).
 //!
 //! This mirrors compaction's in-memory mutation pattern ([`crate::compaction`]):
 //! `session.messages` is replaced directly, the durable store (append-only) is

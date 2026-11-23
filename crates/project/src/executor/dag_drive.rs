@@ -117,7 +117,6 @@ async fn create_host_session(
             title: Some(format!("项目DAG / {}", todo.title)),
             agent: Some("act".into()),
             model: Some(config.model.clone()),
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,

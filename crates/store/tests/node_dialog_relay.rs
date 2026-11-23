@@ -19,7 +19,6 @@ fn meta(id: &str, task_type: Option<&str>) -> SessionMeta {
         title: Some(id.into()),
         agent: Some("act".into()),
         model: None,
-        autopilot_mode: None,
         workdir_hash: None,
         created_at: 1,
         updated_at: 1,

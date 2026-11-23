@@ -17,7 +17,6 @@ fn meta(id: &str, created_at: i64, updated_at: i64) -> SessionMeta {
         title: Some(id.into()),
         agent: Some("act".into()),
         model: None,
-        autopilot_mode: None,
         workdir_hash: None,
         created_at,
         updated_at,
@@ -127,7 +126,7 @@ async fn existing_schema_reopens_with_activity_pagination_and_unchanged_history(
         .unwrap();
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
-        39
+        40
     );
 }
 

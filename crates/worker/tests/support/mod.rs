@@ -54,7 +54,6 @@ pub fn disable_operator_identity(root: &std::path::Path) {
 pub async fn worker(root: &std::path::Path, client: Arc<dyn ChatStream>) -> Worker {
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     disable_operator_identity(root);
     Worker::open(
         WorkerOptions {
@@ -86,7 +85,6 @@ pub async fn dag_worker(
 pub fn drain_options(root: &std::path::Path) -> WorkerOptions {
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     WorkerOptions {
         name: "drain-node".into(),
         workdir,
@@ -148,7 +146,6 @@ impl ChatStream for InterruptClient {
 pub async fn worker_with_client(root: &std::path::Path, client: Arc<dyn ChatStream>) -> Worker {
     let workdir = root.join("work");
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     disable_operator_identity(root);
     Worker::open(
         WorkerOptions {

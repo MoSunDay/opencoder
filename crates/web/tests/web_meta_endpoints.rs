@@ -1,6 +1,6 @@
 //! Integration tests for the metadata endpoints: requirement annotation,
-//! session autopilot override, sanitized model catalog, skill catalog, the
-//! `?workdir=` session filter, and `Last-Event-ID` SSE replay.
+//! sanitized model catalog, skill catalog, the `?workdir=` session filter,
+//! and `Last-Event-ID` SSE replay.
 
 use std::sync::Arc;
 
@@ -20,11 +20,6 @@ async fn app() -> Ctx {
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
     let mock = MockChatClient::new().with_default(vec![LlmEvent::Completed {
         text: "t".into(),
         tool_calls: vec![],
@@ -176,56 +171,6 @@ async fn annotation_set_clear_and_missing_session() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
-// ── autopilot ────────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn autopilot_set_invalid_and_clear() {
-    let ctx = app().await;
-    let id = create_session(&ctx).await;
-
-    for mode in ["ap", "review", "off"] {
-        let (status, body) = post_json(
-            &ctx,
-            &format!("/api/sessions/{id}/autopilot"),
-            json!({"mode": mode}).to_string(),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["mode"].as_str(), Some(mode), "echo for {mode}");
-    }
-
-    let (status, body) = post_json(
-        &ctx,
-        &format!("/api/sessions/{id}/autopilot"),
-        json!({"mode": "turbo"}).to_string(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "invalid mode: {body}");
-    assert!(
-        body["error"].as_str().unwrap().contains("off"),
-        "error must list valid values: {body}"
-    );
-
-    // Clear: mode null → override cleared, readback null.
-    let (status, _) = post_json(
-        &ctx,
-        &format!("/api/sessions/{id}/autopilot"),
-        json!({"mode": "ap"}).to_string(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, body) = post_json(
-        &ctx,
-        &format!("/api/sessions/{id}/autopilot"),
-        json!({"mode": null}).to_string(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body["mode"].is_null());
-    let (_, s) = get_json(&ctx, &format!("/api/sessions/{id}")).await;
-    assert!(s["meta"]["autopilot_mode"].is_null(), "clear must persist");
 }
 
 // ── models ───────────────────────────────────────────────────────────────

@@ -233,17 +233,6 @@ pub fn node_opts(
     }
 }
 
-/// Keep developer-wide autopilot settings out of scripted worker rounds
-/// (same isolation as `crates/node/tests`).
-pub fn pin_autopilot_off(workdir: &std::path::Path) {
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
-}
-
 /// One SSE unit of the fleet API as the browser sees it.
 pub async fn spawn_node(
     base: &str,

@@ -48,7 +48,6 @@ pub async fn fork_session_in(
         title: meta.title.as_deref().map(|t| format!("{t} (fork)")),
         agent: meta.agent.clone(),
         model: meta.model.clone(),
-        autopilot_mode: meta.autopilot_mode.clone(),
         workdir_hash: workdir
             .map(opencoder_core::workdir_hash)
             .or(meta.workdir_hash.clone()),
@@ -89,15 +88,13 @@ mod tests {
         m
     }
 
-    async fn seed(store: &dyn Store, id: &str, task_type: Option<&str>, ap_mode: Option<&str>) {
+    async fn seed(store: &dyn Store, id: &str, task_type: Option<&str>) {
         store
             .create_session(&SessionMeta {
                 id: id.into(),
                 title: Some("parent".into()),
                 agent: Some("act".into()),
                 model: Some("m".into()),
-
-                autopilot_mode: ap_mode.map(String::from),
                 workdir_hash: None,
                 created_at: 0,
                 updated_at: 0,
@@ -126,9 +123,8 @@ mod tests {
     #[tokio::test]
     async fn fork_copies_messages_and_resets_meta() {
         let store = TursoStore::open_memory().await.unwrap();
-        // Seed with a non-default task_type (fork resets it) and a pinned
-        // session autopilot mode (fork inherits it, model-style).
-        seed(&store, "parent", Some("subagent"), Some("review")).await;
+        // Seed with a non-default task_type (fork resets it).
+        seed(&store, "parent", Some("subagent")).await;
 
         let child_id = fork_session(&store, "parent").await.unwrap();
         assert_ne!(child_id, "parent", "fork must create a new id");
@@ -152,11 +148,6 @@ mod tests {
             "fork resets summary_images"
         );
         assert_eq!(child.model.as_deref(), Some("m"), "model carried over");
-        assert_eq!(
-            child.autopilot_mode.as_deref(),
-            Some("review"),
-            "fork inherits the pinned session autopilot mode (model-style), unlike task_type"
-        );
     }
 
     #[tokio::test]

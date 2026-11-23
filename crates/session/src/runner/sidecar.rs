@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
-use opencoder_core::{resolve_agent, ApMode, Config, Message, Role, ToolArc};
+use opencoder_core::{resolve_agent, Config, Message, Role, ToolArc};
 use opencoder_llm::ChatStream;
 
 use super::event::Sink;
@@ -92,7 +92,7 @@ pub fn snapshot_messages(parent: &SessionState) -> Vec<Message> {
 }
 
 /// Shared constructor for both entry points: a store-less child with the
-/// sidecar agent, autopilot forced off, and the snapshot as its transcript.
+/// sidecar agent and the snapshot as its transcript.
 async fn build_sidecar_conv(
     id: String,
     config: Config,
@@ -103,10 +103,6 @@ async fn build_sidecar_conv(
     let agent =
         resolve_agent("sidecar").ok_or_else(|| anyhow!("'sidecar' agent not registered"))?;
     let mut child = SessionState::new(id.clone(), agent, config, client, working_dir);
-    // Autopilot is top-level orchestration only (same rationale as the task
-    // subagent): a sidecar answers and stops, never drives its own
-    // PLAN->ACT->VERIFY loop after the scoped question.
-    child.config.autopilot.mode = ApMode::Off;
     // The transcript is a borrowed snapshot of the parent, not this loop's own
     // durable history: never compact. Without this, a parent near its compaction
     // threshold would make every sidecar question first pay a compaction LLM

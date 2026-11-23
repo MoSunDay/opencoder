@@ -50,7 +50,6 @@ async fn seed_session(root: &std::path::Path, id: &str, prompt: &str, seed: Seed
             title: Some(prompt.into()),
             agent: Some("act".into()),
             model: None,
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 1,
             updated_at: 1,

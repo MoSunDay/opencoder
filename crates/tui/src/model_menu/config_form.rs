@@ -97,7 +97,6 @@ pub enum ConfigField {
     ContextSize,
     Threshold,
     Fps,
-    ApMaxIter,
     EnableTmuxSession,
     Subagent,
     Save,
@@ -105,14 +104,13 @@ pub enum ConfigField {
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 11] = [
+    const ORDER: [ConfigField; 10] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
         ConfigField::ContextSize,
         ConfigField::Threshold,
         ConfigField::Fps,
-        ConfigField::ApMaxIter,
         ConfigField::EnableTmuxSession,
         ConfigField::Subagent,
         ConfigField::Save,
@@ -148,9 +146,6 @@ pub struct ConfigForm {
     pub fps_input: String,
     /// Char-index edit cursor within `fps_input`.
     pub fps_cursor: usize,
-    pub ap_max_iter_input: String,
-    /// Char-index edit cursor within `ap_max_iter_input`.
-    pub ap_max_iter_cursor: usize,
     pub enable_tmux_session: bool,
     pub subagent: bool,
     pub focus: ConfigField,
@@ -165,7 +160,6 @@ impl ConfigForm {
         let threshold_input = config.compaction.context_threshold.to_string();
         let context_size_input = config.context_limit().to_string();
         let fps_input = config.tui_fps().to_string();
-        let ap_max_iter_input = config.autopilot.max_iterations.to_string();
         ConfigForm {
             reasoning: Reasoning::from_config(config.reasoning_effort.as_deref()),
             interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
@@ -177,8 +171,6 @@ impl ConfigForm {
             context_size_cursor: context_size_input.chars().count(),
             fps_input: fps_input.clone(),
             fps_cursor: fps_input.chars().count(),
-            ap_max_iter_input: ap_max_iter_input.clone(),
-            ap_max_iter_cursor: ap_max_iter_input.chars().count(),
             enable_tmux_session: config.enable_tmux_session.unwrap_or(false),
             subagent: config.subagent_enabled(),
             focus: ConfigField::Reasoning,
@@ -200,7 +192,6 @@ impl ConfigForm {
             }
             ConfigField::Threshold => op(&mut self.threshold_input, &mut self.threshold_cursor),
             ConfigField::Fps => op(&mut self.fps_input, &mut self.fps_cursor),
-            ConfigField::ApMaxIter => op(&mut self.ap_max_iter_input, &mut self.ap_max_iter_cursor),
             _ => {}
         }
     }
@@ -223,12 +214,6 @@ impl ConfigForm {
             .parse::<u32>()
             .unwrap_or(10)
             .clamp(1, 30);
-        let ap_max_iter = self
-            .ap_max_iter_input
-            .trim()
-            .parse::<u32>()
-            .unwrap_or(10)
-            .max(1);
         ConfigPatch {
             reasoning_effort: self.reasoning.to_option(),
             interleaved_thinking: Some(self.interleaved_thinking),
@@ -236,7 +221,6 @@ impl ConfigForm {
             context_threshold: threshold,
             context_limit: context_size,
             fps,
-            ap_max_iter,
             enable_tmux_session: Some(self.enable_tmux_session),
             subagent: self.subagent,
         }
@@ -252,9 +236,6 @@ impl ConfigForm {
         if self.fps_input.trim().is_empty() {
             return Err("fps cannot be empty".into());
         }
-        if self.ap_max_iter_input.trim().is_empty() {
-            return Err("ap_max_iter cannot be empty".into());
-        }
         let threshold = parse_field(&self.threshold_input)
             .ok_or_else(|| "context_threshold is not a number".to_string())?;
         let context_size = parse_field(&self.context_size_input)
@@ -264,11 +245,6 @@ impl ConfigForm {
             .parse::<u32>()
             .ok()
             .ok_or_else(|| "fps is not a number".to_string())?;
-        self.ap_max_iter_input
-            .trim()
-            .parse::<u32>()
-            .ok()
-            .ok_or_else(|| "ap_max_iter is not a number".to_string())?;
         if threshold < 1000 {
             return Err("context_threshold must be >= 1000".into());
         }
@@ -298,7 +274,7 @@ impl ConfigForm {
 pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<ModelMenu>) {
     form.error = None;
     // Ctrl+L / Ctrl+U: clear the focused numeric field (max_tokens /
-    // context_size / threshold / fps / ap_max_iter). No-op on toggle and
+    // context_size / threshold / fps). No-op on toggle and
     // button fields. Both the 'l'/'u' char form and the raw control-char
     // forms (\u{c} FF, \u{15} NAK, per kitty keyboard protocol) match.
     if k.modifiers.contains(KeyModifiers::CONTROL) {
@@ -330,8 +306,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold
-            | ConfigField::Fps
-            | ConfigField::ApMaxIter => form.edit_numeric(|_, cur| *cur = cur.saturating_sub(1)),
+            | ConfigField::Fps => form.edit_numeric(|_, cur| *cur = cur.saturating_sub(1)),
             _ => {}
         },
         KeyCode::Right => match form.focus {
@@ -344,8 +319,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold
-            | ConfigField::Fps
-            | ConfigField::ApMaxIter => {
+            | ConfigField::Fps => {
                 form.edit_numeric(|text, cur| *cur = (*cur + 1).min(text.chars().count()));
             }
             _ => {}
@@ -382,7 +356,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             | ConfigField::ContextSize
             | ConfigField::Threshold
             | ConfigField::Fps
-            | ConfigField::ApMaxIter
                 if c.is_ascii_digit() =>
             {
                 form.edit_numeric(|text, cur| {

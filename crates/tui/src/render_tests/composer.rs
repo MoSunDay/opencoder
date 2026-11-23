@@ -259,7 +259,6 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
         None,
         None,
         None,
-        None, // agent_menu
         &mut hits,
         &mut viewport,
         false,
@@ -271,7 +270,6 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
         0,
         0,
         true,
-        opencoder_core::ApMode::default(),
         "act",
         false,
         None,

@@ -29,8 +29,6 @@ pub async fn create_session(
             title: Some(format!("todos workflow {}", state.workflow_id)),
             agent: Some("workflow".into()),
             model: Some(config.model.clone()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,
@@ -126,8 +124,7 @@ async fn decide<T: serde::de::DeserializeOwned>(
     state: &WorkflowState,
     prompt: String,
 ) -> Result<T> {
-    let mut config = runtime.config.clone();
-    config.autopilot.mode = opencoder_core::ApMode::Off;
+    let config = runtime.config.clone();
     let mut session = opencoder_session::resume(
         runtime.store.clone(),
         &state.parent_session_id,

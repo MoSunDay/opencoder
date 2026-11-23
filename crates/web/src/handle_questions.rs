@@ -2,12 +2,11 @@
 //!
 //! Kept out of `handle.rs` purely to respect the file-size budget: the drain
 //! loop itself stays lean while these small helpers own the "web parity with
-//! the TUI" semantics (abandon-on-disconnect, `/ap` + `/requirement` drain
+//! the TUI" semantics (abandon-on-disconnect, `/requirement` drain
 //! commands, post-drain title generation).
 
 use std::sync::Arc;
 
-use opencoder_core::ApMode;
 use opencoder_session::SessionState;
 use opencoder_store::{SessionPatch, Store};
 use tracing::warn;
@@ -26,7 +25,7 @@ pub(crate) fn abandon_all_waiting(h: &SessionHandle) {
 }
 
 /// Get-or-create the [`SessionHandle`] for `session_id` under the map lock.
-/// Shared by the question/annotation/autopilot endpoints, which must reach a
+/// Shared by the question/annotation endpoints, which must reach a
 /// stable handle even before the first prompt spawns a drain.
 pub(crate) async fn get_or_create_handle(
     handles: &HandleMap,
@@ -36,25 +35,6 @@ pub(crate) async fn get_or_create_handle(
     map.entry(session_id.to_string())
         .or_insert_with(SessionHandle::new)
         .clone()
-}
-
-/// Body of [`DrainCmd::SetApMode`] (TUI `/ap` parity, worker.rs ApModeSwitch):
-/// set the session-scoped override AND the live config mode, then persist the
-/// canonical spelling so a resume restores it. Best-effort persist — a store
-/// hiccup must not kill the drain.
-pub(crate) async fn apply_set_ap_mode(session: &mut SessionState, mode: ApMode) {
-    session.ap_mode_override = Some(mode);
-    session.config.autopilot.mode = mode;
-    if let Some(store) = &session.store {
-        let patch = SessionPatch {
-            autopilot_mode: Some(mode.as_str().to_string()),
-            updated_at: Some(opencoder_core::message::now_ms()),
-            ..Default::default()
-        };
-        if let Err(e) = store.update_session(&session.id, &patch).await {
-            warn!(session_id = %session.id, error = %e, "persist autopilot mode failed");
-        }
-    }
 }
 
 /// Body of [`DrainCmd::SetAnnotation`] (TUI `/requirement` parity,

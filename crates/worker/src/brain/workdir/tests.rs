@@ -1,6 +1,6 @@
 use super::*;
 use crate::{lifecycle::Lifecycle, operations::queue::QueuedRun, WorkerOptions};
-use opencoder_core::{config::ApMode, fleet::*, Config};
+use opencoder_core::{fleet::*, Config};
 use serde_json::json;
 
 #[tokio::test]
@@ -26,7 +26,6 @@ async fn managed_session_keeps_admitted_settings_in_an_isolated_workspace() {
         ..Config::default()
     };
     config.provider.base_url = "http://127.0.0.1:12345/v1".into();
-    config.autopilot.mode = ApMode::Review;
     let id = "managed-agent";
     let record = Record {
         assignment: Assignment {
@@ -76,7 +75,6 @@ async fn managed_session_keeps_admitted_settings_in_an_isolated_workspace() {
         let config = config.expect("managed sessions must retain admitted settings");
         assert_eq!(config.model, "fixture/admitted-model");
         assert_eq!(config.provider.base_url, "http://127.0.0.1:12345/v1");
-        assert_eq!(config.autopilot.mode, ApMode::Review);
         assert_ne!(state.workdir, worker.inner.state.workdir);
         assert!(state.workdir.is_dir());
         assert_eq!(std::fs::read_dir(&state.workdir).unwrap().count(), 0);

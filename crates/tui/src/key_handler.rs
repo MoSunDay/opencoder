@@ -97,7 +97,7 @@ pub(crate) fn handle_key(
     running: bool,
     // Whether any subagents are live (`chat.subagents_running > 0`). The
     // parent turn may already report idle while its subagent batch is still
-    // draining (autopilot stage gap, cancel grace, reabsorb tail), so Tab's
+    // draining (cancel grace, reabsorb tail), so Tab's
     // queue-vs-submit arm must treat live subagents as busy too.
     subagents_running: bool,
     agent: &str,
@@ -510,7 +510,7 @@ pub(crate) fn handle_key(
         KeyCode::Esc => {
             // Double-Esc within the window while busy => hard-abort. Busy is
             // `running || subagents_running`: during the subagent drain
-            // window (autopilot stage gap, cancel grace, reabsorb tail) the
+            // window (cancel grace, reabsorb tail) the
             // parent already reports idle — gating on `running` alone made
             // the abort a silent no-op exactly when the user wanted to stop.
             let now = Instant::now();

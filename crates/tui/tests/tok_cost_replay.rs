@@ -24,7 +24,6 @@ async fn make_session(store: &Arc<dyn Store>, id: &str) {
         title: Some(format!("title-{id}")),
         agent: Some("act".into()),
         model: Some("m".into()),
-        autopilot_mode: None,
         workdir_hash: None,
         created_at: 1000,
         updated_at: 1000,

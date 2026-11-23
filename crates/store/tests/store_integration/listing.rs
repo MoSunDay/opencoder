@@ -178,7 +178,6 @@ async fn list_sessions_carries_skill_body_for_picker_tag() {
             id: "skilled".into(),
             agent: Some("plan".into()),
 
-            autopilot_mode: None,
             skill: Some("## do-and-done\nfull body".into()),
             ..Default::default()
         })
@@ -189,7 +188,6 @@ async fn list_sessions_carries_skill_body_for_picker_tag() {
             id: "plain".into(),
             agent: Some("act".into()),
 
-            autopilot_mode: None,
             ..Default::default()
         })
         .await

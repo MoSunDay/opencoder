@@ -30,8 +30,8 @@ async fn reload_config_success_swaps_model() {
     assert_eq!(sess.model, "test-model", "model must be swapped on success");
 }
 
-/// `/ap` toggles and pure max_iterations saves land here with an unchanged
-/// model: no `[model]` marker and no store rewrite may fire for them.
+/// Config saves that keep the model unchanged land here: no `[model]`
+/// marker and no store rewrite may fire for them.
 #[tokio::test]
 async fn reload_config_same_model_emits_no_model_switch() {
     use opencoder_core::{resolve_agent, Config, ProviderConfig};
@@ -48,8 +48,8 @@ async fn reload_config_same_model_emits_no_model_switch() {
     );
     let prev_model = sess.config.model.clone();
 
-    // Same model, resolvable endpoint (api_key present): the only thing
-    // that changes is e.g. autopilot.mode — no ModelSwitch may fire.
+    // Same model, resolvable endpoint (api_key present): nothing but the
+    // model identity changes — no ModelSwitch may fire.
     let new_cfg = Config {
         provider: ProviderConfig {
             api_key: Some("k".into()),

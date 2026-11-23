@@ -21,14 +21,6 @@ use tower::ServiceExt;
 async fn app(mock: MockChatClient) -> (axum::Router, Arc<dyn Store>) {
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
-    // Pin autopilot off via the project domain file: a developer's global
-    // ap.json must not append a review turn to this scripted sequence.
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
     let state = Arc::new(opencoder_web::AppState {
         config_home: None,
         brain: opencoder_web::api_brain::mock_brain(store.clone()),

@@ -22,19 +22,13 @@ struct Ctx {
     mock: Arc<MockChatClient>,
 }
 
-/// App with a scripted mock and developer-wide autopilot disabled
-/// so extra model rounds cannot consume the two scripted replies. The
-/// project config pins model + small_model so the title request's model is
-/// assertable.
+/// App with a scripted mock so extra model rounds cannot consume the two
+/// scripted replies. The project config pins model + small_model so the
+/// title request's model is assertable.
 async fn app(mock: MockChatClient) -> Ctx {
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
     std::fs::write(
         workdir.join(".opencoder").join("config.json"),
         json!({"model": "a/big", "small_model": "a/mini"}).to_string(),

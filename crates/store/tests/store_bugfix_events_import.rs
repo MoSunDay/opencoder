@@ -31,7 +31,6 @@ fn make_session_meta(id: &str) -> SessionMeta {
         title: Some(format!("title-{id}")),
         agent: None,
         model: None,
-        autopilot_mode: None,
         workdir_hash: None,
         created_at: now,
         updated_at: now,

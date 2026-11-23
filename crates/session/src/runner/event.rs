@@ -5,7 +5,6 @@ use serde_json::Value;
 
 use opencoder_core::Message;
 
-use crate::autopilot::state::ApPhase;
 use opencoder_store::EventKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,12 +145,6 @@ pub enum SessionEvent {
         #[serde(default)]
         text: String,
     },
-    /// Autopilot loop progress: which phase is starting and the
-    /// 0-based iteration index. Emitted by `autopilot::drive`.
-    AutoPilot {
-        phase: ApPhase,
-        iteration: u32,
-    },
     Done,
     Error(String),
 }
@@ -184,7 +177,6 @@ impl SessionEvent {
             SessionEvent::SidecarStart { .. } => "sidecar_start",
             SessionEvent::SidecarChild { .. } => "sidecar_child",
             SessionEvent::SidecarTurn { .. } => "sidecar_turn",
-            SessionEvent::AutoPilot { .. } => "autopilot",
             SessionEvent::TranscriptReset(_) => "transcript_reset",
             SessionEvent::QueueConsumed { .. } => "queue_consumed",
             SessionEvent::SteerConsumed { .. } => "steer_consumed",
@@ -266,9 +258,6 @@ impl SessionEvent {
                 "id": id, "ok": ok, "answer": answer, "elapsed_ms": elapsed_ms,
                 "total_tokens": total_tokens, "rounds": rounds
             }),
-            SessionEvent::AutoPilot { phase, iteration } => {
-                serde_json::json!({ "phase": phase, "iteration": iteration })
-            }
             SessionEvent::TranscriptReset(_) => serde_json::json!({}),
             SessionEvent::QueueConsumed { seq, text } => {
                 serde_json::json!({ "seq": seq, "text": text })
@@ -393,11 +382,6 @@ impl SessionEvent {
                     .unwrap_or("")
                     .to_string(),
             },
-            "autopilot" => {
-                let iteration = data.get("iteration")?.as_u64()?.min(u32::MAX as u64) as u32;
-                let phase = serde_json::from_value(data.get("phase")?.clone()).ok()?;
-                SessionEvent::AutoPilot { phase, iteration }
-            }
             "done" => SessionEvent::Done,
             "error" => SessionEvent::Error(data.get("error")?.as_str()?.to_string()),
             _ => return None,
@@ -428,7 +412,6 @@ impl SessionEvent {
             | SessionEvent::SidecarStart { .. }
             | SessionEvent::SidecarChild { .. }
             | SessionEvent::SidecarTurn { .. }
-            | SessionEvent::AutoPilot { .. }
             | SessionEvent::QueueConsumed { .. }
             | SessionEvent::SteerConsumed { .. } => EventKind::Step,
             SessionEvent::TranscriptReset(_) => EventKind::Compaction,

@@ -515,7 +515,6 @@ pub(crate) async fn dispatch_command(
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
-    ap_menu: &mut Option<crate::ap_menu::ApMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     _keymap_menu: &mut Option<KeymapMenu>,
     agent_name: &str,
@@ -554,7 +553,6 @@ pub(crate) async fn dispatch_command(
                 mcp_menu,
                 cli_menu,
                 skill_toggle_menu,
-                ap_menu,
                 cache_salt_menu,
                 agent_name,
                 config,
@@ -711,11 +709,6 @@ pub(crate) use app_loop_cli::handle_cli_outcome;
 mod app_loop_skill;
 
 pub(crate) use app_loop_skill::handle_skill_outcome;
-
-#[path = "app_loop_ap.rs"]
-mod app_loop_ap;
-
-pub(crate) use app_loop_ap::handle_ap_outcome;
 
 #[path = "app_loop_paste.rs"]
 mod app_loop_paste;

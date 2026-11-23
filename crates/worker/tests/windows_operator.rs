@@ -79,12 +79,7 @@ async fn windows_operator_rejects_other_workloads_executes_and_recovers_isolated
         .unwrap()
         .join("opencoder-agent.exe");
     opencoder_session::process::configure_supervisor_binary(executable).unwrap();
-    std::fs::create_dir_all(root.path().join("work/.opencoder")).unwrap();
-    std::fs::write(
-        root.path().join("work/.opencoder/ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
+    std::fs::create_dir_all(root.path().join("work")).unwrap();
     let call = || {
         vec![LlmEvent::Completed {
             text: String::new(),

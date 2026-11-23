@@ -27,7 +27,6 @@ pub(crate) fn render_popups(
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
     cli_menu: Option<&crate::cli_menu::CliMenu>,
     skill_toggle_menu: Option<&crate::skill_menu::SkillMenu>,
-    ap_menu: Option<&crate::ap_menu::ApMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     keymap_menu: Option<&KeymapMenu>,
     question_menu: Option<&crate::question_menu::QuestionMenu>,
@@ -52,9 +51,6 @@ pub(crate) fn render_popups(
     }
     if let Some(sk) = skill_toggle_menu {
         crate::skill_menu::render_skill_popup(f, area, composer_top, sk);
-    }
-    if let Some(am) = ap_menu {
-        crate::ap_menu::render_ap_popup(f, area, composer_top, am);
     }
     if let Some(cs) = cache_salt_menu {
         crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);

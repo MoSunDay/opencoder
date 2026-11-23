@@ -60,7 +60,6 @@ async fn check(scoped: bool, missing: bool) {
         json!({"agent":{"agents_dir":live},"model":"mock/test"}).to_string(),
     )
     .unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     let client = Arc::new(
         MockChatClient::new()
             .push_script(vec![LlmEvent::Completed {
@@ -84,7 +83,6 @@ async fn check(scoped: bool, missing: bool) {
             id: "probe-session".into(),
             agent: Some("probe".into()),
             title: Some("resource snapshot".into()),
-            autopilot_mode: Some("off".into()),
             ..Default::default()
         })
         .await

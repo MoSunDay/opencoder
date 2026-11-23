@@ -40,8 +40,7 @@ impl Drop for ReadyWhenReleased {
 
 fn options(root: &std::path::Path) -> WorkerOptions {
     let workdir = root.join("work");
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    std::fs::create_dir_all(&workdir).unwrap();
     WorkerOptions {
         name: "task-tracker-test".into(),
         workdir,

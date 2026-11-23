@@ -733,7 +733,7 @@ async fn clear_context_seeds_last_say_never_directive() {
         );
         assert!(
             !seed_body.contains("Execute it now"),
-            "the autopilot handoff directive must never be synthesized here: {seed_body}"
+            "the handoff execution directive must never be synthesized here: {seed_body}"
         );
         assert!(
             !evs.iter()

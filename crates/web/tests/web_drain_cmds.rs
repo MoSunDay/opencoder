@@ -1,7 +1,7 @@
-//! Integration tests for the web-parity drain commands (`SetApMode`,
-//! `SetAnnotation`). Commands are queued via the public endpoints while a
-//! drain is held mid-turn (mock `push_hang`), then applied when the run loop
-//! returns — asserting the durable store state afterwards.
+//! Integration tests for the web-parity drain commands (`SetAnnotation`).
+//! Commands are queued via the public endpoints while a drain is held
+//! mid-turn (mock `push_hang`), then applied when the run loop returns —
+//! asserting the durable store state afterwards.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,12 +22,6 @@ struct Ctx {
 async fn hanging_app(notify: Arc<Notify>) -> Ctx {
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
     let mock = MockChatClient::new()
         .push_hang(notify)
         .with_default(vec![LlmEvent::Completed {
@@ -108,7 +102,7 @@ async fn post_json(ctx: &Ctx, uri: &str, body: String) -> StatusCode {
     resp.status()
 }
 
-/// Wait until the session row reports the given autopilot/requirement state.
+/// Wait until the session row reports the given requirement state.
 async fn wait_meta<F: Fn(&opencoder_store::SessionMeta) -> bool>(
     store: &Arc<dyn Store>,
     id: &str,
@@ -126,10 +120,10 @@ async fn wait_meta<F: Fn(&opencoder_store::SessionMeta) -> bool>(
     panic!("session meta never reached {what}");
 }
 
-/// Endpoint-posted autopilot/annotation updates are forwarded as drain
-/// commands while a drain runs, and applied (persisted) once the turn ends.
+/// Endpoint-posted annotation updates are forwarded as drain commands while
+/// a drain runs, and applied (persisted) once the turn ends.
 #[tokio::test]
-async fn autopilot_and_annotation_cmds_apply_to_live_drain() {
+async fn annotation_cmd_applies_to_live_drain() {
     let notify = Arc::new(Notify::new());
     let ctx = hanging_app(notify.clone()).await;
     let id = create_session(&ctx).await;
@@ -140,15 +134,6 @@ async fn autopilot_and_annotation_cmds_apply_to_live_drain() {
     assert_eq!(
         post_json(
             &ctx,
-            &format!("/api/sessions/{id}/autopilot"),
-            json!({"mode": "ap"}).to_string()
-        )
-        .await,
-        StatusCode::OK
-    );
-    assert_eq!(
-        post_json(
-            &ctx,
             &format!("/api/sessions/{id}/annotation"),
             json!({"text": "prefer sqlite"}).to_string()
         )
@@ -156,16 +141,9 @@ async fn autopilot_and_annotation_cmds_apply_to_live_drain() {
         StatusCode::OK
     );
 
-    // Release the hang: the run returns, `process_drain_cmds` applies both
-    // commands, each persisting its column.
+    // Release the hang: the run returns, `process_drain_cmds` applies the
+    // command, persisting its column.
     notify.notify_one();
-    wait_meta(
-        &ctx.store,
-        &id,
-        |m| m.autopilot_mode.as_deref() == Some("ap"),
-        "autopilot_mode = ap",
-    )
-    .await;
     wait_meta(
         &ctx.store,
         &id,

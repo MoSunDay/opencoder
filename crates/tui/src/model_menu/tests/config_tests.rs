@@ -6,7 +6,6 @@ use crate::model_menu::patch::ConfigPatch;
 use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
 use crossterm::event::{KeyCode, KeyModifiers};
-use opencoder_core::ApMode;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
@@ -22,7 +21,6 @@ fn config_patch_serializes_all_fields() {
         context_threshold: 80_000,
         context_limit: 128_000,
         fps: 25,
-        ap_max_iter: 15,
         enable_tmux_session: None,
         subagent: true,
     };
@@ -37,7 +35,6 @@ fn config_patch_serializes_all_fields() {
         serde_json::json!(80_000)
     );
     assert_eq!(v["context_limit"], serde_json::json!(128_000));
-    assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
     assert!(
         v.get("theme").is_none(),
         "theme key no longer exists — the palette is fixed"
@@ -57,7 +54,6 @@ fn config_patch_omits_max_tokens_when_none() {
         context_threshold: 1000,
         context_limit: 128_000,
         fps: 10,
-        ap_max_iter: 10,
         enable_tmux_session: None,
         subagent: false,
     };
@@ -79,7 +75,6 @@ fn config_patch_off_reasoning_emits_empty_string_not_null() {
         context_threshold: 1000,
         context_limit: 128_000,
         fps: 10,
-        ap_max_iter: 10,
         enable_tmux_session: None,
         subagent: false,
     };
@@ -117,7 +112,6 @@ fn enter_chains_through_config_fields_to_save() {
         ConfigField::ContextSize,
         ConfigField::Threshold,
         ConfigField::Fps,
-        ConfigField::ApMaxIter,
         ConfigField::EnableTmuxSession,
         ConfigField::Subagent,
         ConfigField::Save,
@@ -264,17 +258,6 @@ fn config_form_paste_into_threshold() {
 }
 
 #[test]
-fn config_form_inits_autopilot_from_config() {
-    let mut c = cfg();
-    c.autopilot.mode = ApMode::Ap;
-    c.autopilot.max_iterations = 7;
-    let f = ConfigForm::new(&c);
-    assert_eq!(f.ap_max_iter_input, "7");
-    let p = f.build_patch();
-    assert_eq!(p.ap_max_iter, 7);
-}
-
-#[test]
 fn config_form_inits_context_size_from_config() {
     let f = ConfigForm::new(&cfg());
     assert_eq!(
@@ -370,30 +353,6 @@ fn validate_rejects_fps_u32_overflow() {
         assert!(
             err.contains("fps") && err.contains("not a number"),
             "expected fps overflow error for fps={bad}, got: {err}"
-        );
-    }
-}
-
-#[test]
-fn validate_rejects_ap_max_iter_u32_overflow() {
-    for bad in ["4294967296", "99999999999999"] {
-        let mut f = ConfigForm::new(&cfg());
-        f.ap_max_iter_input = bad.into();
-        // validate is private, so trigger it via handle_key on Save.
-        f.focus = ConfigField::Save;
-        let (outcome, next) = crate::model_menu::config_form::handle_key(f, enter());
-        assert!(
-            matches!(outcome, ModelOutcome::Idle),
-            "save should be blocked for ap_max_iter={bad}"
-        );
-        let f = match next {
-            Some(ModelMenu::Config(f)) => f,
-            _ => panic!("expected Config menu to stay open for ap_max_iter={bad}"),
-        };
-        let err = f.error.as_deref().unwrap_or_default();
-        assert!(
-            err.contains("ap_max_iter") && err.contains("not a number"),
-            "expected ap_max_iter overflow error for ap_max_iter={bad}, got: {err}"
         );
     }
 }
@@ -615,7 +574,7 @@ fn ctrl_l_clears_focused_field_and_raw_control_char_forms_match() {
         "raw Ctrl+L must clear context_size"
     );
 
-    // Ctrl+L char form clears fps; raw \u{15} clears ap_max_iter.
+    // Ctrl+L char form clears fps.
     {
         let f = match slot.as_mut().unwrap() {
             ModelMenu::Config(f) => f,
@@ -630,27 +589,6 @@ fn ctrl_l_clears_focused_field_and_raw_control_char_forms_match() {
         _ => unreachable!(),
     };
     assert!(f.fps_input.is_empty(), "Ctrl+L must clear fps");
-
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Config(f) => f,
-            _ => unreachable!(),
-        };
-        f.focus = ConfigField::ApMaxIter;
-        f.ap_max_iter_input = "9".into();
-    }
-    handle_model_key(
-        &mut slot,
-        crossterm::event::KeyEvent::new(KeyCode::Char('\u{15}'), KeyModifiers::CONTROL),
-    );
-    let f = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f,
-        _ => unreachable!(),
-    };
-    assert!(
-        f.ap_max_iter_input.is_empty(),
-        "raw \u{15} (Ctrl+U) must clear ap_max_iter"
-    );
 }
 
 #[test]

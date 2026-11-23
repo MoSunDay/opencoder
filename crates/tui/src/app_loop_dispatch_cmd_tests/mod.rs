@@ -97,7 +97,6 @@ async fn dispatch_popup(
         &mut mcp_menu,
         &mut None,
         &mut None,
-        &mut None,
         &mut cache_salt_menu,
         &mut None,
         agent,

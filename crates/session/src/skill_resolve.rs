@@ -37,8 +37,8 @@ pub const SKILL_TRIGGER: &str = "The active skill is now in effect. Begin execut
 /// `skill_persist::persist_skill`: best-effort — store errors are swallowed
 /// because the in-memory write keeps the in-flight turn correct — and a
 /// `None -> Some` transition only writes `skill`, never `clear_skill` (skill
-/// *clearing* is owned by the explicit clear paths — control_cmd, autopilot
-/// handoff, the TUI `$` menu — plus the run-end auto-clear in
+/// *clearing* is owned by the explicit clear paths — control_cmd, handoff,
+/// the TUI `$` menu — plus the run-end auto-clear in
 /// `skill_lifecycle::clear_on_run_end`; this function never clears).
 ///
 /// This is what makes consumption-time activation survive resume: the queue /

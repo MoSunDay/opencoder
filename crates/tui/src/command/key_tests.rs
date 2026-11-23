@@ -101,9 +101,7 @@ fn enter_on_clear_context_dispatches() {
 fn parse_local_commands() {
     assert_eq!(parse("/ps"), Some(SlashAction::Ps));
     assert_eq!(parse("/stop"), Some(SlashAction::Stop));
-    assert_eq!(parse("/ap"), Some(SlashAction::Ap));
     assert_eq!(parse(" /ps "), Some(SlashAction::Ps));
-    assert_eq!(parse(" /ap "), Some(SlashAction::Ap));
 }
 
 #[test]
@@ -138,21 +136,7 @@ fn enter_on_stop_dispatches() {
 }
 
 #[test]
-fn enter_on_ap_dispatches() {
-    let mut menu = Some(CommandMenu::new());
-    for c in "ap".chars() {
-        if let Some(m) = menu.as_mut() {
-            m.on_char(c);
-        }
-    }
-    // An exact name hit stays highlighted even when descriptions change.
-    let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
-    match outcome {
-        CommandOutcome::Dispatch(SlashAction::Ap) => {}
-        other => panic!("expected Dispatch(Ap), got {:?}", other),
-    }
-    assert!(menu.is_none(), "popup closed after Enter-dispatch");
-
+fn enter_on_config_dispatches_after_move_down() {
     let mut menu = Some(CommandMenu::new());
     for c in "co".chars() {
         if let Some(m) = menu.as_mut() {

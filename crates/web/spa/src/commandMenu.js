@@ -1,6 +1,6 @@
 // commandMenu.js — pure slash-command + `$skill` + `@agent` catalog for the
 // composer.
-// TUI parity source: the tui slash commands (act/plan/compact/model/ap/
+// TUI parity source: the tui slash commands (act/plan/compact/model/
 // annotation/fork/clear_context) and the runner's TEXT control heads
 // (crates/session/src/control_cmd.rs): while a drain runs, /act //plan
 // travel as ordinary prompts and the runner applies them at the boundary.
@@ -17,7 +17,6 @@ import { fuzzyScore } from './fuzzy.js';
 ///   text       → send as a normal prompt (runner control heads)
 ///   compact    → POST /compact
 ///   model      → open the model picker modal
-///   ap         → open the autopilot picker (off/ap/review/清除)
 ///   annotation → open the annotation input modal
 ///   fork       → POST /fork, select the new session
 export const COMMAND_CATALOG = [
@@ -32,7 +31,6 @@ export const COMMAND_CATALOG = [
   { cmd: '/clear_context', desc: '清空上下文', kind: 'text' },
   { cmd: '/compact', desc: '压缩上下文', kind: 'compact' },
   { cmd: '/model', desc: '切换模型', kind: 'model' },
-  { cmd: '/ap', desc: 'autopilot 模式 (off/ap/review)', kind: 'ap' },
   { cmd: '/annotation', desc: '设置批注', kind: 'annotation' },
   { cmd: '/fork', desc: 'fork 当前会话', kind: 'fork' },
 ];

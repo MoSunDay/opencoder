@@ -112,7 +112,6 @@ async fn legacy_tables_without_version_row_converge_on_open() {
     for (table, column) in [
         ("sessions", "task_type"),
         ("sessions", "handoff_seq"),
-        ("sessions", "autopilot_mode"),
         ("sessions", "harness_runtime"),
         ("session_events", "sse_kind"),
         ("session_inputs", "images_json"),

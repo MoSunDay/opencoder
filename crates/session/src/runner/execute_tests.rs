@@ -278,8 +278,6 @@ async fn force_cancel_marks_task_and_prunes_registries() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -301,8 +299,6 @@ async fn force_cancel_marks_task_and_prunes_registries() {
             title: None,
             agent: Some("explore".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -382,8 +378,6 @@ async fn force_cancel_marks_task_and_prunes_registries() {
             title: None,
             agent: Some("explore".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

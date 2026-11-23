@@ -61,7 +61,6 @@ describe('chat top bar', () => {
     expect(screen.queryByRole('button', { name: '知识追加' })).toBeNull();
     expect(screen.queryByRole('button', { name: '批注' })).toBeNull();
     expect(screen.queryByRole('button', { name: '压缩' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'autopilot' })).toBeNull();
   });
 
   it('act/plan is clickable before any session exists and stages the mode onto creation', async () => {

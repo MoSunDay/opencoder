@@ -69,7 +69,6 @@ fn session(id: &str) -> SessionMeta {
         title: None,
         agent: None,
         model: None,
-        autopilot_mode: None,
         workdir_hash: None,
         created_at: 1,
         updated_at: 1,

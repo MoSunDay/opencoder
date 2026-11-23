@@ -219,7 +219,7 @@ async fn switch_restores_model_and_agent_both_ways() {
 async fn switched_model_used_by_next_turn() {
     // The switch path runs `Config::load(workdir)`, which merges the REAL
     // `~/.opencoder` global config (see `Config::load_with_home`).
-    // Developer-wide settings there (e.g. autopilot) could fire extra
+    // Developer-wide settings there could fire extra
     // model rounds this test's `call_count == 1` assertion must not see.
     // HOME points at a fresh tempdir for the whole body (including awaits)
     // to keep that out.

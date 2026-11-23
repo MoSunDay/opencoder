@@ -29,11 +29,10 @@ def fixture(root, mib, extra_config=None):
     agents = root / 'agents'
     for path in [data, work / '.opencoder', home / '.opencoder', agents]:
         path.mkdir(parents=True, exist_ok=True)
-    config = {'agent': {'agents_dir': str(agents)}, 'autopilot': {'mode': 'off'}}
+    config = {'agent': {'agents_dir': str(agents)}}
     config.update(extra_config or {})
     for path in [work, home]:
         (path / '.opencoder/config.json').write_text(json.dumps(config))
-        (path / '.opencoder/ap.json').write_text('{"mode":"off"}')
     (data / 'node-id').write_text('node-memory-fixture')
     payload = 'x' * (128 * 1024)
     count = mib * 4

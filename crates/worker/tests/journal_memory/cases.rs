@@ -266,8 +266,7 @@ async fn concurrent_read_retries_save_and_observes_forget_without_holding_journa
     let _guard = opencoder_core::config::scoped_config_home(home.path().into());
     let root = tempfile::tempdir().unwrap();
     let workdir = root.path().join("work");
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(workdir.join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
+    std::fs::create_dir_all(&workdir).unwrap();
     let worker = crate::Worker::open(
         crate::WorkerOptions {
             name: "memory-test".into(),

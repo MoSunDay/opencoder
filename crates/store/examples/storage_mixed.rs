@@ -23,7 +23,6 @@ fn meta(id: String) -> SessionMeta {
         title: Some("Benchmark session".into()),
         agent: None,
         model: None,
-        autopilot_mode: None,
         workdir_hash: None,
         created_at: 0,
         updated_at: 0,

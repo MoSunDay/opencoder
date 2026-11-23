@@ -37,8 +37,6 @@ async fn make_session(id: &str) -> SessionState {
             title: Some("test".into()),
             agent: Some("act".into()),
             model: Some("m/g".into()),
-
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

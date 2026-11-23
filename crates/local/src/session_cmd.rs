@@ -433,8 +433,6 @@ mod tests {
                 title: Some("t".into()),
                 agent: Some("act".into()),
                 model: Some("m".into()),
-
-                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: 0,
                 updated_at: 0,
@@ -500,8 +498,6 @@ mod tests {
                 id: "redact-s1".into(),
                 agent: Some("act".into()),
                 model: Some("m".into()),
-
-                autopilot_mode: None,
                 handoff_seq: Some(1),
                 // Exactly what control_cmd::ClearContext persists as the
                 // resume-reconstruction boundary marker.

@@ -27,7 +27,6 @@ pub async fn dispatch(
                 title: title.map(str::to_string),
                 agent: agent.map(str::to_string),
                 model: model.map(str::to_string),
-                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: now_ms,
                 updated_at: now_ms,

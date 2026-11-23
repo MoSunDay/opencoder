@@ -584,9 +584,9 @@ async fn apply_drain_cmd(
                 Err(e) => broadcast(SessionEvent::Error(format!("compact: {e:#}"))),
             }
         }
-        // Execution handoff (web parity of the autopilot ACT phase): collapse
-        // the transcript to the newest assistant brief as a single synthetic
-        // directive, persist the boundary, and switch back to `act`.
+        // Execution handoff: collapse the transcript to the newest assistant
+        // brief as a single synthetic directive, persist the boundary, and
+        // switch back to `act`.
         DrainCmd::Handoff { extra } => {
             if handoff::reset_to_directive(session, &extra).is_some() {
                 if let Some(store) = &session.store {
@@ -642,13 +642,10 @@ async fn apply_drain_cmd(
             }
             Err(e) => broadcast(SessionEvent::Error(format!("reload config: {e:#}"))),
         },
-        // The three web-parity commands mutate bookkeeping state only (no
+        // The web-parity commands mutate bookkeeping state only (no
         // transcript-visible effect), so unlike Compact/Handoff they neither
         // broadcast nor persist events. Bodies live in `handle_questions.rs`
         // to keep this file within its size budget.
-        DrainCmd::SetApMode(mode) => {
-            crate::handle_questions::apply_set_ap_mode(session, mode).await;
-        }
         DrainCmd::SetAnnotation(text) => {
             crate::handle_questions::apply_set_annotation(session, text).await;
         }

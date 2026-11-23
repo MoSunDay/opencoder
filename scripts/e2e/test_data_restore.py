@@ -97,7 +97,6 @@ def main() -> None:
         root = pathlib.Path(raw)
         work = root / "work"
         (work / ".opencoder").mkdir(parents=True)
-        (work / ".opencoder/ap.json").write_text('{"mode":"off"}\n', encoding="utf-8")
         token = secrets.token_urlsafe(32)
         token_file = root / "token"
         token_file.write_text(token + "\n", encoding="utf-8")

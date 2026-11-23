@@ -22,12 +22,6 @@ async fn hanging_fixture(
 ) -> (axum::Router, Arc<TursoStore>, Arc<MockChatClient>) {
     let store = Arc::new(TursoStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
     let mock =
         Arc::new(
             MockChatClient::new()

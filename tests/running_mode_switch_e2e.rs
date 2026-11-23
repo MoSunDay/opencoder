@@ -150,7 +150,6 @@ fn real_server_rejects_running_mode_switches_until_idle() {
         format!("{{{}}}", stub.config_fragment()),
     )
     .unwrap();
-    std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     let (_server, base) = spawn_server(tmp.path());
 
     let (status, created) = http(&base, "POST", "/api/sessions", TOKEN, r#"{"agent":"act"}"#);
@@ -262,7 +261,6 @@ fn real_server_clear_context_executes_preserved_plan_in_act() {
         format!("{{{}}}", stub.config_fragment()),
     )
     .unwrap();
-    std::fs::write(tmp.path().join(".opencoder/ap.json"), r#"{"mode":"off"}"#).unwrap();
     let (server, base) = spawn_server(tmp.path());
 
     // Durable node placement precedes the first prompt. A title avoids the

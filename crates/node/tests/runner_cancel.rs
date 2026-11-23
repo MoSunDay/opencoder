@@ -33,21 +33,11 @@ fn test_opts(base: &str, workdir: &std::path::Path, data: &std::path::Path) -> N
     }
 }
 
-fn pin_autopilot_off(workdir: &std::path::Path) {
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn heartbeat_cancellation_reports_cancelled() {
     let (base, st) = support::spawn_stub().await;
     let workdir = tempfile::tempdir().unwrap().keep();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(&workdir);
 
     let task = st.push_task("hang forever until cancelled");
     // Hang BEFORE cancellation exists: claim is the arming barrier.

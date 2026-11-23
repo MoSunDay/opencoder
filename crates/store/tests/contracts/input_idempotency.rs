@@ -10,7 +10,6 @@ async fn create_session(store: &TursoStore, id: &str) {
             title: Some("idempotency".into()),
             agent: Some("act".into()),
             model: None,
-            autopilot_mode: None,
             workdir_hash: None,
             created_at: 1,
             updated_at: 1,

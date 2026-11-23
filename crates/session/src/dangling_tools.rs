@@ -20,9 +20,9 @@
 //! depends on staying open.
 //!
 //! The pure pairing predicates here (`tool_use_ids` / `tool_result_ids` /
-//! `tool_use_ids_without_result`) are also reused by the autopilot VERIFY
-//! snapshot repair (`autopilot::verify`), which must fix the same
-//! use/result pairing defects at a window boundary — one shared definition.
+//! `tool_use_ids_without_result`) are the shared use/result pairing algebra:
+//! every caller that must fix the same defects answers them from one
+//! definition.
 
 use std::collections::HashSet;
 
@@ -53,10 +53,9 @@ pub fn replayable_task_ids_from_records(records: &[SubagentTaskRecord]) -> HashS
 
 /// Ids of every `tool_use` block in `messages` (duplicates collapsed). Pure.
 ///
-/// Shared pairing algebra: `dangling_tool_use_results` (below) and the
-/// autopilot VERIFY snapshot repair (`autopilot::verify::build_snapshot`)
-/// both need to ask "which tool_use ids exist in this transcript slice?" —
-/// one definition keeps the two from drifting apart.
+/// Shared pairing algebra: `dangling_tool_use_results` (below) and any other
+/// caller that must ask "which tool_use ids exist in this transcript slice?"
+/// reuse this — one definition keeps them from drifting apart.
 pub fn tool_use_ids(messages: &[Message]) -> HashSet<String> {
     messages
         .iter()

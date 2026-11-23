@@ -656,11 +656,6 @@ function foldFrame(state, frame, nowMs) {
       const text = typeof data.text === 'string' ? data.text : '';
       return text ? withTurns(state, state.turns.concat([{ kind: 'sys', text: '🗜 ' + text }])) : state;
     }
-    case 'autopilot': {
-      const phase = String(data.phase || '').toLowerCase();
-      const it = Number.isFinite(data.iteration) ? data.iteration : null;
-      return withTurns(state, state.turns.concat([{ kind: 'sys', text: '🛸 autopilot ' + phase + (it !== null ? ' #' + it : '') }]));
-    }
     case 'interrupted': {
       // Terminal settle: the streaming Say lands first (flushPendingSay),
       // then the boundary freezes the ladder and retires every running hint.

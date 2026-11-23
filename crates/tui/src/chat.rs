@@ -449,9 +449,6 @@ impl ChatView {
                 }
                 self.steer_items.retain(|(s, _)| s != seq);
             }
-            SessionEvent::AutoPilot { phase, iteration } => {
-                self.status = format!("autopilot: {:?} #{}", phase, iteration);
-            }
             // Sidecar frames fold into the panel field `chat.sidecar` (see
             // `sidecar::fold_sidecar`): Start claims/creates the panel,
             // Child routes into the panel's nested view, Turn finalizes it.

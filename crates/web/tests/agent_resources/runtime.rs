@@ -92,7 +92,6 @@ async fn http_saved_resources_feed_prompt_skills_executable_tools_and_memory() {
         .create_session(&SessionMeta {
             id: "http-session".into(),
             agent: Some("http-probe".into()),
-            autopilot_mode: Some("off".into()),
             ..Default::default()
         })
         .await

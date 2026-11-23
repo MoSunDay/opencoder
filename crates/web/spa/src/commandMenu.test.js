@@ -37,10 +37,10 @@ describe('agentsToCommands', () => {
 });
 
 describe('catalog shape (TUI parity contract)', () => {
-  it('carries the ten fixed slash entries with their kinds', () => {
+  it('carries the nine fixed slash entries with their kinds', () => {
     expect(COMMAND_CATALOG.map((e) => e.cmd)).toEqual([
       '/act', '/plan', '/agent', '/act_clear_context', '/clear_context', '/compact',
-      '/model', '/ap', '/annotation', '/fork',
+      '/model', '/annotation', '/fork',
     ]);
     const byCmd = Object.fromEntries(COMMAND_CATALOG.map((e) => [e.cmd, e]));
     expect(byCmd['/act'].kind).toBe('agent');
@@ -51,7 +51,6 @@ describe('catalog shape (TUI parity contract)', () => {
     expect(byCmd['/clear_context'].kind).toBe('text');
     expect(byCmd['/compact'].kind).toBe('compact');
     expect(byCmd['/model'].kind).toBe('model');
-    expect(byCmd['/ap'].kind).toBe('ap');
     expect(byCmd['/annotation'].kind).toBe('annotation');
     expect(byCmd['/fork'].kind).toBe('fork');
   });

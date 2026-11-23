@@ -97,7 +97,7 @@ pub(super) fn run_handle_disabled(
 }
 
 /// Like `run_handle` but simulates the idle-parent-with-live-subagents
-/// window (autopilot stage gap, cancel grace, reabsorb tail): `running`
+/// window (stage gap, cancel grace, reabsorb tail): `running`
 /// is false while `subagents_running` is true, so Tab must stay on the
 /// queue arm.
 pub(super) fn run_handle_subagents_busy(

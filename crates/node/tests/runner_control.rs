@@ -36,15 +36,6 @@ fn test_opts(base: &str, workdir: &std::path::Path, data: &std::path::Path) -> N
     }
 }
 
-fn pin_autopilot_off(workdir: &std::path::Path) {
-    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
-    std::fs::write(
-        workdir.join(".opencoder").join("ap.json"),
-        r#"{"mode":"off"}"#,
-    )
-    .unwrap();
-}
-
 fn mock_round() -> Arc<dyn ChatStream> {
     Arc::new(MockChatClient::new().with_default(vec![
         LlmEvent::TextDelta("alpha".into()),
@@ -69,7 +60,6 @@ async fn claim_delivers_control_and_worker_uploads_slice() {
     let (base, st) = support::spawn_stub().await;
     let workdir = tempfile::tempdir().unwrap().keep();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(&workdir);
 
     // One executed task => the node's LOCAL store now owns the dialog.
     let task = st.push_task("relay me");
@@ -109,7 +99,6 @@ async fn unknown_session_reports_ok_false() {
     let (base, st) = support::spawn_stub().await;
     let workdir = tempfile::tempdir().unwrap().keep();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(&workdir);
 
     let runner = tokio::spawn(opencoder_node::run_node(
         test_opts(&base, &workdir, data.path()),
@@ -141,7 +130,6 @@ async fn heartbeat_delivers_control_while_busy() {
     let (base, st) = support::spawn_stub().await;
     let workdir = tempfile::tempdir().unwrap().keep();
     let data = tempfile::tempdir().unwrap();
-    pin_autopilot_off(&workdir);
 
     // Park the LLM call so the worker is BUSY (no claim polling at all).
     let task = st.push_task("hang while a control arrives");

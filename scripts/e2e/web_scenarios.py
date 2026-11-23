@@ -3,8 +3,6 @@
 E11: two-segment delivery contract (steer + queue) — the only CLI-unreachable
      feature (steer/queue are HTTP-only via ``Delivery``).
 E15: cancel/interrupt of a running turn, then prove the session still works.
-E18b: autopilot PLAN->ACT->VERIFY surfaced as SSE events (independent serve so
-      the extra autopilot turns cannot perturb E15's interrupt timing).
 
 Both boot a real ``opencoder-server`` and drive it over HTTP. The harness
 starts it with a fixed test token and authenticates every protected request.
@@ -146,21 +144,6 @@ def run_all(bin_path: str, api_key: str) -> Counter:
         _run_e15_interrupt(c, base, port)
     finally:
         _shutdown(proc)
-
-    # ---- E18b: autopilot over web SSE (independent serve: sharing this
-    # instance would let autopilot's extra turns perturb E15's timing) ----
-    ap_cfg = lib.make_config(api_key=api_key)
-    ap_cfg["autopilot"] = {"mode": "ap", "max_iterations": 1, "verify_retries": 1}
-    ap_booted = _boot_serve(bin_path, ap_cfg, "E18b autopilot serve")
-    if ap_booted is None:
-        c.soft("E18b autopilot serve started", False, "serve did not become ready")
-        c.summary("Web scenarios")
-        return c
-    ap_proc, ap_base, ap_port, _ = ap_booted
-    try:
-        _run_e18b_autopilot(c, ap_base, ap_port)
-    finally:
-        _shutdown(ap_proc)
 
     c.summary("Web scenarios")
     return c
@@ -396,87 +379,3 @@ def _run_e15_interrupt(c: Counter, base: str, port: int) -> None:
     except Exception as e:
         c.check("final transcript: no dangling tool_use (every id answered)",
                 False, str(e))
-
-
-def _run_e18b_autopilot(c: Counter, base: str, port: int) -> None:
-    """E18b: the autopilot PLAN->ACT->VERIFY loop surfaced as SSE events.
-
-    Contract: with autopilot enabled in the serve workdir's opencoder.json, a
-    steered prompt drives the initial turn AND the self-driving loop; the
-    /events?after=0 SSE stream must carry `event: autopilot` with phases
-    plan -> act -> verify (iteration 0) and end with a terminal `event: done`
-    after VERIFY. Phase events are persisted (EventKind::Step, sse_kind
-    "autopilot"), so the replay is reliable even if we subscribe mid-drain.
-    Model/network flakiness (error event / deadline / EOF) soft-skips rather
-    than emitting spurious contract failures."""
-    sid = f"web-e2e-ap-{port}"
-    print(f"== E18b: autopilot SSE phases (plan->act->verify) + done, session {sid} ==")
-
-    prompt = (
-        "用 python3 在当前目录创建 hello_ap.txt，内容写入一行 'hello autopilot'，"
-        "然后用 cat 命令读取该文件验证内容。"
-    )
-    try:
-        r = _request("POST", f"{base}/api/sessions/{sid}/prompt",
-                     {"prompt": prompt, "delivery": "steer"})
-        admitted = r.get("admitted_seq") is not None
-    except Exception as e:
-        c.check("autopilot prompt admitted (steer)", False, str(e))
-        return
-    c.check("autopilot prompt admitted (steer)", admitted)
-    if not admitted:
-        return
-
-    # Read the SSE stream until the terminal done. The stream carries MULTIPLE
-    # `done` events: one per run_loop idle boundary (initial turn, PLAN phase,
-    # ACT phase) plus the final one emitted by autopilot::finish after VERIFY.
-    # Only the done that follows the last autopilot(verify,0) is terminal, so
-    # keep reading until that arrives (or error / EOF / deadline).
-    phases: list = []
-    done_after_verify = False
-    saw_error = False
-    reason = ""
-    deadline = time.time() + 300
-    try:
-        req = urllib.request.Request(
-            f"{base}/api/sessions/{sid}/events?after=0",
-            headers=_auth_headers(),
-        )
-        with urllib.request.urlopen(req, timeout=15) as stream:
-            current_event = None
-            while time.time() < deadline and not done_after_verify:
-                try:
-                    raw = stream.readline()
-                except socket.timeout:
-                    continue  # keep-alive gap: wait for the next event line
-                if not raw:
-                    reason = "SSE stream closed before terminal done"
-                    break
-                line = raw.decode(errors="replace").strip()
-                if line.startswith("event: "):
-                    current_event = line[len("event: "):]
-                elif line.startswith("data: "):
-                    payload = line[len("data: "):]
-                    if current_event == "autopilot":
-                        try:
-                            d = json.loads(payload)
-                            phases.append((d.get("phase"), d.get("iteration")))
-                        except Exception:
-                            pass
-                    elif current_event == "error":
-                        saw_error = True
-                        reason = "error event in SSE stream"
-                        break
-                    elif current_event == "done" and phases and phases[-1] == ("verify", 0):
-                        done_after_verify = True
-    except Exception as e:
-        reason = str(e)
-
-    if done_after_verify and not saw_error:
-        expected = [("plan", 0), ("act", 0), ("verify", 0)]
-        c.check("SSE autopilot phases plan->act->verify (iteration 0)",
-                phases == expected, f"phases={phases}")
-        c.check("terminal event: done after autopilot VERIFY", True)
-    else:
-        c.soft("SSE autopilot stream completed (phases + done)",
-               False, reason or "deadline reached without terminal done")

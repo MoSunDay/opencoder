@@ -1,4 +1,5 @@
 pub mod dag_snapshot;
+pub mod errors;
 mod message_projection;
 
 use anyhow::Result;

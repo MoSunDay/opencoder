@@ -1,6 +1,6 @@
 // Scheduler tables bootstrap additively. Project v33 removes result caches;
 // the release data-format gate excludes older Servers before this migration.
-pub(crate) const SCHEMA_VERSION: i64 = 40;
+pub(crate) const SCHEMA_VERSION: i64 = 41;
 
 // FULL durability is supported by Turso; NORMAL is not.
 const PRAGMAS: &[&str] = &[
@@ -64,8 +64,14 @@ const CREATE_INDEX_SA_TASK_ID: &str =
     "CREATE INDEX IF NOT EXISTS idx_subagent_task_id ON subagent_tasks(task_id)";
 const CREATE_INDEX_SESSION_TASK_TYPE: &str =
     "CREATE INDEX IF NOT EXISTS idx_sessions_task_type ON sessions(task_type)";
+// Plain column index: `updated_at` is kept >= `created_at` (insert clamp +
+// v41 backfill), so it IS the activity stamp. The previous expression index
+// on `MAX(updated_at, created_at)` put every message-append UPDATE on a
+// derived-index maintenance path that Turso 0.8.3 does not roll back
+// atomically; a single desync made every later touch fail with
+// `IdxDelete: no matching index entry found` (see sessions::activity).
 const CREATE_INDEX_SESSION_ACTIVITY: &str =
-    "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(MAX(updated_at, created_at) DESC, id DESC)";
+    "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(updated_at DESC, id DESC)";
 const CREATE_INDEX_TODO_STATUS: &str =
     "CREATE INDEX IF NOT EXISTS idx_todo_workflows_status ON todo_workflows(status, updated_at)";
 const CREATE_INDEX_TODO_EVENTS: &str =
@@ -353,6 +359,12 @@ pub async fn bootstrap_is_noop(conn: &Connection, runtime_reporting: bool) -> Re
         _ => return Ok(false),
     };
     if version != SCHEMA_VERSION {
+        return Ok(false);
+    }
+    // A legacy activity index kept through a corrupt-row v41 migration (or an
+    // index dropped by hand) only converges in the post-migration batch, so
+    // its presence makes the bootstrap a real step again.
+    if !session_activity::index_is_current(conn).await? {
         return Ok(false);
     }
     if !runtime_reporting {

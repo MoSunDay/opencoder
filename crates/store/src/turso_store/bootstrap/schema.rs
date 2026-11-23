@@ -28,6 +28,9 @@ mod project_people;
 #[path = "schema/project_relations.rs"]
 mod project_relations;
 
+#[path = "schema/session_activity.rs"]
+mod session_activity;
+
 use migrations::migrate;
 
 use project_relations::CREATE_PROJECT_MILESTONES;

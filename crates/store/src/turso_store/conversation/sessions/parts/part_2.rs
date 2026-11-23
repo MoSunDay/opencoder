@@ -61,11 +61,12 @@ fn row_to_meta(r: &turso::Row) -> Result<SessionMeta> {
 }
 
 /// Sort/pagination key for session listings: the session's last activity
-/// timestamp, falling back to `created_at` for rows never touched since
-/// insertion (imported backfills carry `updated_at = 0`). Ordering by this —
+/// timestamp. `updated_at >= created_at` is a stored invariant (insert clamp
+/// + v41 backfill), so the plain column is exactly the activity stamp and
+/// `idx_sessions_activity` serves the order directly. Ordering by this —
 /// instead of `created_at` — is what makes an actively-used (or just
 /// clear-context-ed) session float to the top of `/task`.
-const ACTIVITY_EXPR: &str = "MAX(s.updated_at, s.created_at)";
+const ACTIVITY_EXPR: &str = "s.updated_at";
 
 /// Cursor = opaque `{activity_ts}|{id}` (both URL-safe: numeric ts + ULID id).
 /// `activity_ts` is the row's `ACTIVITY_EXPR` value at read time; there are no

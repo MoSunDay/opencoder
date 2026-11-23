@@ -447,6 +447,47 @@ fn completed_assistant_text_is_scoped_to_messages_added_by_current_turn() {
 }
 
 #[tokio::test]
+async fn prompt_failure_error_is_forwarded_exactly_once() {
+    use opencoder_llm::{LlmEvent, MockChatClient};
+
+    // The runner emits its own terminal `SessionEvent::Error` before
+    // returning `Err`; the worker's synthetic fallback must not add a second
+    // identical error to the transcript.
+    let mock = MockChatClient::new().push_script(vec![LlmEvent::Error("boom".into())]);
+    let mut sess = SessionState::new(
+        "error-once",
+        opencoder_core::resolve_agent("act").unwrap(),
+        opencoder_core::Config::default(),
+        Arc::new(mock),
+        std::env::temp_dir(),
+    );
+    let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    assert!(
+        !process_cmd(
+            UiCmd::Prompt("question".into(), Vec::new()),
+            &mut sess,
+            &evt_tx,
+            0
+        )
+        .await
+    );
+
+    let mut errors = Vec::new();
+    while let Ok(event) = evt_rx.try_recv() {
+        if let UiEvent::Session(SessionEvent::Error(error)) = event {
+            errors.push(error);
+        }
+    }
+    assert_eq!(
+        errors.len(),
+        1,
+        "a failed turn must surface exactly one error, got {errors:?}"
+    );
+    assert!(errors[0].contains("boom"), "error text: {errors:?}");
+}
+
+#[tokio::test]
 async fn prompt_sends_reliable_completed_answer_before_turn_done() {
     use opencoder_llm::{LlmEvent, MockChatClient};
 

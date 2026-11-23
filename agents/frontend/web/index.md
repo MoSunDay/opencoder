@@ -49,7 +49,11 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
   滚动流的列表与面板之间，flush 边界落地为消息（text_delta 只累积
   不动 turns）；auto-stick 仅在贴近底部时跟随（手动上滚优先）；
   `findRunningStepsTurn` 从最新 turn 往回找 running steps turn（最新已
-  settle 即无），settle 后实时区清空；与 TUI `chat_live_turn.rs` 同契约
+  settle 即无），settle 后实时区清空；与 TUI `chat_live_turn.rs` 同契约；夹在
+  阶梯与其 Say 之间的 subagent 块对配对透明：`bubbleItems.js::itemsFromTurns`
+  把 run 内 `subagent` 部分与 `sys` 同样吸收进同一气泡（保持块序），
+  `transcript.jsx::AssistantTurnContent` 在头行与 Say 正文之间渲染（见
+  [changelog](../../../features/changelog/2026-11-23/subagent-transparent-step-say-pairing.md)）
 - [chat/inputAttempt.js](../../../crates/web/spa/src/chat/inputAttempt.js) — 人工输入 ID
   的生成与重试规则
 - [nav.js](../../../crates/web/spa/src/nav.js)、

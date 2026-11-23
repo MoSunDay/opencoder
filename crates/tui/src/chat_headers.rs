@@ -67,11 +67,13 @@ impl ChatView {
         let mut live = Vec::new();
         let mut line_idx = 0usize;
         let merged_say = |i: usize| -> bool {
-            // Only a SEALED follower merges (`done == true`) — mirrors
-            // `flatten_with`'s StepGroup adjacency lookup. An OPEN follower
-            // retires the whole ladder instead (`say_streams` in the arm).
+            // Only a SEALED follower merges (`done == true`) — the same
+            // pairing lookup `flatten_with` uses (`steps::say_after_group`;
+            // `Subagent` blocks between the ladder and its Say are
+            // transparent). An OPEN follower retires the whole ladder
+            // instead (`say_streams` in the arm).
             matches!(
-                self.blocks.get(i + 1),
+                super::steps::say_after_group(&self.blocks, i).and_then(|s| self.blocks.get(s)),
                 Some(ChatBlock::Assistant { done: true, .. })
             )
         };
@@ -89,17 +91,16 @@ impl ChatView {
                     // arm line for line. While it streams (`done == false`)
                     // the Say renders STANDALONE: +1 for the `say:` header
                     // row plus every raw body row (no merge, no preview
-                    // dedup). Once sealed, `merged` looks at the PRECEDING
-                    // block (a StepGroup), mirroring flatten's adjacency.
+                    // dedup). Once sealed, `merged` looks at the Say's
+                    // LADDER (`steps::group_before_say`: the preceding
+                    // StepGroup, `Subagent` blocks transparent), mirroring
+                    // flatten's pairing.
                     if !*done {
                         line_idx += 1; // standalone `say:` header row
                         line_idx += super::assistant_rows(raw).len();
                         continue;
                     }
-                    let merged = matches!(
-                        block_idx.checked_sub(1).and_then(|i| self.blocks.get(i)),
-                        Some(ChatBlock::StepGroup { .. })
-                    );
+                    let merged = super::steps::group_before_say(&self.blocks, block_idx).is_some();
                     // +1 for the "say:" header line emitted by flatten() —
                     // skipped when this Say is merged into the preceding
                     // StepGroup's header row (the group emitted the merged
@@ -144,9 +145,11 @@ impl ChatView {
                     // + result + blank when the call is expanded); one trailing
                     // blank, merged into the final expanded call's separator.
                     //
-                    // ADJACENT-pair merge: when the next block is this turn's
-                    // Say (`Assistant`), the standalone `N Steps` row is
-                    // replaced by the merged `Say(n steps): <preview>` header
+                    // Pair merge: when the Say below this group — next
+                    // block, or behind the turn's `Subagent` blocks
+                    // (`steps::say_after_group`, transparent) — is this
+                    // turn's Say (`Assistant`), the standalone `N Steps`
+                    // row is replaced by the merged `Say(n steps): <preview>` header
                     // — the group target (call_idx 0) stays on that row, and
                     // the header's separator blank right below terminates the
                     // CLOSED pair (no ladder rows, no second trailing blank;
@@ -161,7 +164,8 @@ impl ChatView {
                     // later blocks' header rows stay aligned with flatten.
                     let say_merged = merged_say(block_idx);
                     let say_streams = matches!(
-                        self.blocks.get(block_idx + 1),
+                        super::steps::say_after_group(&self.blocks, block_idx)
+                            .and_then(|s| self.blocks.get(s)),
                         Some(ChatBlock::Assistant { done: false, .. })
                     );
                     let ladder = super::steps::settled_steps(*progress_active, steps);

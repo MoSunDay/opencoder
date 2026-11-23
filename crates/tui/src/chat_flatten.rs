@@ -12,7 +12,7 @@ use super::{
     assistant_rows, push_duration_span, render_collapsible, step_render, SayHeader, PLAN_HEADER,
     ROLE_SAY_HEADER, ROLE_USER_HEADER, SPINNER,
 };
-use super::{theme, types, ChatBlock, ChatView};
+use super::{steps, theme, types, ChatBlock, ChatView};
 
 impl ChatView {
     /// Flatten all blocks into a single `Vec<Line>` for rendering, using
@@ -89,16 +89,15 @@ impl ChatView {
                         continue;
                     }
                     // Visual `say:` header — mirrors the `user:` marker on
-                    // prompts. When this Say sits ADJACENT to a `StepGroup`
-                    // (previous block), the group row already renders the
-                    // merged `❯ Say(n steps): <preview>` header, so the
-                    // standalone header row is dropped here — the Say body
-                    // follows the merged header (plus its separator blank)
-                    // below.
-                    let merged = matches!(
-                        bi.checked_sub(1).and_then(|i| self.blocks.get(i)),
-                        Some(ChatBlock::StepGroup { .. })
-                    );
+                    // prompts. When this Say's LADDER sits above it — the
+                    // previous block, or behind the turn's `Subagent`
+                    // blocks (`steps::group_before_say`, transparent to the
+                    // pair) — the group row already renders the merged
+                    // `❯ Say(n steps): <preview>` header, so the standalone
+                    // header row is dropped here — the Say body follows the
+                    // merged header (plus its separator blank, and any
+                    // subagent rows in block order) below.
+                    let merged = steps::group_before_say(&self.blocks, bi).is_some();
                     if !merged {
                         out.push(Line::from(Span::styled(
                             ROLE_SAY_HEADER,
@@ -154,23 +153,25 @@ impl ChatView {
                     progress_active,
                     ..
                 } => {
-                    // Adjacent-pair lifecycle: when the block right below
-                    // this group is the turn's SEALED Say (`done == true`),
-                    // the two render as one clickable header row — pass the
-                    // Say so `flatten_step_group` can fold the `N Steps` row
-                    // into it. While the follower STREAMS (`done == false`)
-                    // the ladder RETIRES entirely — it stops rendering the
+                    // Pair lifecycle: when the Say below this group — the
+                    // next block, or behind the turn's `Subagent` blocks
+                    // (`steps::say_after_group`, transparent to the pair) —
+                    // is SEALED (`done == true`), the two render as one
+                    // clickable header row — pass the Say so
+                    // `flatten_step_group` can fold the `N Steps` row into
+                    // it. While the follower STREAMS (`done == false`) the
+                    // ladder RETIRES entirely — it stops rendering the
                     // moment its Say begins, mirroring how the live region
                     // clears then (no lingering counting row above the
                     // streaming answer); the count returns on seal folded
                     // into the merged `Say(n steps)` header. The ladder's
                     // disclosure flags survive untouched — it re-renders
                     // from them once the pair merges.
-                    let follower_streams = matches!(
-                        self.blocks.get(bi + 1),
-                        Some(ChatBlock::Assistant { done: false, .. })
-                    );
-                    let say = match self.blocks.get(bi + 1) {
+                    let follower =
+                        steps::say_after_group(&self.blocks, bi).and_then(|i| self.blocks.get(i));
+                    let follower_streams =
+                        matches!(follower, Some(ChatBlock::Assistant { done: false, .. }));
+                    let say = match follower {
                         Some(ChatBlock::Assistant {
                             rendered,
                             done: true,
@@ -327,23 +328,25 @@ impl ChatView {
         fn blank_line(l: &Line<'static>) -> bool {
             l.spans.iter().all(|s| s.content.trim().is_empty())
         }
-        // 合并对（上一个块是 StepGroup 且 Say 已 seal）且正文整块隐藏
-        // （单行 Say / 空正文）时，整对以头部后的空行（闭合）或 ladder
-        // 尾部空行（展开）收尾，已经是 blank —— 边界不得再叠加第二个
-        // 空行。流式中的 Say 渲染 standalone 行（见 Assistant arm），
-        // 不构成合并对，落到下方按 raw 尾行判定。
+        // 合并对（上方是它的 StepGroup，中间隔着 Subagent 行也算）且正文
+        // 整块隐藏（单行 Say / 空正文）时，整对以「Say 之前最后一个可见
+        // 行」收尾：阶梯紧邻 Say 时是头部后的空行（闭合）或 ladder 尾部
+        // 空行（展开），已经是 blank —— 边界不得再叠加第二个空行；阶梯与
+        // Say 之间隔着 Subagent 行时，最后一行是 subagent 行（无尾随空
+        // 行），边界照常补空行。流式中的 Say（rendered 尚空，同样判为
+        // Hidden）沿用这一口径：阶梯紧邻时视为已收尾，其余落到下方按 raw
+        // 尾行判定。
         if let Some(ChatBlock::Assistant { rendered, .. }) = self.blocks.last() {
-            let merged = matches!(
-                self.blocks
-                    .len()
-                    .checked_sub(2)
-                    .and_then(|i| self.blocks.get(i)),
-                Some(ChatBlock::StepGroup { .. })
-            );
-            if merged
-                && step_render::merged_say_body_decision(rendered) == step_render::SayBody::Hidden
+            if step_render::merged_say_body_decision(rendered) == step_render::SayBody::Hidden
+                && steps::group_before_say(&self.blocks, self.blocks.len() - 1).is_some()
             {
-                return true;
+                return matches!(
+                    self.blocks
+                        .len()
+                        .checked_sub(2)
+                        .and_then(|i| self.blocks.get(i)),
+                    Some(ChatBlock::StepGroup { .. })
+                );
             }
         }
         match self.blocks.last() {

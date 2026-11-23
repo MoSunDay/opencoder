@@ -85,6 +85,11 @@ function TextContent({ turn }) {
 /// progressActive) travels into StepsContent: the Say header reads its
 /// single-line preview and the Say-row running tag from it, while the Say
 /// BODY still renders below as sibling nodes.
+///
+/// Subagent blocks absorbed between the ladder and its Say (`itemsFromTurns`)
+/// render in block order — header row, the subagent block, then the Say
+/// body — the same order the TUI flattens (`chat_flatten.rs`); parts from
+/// the first Say text on keep their place below the body.
 function AssistantTurnContent({ turn }) {
   const say = turn && Array.isArray(turn.say) ? turn.say : [];
   // Streaming keeps the compact raw preview. Completed answers render the
@@ -95,18 +100,30 @@ function AssistantTurnContent({ turn }) {
     const isText = (part) => part.kind === 'text' && !part.image;
     return { preview: '', rows: [], markdown: say.filter(isText).map((part) => part.text || '').join(''), other: say.filter((part) => !isText(part)) };
   }, [say, turn.sayActive]);
-  const body = presentation.other;
+  const firstSay = say.findIndex((part) => (
+    part && part.kind === 'text' && !part.image && typeof part.text === 'string' && part.text.trim().length > 0
+  ));
+  const lead = firstSay < 0 ? [] : say.slice(0, firstSay).filter((part) => part && part.kind === 'subagent');
+  const body = presentation.other.filter((part) => !lead.includes(part));
   return (
     <div>
       <StepsContent turn={turn} preview={presentation.preview} />
-      {body.length > 0 || presentation.rows.length > 0 || presentation.markdown ? (
+      {lead.length > 0 || body.length > 0 || presentation.rows.length > 0 || presentation.markdown ? (
         // Keep the answer body separate from the expandable step summary.
         <div style={{ marginTop: 16 }}>
+          {lead.map((part, index) => (
+            <div key={'subagent:' + index} style={{ marginBottom: 8 }}>
+              <SubagentContent turn={part} />
+            </div>
+          ))}
           {presentation.markdown && <Markdown text={presentation.markdown} />}
           {!!presentation.rows.length && <TextRows rows={presentation.rows} />}
           {body.map((part, index) => {
             if (part.kind === 'think') {
               return <ThinkContent key={'think:' + index} turn={part} />;
+            }
+            if (part.kind === 'subagent') {
+              return <SubagentContent key={'subagent:' + index} turn={part} />;
             }
             if (part.kind === 'sys') {
               // Absorbed retry/status row (bubbleItems): render as the centered

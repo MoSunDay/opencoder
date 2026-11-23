@@ -86,23 +86,20 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
     // side regresses. (collect_headers is private, so we mirror its math.)
     let mut expected = 0usize;
     for (bi, block) in view.blocks.iter().enumerate() {
-        // ADJACENT-pair merge (see flatten_with): a StepGroup whose NEXT
-        // block is the turn's SEALED Say (`done: true`) renders one merged
-        // header row and the Say renders body only — both sides of the
-        // pair lose one line. An OPEN Say RETIRES the whole ladder — the
+        // Pair merge (see flatten_with): a StepGroup whose Say — the NEXT
+        // block, or behind `Subagent` blocks (`steps::say_after_group`,
+        // transparent to the pair) — is SEALED (`done: true`) renders one
+        // merged header row and the Say renders body only — both sides of
+        // the pair lose one line. An OPEN Say RETIRES the whole ladder — the
         // group contributes no rows (only its live-region rows, if armed).
-        let say_merged_after_group = matches!(
-            view.blocks.get(bi + 1),
-            Some(ChatBlock::Assistant { done: true, .. })
-        );
-        let say_streams_after_group = matches!(
-            view.blocks.get(bi + 1),
-            Some(ChatBlock::Assistant { done: false, .. })
-        );
-        let say_merged_into_group = bi
-            .checked_sub(1)
-            .and_then(|i| view.blocks.get(i))
-            .is_some_and(|b| matches!(b, ChatBlock::StepGroup { .. }));
+        let group_say =
+            super::super::steps::say_after_group(&view.blocks, bi).and_then(|i| view.blocks.get(i));
+        let say_merged_after_group =
+            matches!(group_say, Some(ChatBlock::Assistant { done: true, .. }));
+        let say_streams_after_group =
+            matches!(group_say, Some(ChatBlock::Assistant { done: false, .. }));
+        let say_merged_into_group =
+            super::super::steps::group_before_say(&view.blocks, bi).is_some();
         match block {
             ChatBlock::Marker(lines) => expected += lines.len(),
             ChatBlock::User { rendered } => expected += 1 + rendered.len(),

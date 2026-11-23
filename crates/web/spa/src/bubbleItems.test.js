@@ -123,6 +123,39 @@ describe('itemsFromTurns', () => {
     expect(items.map((i) => i.role)).toEqual(['ai', 'sys']);
   });
 
+  it('absorbs a subagent block between the ladder and its Say: [steps, subagent, say] stays ONE bubble', () => {
+    // TUI parity (chat_steps.rs say_after_group): a `task` call never
+    // enters the ladder, so the subagent block it opens sits between the
+    // ladder and the Say that closes it. The block is TRANSPARENT to the
+    // pair — the run used to end at it, leaving a Say-less `N Steps` bubble
+    // above the subagent and a bare ai text bubble below. The block rides in
+    // `say`, block order.
+    const steps = { kind: 'steps', role: 'assistant', progressActive: true, steps: [{ thinking: 't', calls: [] }] };
+    const subagent = { kind: 'subagent', id: 'sa1', name: 'explore', prompt: 'look', status: 'done', ok: true, summary: 'found', events: [] };
+    const say = { kind: 'text', role: 'assistant', text: 'done' };
+    const items = itemsFromTurns([steps, subagent, say]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ role: 'assistantTurn', key: 'assistant-turn:0' });
+    expect(items[0].content.steps).toEqual(steps.steps);
+    expect(items[0].content.say).toEqual([subagent, say]);
+    expect(items[0].content.progressActive).toBe(false);
+  });
+
+  it('keeps a subagent block standalone when it is not inside an open run', () => {
+    // Before any assistant part, or AFTER the Say closed the run (the
+    // dispatch shape [steps, say, subagent]): absorption only applies
+    // INSIDE an open run.
+    const steps = { kind: 'steps', role: 'assistant', progressActive: false, steps: [{ thinking: 't', calls: [] }] };
+    const say = { kind: 'text', role: 'assistant', text: 'done' };
+    const subagent = { kind: 'subagent', id: 'sa1', name: 'explore', prompt: 'look', status: 'running', events: [] };
+    const before = itemsFromTurns([subagent, { kind: 'text', role: 'user', text: 'go' }]);
+    expect(before.map((i) => i.role)).toEqual(['subagent', 'user']);
+    const after = itemsFromTurns([steps, say, subagent]);
+    expect(after.map((i) => i.role)).toEqual(['assistantTurn', 'subagent']);
+    expect(after[0].content.say).toEqual([say]);
+    expect(after[1].content).toBe(subagent);
+  });
+
   it('splits [steps, say, steps, say] into two assistant Turn items (one Say each)', () => {
     const a = { kind: 'steps', role: 'assistant', progressActive: false, steps: [{ thinking: 'a', calls: [] }] };
     const mid = { kind: 'text', role: 'assistant', text: 'working' };

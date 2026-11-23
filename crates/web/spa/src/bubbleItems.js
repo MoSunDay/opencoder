@@ -50,8 +50,13 @@ function isSayPart(part) {
 /// input alternates [steps, say, steps, say...] - a steps part AFTER a Say
 /// starts the NEXT item with its own step count and its own Say. Multiple
 /// adjacent step segments before the Say still merge into that single count.
-/// Ordinary text-only replies retain the existing ai-item shape. Always
-/// returns an array and never throws on null/undefined.
+/// Ordinary text-only replies retain the existing ai-item shape. Inside an
+/// open run, `sys` rows AND `subagent` blocks are absorbed (they ride in
+/// `say`, block order) instead of ending it: a `task` call never enters the
+/// ladder, so the subagent block it opens sits between the ladder and the
+/// Say that closes it — transparent to the pair, exactly like the TUI
+/// (`chat_steps.rs::say_after_group`). Always returns an array and never
+/// throws on null/undefined.
 export function itemsFromTurns(turns) {
   const list = Array.isArray(turns) ? turns : [];
   const items = [];
@@ -84,6 +89,12 @@ export function itemsFromTurns(turns) {
         // A sys status row inside an open run is presentation (the retry
         // badge), not a Turn boundary - absorb it so the run's
         // [steps ... say] stays ONE bubble instead of splitting in two.
+        parts.push(part);
+        end += 1;
+      } else if (part && part.kind === 'subagent' && parts.length > 0) {
+        // Same for a subagent block: the Say behind it still closes the
+        // ladder above ([steps, subagent, say] is ONE Turn sharing one
+        // header row); the block renders in `say` order.
         parts.push(part);
         end += 1;
       } else {

@@ -88,6 +88,49 @@ pub(crate) fn settled_steps(progress_active: bool, steps: &[Step]) -> &[Step] {
     }
 }
 
+/// Pairing across `Subagent` blocks — the ONE lookup shared by render
+/// (`chat_flatten.rs`) and hit accounting (`chat_headers.rs`), so neither
+/// side can disagree about which Say closes which ladder.
+///
+/// A `task` call never enters the ladder (its reasoning folds into a
+/// call-less step), but the `Subagent` block it opens IS pushed between the
+/// turn's ladder and the Say that closes it: `[StepGroup, Subagent,
+/// Assistant]` — live (`SubagentStart` pushes the block while
+/// `turn_block_start` stays on the ladder) and replay (child blocks
+/// interleave under their parent message; `normalize_turn_groups` caps the
+/// segment at the Say) alike. Those blocks are TRANSPARENT to the pair — the
+/// Say still belongs to the ladder above them — so both walks skip
+/// `Subagent` blocks and stop at the first anything-else. Every other
+/// intervening block (a User echo, an older Say, a newer ladder, a marker, a
+/// Compaction) still breaks the pair exactly as before.
+///
+/// - [`say_after_group`] — the ladder's follower Say (streaming OR sealed;
+///   the caller tells them apart by `done`), walking FORWARD;
+/// - [`group_before_say`] — the Say's ladder, walking BACKWARD.
+pub(crate) fn say_after_group(blocks: &[ChatBlock], group: usize) -> Option<usize> {
+    for (i, block) in blocks.iter().enumerate().skip(group + 1) {
+        match block {
+            ChatBlock::Subagent { .. } => continue,
+            ChatBlock::Assistant { .. } => return Some(i),
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The reverse walk of [`say_after_group`]: the ladder whose Say `say` is.
+pub(crate) fn group_before_say(blocks: &[ChatBlock], say: usize) -> Option<usize> {
+    let head = &blocks[..say.min(blocks.len())];
+    for (i, block) in head.iter().enumerate().rev() {
+        match block {
+            ChatBlock::Subagent { .. } => continue,
+            ChatBlock::StepGroup { .. } => return Some(i),
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// A reasoning delta starts a new step after the previous step has already
 /// reached calls (or was explicitly sealed). Further deltas of the same
 /// reasoning run append to the still-open, call-less step.

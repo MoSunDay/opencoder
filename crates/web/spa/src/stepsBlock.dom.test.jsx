@@ -322,6 +322,40 @@ describe('StepsContent three-level drill-down', () => {
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
+  it('keeps a subagent block between the ladder and its Say inside ONE bubble, in block order', () => {
+    // TUI parity (chat_steps.rs say_after_group): the subagent block is
+    // transparent to the ladder/Say pair — the header is still the pair's
+    // own row (`2 Steps` once done, `2 Steps: <preview>` + running tag while
+    // sayActive) and the block renders BETWEEN the header row and the Say
+    // body.
+    const subagent = {
+      kind: 'subagent', id: 'sa1', name: 'explore', prompt: 'look', childSessionId: 'c1',
+      status: 'done', ok: true, summary: 'found 3 files', events: [], usage: null, startedAt: 0,
+    };
+    const done = mount([stepsTurn(), subagent, { kind: 'text', role: 'assistant', text: 'final answer' }]);
+    expect(done.container.querySelectorAll('.ant-bubble')).toHaveLength(1);
+    const group = screen.getByText('2 Steps');
+    const block = screen.getByText(/🤖 explore · done/);
+    const say = done.container.querySelector('.md-body');
+    expect(say.textContent).toContain('final answer');
+    expect(group.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(block.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Streaming window: same shape with the running tag on the Say row and
+    // the raw preview body still below the block.
+    cleanup();
+    const streaming = mount([
+      { ...stepsTurn(), sayStreaming: true },
+      subagent,
+      { kind: 'text', role: 'assistant', text: 'partial answer line one\nmore below' },
+    ]);
+    expect(streaming.container.querySelectorAll('.ant-bubble')).toHaveLength(1);
+    expect(screen.getByText('2 Steps: partial answer line one')).toBeTruthy();
+    expect(screen.getByText('running')).toBeTruthy();
+    expect(screen.getByText(/🤖 explore · done/).compareDocumentPosition(screen.getByText('more below'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders `N Steps + Say` as one visual Turn bubble', () => {
     const { container } = mount([
       stepsTurn(),

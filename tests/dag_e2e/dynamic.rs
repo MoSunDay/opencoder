@@ -93,12 +93,7 @@ fn dynamic_binary_instances_have_http_pages_isolated_argv_artifacts_and_replay()
 
 #[test]
 fn runc_dynamic_agent_and_binary_read_isolated_copies_and_argv() {
-    if !std::process::Command::new("runc")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        eprintln!("SKIP: runc unavailable");
+    if !crate::clone3_fixtures::backend_ready() {
         return;
     }
     let responder = Script::dynamic(|request| {

@@ -5,6 +5,7 @@ mod process;
 mod recovery;
 
 use anyhow::{ensure, Context, Result};
+use super::clone3::Backend;
 use opencoder_dag::DagClaimedRun;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,16 +20,26 @@ pub use output::ProcessFailure;
 pub use process::{execute, StepProcess};
 pub use recovery::cleanup as cleanup_run;
 
+/// Per-run record under `container.json`; `execute` reads it to reach the
+/// backend without the node configuration.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Receipt {
     pub id: String,
     pub agent_uid: u32,
+    /// Backend owning the run; records written before clone3 existed are runc.
+    #[serde(default)]
+    pub backend: Backend,
+    /// Host path of the rootfs `dag-runner`, the clone3 launcher and relay.
+    #[serde(default)]
+    pub runner: Option<PathBuf>,
 }
 
 pub struct RunContainer {
     root: PathBuf,
     id: String,
     cleaned: AtomicBool,
+    /// Live clone3 sandbox; `None` for runc, whose state lives in `runc-state`.
+    launcher: Option<super::clone3::launch::Launcher>,
 }
 
 impl RunContainer {
@@ -37,10 +48,7 @@ impl RunContainer {
         config: &opencoder_core::Config,
         run: &DagClaimedRun,
     ) -> Result<Self> {
-        ensure!(
-            super::runc::runc_available(),
-            "runc is required for every DAG run"
-        );
+        let backend = super::clone3::select(config)?;
         preflight(config)?;
         ensure!(
             opencoder_dag::artifacts::validate_run_id(&run.run_id),
@@ -49,15 +57,15 @@ impl RunContainer {
         std::fs::create_dir_all(root)?;
         mounts::real_dir(root)?;
         let id = format!("dag-run-{}", run.run_id);
-        let owner = Self {
+        let mut owner = Self {
             root: root.to_path_buf(),
             id,
             cleaned: AtomicBool::new(false),
+            launcher: None,
         };
         owner.cleanup().await?;
         owner.cleaned.store(false, Ordering::Release);
-        let prepared = owner.prepare(config, run);
-        if let Err(error) = prepared {
+        if let Err(error) = owner.prepare(config, run, backend) {
             owner
                 .cleanup()
                 .await
@@ -66,33 +74,65 @@ impl RunContainer {
         }
         let diagnostic = root.join("private/start.log");
         let stderr = std::fs::File::create(&diagnostic)?;
-        let status = Command::new("runc")
-            .arg("--root")
-            .arg(root.join("runc-state"))
-            .args(["run", "--no-pivot", "--detach", "--bundle"])
-            .arg(root.join("bundle"))
-            .arg(&owner.id)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(stderr)
-            .status()
-            .await
-            .context("start DAG container");
-        let status = match status {
-            Ok(status) => status,
+        let started = match backend {
+            Backend::Runc => owner.start_runc(stderr).await.map(|_| None),
+            Backend::Clone3 => owner.start_clone3(config, stderr).await.map(Some),
+        };
+        let launcher = match started {
+            Ok(launcher) => launcher,
             Err(error) => {
                 owner.cleanup().await?;
                 return Err(error);
             }
         };
-        if !status.success() {
+        owner.launcher = launcher;
+        if let Err(error) = owner.startup_check(run).await {
             owner.cleanup().await?;
-            let bytes =
-                super::output_limit::read_file_bounded(&diagnostic, "DAG startup", 64 * 1024)?;
-            anyhow::bail!("DAG container failed: {}", String::from_utf8_lossy(&bytes));
+            return Err(error);
         }
+        Ok(owner)
+    }
+
+    /// runc keeps the container's state under `runc-state`.
+    async fn start_runc(&self, stderr: std::fs::File) -> Result<()> {
+        let status = Command::new("runc")
+            .arg("--root")
+            .arg(self.root.join("runc-state"))
+            .args(["run", "--no-pivot", "--detach", "--bundle"])
+            .arg(self.root.join("bundle"))
+            .arg(&self.id)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(stderr)
+            .status()
+            .await
+            .context("start DAG container")?;
+        if status.success() {
+            return Ok(());
+        }
+        let diagnostic = self.root.join("private/start.log");
+        let bytes = super::output_limit::read_file_bounded(&diagnostic, "DAG startup", 64 * 1024)?;
+        anyhow::bail!("DAG container failed: {}", String::from_utf8_lossy(&bytes))
+    }
+
+    /// The clone3 sandbox is the rootfs launcher process, whose stdin is
+    /// this owner's lease over the sandbox's lifetime.
+    async fn start_clone3(
+        &self,
+        config: &opencoder_core::Config,
+        log: std::fs::File,
+    ) -> Result<super::clone3::launch::Launcher> {
+        let rootfs = config
+            .dag
+            .rootfs_dir
+            .as_deref()
+            .context("DAG rootfs_dir is required")?;
+        super::clone3::launch::spawn(&self.root, &rootfs.join("usr/bin/dag-runner"), log).await
+    }
+
+    async fn startup_check(&self, run: &DagClaimedRun) -> Result<()> {
         let verified = execute(
-            root,
+            &self.root,
             StepProcess {
                 key: "startup-check".into(),
                 argv: vec![
@@ -109,16 +149,19 @@ impl RunContainer {
         )
         .await;
         match verified {
-            Ok((0, _)) => {}
-            failure => {
-                owner.cleanup().await?;
-                anyhow::bail!("DAG container execution preflight failed: {failure:?}");
-            }
+            Ok((0, _)) => Ok(()),
+            failure => Err(anyhow::anyhow!(
+                "DAG container execution preflight failed: {failure:?}"
+            )),
         }
-        Ok(owner)
     }
 
-    fn prepare(&self, config: &opencoder_core::Config, run: &DagClaimedRun) -> Result<()> {
+    fn prepare(
+        &self,
+        config: &opencoder_core::Config,
+        run: &DagClaimedRun,
+        backend: Backend,
+    ) -> Result<()> {
         let source = config
             .dag
             .workspace_dir
@@ -130,8 +173,12 @@ impl RunContainer {
             uid != 65532,
             "node credential user cannot be the binary execution user"
         );
-        for directory in ["bundle", "runc-state", "private", "private/exec"] {
+        for directory in ["bundle", "private", "private/exec"] {
             std::fs::create_dir_all(self.root.join(directory))?;
+        }
+        // Only the OCI backend keeps container state under the run root.
+        if backend == Backend::Runc {
+            std::fs::create_dir_all(self.root.join("runc-state"))?;
         }
         mounts::permissions(&self.root.join("private"), uid, 0o700)?;
         opencoder_core::atomic_write(&self.root.join("private/identity"), run.run_id.as_bytes())?;
@@ -158,12 +205,19 @@ impl RunContainer {
             &serde_json::to_vec(&Receipt {
                 id: self.id.clone(),
                 agent_uid: uid,
+                backend,
+                runner: (backend == Backend::Clone3)
+                    .then(|| rootfs.join("usr/bin/dag-runner")),
             })?,
         )?;
         Ok(())
     }
 
     pub async fn cleanup(&self) -> Result<()> {
+        match &self.launcher {
+            Some(launcher) => launcher.stop().await?,
+            None => super::clone3::launch::stop_abandoned(&self.root).await?,
+        }
         let state = self.root.join("runc-state");
         if state.join(&self.id).exists() {
             super::runc::delete_force(&state, &self.id).await?;
@@ -213,10 +267,12 @@ impl Drop for RunContainer {
 }
 
 pub fn preflight(config: &opencoder_core::Config) -> Result<()> {
-    ensure!(
-        super::runc::runc_available(),
-        "runc is required for every DAG run"
-    );
+    if super::clone3::select(config)? == Backend::Runc {
+        ensure!(
+            super::runc::runc_available(),
+            "runc is required for every DAG run"
+        );
+    }
     config::rootfs_source(config)?;
     let source = config
         .dag

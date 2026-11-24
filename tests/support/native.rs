@@ -124,6 +124,7 @@ impl NativeMounts {
         if let Some(rootfs) = rootfs {
             node["dag"]["rootfs_dir"] = json!(rootfs);
             node["dag"]["data_dir"] = json!(workdir.join("node-state/dag/runs"));
+            node["dag"]["sandbox"] = json!(opencoder_core::config::DagSandbox::from_test_env());
         }
         Self {
             mounts,

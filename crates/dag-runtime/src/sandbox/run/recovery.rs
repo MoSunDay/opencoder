@@ -17,6 +17,7 @@ pub async fn cleanup(root: &Path, run_id: &str) -> Result<()> {
         root: root.to_path_buf(),
         id: expected,
         cleaned: std::sync::atomic::AtomicBool::new(false),
+        launcher: None,
     }
     .cleanup()
     .await
@@ -24,6 +25,7 @@ pub async fn cleanup(root: &Path, run_id: &str) -> Result<()> {
 
 pub(super) fn cleanup_abandoned(root: &Path, id: &str) -> Result<()> {
     super::mounts::real_dir(root)?;
+    crate::sandbox::clone3::launch::stop_abandoned_blocking(root)?;
     let state = root.join("runc-state");
     if state.join(id).exists() {
         let mut child = std::process::Command::new("runc")

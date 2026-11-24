@@ -137,7 +137,7 @@ pub async fn node(root: &Path, client: Option<Arc<dyn ChatStream>>) -> MatrixNod
     // can be constructed. The test must execute actual Codex fixture processes.
     let agents = std::path::PathBuf::from(std::env::var_os("OPENCODER_AGENTS_DIR").unwrap());
     let mount = agents.parent().unwrap();
-    let config = json!({"model":"matrix/model","providers":{"matrix":{"base_url":"http://127.0.0.1:1","api_key":""}},"agent":{"agents_dir":agents},"dag":{"rootfs_dir":std::path::PathBuf::from(std::env::var_os("DAG_TEST_ROOTFS").unwrap()),"workspace_dir":mount.join("workspace"),"binary_dir":mount.join("binaries")}});
+    let config = json!({"model":"matrix/model","providers":{"matrix":{"base_url":"http://127.0.0.1:1","api_key":""}},"agent":{"agents_dir":agents},"dag":{"rootfs_dir":std::path::PathBuf::from(std::env::var_os("DAG_TEST_ROOTFS").unwrap()),"workspace_dir":mount.join("workspace"),"binary_dir":mount.join("binaries"),"sandbox":opencoder_core::config::DagSandbox::from_test_env()}});
     std::fs::write(workdir.join(".opencoder/config.json"), config.to_string()).unwrap();
     let mut config = opencoder_core::Config::load(&workdir).unwrap();
     assert!(config.resolve_endpoint().is_err());

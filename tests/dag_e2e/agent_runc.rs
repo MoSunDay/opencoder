@@ -1,5 +1,6 @@
 //! Shared DAG container end to end: a single agent step's
-//! WHOLE session (LLM loop + tools) runs inside the read-only OCI container
+//! WHOLE session (LLM loop + tools) runs inside the read-only sandbox
+//! (`runc`, or the native clone3 backend when `DAG_TEST_SANDBOX` pins it)
 //! via the rootfs-installed `agent-step-runner`, while the host keeps the
 //! session row + artifacts contract. Pins: structured output recovered from
 //! the container-written `output.json`, runner artifacts
@@ -7,8 +8,8 @@
 //! kernel-enforced READ-ONLY knowledge root (byte-identical tree, no write
 //! probe), and the bundle's direct-argv + env + knowledge-mount shape.
 //!
-//! Skips (with a reason) when `runc` is not installed — the sandbox is a
-//! provisioning concern, not a test prerequisite.
+//! Skips (with a reason) when the configured backend is unavailable — the
+//! sandbox is a provisioning concern, not a test prerequisite.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -73,19 +74,9 @@ fn snapshot_tree(root: &Path) -> BTreeMap<String, (String, u64, u128)> {
     out
 }
 
-fn runc_available() -> bool {
-    std::process::Command::new("runc")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
 #[test]
 fn agent_step_session_runs_inside_runc_container() {
-    if !runc_available() {
-        eprintln!("SKIP: runc unavailable");
+    if !crate::clone3_fixtures::backend_ready() {
         return;
     }
     // Any request (the step turn) gets the fenced structured-output reply.

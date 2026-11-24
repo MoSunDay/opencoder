@@ -167,6 +167,9 @@ pub struct Fleet {
     _server: Proc,
     agent: Option<Proc>,
     node_name: String,
+    /// Extra environment applied to every (re)spawned agent process, e.g. a
+    /// `PATH` without `runc` for backend pinning scenarios.
+    agent_env: Vec<(String, String)>,
     _native: Option<super::native::NativeMounts>,
 }
 
@@ -183,15 +186,26 @@ impl Fleet {
         extra: Value,
         node_name: &str,
     ) -> Self {
-        Self::spawn_inner(workdir, stub_port, extra, node_name, None)
+        Self::spawn_inner(workdir, stub_port, extra, node_name, None, Vec::new())
     }
 
     pub fn spawn_native(workdir: &Path, stub_port: u16, extra: Value, node_name: &str) -> Self {
-        Self::spawn_inner(workdir, stub_port, extra, node_name, Some(true))
+        Self::spawn_inner(workdir, stub_port, extra, node_name, Some(true), Vec::new())
+    }
+
+    /// [`Fleet::spawn_native`] with extra agent-process environment.
+    pub fn spawn_native_with(
+        workdir: &Path,
+        stub_port: u16,
+        extra: Value,
+        node_name: &str,
+        agent_env: Vec<(String, String)>,
+    ) -> Self {
+        Self::spawn_inner(workdir, stub_port, extra, node_name, Some(true), agent_env)
     }
 
     pub fn spawn_conversations(workdir: &Path, stub_port: u16, node_name: &str) -> Self {
-        Self::spawn_inner(workdir, stub_port, json!({}), node_name, Some(false))
+        Self::spawn_inner(workdir, stub_port, json!({}), node_name, Some(false), Vec::new())
     }
 
     fn spawn_inner(
@@ -200,6 +214,7 @@ impl Fleet {
         extra: Value,
         node_name: &str,
         native: Option<bool>,
+        agent_env: Vec<(String, String)>,
     ) -> Self {
         let native = native.map(|dag| {
             if dag {
@@ -237,7 +252,7 @@ impl Fleet {
                 native.node_config.clone(),
             );
         }
-        let agent = spawn_agent(workdir, &base, &log, node_name);
+        let agent = spawn_agent(workdir, &base, &log, node_name, &agent_env);
         let fleet = Self {
             base,
             workdir: workdir.to_path_buf(),
@@ -246,6 +261,7 @@ impl Fleet {
             _server: server,
             agent: Some(agent),
             node_name: node_name.to_string(),
+            agent_env,
             _native: native,
         };
         fleet.wait_ready(&["operator", "dag"]);
@@ -352,6 +368,7 @@ impl Fleet {
             &self.base,
             &self.log,
             &self.node_name,
+            &self.agent_env,
         ));
         self.wait_ready(&["operator", "dag"]);
     }
@@ -362,6 +379,12 @@ impl Fleet {
     /// server process directly while this guard still owns its reaping.
     pub fn server_pid(&self) -> u32 {
         self._server.child.id()
+    }
+
+    /// The live agent's PID (`None` after [`Fleet::kill_agent`]): host-side
+    /// sandbox scenarios inspect `/proc/<agent>/mountinfo` directly.
+    pub fn agent_pid(&self) -> Option<u32> {
+        self.agent.as_ref().map(|agent| agent.child.id())
     }
 }
 
@@ -386,9 +409,16 @@ fn spawn_server(workdir: &Path, log: &ProcLog) -> Proc {
     Proc::spawn(command, "server", log)
 }
 
-fn spawn_agent(workdir: &Path, base: &str, log: &ProcLog, name: &str) -> Proc {
+fn spawn_agent(
+    workdir: &Path,
+    base: &str,
+    log: &ProcLog,
+    name: &str,
+    agent_env: &[(String, String)],
+) -> Proc {
     let mut command = Command::new(sibling_bin(AGENT_BIN));
     command
+        .envs(agent_env.iter().map(|(key, value)| (key, value)))
         .env("HOME", workdir)
         .arg("--workdir")
         .arg(if workdir.join("node-work").exists() {

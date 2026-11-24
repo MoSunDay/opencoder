@@ -366,6 +366,11 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
         }
         if let Some(d) = obj.get("dag").and_then(|v| v.as_object()) {
+            if let Some(value) = d.get("sandbox") {
+                if let Ok(parsed) = serde_json::from_value::<super::DagSandbox>(value.clone()) {
+                    cfg.dag.sandbox = parsed;
+                }
+            }
             if let Some(dir) = d.get("binary_dir").and_then(|v| v.as_str()) {
                 cfg.dag.binary_dir = Some(std::path::PathBuf::from(dir));
             }

@@ -59,7 +59,7 @@ pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 pub use agent::{AgentDefaults, AgentNfsConfig, ToolsScope};
 pub use cli::{CliConfig, InjectionTarget};
 pub use compaction::{CompactionConfig, OutputStreamlineConfig};
-pub use dag::DagConfig;
+pub use dag::{DagConfig, DagSandbox};
 pub use domain::domain_file_names;
 pub use env::candidates_with_home;
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};

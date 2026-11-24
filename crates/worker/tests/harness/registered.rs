@@ -1,5 +1,6 @@
 //! The six registered employee identities are Agent cards even when their
-//! ordinary sessions use the host. DAG placement must still use runc.
+//! ordinary sessions use the host. DAG placement must still use the sandbox
+//! (`DAG_TEST_SANDBOX`, runc by default).
 use super::{dispatch, read, save, settled, support, Fleet};
 use serde_json::json;
 
@@ -53,8 +54,5 @@ pub async fn verify(fleet: &Fleet) {
         );
     }
     assert!(root.join("bundle/config.json").is_file());
-    assert!(std::fs::read_dir(root.join("runc-state"))
-        .unwrap()
-        .next()
-        .is_none());
+    super::support::native::container::assert_runtime_released(&root);
 }

@@ -1,5 +1,5 @@
 use opencoder_agents::{spawn_nfs_server, NfsServerHandle, NfsServerOpts};
-use opencoder_core::Config;
+use opencoder_core::config::{Config, DagSandbox};
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -93,6 +93,7 @@ impl ContainerFixture {
         let mount = root.join("native-resources/mount");
         std::fs::create_dir_all(&mount).unwrap();
         let mut config = Config::default();
+        config.dag.sandbox = DagSandbox::from_test_env();
         config.dag.rootfs_dir = Some(rootfs());
         let export = spawn_nfs_server(&NfsServerOpts {
             export_root: source,
@@ -118,7 +119,48 @@ impl ContainerFixture {
         config.dag.workspace_dir = self.config.dag.workspace_dir.clone();
         config.dag.binary_dir = self.config.dag.binary_dir.clone();
         config.dag.rootfs_dir = self.config.dag.rootfs_dir.clone();
+        config.dag.sandbox = self.config.dag.sandbox;
     }
+}
+
+/// A finished run owns no sandbox on either backend: the OCI state directory
+/// (runc only, always present there) is empty and a recorded native init is
+/// gone. Shared through `#[path]` by test binaries that do not all use it.
+#[allow(dead_code)]
+pub fn assert_runtime_released(root: &Path) {
+    let state = root.join("runc-state");
+    match DagSandbox::from_test_env() {
+        DagSandbox::Runc => assert!(
+            std::fs::read_dir(&state).unwrap().next().is_none(),
+            "runc state of a released run: {}",
+            root.display()
+        ),
+        // A native run materialises nothing of the OCI runtime.
+        DagSandbox::Clone3 => {
+            assert!(!state.exists(), "OCI state under a native run: {}", root.display());
+        }
+        // Either shape, as long as nothing is left behind.
+        DagSandbox::Auto => {
+            if let Ok(mut entries) = std::fs::read_dir(&state) {
+                assert!(entries.next().is_none(), "runtime state of a released run: {}", root.display());
+            }
+        }
+    }
+    // The native backend leaves its record behind; its init must be gone.
+    let Ok(record) = std::fs::read(root.join("private/clone3/init.json")) else {
+        return;
+    };
+    let record: serde_json::Value = serde_json::from_slice(&record).unwrap();
+    let pid = record["init"]["pid"].as_i64().unwrap();
+    let start_time = record["init"]["start_time"].as_u64().unwrap();
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok();
+    let alive = stat.as_deref().is_some_and(|stat| {
+        // Field 22 (starttime): 19 tokens after the `comm` state token.
+        stat.rsplit_once(") ")
+            .and_then(|(_, tail)| tail.split_whitespace().nth(19))
+            .is_some_and(|field| field.parse::<u64>() == Ok(start_time))
+    });
+    assert!(!alive, "clone3 init {pid} survived cleanup: {stat:?}");
 }
 
 impl Drop for ContainerFixture {

@@ -100,7 +100,7 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
 
     await screen.findByText('smoke · 管理员');
     // 显式导航走头部品牌的完整导航菜单（portal 内的 .fleet-nav-panel）。
-    const brand = screen.getByRole('button', { name: '打开完整导航' });
+    const brand = screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ });
     fireEvent.click(brand);
     let panel = await screen.findByRole('navigation', { name: '完整导航' });
     fireEvent.click(within(panel).getByRole('menuitem', { name: /Overview$/ }));

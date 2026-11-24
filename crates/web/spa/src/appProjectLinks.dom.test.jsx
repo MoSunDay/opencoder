@@ -14,7 +14,7 @@ it('opens a shared project ahead of a saved page, follows history and clears the
   expect(screen.getByText('项目 · 既有目标', { selector: '.ant-drawer-title' })).toBeTruthy();
   expect(getState().page).toBe('project');
   // Explicit navigation now goes through the header brand's complete menu.
-  fireEvent.click(screen.getByRole('button', { name: '打开完整导航' }));
+  fireEvent.click(screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ }));
   const panel = await screen.findByRole('navigation', { name: '完整导航' });
   fireEvent.click(within(panel).getByRole('menuitem', { name: /用户权限$/ }));
   await waitFor(() => expect(window.location.hash).toBe(''));

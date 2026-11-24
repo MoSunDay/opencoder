@@ -7,7 +7,7 @@ import { getState, setCredentials, setState, HEADERLESS_REASONS, NAV_CATEGORIES,
 /// interaction below starts from the closed state, so a click reliably opens
 /// it (hover is covered by shell/brandNav.dom.test.jsx).
 async function openBrandMenu() {
-  fireEvent.click(screen.getByRole('button', { name: '打开完整导航' }));
+  fireEvent.click(screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ }));
   return screen.findByRole('navigation', { name: '完整导航' });
 }
 
@@ -106,7 +106,7 @@ describe('App shell navigation and layout', () => {
     setCredentials('smoke-token', '');
     await mountApp();
     await screen.findByText('smoke · 管理员');
-    const brand = screen.getByRole('button', { name: '打开完整导航' });
+    const brand = screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ });
     expect(brand.classList.contains('fleet-brand')).toBe(true);
     expect(brand.getAttribute('aria-haspopup')).toBe('menu');
     expect(brand.textContent).toContain('Opencoder Fleet');
@@ -116,6 +116,14 @@ describe('App shell navigation and layout', () => {
     // Default page (nodes) scopes the Sider menu to the node category. Icon
     // glyphs carry their own aria-label, so match menuitem names by regex.
     expect(screen.getByRole('menuitem', { name: /节点列表/ })).toBeTruthy();
+    // The Sider menu names itself after the active category and exposes the
+    // current page to assistive technology (aria-current, not just styling).
+    const siderMenu = document.getElementById('fleet-page-menu');
+    expect(siderMenu).toBeTruthy();
+    expect(siderMenu.getAttribute('role')).toBe('menu');
+    expect(siderMenu.getAttribute('aria-label')).toBe('后台管理页面导航');
+    expect(within(siderMenu).getByRole('menuitem', { name: /节点列表/ }).getAttribute('aria-current')).toBe('page');
+    expect(within(siderMenu).getByRole('menuitem', { name: /用户权限/ }).getAttribute('aria-current')).toBeNull();
     // Pages of other categories stay out of the scoped menu. The chat page's
     // nav label is now「Agent」(renamed from Operator), so both names must be
     // absent here.
@@ -170,11 +178,12 @@ describe('App shell navigation and layout', () => {
     // The complete IA offers pages outside the current (admin) category.
     fireEvent.click(within(panel).getByRole('menuitem', { name: /大脑调度$/ }));
     expect(getState().page).toBe('brain');
-    expect(screen.getByRole('button', { name: '打开完整导航' }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ }).getAttribute('aria-expanded')).toBe('false');
     // The Sider re-scopes + highlights the menu item (scope it: the closing
     // brand panel still carries the same page label during its motion).
     const brainItem = within(document.querySelector('.fleet-sidebar')).getByRole('menuitem', { name: /大脑调度/ });
     expect(brainItem.classList.contains('ant-menu-item-selected')).toBe(true);
+    expect(brainItem.getAttribute('aria-current')).toBe('page');
     // …and the panel behind it renders (agent-category brain page).
     expect(await screen.findByText('运行历史')).toBeTruthy();
   });

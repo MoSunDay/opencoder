@@ -15,7 +15,8 @@
   cmake；`setup-node` 固定 Node 24 与提交 dist 的构建环境一致；`uname -m` 校验平台标签；
   tag 与 workspace 版本一致性校验；`COPYFILE_DISABLE=1` 避免 macOS AppleDouble 条目；
   `GH_REPO` 显式指定发布仓库；工作流级 `contents: read`，仅 release 作业 `contents: write`；
-  checkout `persist-credentials: false`；同 tag 重推由 `cancel-in-progress: true` 取代旧运行。
+  checkout `persist-credentials: false`；同 tag 重推由 `cancel-in-progress: true` 取代旧运行；
+  构建失败时把日志尾部写入 step summary 与 error annotation，便于匿名读取失败原因。
 - 版本：`Cargo.toml` `[workspace.package] version = "0.1.1"`，`cargo update --workspace`
   同步 26 个 workspace 成员的 lock 版本；`README.md` / `README.en.md` 徽章与对比表同步。
 - SPA dist：HEAD 的 `crates/web/spa/dist/static/app.js` 与 `src/` 漂移，

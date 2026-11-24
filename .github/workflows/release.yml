@@ -76,7 +76,25 @@ jobs:
 
       - name: build release bundle
         shell: bash
-        run: scripts/platform/release/build.sh --output "$RUNNER_TEMP/bundle"
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/build.log"
+          scripts/platform/release/build.sh --output "$RUNNER_TEMP/bundle" 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "### build.sh failed (exit $status)"
+              echo '```text'
+              tail -n 120 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            tail -n 80 "$log" \
+              | sed 's/%/%25/g; s/\r/%0D/g; s/::/:/g' \
+              | awk '{printf "%s%%0A", $0}' \
+              | cut -c1-3000 > "$RUNNER_TEMP/tail.txt"
+            echo "::error title=build.sh failed (exit $status)::$(cat "$RUNNER_TEMP/tail.txt")"
+            exit "$status"
+          fi
 
       - name: archive and checksum
         shell: bash

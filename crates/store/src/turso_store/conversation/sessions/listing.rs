@@ -124,7 +124,7 @@ impl ListPlan {
     /// bind its parameters.
     fn push_row_predicate(&self, sql: &mut String, args: &mut Vec<Value>) {
         if self.row_clauses.is_empty() {
-            sql.push_str("1");
+            sql.push('1');
         } else {
             sql.push_str(&self.row_clauses.join(" AND "));
         }

@@ -69,7 +69,7 @@ def main():
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=15) as reply: return json.load(reply)
     log = (root/'server.log').open('w')
     process = subprocess.Popen([str(args.server.resolve()), '--workdir', str(work), '--data-dir', str(data),
-        '--port', str(http_port), '--token', 'ontology-fixture', '--web'], stdout=log, stderr=log)
+        '--port', str(http_port), '--token', 'ontology-fixture', '--web', 'true'], stdout=log, stderr=log)
     mounted = False
     receipt = {'passed':False}
     try:

@@ -81,6 +81,7 @@ const FIXTURES = {
   '/api/agents/nfs': { status: { running: true, host: '127.0.0.1', port: 2049, read_only: true, export_root: '/fixture/agents' } },
   '/api/dag/binaries/nfs': { root: '/fixture/binaries', status: { running: true, host: '127.0.0.1', port: 2050, read_only: true, export_root: '/fixture/binaries' } },
   '/api/dag/workspace/nfs': { root: '/fixture/source', status: { running: true, host: '127.0.0.1', port: 2051, read_only: true, export_root: '/fixture/source' } },
+  '/api/project/todos/nfs': { root: '/fixture/todos', status: { running: true, host: '127.0.0.1', port: 2053, read_only: true, export_root: '/fixture/todos' } },
   '/api/dag/binaries': { pools: [{ name: 'tool', description: 'Linux executable', current: 2, current_version: { version: 2, size_bytes: 1024, sha256: 'a'.repeat(64) } }] },
   '/api/dag/binaries/tool': { name: 'tool', current: 2, history: [{ version: 1, size_bytes: 1024, sha256: 'b'.repeat(64) }, { version: 2, size_bytes: 1024, sha256: 'a'.repeat(64) }] },
   '/api/admin/release': { enabled: false },

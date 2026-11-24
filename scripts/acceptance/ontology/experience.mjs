@@ -43,14 +43,15 @@ export async function checkGraph(page) {
   await page.getByRole('button', { name: '恢复 100%', exact: true }).filter({ hasText: '120%' }).waitFor();
   await page.getByRole('button', { name: '放大画布', exact: true }).click();
   await page.getByRole('button', { name: '恢复画布', exact: true }).click();
-  await page.locator('.graph-viewport').click({ position: { x: 4, y: 4 } });
+  // Both observation tabs stay mounted once visited; the inactive pane keeps a hidden canvas.
+  await page.locator('.graph-viewport:visible').click({ position: { x: 4, y: 4 } });
   await page.waitForFunction(() => [...document.querySelectorAll('[role="tooltip"]')]
     .every((tooltip) => !tooltip.getClientRects().length || getComputedStyle(tooltip).visibility !== 'visible'));
   assert.equal(await page.getByRole('button', { name: '恢复 100%', exact: true }).innerText(), '120%');
   for (const width of [768, 390, 1200]) {
     await page.setViewportSize({ width, height: 850 });
     await page.waitForFunction(() => {
-      const viewport = document.querySelector('.graph-viewport')?.getBoundingClientRect();
+      const viewport = [...document.querySelectorAll('.graph-viewport')].find((element) => element.getClientRects().length)?.getBoundingClientRect();
       const node = [...document.querySelectorAll('.graph-node-title')].find((element) => element.textContent === '入口服务')?.getBoundingClientRect();
       if (!viewport || !node) return false;
       const x = node.x + node.width / 2, y = node.y + node.height / 2;
@@ -58,7 +59,7 @@ export async function checkGraph(page) {
     });
   }
   assert.equal(await page.getByRole('button', { name: '恢复 100%', exact: true }).innerText(), '120%');
-  await page.getByText('列表', { exact: true }).click();
+  await page.locator('.graph-toolbar:visible').getByText('列表', { exact: true }).click();
   const results = page.locator('.graph-result-list');
   await results.getByLabel('搜索完整观测结果', { exact: true }).fill('下游');
   await results.getByRole('button', { name: '下游服务', exact: true }).click();

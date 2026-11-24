@@ -141,9 +141,46 @@ pub(crate) fn alive(who: Identity) -> bool {
     identity(who.pid) == Some(who)
 }
 
-/// Signal one exact process incarnation; a process that is already gone is
-/// not an error, any other failure is.
+/// Signal one exact process incarnation through a pidfd, so a pid reused
+/// between the identity check and the signal is never hit; a process that is
+/// already gone is not an error, any other failure is.
 pub(crate) fn kill(who: Identity, signal: i32) -> Result<()> {
+    // Safety: plain syscalls with scalar arguments; the descriptor is closed
+    // on every path below.
+    let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, who.pid, 0) };
+    if pidfd < 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(());
+        }
+        // No pidfd for this process (descriptors exhausted, access refused):
+        // the identity check alone guards the signal, as before.
+        tracing::warn!(%error, pid = who.pid, "clone3 sandbox pidfd unavailable; signalling by identity");
+        return kill_by_identity(who, signal);
+    }
+    let pidfd = pidfd as i32;
+    // The descriptor pins the process; the starttime read afterwards tells
+    // whether it is still the recorded incarnation.
+    let failure = unsafe {
+        let result = if identity(who.pid) == Some(who) {
+            libc::syscall(libc::SYS_pidfd_send_signal, pidfd, signal, 0, 0)
+        } else {
+            0
+        };
+        let failure = (result != 0).then(std::io::Error::last_os_error);
+        libc::close(pidfd);
+        failure
+    };
+    match failure {
+        // Gone before or while being signalled.
+        Some(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(()),
+        None => Ok(()),
+        Some(error) => Err(error).context("signal clone3 sandbox process"),
+    }
+}
+
+/// Signal guarded by the identity check alone (no pidfd available).
+fn kill_by_identity(who: Identity, signal: i32) -> Result<()> {
     if !alive(who) {
         return Ok(());
     }
@@ -213,5 +250,27 @@ mod tests {
         assert_eq!(parse_stat(&stat.replace(") S 1", ") Z 1")), Some((98765, false)));
         assert_eq!(parse_stat("invalid"), None);
         assert!(identity(0).is_none());
+    }
+
+    #[test]
+    fn kill_reaches_the_recorded_incarnation_only() {
+        use std::os::unix::process::ExitStatusExt;
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let who = identity(i32::try_from(child.id()).unwrap()).unwrap();
+        // Another incarnation of this pid is never signalled.
+        let stale = Identity {
+            start_time: who.start_time.wrapping_add(1),
+            ..who
+        };
+        kill(stale, libc::SIGKILL).unwrap();
+        assert!(child.try_wait().unwrap().is_none());
+        kill(who, libc::SIGKILL).unwrap();
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        // Gone: not an error, nothing to signal.
+        kill(who, libc::SIGKILL).unwrap();
     }
 }

@@ -124,19 +124,12 @@ pub(crate) async fn switch_session(
             .with_store(store.clone());
             sess.harness = new_task_harness(sess.harness.harness, opts);
             sess.harness.literal_mentions = true;
-            let now = opencoder_core::message::now_ms();
-            store
-                .create_session(&opencoder_store::SessionMeta {
-                    id: sess.id.clone(),
-                    agent: Some(sess.agent.name.clone()),
-                    model: Some(sess.model.clone()),
-                    created_at: now,
-                    updated_at: now,
-                    ..Default::default()
-                })
-                .await?;
-            store.set_harness_runtime(&sess.id, &sess.harness).await?;
-            (sess.mark_session_created(), 0)
+            // Opening a new task is not itself work: the session row stays
+            // unwritten until the first input is persisted (the session
+            // layer's lazy creation). An untouched task therefore never
+            // appears in /task, and a model request is always preceded by
+            // the row it belongs to.
+            (sess, 0)
         }
         crate::task::TaskPick::Resume(id) => {
             let new_config = Config::load(workdir).unwrap_or_else(|_| config.clone());

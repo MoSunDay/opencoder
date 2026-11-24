@@ -8,8 +8,9 @@ Commit: 0abfe0c77
 ## 索引
 - [src/lib.rs](../../../crates/session/src/lib.rs) — 模块根与公共导出
   （`run`、`run_once`、`run_with_images`、`run_with_registry`、`SessionEvent`）；
-  `SessionState::record` 在 append 外键失败时按内存状态重建已删除的会话行并重试一次
-  （`INSERT OR IGNORE`，不恢复级联删除的子行）
+  `SessionState::record` 在首条消息持久化时懒创建 session 行（标题取首条用户文本，
+  并带上内存中已设置的 `requirement`）；append 外键失败时按内存状态重建已删除的
+  会话行并重试一次（`INSERT OR IGNORE`，不恢复级联删除的子行）
 - [src/runner/](../../../crates/session/src/runner) — drain/执行/sidecar/steer；
   [subagent.rs](../../../crates/session/src/runner/subagent.rs) 子代理
   （`subagent` 配置开关默认开启，关闭后隐藏 `task` 工具并拒绝派发、跳过

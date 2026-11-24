@@ -3,6 +3,7 @@
 //! them without a terminal.
 
 use crate::composer;
+use crate::terminal_text;
 
 /// Timestamp a session entry is shown by: `updated_at` when the store
 /// recorded one, otherwise the creation time.
@@ -35,15 +36,39 @@ pub fn relative_time(ts_ms: i64, now_ms: i64) -> String {
     }
 }
 
-/// Second row of a session entry: the session preview trimmed to `max_w`
-/// display columns. An empty preview still renders an ellipsis so the row
-/// never collapses into a blank line.
-pub fn preview_line(preview: &str, max_w: usize) -> String {
-    let trimmed = preview.trim();
-    if trimmed.is_empty() {
-        return "\u{2026}".to_string();
+/// Placeholder for a row whose preview and title are both empty. Longer
+/// than the 10-column minimum the picker must keep readable.
+const EMPTY_TASK_TEXT: &str = "(no task text)";
+
+/// Collapse every whitespace run (including newlines from pasted prompts)
+/// into one space so a row always renders as a single line.
+fn single_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Visible task text for a session row: the stored preview first, then the
+/// session title. The title may be a first-user-message digest today and an
+/// LLM-generated title later; either way it stays readable even when the
+/// preview subquery had to be skipped (unreadable message pages) or the first
+/// message carried no visible text. Candidates are sanitized and must have a
+/// nonzero display width so control-only/zero-width text cannot yield a blank
+/// row.
+fn task_text(preview: &str, title: Option<&str>) -> String {
+    for candidate in [preview, title.unwrap_or("")] {
+        let sanitized = terminal_text::sanitize_single_line(candidate);
+        let line = single_line(&sanitized);
+        if !line.is_empty() && composer::str_width(&line) > 0 {
+            return line;
+        }
     }
-    composer::truncate_to_width(trimmed, max_w)
+    EMPTY_TASK_TEXT.to_string()
+}
+
+/// Second row of a session entry: the visible task text trimmed to `max_w`
+/// display columns. The fallback keeps at least 10 columns worth of text
+/// whenever the popup is wide enough.
+pub fn preview_line(preview: &str, title: Option<&str>, max_w: usize) -> String {
+    composer::truncate_to_width(&task_text(preview, title), max_w)
 }
 
 #[cfg(test)]
@@ -82,26 +107,86 @@ mod tests {
     }
 
     #[test]
-    fn preview_line_empty_falls_back_to_ellipsis() {
-        assert_eq!(preview_line("", 20), "\u{2026}");
-        assert_eq!(preview_line("   \n\t", 20), "\u{2026}", "whitespace only");
+    fn preview_line_empty_preview_falls_back_to_title() {
+        assert_eq!(
+            preview_line("", Some("specific task text"), 40),
+            "specific task text"
+        );
+        assert_eq!(
+            preview_line("   \n\t", Some("specific task text"), 40),
+            "specific task text",
+            "whitespace-only preview falls through"
+        );
+    }
+
+    #[test]
+    fn preview_line_prefers_preview_when_both_preview_and_title_exist() {
+        assert_eq!(
+            preview_line("actual prompt", Some("session title"), 40),
+            "actual prompt"
+        );
+    }
+
+    #[test]
+    fn preview_line_skips_titles_with_no_visible_width() {
+        for title in ["   \n\t", "\u{1b}\u{01}\u{7f}", "\u{200b}\u{200c}"] {
+            assert_eq!(
+                preview_line("", Some(title), 40),
+                "(no task text)",
+                "invisible title {title:?} must fall through to the placeholder"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_line_without_preview_or_title_keeps_a_readable_placeholder() {
+        let out = preview_line("", None, 40);
+        assert_eq!(out, "(no task text)");
+        assert!(
+            composer::str_width(&out) >= 10,
+            "placeholder must keep at least 10 columns: {out:?}"
+        );
+    }
+
+    #[test]
+    fn preview_line_collapses_multiline_text_to_one_line() {
+        assert_eq!(
+            preview_line("first line\nsecond\tline", None, 40),
+            "first line second line"
+        );
     }
 
     #[test]
     fn preview_line_truncates_to_width_with_ellipsis() {
-        assert_eq!(preview_line("short", 20), "short", "fits unchanged");
+        assert_eq!(preview_line("short", None, 20), "short", "fits unchanged");
         let wide = "x".repeat(80);
-        let out = preview_line(&wide, 10);
+        let out = preview_line(&wide, None, 10);
         assert_eq!(composer::str_width(&out), 10, "9 cols + ellipsis fits 10");
+    }
+
+    #[test]
+    fn preview_line_truncates_long_title_to_width_with_ellipsis() {
+        let title = "y".repeat(80);
+        let out = preview_line("", Some(&title), 12);
+        assert_eq!(composer::str_width(&out), 12);
+        assert!(out.ends_with('\u{2026}'), "truncation marks the cut: {out}");
     }
 
     #[test]
     fn preview_line_does_not_tear_wide_chars() {
         // Four CJK glyphs are 8 columns; a 5-column budget must keep one
         // whole glyph plus the ellipsis, never a torn half-width fragment.
-        let out = preview_line("\u{4f60}\u{597d}\u{4e16}\u{754c}", 5);
+        let out = preview_line("\u{4f60}\u{597d}\u{4e16}\u{754c}", None, 5);
         assert_eq!(composer::str_width(&out), 5);
         assert!(out.ends_with('\u{2026}'));
         assert!(out.starts_with('\u{4f60}'), "first glyph kept whole: {out}");
+    }
+
+    #[test]
+    fn preview_line_does_not_tear_wide_chars_in_title() {
+        // Three whole CJK glyphs (6 columns) plus the ellipsis fill 7.
+        let out = preview_line("", Some("\u{4f60}\u{597d}\u{4e16}\u{754c}"), 7);
+        assert_eq!(out, "\u{4f60}\u{597d}\u{4e16}\u{2026}");
+        assert_eq!(composer::str_width(&out), 7);
     }
 }

@@ -1,8 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn agent_self_detaches_remote_and_creates_an_empty_local_task_then_resumes_only_remote_context(
-) {
+async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_remote_context() {
     let dir = tempfile::tempdir().unwrap();
     let _scope = opencoder_core::scoped_config_home(dir.path().join("config-home"));
     let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
@@ -111,14 +110,14 @@ async fn agent_self_detaches_remote_and_creates_an_empty_local_task_then_resumes
     assert!(history.is_empty());
     assert!(input.is_empty());
     assert!(!running);
-    assert!(store.get_session(&session_id).await.unwrap().is_some());
-    assert!(store
-        .harness_runtime(&session_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .remote
-        .is_none());
+    assert!(
+        store.get_session(&session_id).await.unwrap().is_none(),
+        "switching to a new task must not persist a row before its first input"
+    );
+    assert!(
+        store.harness_runtime(&session_id).await.unwrap().is_none(),
+        "lazy new task must not persist a runtime row before its first input"
+    );
     chat.push_marker(Line::from("self-only content"));
     history.push("local history".into());
     switch_session(

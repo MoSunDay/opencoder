@@ -40,7 +40,7 @@ Commit: 0abfe0c77
 - [sessions.rs](../../../crates/store/src/turso_store/conversation/sessions.rs)
   — 会话读写；活跃索引维护
   [sessions/activity.rs](../../../crates/store/src/turso_store/conversation/sessions/activity.rs)
-  （`IdxDelete` 重建并重试一次）、列表分页/坏行降级
+  （`IdxDelete` 重建并重试一次，重建先建探针索引再换名；重建撞上不可读存储时跳过活跃时间戳降级写入）、列表分页/坏行降级
   [sessions/listing.rs](../../../crates/store/src/turso_store/conversation/sessions/listing.rs)
   （`updated_at` 活跃时间、点查 fallback 跳过坏行）；
   [messages.rs](../../../crates/store/src/turso_store/conversation/messages.rs)
@@ -70,6 +70,8 @@ Commit: 0abfe0c77
   历史会话排序索引维护
 - [brain_cleanup](../../../scripts/maintenance/brain_cleanup/__main__.py) —
   历史大脑表清理
+- [db_repair](../../../scripts/maintenance/db_repair/README.md) — Turso 库损坏
+  （`IdxDelete`/`FOREIGN KEY`/坏页）时 `.dump` + 页级 carve 重建新库
 - [concurrency.rs](../../../crates/database/tests/concurrency.rs)、
   [processes.rs](../../../crates/database/tests/processes.rs)、
   [storage_mixed.rs](../../../crates/store/examples/storage_mixed.rs) — 并发、

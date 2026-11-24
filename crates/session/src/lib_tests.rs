@@ -256,3 +256,46 @@ mod store_message_count_tests {
         assert_eq!(s.store_message_count(), 3);
     }
 }
+
+#[cfg(test)]
+mod lazy_session_row_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, Config, Message};
+    use opencoder_llm::{ChatStream, MockChatClient};
+    use opencoder_store::{Store, TursoStore};
+
+    /// A fresh session writes no row; the first `record` creates it with the
+    /// first user text as title. Anything staged in memory before that first
+    /// record (here `/requirement`) must ride along instead of being lost.
+    #[tokio::test]
+    async fn lazily_created_session_row_preserves_requirement() {
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+        let mut session = SessionState::new(
+            "lazy-requirement",
+            resolve_agent("act").unwrap(),
+            Config::default(),
+            client,
+            PathBuf::from("."),
+        )
+        .with_store(store.clone());
+        session.requirement = Some("keep this requirement".into());
+
+        session.record(Message::user("u1", "first prompt")).await;
+
+        let meta = store
+            .get_session("lazy-requirement")
+            .await
+            .unwrap()
+            .expect("first record must create the session row");
+        assert_eq!(meta.title.as_deref(), Some("first prompt"));
+        assert_eq!(
+            meta.requirement.as_deref(),
+            Some("keep this requirement"),
+            "pre-row requirement must survive lazy creation"
+        );
+    }
+}

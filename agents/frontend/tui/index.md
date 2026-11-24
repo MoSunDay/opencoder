@@ -12,7 +12,8 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   （含 `/subtasks` Enter 下钻）先丢弃在途 `/agent` 查询，晚到的查询结果只在
   暂存槽为空时接受，失败切换不采用父指针
 - [app_bootstrap.rs](../../../crates/tui/src/app_bootstrap.rs) — 恢复运行态或远端绑定
-- [app_task.rs](../../../crates/tui/src/app_task.rs) — 独立任务管理与本地新任务运行设置
+- [app_task.rs](../../../crates/tui/src/app_task.rs) — 独立任务管理与本地新任务运行设置；
+  `/task` 新建任务在首条输入持久化前不落 session 行，模型请求前不会出现空 task
 - [worker.rs](../../../crates/tui/src/worker.rs) — 分派 Server 或本地会话 actor，
   桥接 `SessionEvent` 到聊天渲染；turn 代标：`ResetCancel(CancellationToken, gen)`
   重置取消令牌并携带代数、`TurnDone(String, gen)` 回显同代，app 状态逐 turn
@@ -99,7 +100,9 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - [tests/subtask_restore_floor.rs](../../../crates/tui/tests/subtask_restore_floor.rs) —
   `/task` 切换恢复下限回归：切回恢复
   `max(回放用量, 快照 + 休眠期注册表增量)`，不回退也不重复计数
-- [task.rs](../../../crates/tui/src/task.rs) — `/task` 列表；`src/app_submit.rs` 提交
+- [task.rs](../../../crates/tui/src/task.rs) — `/task` 列表；行内任务文本优先
+  preview，缺失时回退 title；文本经终端安全清洗后按显示宽度判空，二者皆空
+  （含仅控制字符/零宽字符）显示 ≥10 列占位；`src/app_submit.rs` 提交
 - [control_helpers.rs](../../../crates/tui/src/control_helpers.rs) — 复合控制命令组装
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎

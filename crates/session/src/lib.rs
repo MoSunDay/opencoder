@@ -517,7 +517,7 @@ impl SessionState {
             handoff_plan: self.handoff_plan.clone(),
             skill: self.skill_prompt_cloned(),
             task_type: None,
-            requirement: None,
+            requirement: self.requirement.clone(),
         };
         store.create_session(&meta).await?;
         if self.harness.harness == opencoder_core::harness::Harness::Codex

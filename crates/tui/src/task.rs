@@ -277,8 +277,9 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     }
 
     // Session rows: two lines each - the session's relative age (plus the
-    // `(current)` marker) over its preview. The title is intentionally not
-    // rendered; it stays available in the store for other surfaces.
+    // `(current)` marker) over its task text. The preview is preferred; the
+    // title covers rows whose message pages are unreadable or carry no text,
+    // and a fixed placeholder keeps legacy blank rows readable.
     for (i, s) in picker.sessions.iter().enumerate() {
         let selected = picker.selected == i + row_offset;
         let is_current = s.id == picker.current_session_id;
@@ -310,7 +311,10 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         } else {
             Style::default()
         };
-        let preview = Span::styled(task_row::preview_line(&s.preview, PREVIEW_W), preview_style);
+        let preview = Span::styled(
+            task_row::preview_line(&s.preview, s.title.as_deref(), PREVIEW_W),
+            preview_style,
+        );
         items.push(ListItem::new(Text::from(vec![
             Line::from(headline),
             Line::from(preview),
@@ -566,18 +570,36 @@ mod tests {
     }
 
     #[test]
-    fn empty_preview_renders_placeholder_ellipsis() {
+    fn empty_preview_renders_title_fallback() {
         let mut s = item("s1");
         s.created_at = T0;
-        // item() leaves `preview` empty.
+        // item() leaves `preview` empty but carries a title.
         let text = render_picker_to_text(&picker_at(vec![s], T0));
         let age_line = line_with(&text, "now").expect("relative age rendered");
         let preview_line = text.lines().nth(age_line + 1).expect("second row exists");
-        // Strip the surrounding border cells; the row body must be just "...".
         let body = preview_line.trim().trim_matches('\u{2502}').trim();
         assert_eq!(
-            body, "\u{2026}",
-            "empty preview must render an ellipsis placeholder:\n{text}"
+            body, "title-s1",
+            "empty preview must render the session title instead of a lone ellipsis:\n{text}"
+        );
+    }
+
+    #[test]
+    fn empty_preview_and_title_render_a_readable_placeholder() {
+        let mut s = item("s1");
+        s.created_at = T0;
+        s.title = None;
+        let text = render_picker_to_text(&picker_at(vec![s], T0));
+        let age_line = line_with(&text, "now").expect("relative age rendered");
+        let preview_line = text.lines().nth(age_line + 1).expect("second row exists");
+        let body = preview_line.trim().trim_matches('\u{2502}').trim();
+        assert_eq!(
+            body, "(no task text)",
+            "a blank legacy row must still be identifiable:\n{text}"
+        );
+        assert!(
+            body.chars().count() >= 10,
+            "row text must keep at least 10 characters: {body:?}"
         );
     }
 

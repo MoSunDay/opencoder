@@ -68,6 +68,9 @@ describe('menuItemsOf / selectItemsOf scoping', () => {
     expect(items.map((i) => i.key)).toEqual(['nodes', 'users']);
     expect(items.map((i) => i.label)).toEqual(['节点列表', '用户权限']);
     expect(items.every((i) => isValidElement(i.icon))).toBe(true);
+    // Icons are decorative: the menuitem accessible name is the page label,
+    // not the Ant Design icon name (needed by exact-name menu queries).
+    expect(items.every((i) => i.icon.props['aria-hidden'] === true)).toBe(true);
   });
 
   it('never leaks other categories into a menu', () => {

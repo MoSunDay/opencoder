@@ -71,7 +71,7 @@ describe('header brand menu', () => {
     await waitFor(() => expect(screen.queryByRole('navigation', { name: '完整导航' })).toBeNull(), { timeout: 2500 });
   });
 
-  it('closes the hover-opened panel after navigating and keeps the page key intact', async () => {
+  it('closes a hover-opened panel after choosing a page from the full IA', async () => {
     const { brand, onNavigate } = mountMenu('nodes');
     const panel = await openByHover(brand);
     fireEvent.click(within(panel).getByRole('menuitem', { name: /DAG 工作流$/ }));

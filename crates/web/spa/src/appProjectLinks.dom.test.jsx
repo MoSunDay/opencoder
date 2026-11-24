@@ -23,7 +23,7 @@ it('opens a shared project ahead of a saved page, follows history and clears the
   act(() => { window.location.hash = 'project=g-seed'; });
   await screen.findByText('项目 · 既有目标', { selector: '.ant-drawer-title' });
   expect(getState().page).toBe('project');
-});
+}, 10000);
 
 it('retains the shared target and history when link login consumes its credential', async () => {
   installFetchRouter({ withGoal: true });

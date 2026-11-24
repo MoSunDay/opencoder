@@ -525,7 +525,6 @@ body {
 }
 .fleet-category-tab[aria-selected="true"] { background: var(--oc-bg-container); color: var(--oc-primary); }
 .fleet-category-tab:focus-visible { outline: 2px solid var(--oc-primary); outline-offset: -2px; }
-.fleet-nav-category { padding: 12px 12px 8px; }
 .fleet-content > .fleet-mobile-nav { display: none; }
 @media (max-width: 767px) {
   .fleet-sidebar { display: none; }

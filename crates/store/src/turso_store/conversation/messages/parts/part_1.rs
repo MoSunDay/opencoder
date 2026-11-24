@@ -30,9 +30,14 @@ pub async fn append_many(
         // A desynced session-activity index (Turso rollback bug) makes the
         // transaction's `UPDATE sessions` fail with `IdxDelete: no matching
         // index entry`; rebuild the derived index and retry the chunk once.
-        let seqs = super::sessions::activity::repair_and_retry(conn, || {
-            append_chunk_in_tx(conn, session_id, chunk)
-        })
+        // Until the database is repaired the rebuild fails on the unreadable
+        // row as well: the chunk then lands without the activity touch (the
+        // session keeps its old position in `/task`) rather than not at all.
+        let seqs = super::sessions::activity::repair_and_retry_or(
+            conn,
+            || append_chunk_in_tx(conn, session_id, chunk, true),
+            || append_chunk_in_tx(conn, session_id, chunk, false),
+        )
         .await?;
         all_seqs.extend(seqs);
     }
@@ -42,10 +47,13 @@ pub async fn append_many(
 /// The immediate transaction takes the write lock up front, so a concurrent
 /// cross-process commit cannot fail the first INSERT with a busy error that
 /// busy_timeout does not retry (same rationale as input admission).
+/// `touch` false skips the activity stamp: the indexed column stays as it
+/// is, so the write does not depend on the activity index.
 async fn append_chunk_in_tx(
     conn: &Connection,
     session_id: &str,
     msgs: &[Message],
+    touch: bool,
 ) -> Result<Vec<i64>> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let mut seqs = Vec::with_capacity(msgs.len());
@@ -82,14 +90,16 @@ async fn append_chunk_in_tx(
         // `AND updated_at < ?` skips the row rewrite (and the indexed-column
         // mutation) when the append does not advance activity — replays and
         // backfills with older timestamps must not churn the index.
-        if let Some(last_ts) = msgs.iter().map(|m| m.created_at).max() {
-            conn.prepare_cached(
-                "UPDATE sessions SET updated_at = MAX(updated_at, ?) WHERE id = ? AND updated_at < ?",
-            )
-            .await?
-            .execute(params![last_ts, session_id, last_ts])
-            .await
-            .context("touch session activity in tx")?;
+        if touch {
+            if let Some(last_ts) = msgs.iter().map(|m| m.created_at).max() {
+                conn.prepare_cached(
+                    "UPDATE sessions SET updated_at = MAX(updated_at, ?) WHERE id = ? AND updated_at < ?",
+                )
+                .await?
+                .execute(params![last_ts, session_id, last_ts])
+                .await
+                .context("touch session activity in tx")?;
+            }
         }
         Ok(seqs)
     })

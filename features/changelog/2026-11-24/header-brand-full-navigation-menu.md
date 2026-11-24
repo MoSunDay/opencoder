@@ -23,8 +23,10 @@ Select 两级。
   改为 hover `.fleet-brand` 后在 `.fleet-nav-panel` 内选 `menuitem`；
   `spa_responsive.js` 桌面端分类标签取自 `NAV_CATEGORIES`，分类切换只在 <768 的
   tabs 上执行。
-- `nav.js`：`ontologyEntities` 的标题来源从 `menu-only` 修正为 `body-title`，
-  与实体页实际渲染的 Tabs 对齐；这是既有登记漂移，由 `headerContract` 指出。
+- `nav.js`：`menuItemsOf` 给装饰性页面图标加 `aria-hidden`，菜单项的可访问名
+  只含页面文案（Sider 与品牌菜单一致，精确名称查询不再被图标名污染）；
+  `ontologyEntities` 的标题来源从 `menu-only` 修正为 `body-title`，与实体页
+  实际渲染的 Tabs 对齐——这是既有登记漂移，由 `headerContract` 指出。
 
 ## 测试覆盖
 
@@ -45,12 +47,16 @@ Select 两级。
 
 ## 验证
 
-- `npm ci` 恢复二维图谱依赖后，定向 Vitest：`src/nav.test.js`、
-  `src/appNavigation.dom.test.jsx`、`src/navPersistence.dom.test.jsx`、
-  `src/appProjectLinks.dom.test.jsx`、`src/shell/brandNav.dom.test.jsx`、
-  `src/shell/categoryTabs.dom.test.jsx` 共 6 个文件、54 个用例通过；
-  `src/shell/headerContract.dom.test.jsx` 21 个用例通过。
+- `npm ci` 恢复二维图谱依赖后，定向 Vitest 7 个文件、75 个用例通过：
+  `src/nav.test.js`、`src/appNavigation.dom.test.jsx`、
+  `src/navPersistence.dom.test.jsx`、`src/appProjectLinks.dom.test.jsx`、
+  `src/shell/brandNav.dom.test.jsx`、`src/shell/categoryTabs.dom.test.jsx`、
+  `src/shell/headerContract.dom.test.jsx`。
 - 验收脚本逐个 `node --check` 通过；`rg "fleet-nav-category" scripts/acceptance`
   无结果。
-- 未运行全量 SPA 测试、浏览器验收与 Rust 测试；构建与 dist 产物核验见本次父流程。
+- `npm run build` 通过并重建 `crates/web/spa/dist/static/app.js|app.css`；
+  真实 Chromium 冒烟（1440×900 与 390×844）确认品牌 hover/click 菜单、
+  桌面 Sider 无分类 tablist、移动端分类 tabs 保留、菜单项切页与 Ontology
+  二维图谱均正常，无 console/page error，桌面/移动端无横向溢出。
+- 未运行全量 SPA 测试、完整浏览器验收套件与 Rust 测试。
 - 收尾复跑：定向 Vitest 23 个文件 187/187（图谱、shell、nav、appNavigation / appProjectLinks / navPersistence、fleet/navigation）；`npm run typecheck:ontology` 无错误；`build-spa.sh` 重建后 `check-spa-drift.sh` 报 `spa dist: no drift`。浏览器验收仍未运行。

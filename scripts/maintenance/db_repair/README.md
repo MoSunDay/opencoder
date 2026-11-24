@@ -9,7 +9,7 @@
 5. 消息仍在但 `sessions` 行已丢失的会话补一条最小会话行（保持外键有效）；`task_type` 为二进制垃圾、`kind` 为空串的会话行修正为 `parent`/`subagent`/NULL；
 6. `sqlite_sequence` 抬到各表最大 `seq`，`PRAGMA integrity_check`，输出 JSON 报告。
 
-需要带 `sqlite3` 模块的 Python（本机默认 `python3` 是 3.13 且没有 `_sqlite3`，请用 `/usr/bin/python3`）以及 `sqlite3` 命令行。
+需要带 `sqlite3` 模块的 Python（若默认 `python3` 缺少 `_sqlite3`，改用带该模块的解释器，例如 `/usr/bin/python3`）以及 `sqlite3` 命令行。以下命令在仓库根目录执行。
 
 ```sh
 # 0. 先停掉全部 opencoder 进程（多进程同时写同一库正是损坏来源之一）
@@ -19,9 +19,9 @@ pgrep -a opencoder
 DATA=~/.local/share/opencoder/<workdir-hash>
 mkdir -p ~/opencoder-db-backup && cp -a "$DATA"/opencoder.db* ~/opencoder-db-backup/
 
-# 2. 重建到临时目录（约 10 分钟，2.4GB 库；磁盘需再空出 ~5GB）
+# 2. 重建到临时目录（耗时随库大小增长，数 GB 的库约十分钟；临时目录需预留约两倍库大小的空间）
 mkdir -p /tmp/opencoder-repaired
-PYTHONPATH=/root/opencoder/scripts/maintenance /usr/bin/python3 -m db_repair \
+PYTHONPATH=scripts/maintenance /usr/bin/python3 -m db_repair \
   --database "$DATA/opencoder.db" \
   --output   /tmp/opencoder-repaired/opencoder.db \
   --json     /tmp/opencoder-repaired/report.json
@@ -43,7 +43,7 @@ cp /tmp/opencoder-repaired/opencoder.db "$DATA/opencoder.db"
 
 说明：
 
-- 导入报告里的 `carved.messages_without_seq` 是 2026-11-23 晚间写入、只残留在索引叶页里的行，它们拿到的 `seq` 只保证会话内时间顺序正确；`index_only` 条目对应的行若页已被覆盖则无法恢复。
+- 导入报告里的 `carved.messages_without_seq` 是只残留在索引叶页、表行已丢失的消息，它们拿到的 `seq` 只保证会话内时间顺序正确；`index_only` 条目对应的行若页已被覆盖则无法恢复。
 - 该工具不会修改源库：`--output` 指向 `--database` 同一文件时直接拒绝；运行中途失败会保留 `.repair-<name>/` 里的副本与 dump（日志给出路径），成功时才删除（`--keep-workdir` 可强制保留）。
 - 无 rowid 的索引叶页行按**所属会话**继承旧索引里尚未使用的 `seq`（会话内按 `created_at` 顺序对位）；索引里已没有该会话条目的行拿到高于现有最大值的新 `seq`。
 - `--dump` 可复用同一库状态的既有 `.dump` 文件（会被原地改写）。

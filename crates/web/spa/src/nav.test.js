@@ -5,7 +5,7 @@
 
 import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
-import { HEADERLESS_REASONS, NAV_CATEGORIES, PAGE_META, allowedPages, categoryHome, groupedMenuItemsOf, menuItemsOf, selectItemsOf, visibleCategories } from './nav.js';
+import { HEADERLESS_REASONS, NAV_CATEGORIES, PAGE_META, allowedPages, categoryHome, groupedMenuItemsOf, menuItemsOf, selectItemsOf, visibleCategories, withCurrentPage } from './nav.js';
 
 // Flat {category, page, menu, icon} rows for table-driven assertions.
 const ALL_ITEMS = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => ({ ...i, category: c.key })));
@@ -113,6 +113,35 @@ describe('groupedMenuItemsOf (header brand menu)', () => {
     expect(groups.map((group) => group.label)).toEqual(['项目', 'Agent', 'Ontology']);
     expect(groups.flatMap((group) => group.children.map((item) => item.key)))
       .toEqual(ALL_ITEMS.filter((item) => item.category !== 'admin').map((item) => item.page));
+  });
+});
+
+describe('withCurrentPage (current-page marker)', () => {
+  it('marks only the selected leaf in the grouped brand projection', () => {
+    const groups = groupedMenuItemsOf(NAV_CATEGORIES);
+    const marked = withCurrentPage(groups, 'dag');
+    expect(marked).not.toBe(groups);
+    expect(marked.map((group) => group.label)).toEqual(groups.map((group) => group.label));
+    expect(marked.flatMap((group) => group.children).filter((item) => item['aria-current'] === 'page').map((item) => item.key))
+      .toEqual(['dag']);
+    expect(marked.flatMap((group) => group.children).filter((item) => item.key !== 'dag').every((item) => item['aria-current'] === undefined))
+      .toBe(true);
+    // Groups are recreated with mapped children, never mutated in place.
+    expect(marked.every((group, index) => group !== groups[index])).toBe(true);
+    expect(marked.flatMap((group) => group.children).some((item) => 'aria-current' in item)).toBe(true);
+  });
+
+  it('marks a flat Sider projection and leaves unselected or unknown pages unmarked', () => {
+    const items = menuItemsOf(NAV_CATEGORIES.find((category) => category.key === 'admin').items);
+    const snapshot = items.map((item) => ({ ...item }));
+    const marked = withCurrentPage(items, 'users');
+    expect(marked.map((item) => item.key)).toEqual(['nodes', 'users']);
+    expect(marked.map((item) => item['aria-current'])).toEqual([undefined, 'page']);
+    expect(marked.every((item, index) => item !== items[index])).toBe(true);
+    // No input mutation: same objects, same values, no added marker.
+    expect(items).toEqual(snapshot);
+    expect(items.some((item) => 'aria-current' in item)).toBe(false);
+    expect(withCurrentPage(items, 'brain').map((item) => item['aria-current'])).toEqual([undefined, undefined]);
   });
 });
 

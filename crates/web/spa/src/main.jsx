@@ -39,6 +39,7 @@ import {
   NAV_STORAGE_KEY,
   selectItemsOf,
   visibleCategories,
+  withCurrentPage,
 } from './nav.js';
 import { PANELS } from './shell/panels.jsx';
 import { BrandNavMenu } from './shell/brandNav.jsx';
@@ -225,7 +226,8 @@ function FleetShell() {
                 mode="inline"
                 theme="light"
                 selectedKeys={[shownPage]}
-                items={menuItemsOf(category.items)}
+                aria-label={`${category.label}页面导航`}
+                items={withCurrentPage(menuItemsOf(category.items), shownPage)}
                 onClick={({ key }) => goPage(key)}
                 style={{ borderRight: 0 }}
               />

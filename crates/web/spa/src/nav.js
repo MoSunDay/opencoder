@@ -159,6 +159,20 @@ export function groupedMenuItemsOf(categories) {
   }));
 }
 
+/// Annotate a Menu item tree with `aria-current="page"` on the selected leaf.
+/// Pure: recurse into groups, return fresh item objects/arrays, never mutate
+/// the input (nav.js items are shared by every navigation surface). Leaves
+/// that are not selected get `aria-current: undefined`, which React omits from
+/// the DOM instead of rendering an empty attribute.
+export function withCurrentPage(items, selectedPage) {
+  return items.map((item) => {
+    if (Array.isArray(item.children)) {
+      return { ...item, children: withCurrentPage(item.children, selectedPage) };
+    }
+    return { ...item, 'aria-current': item.key === selectedPage ? 'page' : undefined };
+  });
+}
+
 /// antd Select options for the mobile picker from a raw item LIST.
 export function selectItemsOf(items) {
   return items.map((i) => ({ value: i.page, label: i.menu }));

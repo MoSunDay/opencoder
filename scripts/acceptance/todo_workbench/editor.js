@@ -3,13 +3,16 @@ const path=require('path');
 
 async function verifyEditor(h,definition){
   const {page,api,until,root}=h;
+  const openPage=async name=>{
+    await page.locator('.fleet-brand').hover();
+    await page.locator('.fleet-nav-panel').getByRole('menuitem',{name,exact:true}).click();
+  };
   const writes=[];
   page.on('request',request=>{
     const url=new URL(request.url());
     if(request.method()==='POST'&&url.pathname.startsWith('/api/todo/'))writes.push(url.pathname);
   });
-  await page.getByText('Agent',{exact:true}).first().click();
-  await page.getByRole('menuitem',{name:'TODO 管理'}).click();
+  await openPage('TODO 管理');
   await page.getByRole('button',{name:'新建模板',exact:true}).click();
   const editor=page.getByLabel('TODO 目录编辑器');
   await editor.locator('.file-workspace').waitFor();
@@ -78,8 +81,7 @@ async function verifyEditor(h,definition){
   assert.deepEqual(writes.slice(-2),['/api/todo/validate-files','/api/todo/templates/review-directory/new-version']);
   assert.equal((await api('GET','/api/todo/templates/review-directory/v1/context.json')).objective,saved.objective);
   assert.equal((await api('GET','/api/todo/templates/review-directory/v2/context.json')).objective,revisedObjective);
-  await page.reload();await page.getByText('Agent',{exact:true}).first().click();
-  await page.getByRole('menuitem',{name:'TODO 管理'}).click();
+  await page.reload();await openPage('TODO 管理');
   await page.locator('tr[data-row-key="review-directory"] .ant-table-row-expand-icon').click();
   await page.getByRole('button',{name:'编辑',exact:true}).last().click();await editor.locator('.file-workspace').waitFor();
   await editor.getByLabel('搜索文件',{exact:true}).fill('objective.md');await node('objective.md').click();

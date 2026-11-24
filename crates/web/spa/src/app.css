@@ -112,12 +112,56 @@ body {
   position: relative;
   z-index: 2;
 }
+/* The brand is the full-navigation trigger: a real button styled as the
+   wordmark, so hover/click/focus open the menu popover without adding chrome. */
 .fleet-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--oc-text);
+  font: inherit;
   font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.2px; /* 1px tracked the wordmark out too loosely */
   white-space: nowrap;
+  cursor: pointer;
+}
+.fleet-brand:hover,
+.fleet-brand[aria-expanded="true"] {
+  background: var(--oc-bg-layout);
+}
+.fleet-brand:focus-visible {
+  outline: 2px solid rgba(var(--oc-primary-rgb), 0.45);
+  outline-offset: 2px;
+}
+.fleet-brand-caret {
+  font-size: 11px;
+  color: var(--oc-text-tertiary);
+}
+/* Full-IA popover opened by the brand: a compact column with its own scroll
+   so a deep category list never outgrows the viewport. */
+.fleet-brand-popover .ant-popover-inner { padding: 6px; }
+.fleet-nav-panel {
+  width: min(320px, calc(100vw - 48px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fleet-nav-panel .ant-menu {
+  background: transparent;
+  border-inline-end: 0;
+}
+.fleet-nav-panel .ant-menu-item-group-title {
+  padding: 8px 12px 4px;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
 }
 .fleet-header-side {
   margin-left: auto;
@@ -128,10 +172,6 @@ body {
 .fleet-sidebar {
   background: var(--oc-panel-bg);
   border-right: 1px solid var(--oc-border);
-}
-.fleet-sidebar.ant-layout-sider-collapsed .fleet-nav-category {
-  visibility: hidden;
-  pointer-events: none;
 }
 /* Pin the collapse toggle to the bottom of the sider: the sider children
    are a flex column, the menu grows, and margin-top:auto sinks the button. */
@@ -457,9 +497,9 @@ body {
   overflow-y: auto;
 }
 
-/* Keep navigation and controls reachable on narrow consoles. Two-level IA:
-   the category switch sits above the scoped Sider menu (fleet-nav-category);
-   the same two levels re-render as scrollable tabs + Select rows on mobile. */
+/* Mobile-only IA controls: the header brand opens the complete navigation
+   menu, and narrow consoles keep the two-level category tabs + page Select
+   rows inside the Content. */
 .fleet-category-tabs {
   display: flex;
   max-width: 100%;
@@ -499,7 +539,8 @@ body {
     padding-right: 0 !important;
     padding-bottom: 10px;
   }
-  /* Brand (163px, nowrap) + the five status/identity/action chips need ~425px
+  /* Brand button (nowrap, ~190px with its caret) + the five
+     status/identity/action chips need ~450px
      at their min-content width, so a single row overflows 390px -- and Chromium
      mobile emulation then grows the layout viewport to the overflow (413px),
      dragging the document with it. Wrap onto two rows and stop the flex shrink

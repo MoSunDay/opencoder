@@ -148,9 +148,9 @@ async function chooseInForm(label, text) {
 }
 
 async function openAgentPage(name) {
-  // 侧栏按类别分组（项目/Agent/节点）：目标页都在 Agent 类别下，先点类别再点菜单项。
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name }).click();
+  // 品牌菜单包含全部类别与页面：悬停品牌打开面板，再点目标页菜单项。
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name }).click();
 }
 
 async function openExecution(id) {

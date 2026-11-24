@@ -107,7 +107,8 @@ async function main() {
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'fixture-token'));
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: 'networkidle' });
-    await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
+    await page.locator('.fleet-brand').hover();
+    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
     await page.getByRole('button', { name: '项目浏览器验收', exact: true }).waitFor();
     assert.deepEqual(await page.locator('#fleet-page-menu').getByRole('menuitem').allTextContents(), ['Overview', 'Tag']);
     assert.deepEqual(await page.locator('.fleet-content .ant-tabs').getByRole('tab').allTextContents(), ['项目', '子项', 'TODO']);

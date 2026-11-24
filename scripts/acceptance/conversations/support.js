@@ -30,8 +30,8 @@ async function ready(page, nodeName) {
 
 async function enter(page, base, mode, nodeName) {
   await page.goto(base, { waitUntil: 'networkidle' });
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name: /Agent$/ }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: /Agent$/ }).click();
   await page.getByText(mode === 'agent' ? 'Agent 模式' : 'Operator 模式', { exact: true }).click();
   const node = await ready(page, nodeName);
   assert(node.kinds.includes(mode), `node does not support ${mode}`);

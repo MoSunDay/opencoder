@@ -3,8 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 async function access({ page, browser, base, api, root }) {
-  await page.locator('.fleet-nav-category').getByRole('tab', { name: '后台管理' }).click();
-  await page.getByRole('menuitem', { name: '用户权限' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '用户权限', exact: true }).click();
   await page.getByRole('button', { name: '创建用户' }).click();
   await page.getByLabel('用户名', { exact: true }).fill('accept-viewer');
   await page.getByRole('dialog', { name: '创建用户' }).getByRole('button', { name: '创建用户' }).click();
@@ -42,10 +42,16 @@ async function access({ page, browser, base, api, root }) {
   try {
     await reader.goto(`${base}/#token=${token}`);
     await reader.getByText('accept-viewer · 只读', { exact: true }).waitFor();
-    await reader.locator('.fleet-nav-category').getByRole('tab', { name: '项目', exact: true }).click();
+    await reader.locator('.fleet-brand').hover();
+    await reader.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
     await reader.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
     await reader.getByRole('menuitem', { name: /Overview$/ }).waitFor();
-    assert.equal(await reader.getByRole('tab', { name: '后台管理' }).count(), 0);
+    const panel = reader.locator('.fleet-nav-panel');
+    await reader.locator('.fleet-brand').hover();
+    await panel.waitFor();
+    assert.equal(await panel.getByText('后台管理', { exact: true }).count(), 0);
+    await reader.mouse.move(0, 0);
+    await panel.waitFor({ state: 'hidden' });
     assert(await reader.getByRole('button', { name: '新建项目' }).isDisabled());
     await reader.screenshot({ path: path.join(root, 'access-viewer.png') });
     await page.getByRole('menuitem', { name: '用户权限' }).click();

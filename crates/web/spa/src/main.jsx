@@ -1,9 +1,11 @@
 // main.jsx — app shell: antd Layout with brand Header + connection badge,
-// left Sider (category Segmented on top, then the page Menu scoped to the
-// active category), Content switching per page, and the login gate. The
-// whole navigation derives from nav.js NAV_CATEGORIES; the active category
+// left Sider (page Menu scoped to the active category), Content switching per
+// page, and the login gate. The whole navigation derives from nav.js
+// NAV_CATEGORIES: the header brand opens the complete IA menu (hover/click,
+// shell/brandNav.jsx), the Sider scopes to the category of `page`, and mobile
+// renders the same two levels as scrollable tabs + Select. The active category
 // is derived from `page` itself, so there is no second navigation state to
-// keep in sync (mobile renders the same two levels as Segmented + Select).
+// keep in sync.
 // The last explicitly chosen page is mirrored to localStorage through the
 // usehooks-ts `useLocalStorage` hook (nav.js NAV_STORAGE_KEY) and restored
 // pre-paint on mount, so 项目 / Agent / 节点 selections survive a reload.
@@ -39,6 +41,7 @@ import {
   visibleCategories,
 } from './nav.js';
 import { PANELS } from './shell/panels.jsx';
+import { BrandNavMenu } from './shell/brandNav.jsx';
 import { CategoryTabs } from './shell/categoryTabs.jsx';
 import { clearCredentials, setState, setIdentity, useStore } from './store.js';
 import { normalizeNotice } from './notice.js';
@@ -155,8 +158,8 @@ function FleetShell() {
   const category = visible.find((c) => c.items.some((i) => i.page === shownPage)) || visible[0];
   const categoryOptions = visible.map((c) => ({ value: c.key, label: c.label }));
 
-  // Explicit navigation (Sider Segmented/Menu, mobile Segmented/Select) is
-  // the single writer of the persisted selection; programmatic jumps keep
+  // Explicit navigation (header brand menu, Sider Menu, mobile tabs/Select)
+  // is the single writer of the persisted selection; programmatic jumps keep
   // the store-only semantics they already had.
   const goPage = (key) => {
     if (key !== shownPage) draftGuard.run(() => {
@@ -198,7 +201,7 @@ function FleetShell() {
       <div className="fleet-root">
         <Layout className="fleet-layout">
           <Header className="fleet-header">
-            <span className="fleet-brand">⛵ Opencoder Fleet</span>
+            <BrandNavMenu categories={visible} selectedPage={shownPage} onNavigate={goPage} />
             <div className="fleet-header-side">
               <ConnectionBadge />
               <ServerBase />
@@ -217,13 +220,6 @@ function FleetShell() {
               trigger={null}
               theme="light"
             >
-              <div className="fleet-nav-category" aria-hidden={navCollapsed}>
-                <CategoryTabs
-                  value={category.key}
-                  options={categoryOptions}
-                  onChange={(v) => goPage(categoryHome(v))}
-                />
-              </div>
               <Menu
                 id="fleet-page-menu"
                 mode="inline"

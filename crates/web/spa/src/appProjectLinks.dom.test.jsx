@@ -13,8 +13,12 @@ it('opens a shared project ahead of a saved page, follows history and clears the
   act(() => setState({ page: 'topics' }));
   expect(screen.getByText('项目 · 既有目标', { selector: '.ant-drawer-title' })).toBeTruthy();
   expect(getState().page).toBe('project');
-  fireEvent.click(within(document.querySelector('.fleet-sidebar')).getByRole('tab', { name: '后台管理', exact: true }));
+  // Explicit navigation now goes through the header brand's complete menu.
+  fireEvent.click(screen.getByRole('button', { name: '打开完整导航' }));
+  const panel = await screen.findByRole('navigation', { name: '完整导航' });
+  fireEvent.click(within(panel).getByRole('menuitem', { name: /用户权限$/ }));
   await waitFor(() => expect(window.location.hash).toBe(''));
+  expect(getState().page).toBe('users');
   expect(screen.queryByText('项目 · 既有目标', { selector: '.ant-drawer-title' })).toBeNull();
   act(() => { window.location.hash = 'project=g-seed'; });
   await screen.findByText('项目 · 既有目标', { selector: '.ant-drawer-title' });

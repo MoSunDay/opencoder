@@ -179,8 +179,8 @@ async function createTodo(id, nodeId) {
 }
 
 async function openExecution(id) {
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name: '全部执行' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
   await page.getByRole('button', { name: /^刷\s*新$/ }).click();
   await page.getByRole('button', { name: id, exact: true }).click();
   const drawer = page.locator('.ant-drawer:visible');

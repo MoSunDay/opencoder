@@ -123,8 +123,8 @@ async function main() {
   });
   await page.addInitScript((credential) => localStorage.setItem('oc_token', credential), token);
   await page.goto(base, { waitUntil: 'networkidle' });
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name: '全部执行' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
   await page.getByRole('button', { name: 'dag-browser-artifact' }).click();
   await page.locator('.ant-drawer').waitFor();
   await page.locator('.ant-drawer .ant-select').first().click();

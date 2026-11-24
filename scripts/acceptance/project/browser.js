@@ -10,7 +10,8 @@ async function closeDrawers(page) {
   }
 }
 async function projectPage(page) {
-  await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
   await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).waitFor();
 }
 async function openBrowser(h, errors) {

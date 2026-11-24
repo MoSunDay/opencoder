@@ -1,9 +1,11 @@
 // nav.js — the single source of truth for the fleet-console information
 // architecture (IA): 项目 / Agent / Ontology / 后台管理, each owning
-// an ordered page list. The Sider renders scrollable category tabs above a Menu
-// scoped to the active category; the active category is PURELY derived from
-// the store `page` (no extra global navigation state). `items` is the single
-// source for every navigation consumer below.
+// an ordered page list. Three navigation surfaces derive from the same
+// categories: the header brand hover menu shows the FULL IA
+// (groupedMenuItemsOf), the Sider renders a Menu scoped to the active
+// category, and mobile keeps scrollable category tabs + a page Select. The
+// active category is PURELY derived from the store `page` (no extra global
+// navigation state). `items` is the single source for every consumer below.
 
 import { createElement } from 'react';
 import {
@@ -142,6 +144,18 @@ export function menuItemsOf(items) {
     key: i.page,
     label: i.menu,
     icon: createElement(i.icon),
+  }));
+}
+
+/// antd Menu GROUP items for the complete visible IA: one group per category
+/// (label = category.label) and menuItemsOf children. The header brand menu
+/// renders this; the Sider keeps its single-category menuItemsOf projection.
+export function groupedMenuItemsOf(categories) {
+  return categories.map((category) => ({
+    type: 'group',
+    key: `group-${category.key}`,
+    label: category.label,
+    children: menuItemsOf(category.items),
   }));
 }
 

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // 导航选择持久化（项目 / Agent / 节点 三分类）DOM 契约：
-//   1. 显式导航（Sider Segmented/Menu、移动端 Segmented/Select 都汇入 goPage）
-//      把所选页镜像进 localStorage（键 = nav.js NAV_STORAGE_KEY，usehooks-ts
-//      JSON 序列化），首次进入不预写；
+//   1. 显式导航（头部品牌完整菜单、Sider Menu、移动端 Segmented/Select 都汇入
+//      goPage）把所选页镜像进 localStorage（键 = nav.js NAV_STORAGE_KEY，
+//      usehooks-ts JSON 序列化），首次进入不预写；
 //   2. 重新挂载 <App/> 时在首帧绘制前恢复（useLayoutEffect → store page 回位、
 //      菜单高亮与移动端 Select 同步）；
 //   3. 陌生/损坏的存储值（ALL_PAGES 之外）回退默认页；
@@ -99,14 +99,18 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBeNull();
 
     await screen.findByText('smoke · 管理员');
-    const sider = within(document.querySelector('.fleet-sidebar'));
-    fireEvent.click(sider.getByText('项目')); // 分类 Segmented → 落在首页
+    // 显式导航走头部品牌的完整导航菜单（portal 内的 .fleet-nav-panel）。
+    const brand = screen.getByRole('button', { name: '打开完整导航' });
+    fireEvent.click(brand);
+    let panel = await screen.findByRole('navigation', { name: '完整导航' });
+    fireEvent.click(within(panel).getByRole('menuitem', { name: /Overview$/ }));
     expect(getState().page).toBe('project');
     // usehooks-ts 的 JSON 序列化形状（引号内为页面键）。
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('project'));
 
-    fireEvent.click(sider.getByText('Agent'));
-    fireEvent.click(screen.getByRole('menuitem', { name: /DAG 工作流/ }));
+    fireEvent.click(brand);
+    panel = await screen.findByRole('navigation', { name: '完整导航' });
+    fireEvent.click(within(panel).getByRole('menuitem', { name: /DAG 工作流$/ }));
     expect(getState().page).toBe('dag');
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('dag'));
   });

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.1.1-blue" />
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-orange?logo=rust" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
   <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" />
@@ -222,7 +222,7 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 
 **测量方法：** 负载 = `--help`（最小工作负载，反映运行时本身开销、排除 LLM RTT）；峰值内存用 `/usr/bin/time -v` 的 *Maximum resident set size*；各项取样 5 次取中位数。
 
-| 指标 | opencode `1.17.8` | opencoder `0.1.0` | 差异 |
+| 指标 | opencode `1.17.8` | opencoder `0.1.1` | 差异 |
 | --- | --- | --- | --- |
 | 运行时 | Node SEA（V8，单可执行应用） | Rust 原生单二进制 | — |
 | 二进制大小 | **159 MiB**（166,885,504 B） | **11.1 MiB**（11,644,304 B） | opencode 大 **14.3×** |
@@ -238,7 +238,7 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 
 两者**底层都是 SQLite**，落盘均为标准 `.db` + `.db-wal` + `.db-shm`（WAL 模式），差异在驱动层与表模型：
 
-| 维度 | opencode `1.17.8` | opencoder `0.1.0` |
+| 维度 | opencode `1.17.8` | opencoder `0.1.1` |
 | --- | --- | --- |
 | 数据库 | SQLite（bun 内嵌） | Turso `0.8.3`（纯 Rust SQLite 兼容引擎） |
 | 访问层 | Drizzle ORM（JS，运行时迁移 `migration` 表） | 手写 SQL + `Store` trait（`crates/store/src/store.rs`） |

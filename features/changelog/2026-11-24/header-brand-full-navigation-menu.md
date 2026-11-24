@@ -59,4 +59,4 @@ Select 两级。
   桌面 Sider 无分类 tablist、移动端分类 tabs 保留、菜单项切页与 Ontology
   二维图谱均正常，无 console/page error，桌面/移动端无横向溢出。
 - 未运行全量 SPA 测试、完整浏览器验收套件与 Rust 测试。
-- 收尾复跑：定向 Vitest 23 个文件 187/187（图谱、shell、nav、appNavigation / appProjectLinks / navPersistence、fleet/navigation）；`npm run typecheck:ontology` 无错误；`build-spa.sh` 重建后 `check-spa-drift.sh` 报 `spa dist: no drift`。浏览器验收仍未运行。
+- 收尾复跑：定向 Vitest 23 个文件 187/187（图谱、shell、nav、appNavigation / appProjectLinks / navPersistence、fleet/navigation）；`npm run typecheck:ontology` 无错误；`build-spa.sh` 重建后 `check-spa-drift.sh` 报 `spa dist: no drift`；完整浏览器验收套件仍未运行。

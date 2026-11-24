@@ -18,6 +18,10 @@ const attributes = [{ ...metadata, id: 'source', entity_type_id: 'service', attr
 
 const ONTOLOGY_FIXTURES = {
   [`${base}/nfs`]: { root: '/fixture/ontology', status: { running: true, host: '127.0.0.1', port: 2052, read_only: true, export_root: '/fixture/ontology' } },
+  // directoriesTree / freshnessPolicies / freshnessRuns response shapes (ontology/api.ts).
+  [`${env}/directories/tree`]: { items: [], root_id: 'root' },
+  [`${env}/freshness/policies`]: { items: [] },
+  [`${env}/freshness/runs`]: { items: [] },
   [`${env}/entity-types`]: { items: types },
   [`${env}/entities`]: { items: entities },
   [`${env}/relationship-types`]: { items: relationshipTypes },

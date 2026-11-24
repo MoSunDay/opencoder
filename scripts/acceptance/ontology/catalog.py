@@ -46,7 +46,7 @@ def main(browser_script=None):
     with (root / "server.log").open("w") as log:
         process = subprocess.Popen([
             str(args.server.resolve()), "--workdir", str(work), "--data-dir", str(root / "data"),
-            "--port", str(port), "--token", "ontology-fixture", "--auth-enabled", "false", "--web",
+            "--port", str(port), "--token", "ontology-fixture", "--auth-enabled", "false", "--web", "true",
         ], stdout=log, stderr=log)
         try:
             # A new Turso catalog may initialize while release builds and

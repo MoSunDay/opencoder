@@ -48,4 +48,4 @@
 - 导航链接定向回归 `src/fleet/navigation/links.dom.test.jsx` 9 个用例通过。
 - `npm run build` 通过并重建 `crates/web/spa/dist/`；真实 Chromium 冒烟确认 Ontology 图谱页面渲染二维 SVG/Canvas 且无 3D/console 错误。
 - 未运行全量 SPA 测试、完整浏览器验收套件与 Rust 测试。
-- 收尾：dist 随品牌导航收尾提交重建（`spa dist: no drift`）；`fleet/navigation` 两个自读取请求传入 `{ signal }` 起失效的既有断言已对齐（`d1d017483`），该目录 4 个文件 20/20。
+- 收尾：dist 随品牌导航收尾提交重建（`spa dist: no drift`）；`fleet/navigation` 两个自读取请求传入 `{ signal }` 起失效的既有断言已对齐（`d1d017483`），该目录 4 个文件 20/20。`scripts/acceptance/ontology/main.py`（`browser.mjs` → `experience.mjs`：二维图谱缩放、放大画布、三档屏宽定位、列表定位与观测恢复）已在真实只读 NFS 链路通过，脚本同步见品牌导航 changelog。

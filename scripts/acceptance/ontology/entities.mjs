@@ -34,16 +34,18 @@ export async function checkEntities(browser, base, output) {
         await page.locator('.fleet-content > .fleet-mobile-nav[role=tablist]').getByRole('tab', { name: 'Ontology', exact: true }).click();
         await choose(page.locator('.ant-select.fleet-mobile-nav'), '实体');
       } else {
-        await page.locator('.fleet-sidebar [role=tablist]').getByRole('tab', { name: 'Ontology', exact: true }).click();
-        await page.getByRole('menuitem', { name: /实体$/ }).click();
+        // Desktop: the brand panel (shell/brandNav.jsx) carries every category; the Sider has no category tablist.
+        await page.locator('.fleet-brand').hover();
+        await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '实体', exact: true }).click();
       }
       const entity = page.getByRole('button', { name: '无目录测试实体', exact: true });
       const search = page.getByRole('textbox', { name: '搜索名称或标识' });
-      await entity.waitFor();
-      result.unassigned = true;
+      await page.locator('.ant-table-tbody .ant-table-row').first().waitFor();
       await measure('all');
+      // The Server seeds capability entities on start, so the 20-row table is searched by name.
       await search.fill('无目录测试实体');
       await entity.waitFor();
+      result.unassigned = true;
       await search.fill('missing-entity');
       await entity.waitFor({ state: 'hidden' });
       await search.fill('无目录测试实体');

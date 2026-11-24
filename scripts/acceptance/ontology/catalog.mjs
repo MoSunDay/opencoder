@@ -40,8 +40,9 @@ const measure = async (width, tab) => {
 try {
   const entities = await checkEntities(browser, base, output);
   await page.goto(base);
-  await page.locator('.fleet-sidebar [role=tablist]').getByRole('tab', { name: 'Ontology', exact: true }).click();
-  await page.getByRole('menuitem', { name: /实体$/ }).click();
+  // Desktop: the brand panel (shell/brandNav.jsx) carries every category; the Sider has no category tablist.
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '实体', exact: true }).click();
   await page.getByRole('textbox', { name: '搜索名称或标识' }).fill('受理控制');
   await page.getByRole('button', { name: '受理控制', exact: true }).click();
   await drawer.getByText('此能力由平台同步维护', { exact: true }).waitFor();

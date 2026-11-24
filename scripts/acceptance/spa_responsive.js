@@ -6,7 +6,9 @@ function arg(flag, fallback) { const index = process.argv.indexOf(`--${flag}`); 
 const WIDTH = Number(arg('width', '390'));
 const HEIGHT = Number(arg('height', '1080'));
 const TOKEN = 'fixture-token';
-const SEGMENT = WIDTH < 768 ? '.fleet-mobile-nav[role="tablist"] [role="tab"]' : '.fleet-nav-category [role="tab"]';
+const BRAND = '.fleet-brand';
+const PANEL = '.fleet-nav-panel';
+const SEGMENT = '.fleet-mobile-nav[role="tablist"] [role="tab"]';
 const SELECT = '.ant-select.fleet-mobile-nav';
 const OPTIONS = '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option';
 const TABS = '.fleet-content .ant-tabs-tab';
@@ -68,16 +70,23 @@ async function main() {
     await page.waitForSelector(WIDTH < 768 ? '.fleet-mobile-nav' : '#fleet-page-menu', { timeout: 15000 });
     await pause(1200);
 
-    const segments = await labels(page, SEGMENT);
+    const { NAV_CATEGORIES } = await import(path.join(REPO, 'crates/web/spa/src/nav.js'));
+    const segments = WIDTH < 768 ? await labels(page, SEGMENT) : NAV_CATEGORIES.map((category) => category.label);
     console.log(`viewport=${WIDTH}x${HEIGHT} base=${base} shots=${SHOTS}`);
     console.log(`nav categories: ${segments.join(' | ')}`);
-    if (!segments.length) throw new Error('mobile nav has no categories');
+    if (!segments.length) throw new Error(WIDTH < 768 ? 'mobile nav has no categories' : 'navigation has no categories');
 
     for (const seg of segments) {
-      if (!(await clickLabel(page, SEGMENT, seg))) {
-        console.log(`  !! cannot select category ${seg}`);
-        failed = true;
-        continue;
+      if (WIDTH < 768) {
+        if (!(await clickLabel(page, SEGMENT, seg))) {
+          console.log(`  !! cannot select category ${seg}`);
+          failed = true;
+          continue;
+        }
+      } else {
+        const category = NAV_CATEGORIES.find((entry) => entry.label === seg);
+        await page.locator(BRAND).hover();
+        await page.locator(PANEL).getByRole('menuitem', { name: category.items[0].menu, exact: true }).click();
       }
       await pause(400);
       const pages = WIDTH < 768 ? await pagesOf(page) : await labels(page, '.fleet-sidebar .ant-menu-item');
@@ -111,7 +120,6 @@ async function main() {
       console.log(`console errors (${consoleErrors.length}): ${consoleErrors.slice(0, 6).join(' ;; ')}`);
     }
     if (!visited.length) throw new Error('no navigation page was visited');
-    const { NAV_CATEGORIES } = await import(path.join(REPO, 'crates/web/spa/src/nav.js'));
     const expected = NAV_CATEGORIES.flatMap((category) => category.items.map((item) => `${category.label}/${item.menu}`));
     if (!ONLY && (visited.length !== expected.length || expected.some((name) => !visited.includes(name)))) throw new Error('navigation coverage is incomplete');
     if (srv.fixtureMisses.length) throw new Error(`unhandled fixture requests: ${srv.fixtureMisses.join(', ')}`);

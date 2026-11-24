@@ -55,7 +55,8 @@ async function main() {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript((value) => localStorage.setItem('oc_token', value), token);
     await page.goto(base, { waitUntil: 'networkidle' });
-    await page.locator('.fleet-nav-category').getByText('项目', { exact: true }).click();
+    await page.locator('.fleet-brand').hover();
+    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
     const tab = (name) => page.locator('.fleet-content .ant-tabs').getByRole('tab', { name, exact: true });
     const table = (name) => page.getByLabel(name, { exact: true });
     const resetScroll = (element) => element.locator('.ant-table-content').evaluate((el) => { el.scrollLeft = 0; });

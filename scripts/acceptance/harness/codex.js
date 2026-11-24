@@ -128,8 +128,8 @@ async function main() {
   await expand();
   await page.screenshot({ path: path.join(root, 'expanded.png'), animations: 'disabled' });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name: '全部执行' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
   await page.getByRole('button', { name: id, exact: true }).click();
   await page.getByText(/WRAP_BROWSER_OK: sample-content: LOCAL_OK/).first().waitFor();
   await expand();

@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { getState, setCredentials, setState, HEADERLESS_REASONS, NAV_CATEGORIES, ConfigProvider, Popconfirm, zhCN, dayjs, theme, mountApp } from './test/appShell.jsx';
 
+/// The header brand opens the complete IA in a portal popover; every brand
+/// interaction below starts from the closed state, so a click reliably opens
+/// it (hover is covered by shell/brandNav.dom.test.jsx).
+async function openBrandMenu() {
+  fireEvent.click(screen.getByRole('button', { name: '打开完整导航' }));
+  return screen.findByRole('navigation', { name: '完整导航' });
+}
+
 describe('App shell navigation and layout', () => {
   it('opens an execution link before restoring a saved project page', async () => {
     window.history.replaceState(null, '', '/?execution=agent-history&execution_kind=agent');
@@ -24,7 +32,8 @@ describe('App shell navigation and layout', () => {
     act(() => setState({ page: 'project' }));
     expect(screen.getByText('operator-history', { selector: '.ant-drawer-title' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /全部执行/ }).classList.contains('ant-menu-item-selected')).toBe(true);
-    fireEvent.click(within(document.querySelector('.fleet-sidebar')).getByRole('tab', { name: '项目', exact: true }));
+    const brandPanel = await openBrandMenu();
+    fireEvent.click(within(brandPanel).getByRole('menuitem', { name: /Overview$/ }));
     await waitFor(() => expect(window.location.hash).toBe(''));
     expect(getState().page).toBe('project');
   });
@@ -93,11 +102,17 @@ describe('App shell navigation and layout', () => {
     expect(document.querySelector('.fleet-content > .fleet-sheet')).toBeNull();
   });
 
-  it('renders the brand and the node-category menu on the default page', async () => {
+  it('renders the brand trigger and the node-category menu on the default page', async () => {
     setCredentials('smoke-token', '');
     await mountApp();
     await screen.findByText('smoke · 管理员');
-    expect(screen.getByText(/Opencoder Fleet/)).toBeTruthy();
+    const brand = screen.getByRole('button', { name: '打开完整导航' });
+    expect(brand.classList.contains('fleet-brand')).toBe(true);
+    expect(brand.getAttribute('aria-haspopup')).toBe('menu');
+    expect(brand.textContent).toContain('Opencoder Fleet');
+    // The old Sider category strip is gone; navigation now lives either in
+    // this brand menu or in the scoped Sider Menu below.
+    expect(document.querySelector('.fleet-nav-category')).toBeNull();
     // Default page (nodes) scopes the Sider menu to the node category. Icon
     // glyphs carry their own aria-label, so match menuitem names by regex.
     expect(screen.getByRole('menuitem', { name: /节点列表/ })).toBeTruthy();
@@ -147,36 +162,36 @@ describe('App shell navigation and layout', () => {
       ).toBeTruthy();
     });
 
-  it('switches categories via the Sider Segmented and lands on the home page', async () => {
+  it('navigates through the header brand menu and lands on the selected page', async () => {
     setCredentials('smoke-token', '');
     await mountApp();
     await screen.findByText('smoke · 管理员');
-    // Scope to the Sider Segmented — its mobile twin also sits in the DOM
-    // (hidden only by the media query), so unscoped text queries would hit
-    // both.
-    const sider = within(document.querySelector('.fleet-sidebar'));
-    fireEvent.click(sider.getByText('Agent'));
-    // A category click navigates to its first page (brain)…
+    const panel = await openBrandMenu();
+    // The complete IA offers pages outside the current (admin) category.
+    fireEvent.click(within(panel).getByRole('menuitem', { name: /大脑调度$/ }));
     expect(getState().page).toBe('brain');
-    // …re-scopes + highlights the menu item…
-    const brainItem = screen.getByRole('menuitem', { name: /大脑调度/ });
+    expect(screen.getByRole('button', { name: '打开完整导航' }).getAttribute('aria-expanded')).toBe('false');
+    // The Sider re-scopes + highlights the menu item (scope it: the closing
+    // brand panel still carries the same page label during its motion).
+    const brainItem = within(document.querySelector('.fleet-sidebar')).getByRole('menuitem', { name: /大脑调度/ });
     expect(brainItem.classList.contains('ant-menu-item-selected')).toBe(true);
-    // …and the panel behind it renders (agent-category page).
-    expect(await screen.findByText('工作台')).toBeTruthy();
+    // …and the panel behind it renders (agent-category brain page).
+    expect(await screen.findByText('运行历史')).toBeTruthy();
   });
 
   it('scopes the project category to Overview and the standalone Tag page', async () => {
     setCredentials('smoke-token', '');
     await mountApp();
     await screen.findByText('smoke · 管理员');
-    const sider = within(document.querySelector('.fleet-sidebar'));
-    fireEvent.click(sider.getByText('项目'));
+    const panel = await openBrandMenu();
+    fireEvent.click(within(panel).getByRole('menuitem', { name: /Overview$/ }));
     expect(getState().page).toBe('project');
     // Menuitem names carry the icon glyph's own aria-label → match by regex
     // (same convention as the surrounding landmark assertions).
-    expect(await screen.findByRole('menuitem', { name: /Overview$/ })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /Tag$/ })).toBeTruthy();
-    expect(screen.queryByRole('menuitem', { name: /大脑调度/ })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: /节点列表/ })).toBeNull();
+    const sider = within(document.querySelector('.fleet-sidebar'));
+    expect(await sider.findByRole('menuitem', { name: /Overview$/ })).toBeTruthy();
+    expect(sider.getByRole('menuitem', { name: /Tag$/ })).toBeTruthy();
+    expect(sider.queryByRole('menuitem', { name: /大脑调度/ })).toBeNull();
+    expect(sider.queryByRole('menuitem', { name: /节点列表/ })).toBeNull();
   });
 });

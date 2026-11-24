@@ -161,8 +161,8 @@ async function inspect(page, todo, id, root, status) {
   await detailPage.screenshot({ path: path.join(root, todo.marker + '.png'), animations: 'disabled' });
   await detailPage.close();
   await closeTodo(page, todo);
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name: '全部执行' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
   await page.locator('.ant-table-tbody .ant-table-row').first().waitFor();
   const executionRow = page.getByRole('row').filter({ hasText: id });
   while (!await executionRow.count()) {

@@ -137,8 +137,8 @@ async function main() {
   await page.getByRole('button', { name: '执行指令', exact: true }).click();
   await page.locator('.ant-modal pre').filter({ hasText: 'maintenance_agent_id' }).waitFor();
   await page.locator('.ant-modal-close').click();
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name: '全部执行' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
   await page.locator('.ant-empty').waitFor();
   const browserNode = (await api('GET', '/api/nodes')).nodes.find((node) => node.name === 'node-a');
   await api('POST', '/api/executions', { id: 'agent-browser', kind: 'agent', target: 'act', node_id: browserNode.id, input: { prompt: 'run browser acceptance' } });
@@ -200,7 +200,8 @@ async function main() {
   await page.getByRole('combobox', { name: '页面导航' }).press('Escape');
   await page.screenshot({ path: path.join(root, 'mobile-nodes.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
   console.log('CASE Team execution');
   await teams({ page, api, root, until });
   await page.getByRole('menuitem', { name: '大脑调度' }).click();
@@ -232,8 +233,8 @@ async function main() {
   const count = (await api('GET', '/api/executions')).executions.length;
   await stop(restarted);
   await until(async () => !(await api('GET', '/api/nodes')).nodes.find((node) => node.id === owner.id).online, 'owner disconnected');
-  await page.locator('.fleet-nav-category').getByText('Agent', { exact: true }).click();
-  await page.getByRole('menuitem', { name: '全部执行' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
   await page.getByRole('combobox', { name: '执行类型筛选' }).click();
   await page.locator('.ant-select-item-option-content').getByText('项目任务', { exact: true }).click();
   await page.getByRole('button', { name: projectId, exact: true }).click();

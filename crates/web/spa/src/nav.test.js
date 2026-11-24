@@ -5,7 +5,7 @@
 
 import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
-import { HEADERLESS_REASONS, NAV_CATEGORIES, PAGE_META, allowedPages, categoryHome, menuItemsOf, selectItemsOf, visibleCategories } from './nav.js';
+import { HEADERLESS_REASONS, NAV_CATEGORIES, PAGE_META, allowedPages, categoryHome, groupedMenuItemsOf, menuItemsOf, selectItemsOf, visibleCategories } from './nav.js';
 
 // Flat {category, page, menu, icon} rows for table-driven assertions.
 const ALL_ITEMS = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => ({ ...i, category: c.key })));
@@ -90,6 +90,26 @@ describe('menuItemsOf / selectItemsOf scoping', () => {
       { value: 'chat', label: 'Agent' },
       { value: 'agents', label: 'Agent 配置' },
     ]);
+  });
+});
+
+describe('groupedMenuItemsOf (header brand menu)', () => {
+  it('groups the complete IA by category in order, reusing menuItemsOf children', () => {
+    const groups = groupedMenuItemsOf(NAV_CATEGORIES);
+    expect(groups.map((group) => group.type)).toEqual(['group', 'group', 'group', 'group']);
+    expect(groups.map((group) => group.label)).toEqual(['项目', 'Agent', 'Ontology', '后台管理']);
+    expect(groups.flatMap((group) => group.children.map((item) => item.key))).toEqual(ALL_PAGES);
+    // Flattened labels and icons are exactly the per-category menu projection.
+    expect(groups.flatMap((group) => group.children))
+      .toEqual(NAV_CATEGORIES.flatMap((category) => menuItemsOf(category.items)));
+    expect(groups[3].children).toEqual(menuItemsOf(NAV_CATEGORIES[3].items));
+  });
+
+  it('groups only the categories handed in (permission-filtered IA)', () => {
+    const groups = groupedMenuItemsOf(visibleCategories({ role: 'viewer' }));
+    expect(groups.map((group) => group.label)).toEqual(['项目', 'Agent', 'Ontology']);
+    expect(groups.flatMap((group) => group.children.map((item) => item.key)))
+      .toEqual(ALL_ITEMS.filter((item) => item.category !== 'admin').map((item) => item.page));
   });
 });
 

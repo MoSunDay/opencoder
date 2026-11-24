@@ -57,8 +57,10 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - [chat/inputAttempt.js](../../../crates/web/spa/src/chat/inputAttempt.js) — 人工输入 ID
   的生成与重试规则
 - [nav.js](../../../crates/web/spa/src/nav.js)、
+  [shell/brandNav.jsx](../../../crates/web/spa/src/shell/brandNav.jsx)、
   [shell/categoryTabs.jsx](../../../crates/web/spa/src/shell/categoryTabs.jsx) —
-  平台导航分类
+  平台导航分类；头部品牌菜单承载完整 IA（hover/click），移动端为分类 tabs +
+  Select，Sider 只保留当前分类 Menu
 - `project/` — 项目/子项/TODO/Tag 表格、表单、看板与评论
 - [project/navigation/links.js](../../../crates/web/spa/src/project/navigation/links.js)
   — `project/initiative/todo` 定位编解码

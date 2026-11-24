@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.1.1-blue" />
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-orange?logo=rust" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
   <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" />
@@ -187,7 +187,7 @@ OpenCoder and [sst/opencode](https://github.com/sst/opencode) (a TypeScript / No
 
 **Methodology:** workload = `--help` (the minimal workload, reflecting the runtime's own overhead and excluding LLM RTT); peak memory via *Maximum resident set size* from `/usr/bin/time -v`; 5 samples each, median reported.
 
-| Metric | opencode `1.17.8` | opencoder `0.1.0` | Difference |
+| Metric | opencode `1.17.8` | opencoder `0.1.1` | Difference |
 | --- | --- | --- | --- |
 | Runtime | Node SEA (V8, single executable app) | Rust-native single binary | — |
 | Binary size | **159 MiB** (166,885,504 B) | **11.1 MiB** (11,644,304 B) | opencode is **14.3×** larger |
@@ -203,7 +203,7 @@ OpenCoder and [sst/opencode](https://github.com/sst/opencode) (a TypeScript / No
 
 Both are **SQLite under the hood**, persisting as standard `.db` + `.db-wal` + `.db-shm` (WAL mode); the differences are at the driver layer and table model:
 
-| Dimension | opencode `1.17.8` | opencoder `0.1.0` |
+| Dimension | opencode `1.17.8` | opencoder `0.1.1` |
 | --- | --- | --- |
 | Database | SQLite (embedded in bun) | Turso `0.8.3` (pure-Rust SQLite-compatible engine) |
 | Access layer | Drizzle ORM (JS, runtime migrations via `migration` table) | Hand-written SQL + `Store` trait (`crates/store/src/store.rs`) |

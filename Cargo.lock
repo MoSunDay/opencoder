@@ -2180,7 +2180,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "opencoder"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -2196,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2223,7 +2223,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-agents"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2244,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-brain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "opencoder-core",
@@ -2259,7 +2259,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-control"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2332,7 +2332,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2353,7 +2353,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-dag"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2364,7 +2364,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-dag-binary"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fs2",
  "opencoder-agents",
@@ -2377,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-dag-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2405,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-database"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -2417,7 +2417,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-event"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2432,7 +2432,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-llm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "futures",
@@ -2446,7 +2446,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-local"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -2467,7 +2467,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-node"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2490,7 +2490,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-ontology"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-project"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2558,7 +2558,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-session"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2586,7 +2586,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-shellguard"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rable",
  "thiserror 2.0.18",
@@ -2594,7 +2594,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2615,7 +2615,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-team"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-todos"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2650,7 +2650,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2681,7 +2681,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-web"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "opencoder-worker"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",

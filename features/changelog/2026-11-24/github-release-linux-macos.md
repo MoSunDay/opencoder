@@ -10,7 +10,8 @@
 - `.github/workflows/release.yml`：`push` tag `v*` 触发（另留 `workflow_dispatch`）；
   `bundle` 矩阵作业各自构建平台包、打 `opencoder-<version>-<platform>.tar.gz` 并生成
   `.sha256`；`release` 作业仅在 tag 触发时运行，`sha256sum -c` 校验全部产物后用
-  `gh release create --verify-tag --generate-release-notes --clobber` 发布。
+  `gh release create --verify-tag --notes-file` 发布（release 已存在时改走
+  `gh release upload --clobber`）；发布失败时日志尾部写入 step summary 与 error annotation。
 - 工作流加固：Linux 安装 `libclang-dev cmake pkg-config`（bindgen 依赖）、macOS 安装
   cmake；`setup-node` 固定 Node 24 与提交 dist 的构建环境一致；`uname -m` 校验平台标签；
   tag 与 workspace 版本一致性校验；`COPYFILE_DISABLE=1` 避免 macOS AppleDouble 条目；

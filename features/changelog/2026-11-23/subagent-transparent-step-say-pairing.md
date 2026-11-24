@@ -28,7 +28,7 @@ n Steps + Say」与 Say 关轮；本次只放宽配对的相邻要求，不改 T
 （Assistant 臂 `merged`、StepGroup 臂 `follower`、`last_block_ends_blank`）、
 `chat_headers.rs`（`merged_say` 闭包、StepGroup 臂 `say_streams`、
 Assistant 臂 `merged`）、测试镜像 `chat_tests/line_accounting.rs`、
-新增 `chat_tests/subagent_steps_continue.rs`；SPA `crates/web/spa/src/
+新增 `chat_tests/subagent_steps_continue.rs`（`chat_tests/mod.rs` 注册）；SPA `crates/web/spa/src/
 {bubbleItems.js,transcript.jsx}` 及 `bubbleItems.test.js`、
 `stepsBlock.dom.test.jsx`。仅 TUI/SPA 转录展示与点击记账，不触及规则
 04/06/07 契约，无公共能力/CLI/API/依赖变更，不触发 Ontology 同步；无凭证。
@@ -41,7 +41,7 @@ Assistant 臂 `merged`）、测试镜像 `chat_tests/line_accounting.rs`、
 | seal 后跨 subagent 行合并为 `▸ Say(3 steps): <preview>`，单行正文隐藏，`Done` 边界补恰好一个空行；展开阶梯后 subagent 行仍在正文前且记账对齐 | `sealed_say_after_a_subagent_merges_into_the_ladder_behind_the_subagent_row` | 同上 |
 | 正文隐藏的合并对：阶梯紧邻 `last_block_ends_blank` 为真，隔 subagent 行为假；Marker 等其他块仍拆对 | `hidden_say_pair_behind_a_subagent_row_does_not_end_blank` | 同上 |
 | 回放形状 `[SG, SG, Subagent, SG, Assistant]` 经 `coalesce_steps` 得 `[SG(3), Subagent, Assistant]`，与实时同渲染 | `replayed_ladder_behind_a_subagent_block_pairs_with_its_say_like_live` | 同上 |
-| 命中记账镜像与 flatten 逐行对齐（含跨 subagent 配对） | `assert_line_accounting_matches` 全部调用方（含新增 3 处） | `crates/tui/src/chat_tests/line_accounting.rs` |
+| 命中记账镜像与 flatten 逐行对齐（含跨 subagent 配对） | `assert_line_accounting_matches` 全部调用方（新增文件内 4 处调用，每个用例一处） | `crates/tui/src/chat_tests/line_accounting.rs` |
 | SPA：`[steps, subagent, say]` 归并为一个 assistantTurn，`say=[subagent, say]`，`progressActive` 冻结 | `absorbs a subagent block between the ladder and its Say: [steps, subagent, say] stays ONE bubble` | `crates/web/spa/src/bubbleItems.test.js` |
 | SPA：run 之外的 subagent 块仍独立（之前 / `[steps, say, subagent]` 派发形状） | `keeps a subagent block standalone when it is not inside an open run` | 同上 |
 | SPA DOM：同一气泡内顺序为 头行 → subagent 块 → Say 正文（done 与 sayActive 两种形态） | `keeps a subagent block between the ladder and its Say inside ONE bubble, in block order` | `crates/web/spa/src/stepsBlock.dom.test.jsx` |

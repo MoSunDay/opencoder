@@ -60,3 +60,4 @@ Select 两级。
   二维图谱均正常，无 console/page error，桌面/移动端无横向溢出。
 - 未运行全量 SPA 测试、完整浏览器验收套件与 Rust 测试。
 - 收尾复跑：定向 Vitest 23 个文件 187/187（图谱、shell、nav、appNavigation / appProjectLinks / navPersistence、fleet/navigation）；`npm run typecheck:ontology` 无错误；`build-spa.sh` 重建后 `check-spa-drift.sh` 报 `spa dist: no drift`；完整浏览器验收套件仍未运行。
+- 屏宽验收脚本：`node scripts/acceptance/spa_responsive.js --require-committed`（`CHROME_PATH` 指向系统 Chrome）在 1280 与 390 两个宽度各访问 17 页、44 次布局测量 0 溢出，桌面端分类切换经品牌菜单 hover → `.fleet-nav-panel` 完成；脚本以 exit 2 收尾，原因是 5 个与本改动无关的既有 fixture 缺口（`/api/project/todos/nfs`、`/api/ontology/envs/debug/directories/tree`、`freshness/policies|runs`：`spa_responsive_fixtures.js` 停在 2026-10-19，这些端点于 10-30/31 引入，待补 fixture）。`scripts/acceptance/ontology/experience.mjs` 需独立 Server 与真实只读 NFS，未运行。

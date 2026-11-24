@@ -112,7 +112,7 @@ export const HEADERLESS_REASONS = {
   nodes: 'menu-only',
   users: 'menu-only',
   ontologyGraph: 'menu-only',
-  ontologyEntities: 'menu-only',
+  ontologyEntities: 'body-title',
   ontologyTypes: 'menu-only',
   ontologyRelationships: 'menu-only',
   ontologyFreshness: 'body-title',
@@ -143,7 +143,7 @@ export function menuItemsOf(items) {
   return items.map((i) => ({
     key: i.page,
     label: i.menu,
-    icon: createElement(i.icon),
+    icon: createElement(i.icon, { 'aria-hidden': true }),
   }));
 }
 

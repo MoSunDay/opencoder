@@ -110,9 +110,9 @@ describe('App shell navigation and layout', () => {
     expect(brand.classList.contains('fleet-brand')).toBe(true);
     expect(brand.getAttribute('aria-haspopup')).toBe('menu');
     expect(brand.textContent).toContain('Opencoder Fleet');
-    // The old Sider category strip is gone; navigation now lives either in
-    // this brand menu or in the scoped Sider Menu below.
-    expect(document.querySelector('.fleet-nav-category')).toBeNull();
+    // The old scrollable Sider category strip is gone; navigation now lives
+    // either in this brand menu or in the scoped Sider Menu below.
+    expect(document.querySelector('.fleet-sidebar [role="tablist"]')).toBeNull();
     // Default page (nodes) scopes the Sider menu to the node category. Icon
     // glyphs carry their own aria-label, so match menuitem names by regex.
     expect(screen.getByRole('menuitem', { name: /节点列表/ })).toBeTruthy();

@@ -40,5 +40,11 @@
 | 完整关系标签 | `complete relationship labels` | `crates/web/spa/src/ontology/pages/graph/__tests__/relationshipLabel.test.ts` |
 | 移除观测链接后的导航与位置解析 | 既有 `encodes execution IDs and keeps execution links ahead of stored navigation`、`follows ID-only links, hash changes and browser history without relying on the list` | `crates/web/spa/src/fleet/navigation/links.dom.test.jsx` |
 
-- 定向测试将在父流程执行 `npm install` 后运行；本记录不声称上述测试已通过。
-- 未运行 `npm install` / `npm test` / `npm run build`。
+## 验证
+
+- `npm ci` 恢复二维依赖；定向 Vitest 4 个文件、24 个用例通过：
+  `GraphCanvas.test.tsx`、`GraphPageAspects.test.tsx`、
+  `graphLifecycle.test.ts`、`relationshipLabel.test.ts`。
+- 导航链接定向回归 `src/fleet/navigation/links.dom.test.jsx` 9 个用例通过。
+- 未运行全量 SPA 测试、浏览器验收与 Rust 测试；SPA 构建与 dist 产物核验见本次父流程。
+- 收尾：dist 随品牌导航收尾提交重建（`spa dist: no drift`）；`fleet/navigation` 两个自读取请求传入 `{ signal }` 起失效的既有断言已对齐（`d1d017483`），该目录 4 个文件 20/20。

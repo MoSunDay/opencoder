@@ -27,8 +27,8 @@ async function main() {
   const id = 'dag-results-browser';
   await api('POST', '/api/dag/defs/dag-results-ui/dispatch', { id, node_id: h.nodeId });
   await until(async () => (await api('GET', `/api/dag/runs/${id}/progress`)).running === 1, 'running step');
-  await page.getByText('Agent', { exact: true }).first().click();
-  await page.getByRole('menuitem', { name: 'DAG 工作流' }).click();
+  await page.locator('.fleet-brand').hover();
+  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'DAG 工作流', exact: true }).click();
   await page.getByRole('tab', { name: '运行', exact: true }).click();
   await page.getByRole('button', { name: '查看', exact: true }).first().click();
   await until(async () => await page.locator('.dag-node--running').count() === 1, 'current running graph');

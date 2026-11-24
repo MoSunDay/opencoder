@@ -14,6 +14,10 @@ async function main() {
     return { instance: full.includes('INSTANCE_ZERO') ? 'zero-result' : 'one-result' };
   }, { dag: true, rootfs: process.argv[2] });
   const { page, api, root, until } = h;
+  const openPage = async (name) => {
+    await page.locator('.fleet-brand').hover();
+    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name, exact: true }).click();
+  };
   console.log(JSON.stringify({ root }));
   const id = 'dag-dynamic-browser';
   await api('POST', '/api/dag/defs', { spec: { name: 'dynamic-browser', steps: [
@@ -24,8 +28,7 @@ async function main() {
   await until(async () => (await api('GET', `/api/dag/runs/${id}/steps/process/instances`)).progress?.done === 1, 'first instance complete');
   const requests = [];
   page.on('request', (r) => { if (r.url().includes('/instances/') && r.url().includes('/events')) requests.push(r.url()); });
-  await page.getByText('Agent', { exact: true }).first().click();
-  await page.getByRole('menuitem', { name: 'DAG 工作流' }).click();
+  await openPage('DAG 工作流');
   await page.getByRole('tab', { name: '运行', exact: true }).click();
   await page.getByRole('button', { name: '查看', exact: true }).first().click();
   await page.locator('[data-id="process"]').getByText('1/2 成功').waitFor();
@@ -55,7 +58,7 @@ async function main() {
   assert.equal(detail.status, 'done');
   assert.equal(detail.output.instance, 'one-result');
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByRole('menuitem', { name: 'DAG 工作流' }).click();
+  await openPage('DAG 工作流');
   await page.getByRole('tab', { name: '运行', exact: true }).click();
   await page.getByRole('button', { name: '查看', exact: true }).first().click();
   await page.locator('[data-id="process"] .dag-node').waitFor();
@@ -65,7 +68,7 @@ async function main() {
     { name: 'batch', kind: { type: 'dynamic', source: { type: 'input', pointer: '/items' }, template: { type: 'agent', prompt: 'Read the local how instructions.' } } },
   ] } });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByRole('menuitem', { name: 'DAG 工作流' }).click();
+  await openPage('DAG 工作流');
   await page.getByRole('row').filter({ hasText: 'dynamic-input-browser' }).getByRole('button', { name: '派发', exact: true }).click();
   await page.getByRole('textbox', { name: 'batch 批次' }).fill('["INSTANCE_ZERO"]');
   const dispatched = page.waitForResponse((response) => response.url().endsWith('/dynamic-input-browser/dispatch') && response.request().method() === 'POST');

@@ -77,8 +77,8 @@ async function main() {
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'browser-fixture'));
     await page.goto(base, { waitUntil: 'networkidle' });
-    await page.getByRole('tablist', { name: '导航分类', exact: true }).getByRole('tab', { name: 'Agent', exact: true }).click();
-    await page.getByRole('menuitem', { name: '大脑调度' }).click();
+    await page.locator('.fleet-brand').hover();
+    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '大脑调度', exact: true }).click();
     await page.getByRole('tab', { name: '工作台' }).waitFor();
     assert.equal(await page.getByRole('button', { name: '创建并执行计划' }).count(), 0);
     await capabilityContracts(page, artifacts);

@@ -152,10 +152,41 @@ jobs:
           GH_REPO: ${{ github.repository }}
         working-directory: artifacts
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          log="$RUNNER_TEMP/release.log"
+          notes="$RUNNER_TEMP/notes.md"
+          cat >"$notes" <<NOTES
+          Platform bundles built from commit ${GITHUB_SHA}.
+
+          - opencoder-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz (+ .sha256)
+          - opencoder-${GITHUB_REF_NAME#v}-macos-aarch64.tar.gz (+ .sha256)
+
+          Each archive carries bin/, manifest.json and SHA256SUMS.
+          Verify an archive with: sha256sum -c <archive>.sha256
+          NOTES
           gh release create "$GITHUB_REF_NAME" \
             --title "opencoder $GITHUB_REF_NAME" \
-            --generate-release-notes \
+            --notes-file "$notes" \
             --verify-tag \
-            --clobber \
-            ./*
+            ./* 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          # A retry after a partial publish must replace the assets instead of
+          # failing on the existing release.
+          if [ "$status" -ne 0 ] && gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" ./* --clobber
+            status=$?
+          fi
+          if [ "$status" -ne 0 ]; then
+            tail -n 80 "$log" \
+              | sed 's/%/%25/g; s/\r/%0D/g; s/::/:/g' \
+              | awk '{printf "%s%%0A", $0}' \
+              | cut -c1-3000 > "$RUNNER_TEMP/tail.txt"
+            echo "::error title=gh release failed (exit $status)::$(cat "$RUNNER_TEMP/tail.txt")"
+            {
+              echo "### release failed (exit $status)"
+              echo '```text'
+              tail -n 80 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi

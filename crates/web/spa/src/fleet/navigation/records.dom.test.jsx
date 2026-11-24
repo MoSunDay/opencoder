@@ -39,7 +39,7 @@ it.each(['team', 'dag', 'todos', 'brain'])('resolves a generic ID to its native 
   window.history.replaceState(null, '', executionHref(id));
   render(<ExecutionsPanel onNotice={vi.fn()} />);
   expect(await screen.findByText('original-runtime')).toBeTruthy();
-  expect(apiGet).toHaveBeenCalledWith(`/api/executions/${id}`);
+  expect(apiGet).toHaveBeenCalledWith(`/api/executions/${id}`, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   const process = { team: '原始讨论结论', dag: '原始 DAG', todos: '原始工作流步骤', brain: '原始大脑步骤' }[kind];
   expect(await screen.findByText(process)).toBeTruthy();
   expect(screen.getByText(id, { selector: '.ant-drawer-title' })).toBeTruthy();

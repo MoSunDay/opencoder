@@ -45,7 +45,7 @@ it.each(['agent', 'operator'])('opens the actual linked %s Session and pages mes
     expect(screen.getByText('original-runtime')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: '继续加载消息' }));
     expect(await screen.findByText('后续执行细节')).toBeTruthy();
-    expect(apiGet).toHaveBeenCalledWith(`/api/executions/${id}/messages?seq=2`);
+    expect(apiGet).toHaveBeenCalledWith(`/api/executions/${id}/messages?seq=2`, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(screen.getByText(id, { selector: '.ant-drawer-title' })).toBeTruthy();
     cleanup();
   } finally {

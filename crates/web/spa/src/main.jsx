@@ -48,7 +48,6 @@ import { DraftGuardProvider, useDraftGuard } from './ontology/navigation/DraftGu
 import { linkedPage, withoutExecutionLink } from './fleet/navigation/links.js';
 import { useLinkedLocation } from './fleet/navigation/location.js';
 import { projectLocation } from './project/navigation/links.js';
-import { withoutObservationLink } from './ontology/navigation/observationLink.ts';
 import { replaceLocation } from './fleet/navigation/history.js';
 
 // zh-CN everywhere: antd built-ins (Modal/Popconfirm buttons) + dayjs
@@ -115,7 +114,7 @@ function FleetShell() {
   const canConnect = authEnabled === false || !!token;
   const draftGuard = useDraftGuard();
   const linkedLocation = useLinkedLocation();
-  const linkedRoutePage = linkedLocation.execution || linkedLocation.project || linkedLocation.ontology ? linkedLocation.page : null;
+  const linkedRoutePage = linkedLocation.execution || linkedLocation.project ? linkedLocation.page : null;
   // 项目 / Agent / 节点 分类选择的持久化：显式导航（goPage）经 usehooks-ts 的
   // useLocalStorage 把所选页写入 `oc_nav_page`（键与校验集都在 nav.js）；重新
   // 挂载时在首帧绘制前恢复进 store——useLayoutEffect 先于绘制执行，默认页不
@@ -161,10 +160,9 @@ function FleetShell() {
   // the store-only semantics they already had.
   const goPage = (key) => {
     if (key !== shownPage) draftGuard.run(() => {
-      if (linkedLocation.execution || linkedLocation.project || linkedLocation.ontology) {
+      if (linkedLocation.execution || linkedLocation.project) {
         const cleared = new URL(withoutExecutionLink(window.location.href), window.location.href);
-        const unlinked = new URL(withoutObservationLink(cleared.href), window.location.href);
-        replaceLocation(projectLocation(unlinked.href));
+        replaceLocation(projectLocation(cleared.href));
       }
       setStoredPage(key);
       setState({ page: key });

@@ -15,8 +15,8 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 - [GraphPage.tsx](../../../crates/web/spa/src/ontology/pages/graph/GraphPage.tsx)、[useGraphObservation.ts](../../../crates/web/spa/src/ontology/pages/graph/useGraphObservation.ts) 组织元数据、观测请求和最后成功结果，图谱请求固定启用 `expandNeighbors`；[aspects/](../../../crates/web/spa/src/ontology/pages/graph/aspects) 连接命名切面与自定义范围。
 - [observationMemory.ts](../../../crates/web/spa/src/ontology/pages/graph/session/observationMemory.ts) 按环境保存成功的范围与命名切面，恢复前校验类型、关系和中心是否仍有效；观测记录不保存邻居展开选项。
 - [projection/model.ts](../../../crates/web/spa/src/ontology/pages/graph/projection/model.ts) 用纯函数选择画布节点和边，保留实际连接路径；[useProjection.ts](../../../crates/web/spa/src/ontology/pages/graph/projection/useProjection.ts) 管理展示预算。[ResultList.tsx](../../../crates/web/spa/src/ontology/pages/graph/projection/ResultList.tsx) 使用完整查询结果。
-- [GraphCanvas.tsx](../../../crates/web/spa/src/ontology/pages/graph/GraphCanvas.tsx) 组织三维画布、完整列表、展示预算和渲染失败回退；[canvas3d/](../../../crates/web/spa/src/ontology/pages/graph/canvas3d) 使用 React Force Graph 与 Three.js，将查询记录转换为独立的模拟对象，管理三维曲线、方向箭头、HTML 标签、相机及资源释放。相同数据刷新复用布局对象，切面和中心切换在布局完成后定位；搜索先补入目标及路径再定位。
-- [canvas/](../../../crates/web/spa/src/ontology/pages/graph/canvas) 保留工具栏、视口高度和名称展示规则。缩放、旋转、平移、放大画布及容器尺寸变化不改变查询范围；隐藏场景暂停绘制，渲染失败保留完整列表并允许重试。标签通过三维坐标投影定位，名称作为普通文本渲染，关系名称完整换行。
+- [GraphCanvas.tsx](../../../crates/web/spa/src/ontology/pages/graph/GraphCanvas.tsx) 组织二维有向图、完整列表、展示预算和渲染失败回退，通过 `@ant-design/graphs` 的 FlowDirectionGraph 与 `@antv/g6` 渲染；[graphLifecycle.ts](../../../crates/web/spa/src/ontology/pages/graph/graphLifecycle.ts) 串行化异步渲染与销毁。相同数据刷新、加载与展开沿用同一画布和视口；切面和中心切换在布局完成后定位；搜索先补入目标及路径再定位。
+- [canvas/](../../../crates/web/spa/src/ontology/pages/graph/canvas) 保留节点渲染、关系边、完整关系标签、工具栏、视口运行时和名称展示规则；画布展示预算与查询结果分开，起始最多 30 个节点、60 条边并可逐步展开。缩放、平移、放大画布及容器尺寸变化不改变查询范围，窗口或容器调整保留缩放与视口中心；隐藏视口暂停绘制，渲染失败保留完整列表并允许重试，关系名称完整换行。
 - [details/](../../../crates/web/spa/src/ontology/pages/graph/details) 保存实体和关系详情的返回路径、标签及滚动位置，并支持以当前实体重新观测。
 
 ## 实体详情
@@ -37,7 +37,7 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 ## 验证与接缝
 
 - 单元及 DOM 测试与上述模块相邻；[testSetup.ts](../../../crates/web/spa/src/ontology/testSetup.ts) 提供浏览器环境适配。
-- [Ontology 浏览器验收](../../../scripts/acceptance/ontology/main.py)、[详情与图谱操作](../../../scripts/acceptance/ontology/experience.mjs) 使用独立 Server 和真实只读 NFS，检查草稿、图谱控制、恢复及导航标签。[三维图谱验收](../../../scripts/acceptance/ontology/graph.py) 单独验证图谱交互、屏宽、切面和 WebGL 故障回退，并比对 Server 实际提供的静态资源。
+- [Ontology 浏览器验收](../../../scripts/acceptance/ontology/main.py)、[详情与图谱操作](../../../scripts/acceptance/ontology/experience.mjs) 使用独立 Server 和真实只读 NFS，检查草稿、图谱控制、观测恢复、列表定位及导航标签。
 - [Ontology 服务](../../ontology/index.md) · [功能规则](../../../features/platform/ontology/index.md) · [Web 索引](index.md)
 
 实体页内容区为 Tabs【实体 | 目录】，默认「实体」：
@@ -53,6 +53,4 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 `createRelationship` 挂载成员、`updateRelationship` 软删除移出。目录
 管理行为口径以
 [功能规则](../../../features/platform/ontology/index.md) 为准。实体的详情
-与观测直达沿用既有导航与草稿保护。
-
-观测直达链接由 `ontology/navigation/observationLink.ts` 解析，`graph/session/linkedObservation.ts` 校验切面与中心，复用全局地址监听和草稿保护。链接条件优先于浏览器记忆，不写回切面；离开图谱时移除对应参数。
+沿用既有导航与草稿保护。

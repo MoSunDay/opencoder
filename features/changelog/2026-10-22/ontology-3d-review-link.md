@@ -1,5 +1,11 @@
 Commit: 8a4025fa76a0086638dfc3243bbe4617f08cfc1a
 
+> **已回滚**：三维图谱及其观测直达链接已于 2026-11-24 完整回滚到二维
+> `@ant-design/graphs` / `@antv/g6` 实现，`observationLink` / `linkedObservation`
+> 与 `#ontology_aspect` 深度链接均已移除，见
+> [ontology-graph-3d-rollback.md](../2026-11-24/ontology-graph-3d-rollback.md)。
+> 以下保留当时的变更记录原文。
+
 # Ontology 三维观测链接与本地交付
 
 三维图谱增加可直接打开指定切面和观测中心的地址。链接条件优先于浏览器记忆；中心与切面不匹配或对象已停用时提示并恢复可用范围。地址变化复用导航与草稿保护，离开图谱时清除观测参数，不写回保存的切面。

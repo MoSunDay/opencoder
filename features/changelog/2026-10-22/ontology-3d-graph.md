@@ -1,5 +1,10 @@
 Commit: c8a5950cb69b4e73e3edb27027f3cdd316c6fa5b
 
+> **已回滚**：三维图谱实现已于 2026-11-24 完整回滚到二维
+> `@ant-design/graphs` / `@antv/g6` 实现，见
+> [ontology-graph-3d-rollback.md](../2026-11-24/ontology-graph-3d-rollback.md)。
+> 以下保留当时的变更记录原文。
+
 # Ontology 三维图谱
 
 图谱改用三维空间网络，保留观测范围、命名切面、完整列表和详情编辑。实体管理及服务端 API 保持兼容。

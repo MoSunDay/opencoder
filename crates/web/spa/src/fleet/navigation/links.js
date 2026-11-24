@@ -1,5 +1,4 @@
 import { projectLink } from '../../project/navigation/links.js';
-import { observationLink } from '../../ontology/navigation/observationLink.ts';
 
 export function executionHref(id, kind) {
   const query = new URLSearchParams({ execution: id });
@@ -20,7 +19,6 @@ export function executionLink(search, hash = '') {
 export function linkedPage(search, hash = '') {
   if (executionLink(search, hash)) return 'topics';
   if (projectLink(search, hash)) return 'project';
-  if (observationLink(search, hash)) return 'ontologyGraph';
   return new URLSearchParams(search).has('brain_run') ? 'brain' : null;
 }
 

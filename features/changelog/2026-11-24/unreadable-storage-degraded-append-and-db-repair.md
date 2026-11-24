@@ -1,6 +1,6 @@
 # 存储不可读时消息追加降级落地 + `db_repair` 页级修库工具
 
-一句话：生产库 `messages` 根页已被索引内部页覆盖（`sqlite3 .dump` 导出 0 条消息、
+一句话：损坏库里 `messages` 根页被索引内部页覆盖（`sqlite3 .dump` 导出 0 条消息、
 按 rowid 读写 panic、回填活跃时间报 `inconsistent overflow chain`），应用层只能
 "能启动、能列会话、能降级写"，历史消息必须重建文件才能找回。本次：① 追加消息时
 活跃索引重建也撞上不可读存储，则跳过活跃时间戳把消息写进去（而不是整段丢失），
@@ -16,12 +16,12 @@
 - c80f421da 之后，损坏库已可启动（v41 迁移对坏行逐行回填并跳过、列表降级点查），
   但 `append_many` 的 `repair_and_retry` 在索引重建（`UPDATE sessions` / `CREATE INDEX`
   全表扫描）再次撞上不可读行时直接返回错误—— assistant 回复整段落库失败。
-- 取证结论（副本 `/tmp/dbg2`，2.4GB，schema v39，freelist 0）：`messages`
-  rootpage=6 被一个 0x02 索引内部页覆盖，Turso 对该表不可读不可写
+- 取证结论（一个约 2.4GB、schema v39、freelist 为 0 的损坏副本）：`messages`
+  根页被一个 0x02 索引内部页覆盖，Turso 对该表不可读不可写
   （`pager.rs:507` panic）；但消息行仍完整地散落在 0x0D 表叶页里，可按 rowid 恢复，
-  另有 479 条只存在于 0x0A 索引叶页（无 rowid）。`sessions` 365 行中 rowid 341 的
+  另有一批只存在于 0x0A 索引叶页（无 rowid）。`sessions` 中有一行的
   `task_type`/`handoff_plan` 为截断 overflow（非法 UTF-8，Turso 打开即报
-  `TEXT value contains invalid UTF-8`）；4 个 `sub-*` 会话行已删而消息仍在。
+  `TEXT value contains invalid UTF-8`）；若干 `sub-*` 会话行已删而消息仍在。
 - 根因不是代码缺陷：多个 opencoder 进程以 `experimental_multiprocess_wal(true)`
   并发写同一文件造成页级丢失更新。应用代码中没有任何 `DELETE FROM messages`。
 
@@ -65,7 +65,7 @@
 |----|------|
 | `.dump` | 12,846,111 条 INSERT，`messages` 0 行（预期），末尾 ROLLBACK 被改写为 COMMIT |
 | carve | 带 seq 消息 44,732；无 rowid 479（19 个重复 id）；补回事件 42,562 |
-| stub 会话 | `sub-01M81KRYG0XJ2SC9BY6JQMCXKA`、`sub-01M81KRYG1F11855P82Z5B0NPM`、`sub-01M81MHHQ1HCDXR1JQBDZ5W21S`、`sub-01M81N1J32BTYG4J7XDWZ4QYAT` |
+| stub 会话 | 4 个 `sub-*` 会话（消息仍在、会话行已丢失）各补一条最小行 |
 | 清洗/规整 | `sessions.handoff_plan` 1、`task_type` 1（lossy）；`task_type` 规整 1 |
 | verify | integrity ok；sessions 368、messages 45,211（id 唯一）、session_events 12,887,252；`sqlite_sequence` messages 12849113 / events 12889630 |
 | 新二进制 | v39→v41 迁移成功；`session list` 带预览 0.2s；`session show` 68 行；append 新 seq 12849114+ 无冲突 |
@@ -81,6 +81,7 @@
 | 端到端重建（损坏页 → 导入 → 补行 → stub → 规整）/ ROLLBACK→COMMIT 改写 / 非法 UTF-8 清洗 / 孤儿行按会话对位 seq / 拒绝覆盖源库 / 失败保留工作副本 | `test_rebuild_restores_orphaned_messages_and_events`、`test_finalize_dump_only_patches_the_error_rollback`、`test_scrub_rewrites_text_that_is_not_utf8`、`test_assign_orphan_seqs_pairs_each_session_with_its_own_index_seqs`、`test_repair_refuses_to_overwrite_the_source_database`、`test_failed_repair_keeps_the_scratch_copy` | `scripts/maintenance/db_repair/test_repair.py` |
 
 - `cargo test -p opencoder-store --test session_activity_index_repair --test list_activity_order` 9/9，`--lib activity` 7/7；`PYTHONPATH=scripts/maintenance /usr/bin/python3 -m unittest db_repair.test_repair -v` 6/6 OK。
+- 收尾复跑：`cargo clippy -p opencoder-store --all-targets -- -D warnings` 零警告（顺手修复 `listing.rs` 的 `push_str("1")` 与 `sessions/parts/part_2.rs` 文档段落行首 `+` 触发的 `doc_lazy_continuation`，均为既有问题）；上述 Rust 9/9 与 Python 6/6 复跑结果一致。
 - 新集成测试的 fixture 做法：会话 s2 带 20 KiB 标题产生 overflow 链，把首页 overflow 的 next 指针清零（sqlite3 `integrity_check` 报 `overflow list length is 1 but should be 4`）。注意 Turso 下 `SELECT updated_at … WHERE id=?` 被活跃索引完全覆盖、不读表行，fixture 断言必须读 `title`，且错误在 `rows.next()` 而非 `query()` 才出现。
 - `cargo test -p opencoder-store --no-fail-fast` 仅 2 个既有失败与本改动无关：
   `catalog_maintenance`（调用的 `python3` 3.13 无 `_sqlite3`）、
@@ -90,7 +91,6 @@
 
 ## 已知限制
 
-- 约 61 条消息（2026-11-23 晚间，页已被覆盖）与 `session_events` 尾部约 2.4k 条无法恢复；
-  4 个 ghost 会话以 stub 行复活（如确为有意删除可再删）；`01M844Q7JPQ2MSYZV489V4XKTJ`
-  保留了 `updated_at = created_at` 的旧版本。
+- 所在页已被覆盖的消息与 `session_events` 尾部记录无法恢复（数量见报告的 `index_only` / 未匹配条目）；
+  ghost 会话以 stub 行复活（如确为有意删除可再删）；修库不回填 `updated_at`，恢复出的会话保留旧版本。
 - 修库不消除根因：多进程并发写同一库会再次损坏，应减少并发写入或升级存储引擎。

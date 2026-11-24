@@ -56,16 +56,21 @@ impl Drop for Environment {
 }
 
 pub fn runner() -> PathBuf {
-    let target = std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let binary = target.join("examples/agent-step-runner");
-    assert!(binary.is_file(), "missing runner {}", binary.display());
-    binary
+    // Test binaries run from several layouts (`target/<profile>/deps`,
+    // `target/<profile>/build/<pkg>/<hash>/out`, ...): the example binaries
+    // live in the profile directory, a bounded number of ancestors up.
+    let mut directory = std::env::current_exe().unwrap();
+    for _ in 0..8 {
+        let Some(parent) = directory.parent() else {
+            break;
+        };
+        let binary = parent.join("examples/agent-step-runner");
+        if binary.is_file() {
+            return binary;
+        }
+        directory = parent.to_path_buf();
+    }
+    panic!("missing runner {}", directory.display());
 }
 
 pub fn rootfs(root: &Path, runner: &Path) {

@@ -1,8 +1,36 @@
 use serde::{Deserialize, Serialize};
 
+/// Container backend selected for DAG runs on this node.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DagSandbox {
+    /// The OCI runtime (`runc`) is required for every run.
+    #[default]
+    Runc,
+    /// Use the native clone3 sandbox when the node supports it, else `runc`.
+    Auto,
+    /// Require the native clone3 sandbox; no `runc` dependency.
+    Clone3,
+}
+
+impl DagSandbox {
+    /// Sandbox the native test harnesses configure: `DAG_TEST_SANDBOX` takes
+    /// the same values as `dag.sandbox` and is `runc` when unset, so every
+    /// existing harness keeps its backend unless a run opts in.
+    pub fn from_test_env() -> Self {
+        let Ok(raw) = std::env::var("DAG_TEST_SANDBOX") else {
+            return Self::default();
+        };
+        serde_json::from_value(serde_json::Value::String(raw))
+            .expect("DAG_TEST_SANDBOX must be runc, auto or clone3")
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DagConfig {
+    #[serde(default)]
+    pub sandbox: DagSandbox,
     #[serde(skip)]
     pub execution_private_root: Option<std::path::PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,6 +119,46 @@ mod tests {
         assert_eq!(config.workspace_nfs.port, 2051);
         assert!(config.nfs.read_only);
         assert!(!config.workspace_nfs.enabled);
+        assert_eq!(config.sandbox, DagSandbox::Runc);
+    }
+
+    #[test]
+    fn test_env_backend_defaults_to_runc_and_accepts_config_values() {
+        let previous = std::env::var_os("DAG_TEST_SANDBOX");
+        for (raw, expected) in [
+            (None, DagSandbox::Runc),
+            (Some("clone3"), DagSandbox::Clone3),
+            (Some("auto"), DagSandbox::Auto),
+            (Some("runc"), DagSandbox::Runc),
+        ] {
+            match &raw {
+                Some(value) => std::env::set_var("DAG_TEST_SANDBOX", value),
+                None => std::env::remove_var("DAG_TEST_SANDBOX"),
+            }
+            assert_eq!(DagSandbox::from_test_env(), expected, "{raw:?}");
+        }
+        match previous {
+            Some(value) => std::env::set_var("DAG_TEST_SANDBOX", value),
+            None => std::env::remove_var("DAG_TEST_SANDBOX"),
+        }
+    }
+
+    #[test]
+    fn sandbox_modes_roundtrip_and_unknown_values_fail() {
+        for (text, expected) in [
+            (r#"{"sandbox":"runc"}"#, DagSandbox::Runc),
+            (r#"{"sandbox":"auto"}"#, DagSandbox::Auto),
+            (r#"{"sandbox":"clone3"}"#, DagSandbox::Clone3),
+        ] {
+            let config: DagConfig = serde_json::from_str(text).unwrap();
+            assert_eq!(config.sandbox, expected, "{text}");
+            assert_eq!(
+                serde_json::from_value::<DagConfig>(serde_json::to_value(&config).unwrap()).unwrap(),
+                config
+            );
+        }
+        assert!(serde_json::from_str::<DagConfig>(r#"{"sandbox":"host"}"#).is_err());
+        assert!(serde_json::from_str::<DagConfig>(r#"{"sandbox":""}"#).is_err());
     }
 
     #[test]

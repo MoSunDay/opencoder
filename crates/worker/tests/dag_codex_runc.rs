@@ -127,6 +127,11 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
         eprintln!("SKIP: runc unavailable");
         return;
     }
+    // The receipts pinned here (`runc-state`) exist only on the OCI backend.
+    if opencoder_core::config::DagSandbox::from_test_env() != opencoder_core::config::DagSandbox::Runc {
+        eprintln!("SKIP: DAG_TEST_SANDBOX is not pinned to runc");
+        return;
+    }
     // Build before installing the fixture HOME so rustup retains its host setup.
     let runner = fixture::runner();
     let temp = tempfile::tempdir().unwrap();

@@ -1,4 +1,5 @@
 use opencoder_dag::DagClaimedRun;
+use opencoder_dag_runtime::sandbox::clone3::Backend;
 use opencoder_dag_runtime::sandbox::run::{execute, RunContainer, StepProcess};
 use serde_json::json;
 use std::{path::Path, process::Command};
@@ -7,6 +8,8 @@ use std::{path::Path, process::Command};
 mod container;
 
 struct BindMounts(Vec<std::path::PathBuf>);
+
+
 
 impl BindMounts {
     fn bind(&mut self, source: &Path, target: &Path) {
@@ -39,7 +42,16 @@ async fn probe(root: &Path, config: &opencoder_core::Config, script: &str) -> (i
         ]}
     }))
     .unwrap();
+    let backend = opencoder_dag_runtime::sandbox::clone3::select(config).unwrap();
     let owner = RunContainer::start(root, config, &run).await.unwrap();
+    let init = (backend == Backend::Clone3)
+        .then(|| {
+            let record: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(root.join("private/clone3/init.json")).unwrap())
+                    .unwrap();
+            (record["init"]["pid"].as_i64().unwrap(), record["init"]["start_time"].as_u64().unwrap())
+        })
+        ;
     let result = execute(
         root,
         StepProcess {
@@ -54,20 +66,38 @@ async fn probe(root: &Path, config: &opencoder_core::Config, script: &str) -> (i
     )
     .await;
     owner.cleanup().await.unwrap();
-    let state = Command::new("runc")
-        .arg("--root")
-        .arg(root.join("runc-state"))
-        .args(["list", "--format", "json"])
-        .output()
-        .unwrap();
-    assert!(state.status.success());
-    let containers: serde_json::Value = serde_json::from_slice(&state.stdout).unwrap();
-    assert!(containers.is_null() || containers == json!([]));
+    let released = match backend {
+        Backend::Runc => {
+            let state = Command::new("runc")
+                .arg("--root")
+                .arg(root.join("runc-state"))
+                .args(["list", "--format", "json"])
+                .output()
+                .unwrap();
+            assert!(state.status.success());
+            let containers: serde_json::Value = serde_json::from_slice(&state.stdout).unwrap();
+            assert!(containers.is_null() || containers == json!([]));
+            "runc_empty"
+        }
+        Backend::Clone3 => {
+            // The recorded init (host pid + starttime) must not be alive any more.
+            let (pid, start_time) = init.unwrap();
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok();
+            let still_running = stat.as_deref().is_some_and(|stat| {
+                // Field 22 (starttime): 19 tokens after the `comm` state token.
+                stat.rsplit_once(") ")
+                    .and_then(|(_, tail)| tail.split_whitespace().nth(19))
+                    .is_some_and(|field| field.parse::<u64>() == Ok(start_time))
+            });
+            assert!(!still_running, "clone3 init {pid} survived cleanup: {stat:?}");
+            "init_gone"
+        }
+    };
     let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap();
     assert!(!mounts.contains(&root.display().to_string()));
     println!(
         "{}",
-        json!({"run_id":id,"root":root,"runc_empty":true,"container_mounts_released":true})
+        json!({"run_id":id,"root":root,"backend":backend,"released":released,"container_mounts_released":true})
     );
     result.unwrap()
 }

@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 import subprocess
 import time
-from runtime import inventory, wait, write
+from runtime import alive, inventory, recorded, wait, write
 
 
 SOURCE = r'''
@@ -81,9 +81,17 @@ def finished(runtime, identifier):
 
 
 def clean(root):
-    state = subprocess.run(['runc', '--root', str(root / 'runc-state'), 'list', '--format', 'json'],
-                           capture_output=True, text=True, check=True)
-    assert not json.loads(state.stdout), state.stdout
+    # The OCI backend keeps its containers in `runc-state` (querying a missing
+    # root would create it); the native backend leaves a record of the sandbox
+    # processes, which must all be gone.
+    if (root / 'runc-state').exists():
+        state = subprocess.run(['runc', '--root', str(root / 'runc-state'), 'list', '--format', 'json'],
+                               capture_output=True, text=True, check=True)
+        assert not json.loads(state.stdout), state.stdout
+    record = root / 'private/clone3/init.json'
+    if record.is_file():
+        who = recorded(json.loads(record.read_text()))
+        assert not [item for item in who if alive(item)], who
     assert not any(str(root) in line for line in Path('/proc/self/mountinfo').read_text().splitlines())
 
 

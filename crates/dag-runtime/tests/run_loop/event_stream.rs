@@ -52,10 +52,7 @@ async fn retained_agent_events_are_reset_before_live_import_starts() {
     let output: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("analyze/output.json")).unwrap()).unwrap();
     assert_eq!(output, json!({"current":true}));
-    assert!(std::fs::read_dir(root.join("runc-state"))
-        .unwrap()
-        .next()
-        .is_none());
+    container::assert_runtime_released(&root);
 }
 
 #[tokio::test]
@@ -83,10 +80,7 @@ async fn invalid_live_agent_event_is_error_not_user_cancellation() {
         .as_str()
         .unwrap()
         .contains("invalid container event"));
-    assert!(std::fs::read_dir(root.join("runc-state"))
-        .unwrap()
-        .next()
-        .is_none());
+    container::assert_runtime_released(&root);
 }
 
 #[tokio::test]

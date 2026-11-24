@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import signal
 import socket
 import subprocess
 import time
@@ -34,6 +35,47 @@ def write(path, value):
     path.chmod(0o600)
 
 
+SANDBOXES = ('runc', 'auto', 'clone3')
+
+
+def sandbox():
+    """Backend every node is pinned to: `DAG_TEST_SANDBOX`, `runc` by default."""
+    value = os.environ.get('DAG_TEST_SANDBOX', 'runc')
+    if value not in SANDBOXES:
+        raise ValueError('DAG_TEST_SANDBOX must be one of ' + ', '.join(SANDBOXES))
+    return value
+
+
+def recorded(record):
+    """Process identities (`pid`, `start_time`) of a native sandbox record."""
+    return [who for who in record.values() if isinstance(who, dict) and 'pid' in who]
+
+
+def alive(who):
+    """Whether a recorded process incarnation is still live (not a zombie)."""
+    try:
+        fields = Path(f"/proc/{who['pid']}/stat").read_text().rsplit(') ', 1)[1].split()
+    except (OSError, IndexError):
+        return False
+    return fields[0] != 'Z' and int(fields[19]) == who['start_time']
+
+
+def stop_sandbox(record, seconds=30):
+    """Wait for a recorded native sandbox to go (its lease ends with the node),
+    killing what outlives the wait; returns what is still alive."""
+    who = recorded(record)
+    deadline = time.monotonic() + seconds
+    while any(alive(item) for item in who) and time.monotonic() < deadline:
+        time.sleep(.05)
+    for item in who:
+        if alive(item):
+            os.kill(item['pid'], signal.SIGKILL)
+    deadline = time.monotonic() + 10
+    while any(alive(item) for item in who) and time.monotonic() < deadline:
+        time.sleep(.05)
+    return [item for item in who if alive(item)]
+
+
 def inventory(root):
     result = {}
     for path in [root, *sorted(root.rglob('*'))]:
@@ -52,6 +94,7 @@ def inventory(root):
 class Runtime:
     def __init__(self, root, binaries, rootfs):
         self.root, self.binaries, self.rootfs = root, binaries, rootfs
+        self.sandbox = sandbox()
         self.children, self.mounts = {}, []
         self.token = secrets.token_hex(32)
         self.base = None
@@ -105,7 +148,8 @@ class Runtime:
         self.base = wait(listening, 'Server startup')
         for name in ['node-a', 'node-b']:
             node = self.root / 'runtime' / name
-            dag = {'rootfs_dir': str(self.rootfs), 'data_dir': str(node / 'state/dag/runs')}
+            dag = {'rootfs_dir': str(self.rootfs), 'data_dir': str(node / 'state/dag/runs'),
+                   'sandbox': self.sandbox}
             for key, listener in [('binary_dir', binary_port), ('workspace_dir', workspace_port)]:
                 mount = node / key
                 mount.mkdir(parents=True)
@@ -188,6 +232,13 @@ class Runtime:
             if not str(root).startswith(str(journal.parents[3]) + '/'):
                 errors.append('invalid cleanup ownership ' + str(root))
                 continue
+            # A native sandbox outlives its node only until the node's lease
+            # closes; the record (pid + start time) names exactly its processes.
+            record = root / 'private/clone3/init.json'
+            if record.is_file():
+                remaining = stop_sandbox(json.loads(record.read_text()))
+                if remaining:
+                    errors.append('native sandbox survived ' + str(remaining))
             state = root / 'runc-state'
             if (state / ('dag-run-' + journal.parent.name)).exists():
                 subprocess.run(['runc', '--root', str(state), 'delete', '--force', 'dag-run-' + journal.parent.name], check=True, timeout=30)

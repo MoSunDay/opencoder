@@ -1,5 +1,9 @@
 #!/usr/bin/python3
-"""Exercise one Server and two real native DAG Workers in a private namespace."""
+"""Exercise one Server and two real native DAG Workers in a private namespace.
+
+The sandbox backend is the nodes' `dag.sandbox`: `DAG_TEST_SANDBOX` (`runc`
+by default, `clone3` for the native backend, `auto` to let the node choose).
+"""
 import argparse
 import json
 import os

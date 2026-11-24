@@ -1,4 +1,7 @@
-use super::Receipt;
+use super::{
+    super::clone3::Backend,
+    Receipt,
+};
 use crate::step_log::{StepOutputLog, Stream};
 use anyhow::{ensure, Context, Result};
 use serde_json::json;
@@ -62,15 +65,33 @@ pub async fn execute(
     opencoder_core::atomic_write(&process_file, &serde_json::to_vec(&process)?)?;
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&process_file, std::fs::Permissions::from_mode(0o600))?;
-    let mut child = Command::new("runc")
-        .arg("--root")
-        .arg(root.join("runc-state"))
-        .args(["exec", "--process"])
-        .arg(&process_file)
-        .arg("--pid-file")
-        .arg(&pid_file)
-        .arg(&receipt.id)
-        .stdin(Stdio::null())
+    let mut command = match receipt.backend {
+        Backend::Runc => {
+            let mut command = Command::new("runc");
+            command
+                .arg("--root")
+                .arg(root.join("runc-state"))
+                .args(["exec", "--process"])
+                .arg(&process_file)
+                .arg("--pid-file")
+                .arg(&pid_file)
+                .arg(&receipt.id)
+                .stdin(Stdio::null());
+            command
+        }
+        // The relay joins the live sandbox; its stdin is the lease whose end
+        // makes it stop the step should this process go away first.
+        Backend::Clone3 => {
+            let runner = receipt
+                .runner
+                .as_deref()
+                .context("clone3 receipt is missing the runner path")?;
+            let mut command = Command::new(runner);
+            command.arg("exec").arg(root).arg(&key).stdin(Stdio::piped());
+            command
+        }
+    };
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
@@ -78,6 +99,9 @@ pub async fn execute(
         .context("execute step in DAG container")?;
     let stdout = child.stdout.take().context("DAG stdout missing")?;
     let stderr = child.stderr.take().context("DAG stderr missing")?;
+    // tokio's `Child::wait` closes `stdin`; the clone3 relay's stdin is the
+    // node's lease and closing it stops the step, so it is held until here.
+    let _lease = child.stdin.take();
     let stdout: Box<dyn tokio::io::AsyncRead + Unpin + Send> = match &output {
         Some(log) => Box::new(log.tee_reader(Stream::Stdout, stdout)),
         None => Box::new(stdout),
@@ -130,7 +154,15 @@ pub async fn execute(
                 status?;
             }
             Err(_) => {
-                super::super::runc::delete_force(&root.join("runc-state"), &receipt.id).await?;
+                match receipt.backend {
+                    Backend::Runc => {
+                        super::super::runc::delete_force(&root.join("runc-state"), &receipt.id)
+                            .await?;
+                    }
+                    Backend::Clone3 => {
+                        super::super::clone3::launch::stop_abandoned(root).await?;
+                    }
+                }
                 child.kill().await?;
                 anyhow::bail!("step process tree cleanup failed; DAG container stopped");
             }

@@ -2,7 +2,7 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 
 # dag-runtime 模块
 
-节点侧 DAG 调度与执行。一次运行归属一个节点、一个 `runc` 容器；
+节点侧 DAG 调度与执行。一次运行归属一个节点、一个沙箱容器（`runc`，或 `dag.sandbox` 选定的原生 clone3 后端，缺省 `runc`）；
 Server 不链接此运行时。
 
 ## 索引
@@ -19,6 +19,7 @@ Server 不链接此运行时。
 - [sandbox/run/](../../../crates/dag-runtime/src/sandbox/run/mod.rs) — 容器装配：镜像校验、挂载（`mounts.rs`、`config.rs`）
 - [sandbox/supervisor.rs](../../../crates/dag-runtime/src/sandbox/supervisor.rs) — 步骤进程树监督
 - [sandbox/runc/](../../../crates/dag-runtime/src/sandbox/runc/cleanup.rs) — 容器删除回收与 init 退出核对
+- [sandbox/clone3/](../../../crates/dag-runtime/src/sandbox/clone3/mod.rs) — 原生 clone3 后端：`dag.sandbox` 选择与进程身份（`mod.rs`）、启动器 `launch`（`launcher.rs`、`launch.rs`）、步骤中继 `exec`（`exec.rs`）、挂载 / 降权 / 进程规格（`mounts.rs`、`privilege.rs`、`process.rs`）
 - [sandbox/codex/](../../../crates/dag-runtime/src/sandbox/codex/mod.rs) — Codex 启动契约：`broker.rs`、`startup.rs`、bundle
 - [exec/](../../../crates/dag-runtime/src/exec/mod.rs) — 步骤执行器与共享管线（`StepCtx`、native、agent_runc 等）
 - [step_io.rs](../../../crates/dag-runtime/src/step_io.rs) — 从运行循环提取的单步产物落盘
@@ -31,7 +32,7 @@ Server 不链接此运行时。
 - [examples/codex-startup-probe.rs](../../../crates/dag-runtime/examples/codex-startup-probe.rs) — 真实 runc 下的 Codex 启动探测
 - [examples/connection-mount-probe.rs](../../../crates/dag-runtime/examples/connection-mount-probe.rs) — 连接只读挂载验证
 - [tests/](../../../crates/dag-runtime/tests/sandbox_environment.rs) — 沙箱、preflight 与 run_loop 集成测试
-- [runc_scheduling/main.py](../../../scripts/acceptance/runc_scheduling/main.py) — 两节点验收
+- [runc_scheduling/main.py](../../../scripts/acceptance/runc_scheduling/main.py) — 两节点验收（`DAG_TEST_SANDBOX` 钉 `runc` / `clone3` 后端）
 
 ## 相关
 - [sandbox/codex](../../../crates/dag-runtime/src/sandbox/codex/mod.rs) 将固定的 Codex 启动脚本参数传入原生步骤；执行仍使用工作流容器和节点上的入口。

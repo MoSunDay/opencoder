@@ -196,6 +196,16 @@ impl RunContainer {
             &self.root.join("bundle/rootfs"),
         )?;
         let value = config::render(&self.root, config, run, uid)?;
+        // The node materialises the configured hostname inside the run's own
+        // rootfs overlay for both backends: runc and the native launcher set
+        // the same kernel value, and runc alone would leave no file behind.
+        if let Some(host) = value["hostname"].as_str().filter(|host| !host.is_empty()) {
+            let rootfs = self.root.join("bundle/rootfs");
+            if rootfs.join("etc").is_dir() {
+                std::fs::write(rootfs.join("etc/hostname"), format!("{host}\n"))
+                    .context("write sandbox hostname file")?;
+            }
+        }
         opencoder_core::atomic_write(
             &self.root.join("bundle/config.json"),
             &serde_json::to_vec_pretty(&value)?,

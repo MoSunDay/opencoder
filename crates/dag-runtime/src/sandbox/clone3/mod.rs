@@ -141,12 +141,16 @@ pub(crate) fn alive(who: Identity) -> bool {
     identity(who.pid) == Some(who)
 }
 
+/// Fallbacks taken by `kill` because no pidfd could be opened; tests only.
+#[cfg(test)]
+static FALLBACKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Signal one exact process incarnation through a pidfd, so a pid reused
 /// between the identity check and the signal is never hit; a process that is
 /// already gone is not an error, any other failure is.
 pub(crate) fn kill(who: Identity, signal: i32) -> Result<()> {
     // Safety: plain syscalls with scalar arguments; the descriptor is closed
-    // on every path below.
+    // after use.
     let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, who.pid, 0) };
     if pidfd < 0 {
         let error = std::io::Error::last_os_error();
@@ -156,13 +160,18 @@ pub(crate) fn kill(who: Identity, signal: i32) -> Result<()> {
         // No pidfd for this process (descriptors exhausted, access refused):
         // the identity check alone guards the signal, as before.
         tracing::warn!(%error, pid = who.pid, "clone3 sandbox pidfd unavailable; signalling by identity");
+        #[cfg(test)]
+        FALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return kill_by_identity(who, signal);
     }
     let pidfd = pidfd as i32;
     // The descriptor pins the process; the starttime read afterwards tells
     // whether it is still the recorded incarnation.
+    let recorded = identity(who.pid) == Some(who);
+    // Safety: plain syscalls with scalar arguments; the descriptor is closed
+    // after use.
     let failure = unsafe {
-        let result = if identity(who.pid) == Some(who) {
+        let result = if recorded {
             libc::syscall(libc::SYS_pidfd_send_signal, pidfd, signal, 0, 0)
         } else {
             0
@@ -255,11 +264,13 @@ mod tests {
     #[test]
     fn kill_reaches_the_recorded_incarnation_only() {
         use std::os::unix::process::ExitStatusExt;
+        use std::sync::atomic::Ordering::Relaxed;
         let mut child = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
             .unwrap();
         let who = identity(i32::try_from(child.id()).unwrap()).unwrap();
+        let fallbacks = FALLBACKS.load(Relaxed);
         // Another incarnation of this pid is never signalled.
         let stale = Identity {
             start_time: who.start_time.wrapping_add(1),
@@ -272,5 +283,18 @@ mod tests {
         assert_eq!(status.signal(), Some(libc::SIGKILL));
         // Gone: not an error, nothing to signal.
         kill(who, libc::SIGKILL).unwrap();
+        // A pidfd was at hand throughout: none of these took the fallback.
+        assert_eq!(FALLBACKS.load(Relaxed), fallbacks);
+        // pid 0 cannot be opened (EINVAL, not ESRCH) and is no recorded
+        // identity: the fallback runs and signals nothing.
+        kill(
+            Identity {
+                pid: 0,
+                start_time: 0,
+            },
+            libc::SIGKILL,
+        )
+        .unwrap();
+        assert_eq!(FALLBACKS.load(Relaxed), fallbacks + 1);
     }
 }

@@ -8,10 +8,8 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use opencoder_core::config::DagSandbox;
-
 use crate::clone3_fixtures::{
-    assert_released, backend, backend_ready, dir_identity, expected_backends, mount_at, mounts,
+    assert_released, backend_ready, dir_identity, expected_backends, mount_at, mounts,
     mounts_under, namespace, read_json, status_field, wait_for_live,
 };
 use crate::clone3_probe::PROBE_C;
@@ -246,11 +244,9 @@ fn step_sandbox_is_namespaced_readonly_and_unprivileged() {
     }
     assert_eq!(facts["ns"]["net"].as_u64().unwrap(), namespace(me, "net"));
     assert_eq!(facts["hostname"], "dag-run");
-    // Only the native launcher materialises the hostname as a rootfs file;
-    // runc sets the kernel value alone.
-    if backend() == DagSandbox::Clone3 {
-        assert_eq!(facts["etc_hostname"], "dag-run");
-    }
+    // Both backends materialise the same hostname as a rootfs file: the node
+    // writes it into the run's overlay before the sandbox starts.
+    assert_eq!(facts["etc_hostname"], "dag-run");
 
     // Masked and read-only paths, writable scratch and workspace.
     assert_eq!(facts["kcore_size"], 0, "kcore must be masked");

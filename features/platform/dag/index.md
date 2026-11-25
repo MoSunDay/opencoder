@@ -1,8 +1,8 @@
-Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
+Commit: 8edc26f263fce6e842b0f58ce887eef56f150990
 
 # DAG 工作流
 
-画布/JSON/API 提交依赖图；原生二进制与 Agent 步骤在共享 runc 容器执行，
+画布/JSON/API 提交依赖图；原生二进制与 Agent 步骤在节点选定的单个沙箱容器（`runc`，或 `dag.sandbox` 选定的原生 clone3 后端）内执行，
 本卡只做指路。
 
 ## 索引
@@ -16,7 +16,7 @@ Commit: 6c3491fd94ec48f28aa51058feb4dd7c9e3daf83
 - [crates/dag/src/dynamic.rs](../../../crates/dag/src/dynamic.rs) — 动态节点
   展开
 - [crates/dag-runtime/src/sandbox/](../../../crates/dag-runtime/src/sandbox) —
-  runc 沙箱与工作区布局
+  `runc` / clone3 沙箱与工作区布局
 - [workloads/dag.rs](../../../crates/worker/src/workloads/dag.rs)
   — 节点侧 DAG workload
 - [capabilities.rs](../../../crates/control/src/api/executions/capabilities.rs)

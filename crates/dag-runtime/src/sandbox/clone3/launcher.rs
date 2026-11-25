@@ -103,13 +103,6 @@ impl Plan {
                 )?;
             }
         }
-        if let Some(host) = &self.hostname {
-            // Into the overlay upper, before the root is remounted read-only.
-            if self.rootfs.join("etc").is_dir() {
-                std::fs::write(self.rootfs.join("etc/hostname"), format!("{host}\n"))
-                    .context("write sandbox hostname file")?;
-            }
-        }
         if self.readonly_root {
             mounts::readonly_root(&self.rootfs)?;
         }

@@ -1,5 +1,7 @@
 //! Immutable managed startup programs and the minimal private paths they need.
-use super::guest_path;
+//! The program and its files are host files of the sandbox host mapping (see
+//! `host`); only private settings are snapshotted into the run root.
+use crate::sandbox::host;
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,11 +27,13 @@ pub struct Managed {
     pub mounts: Vec<PrivateMount>,
 }
 
-pub fn resolve(rootfs: &Path, command: &[String]) -> Result<Option<Managed>> {
+/// `runners` is the configured runners directory (`None` when unset): the
+/// program, its files and the Codex executable are guest paths.
+pub fn resolve(host: &Path, runners: Option<&Path>, command: &[String]) -> Result<Option<Managed>> {
     let Some(program) = command.first() else {
         return Ok(None);
     };
-    let manifest = guest_path(rootfs, MANIFEST)?;
+    let manifest = host::host_path(host, runners, MANIFEST)?;
     let data = match std::fs::read(manifest) {
         Ok(data) => data,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -51,20 +55,23 @@ pub fn resolve(rootfs: &Path, command: &[String]) -> Result<Option<Managed>> {
         .as_object()
         .context("managed startup files missing")?
     {
+        // Files sit beside the program in the host mapping; the digest pins
+        // the exact bytes the sandbox binds and executes.
         let source = Path::new(program)
             .parent()
             .context("startup parent missing")?
             .join(name);
-        real_path(&source, false)?;
-        let host = std::fs::read(&source)?;
-        let guest = std::fs::read(guest_path(
-            rootfs,
-            source.to_str().context("startup path is not UTF-8")?,
-        )?)?;
-        let digest = format!("{:x}", Sha256::digest(&host));
+        let source = source.to_str().context("startup path is not UTF-8")?;
+        let mapped = host::host_path(host, runners, source)?;
+        let metadata = std::fs::symlink_metadata(&mapped)?;
         ensure!(
-            expected.as_str() == Some(digest.as_str()) && guest == host,
-            "managed startup host/rootfs content differs"
+            metadata.is_file() && !metadata.file_type().is_symlink(),
+            "managed startup file must be a regular file: {source}"
+        );
+        let digest = format!("{:x}", Sha256::digest(std::fs::read(&mapped)?));
+        ensure!(
+            expected.as_str() == Some(digest.as_str()),
+            "managed startup program differs from its manifest digest"
         );
     }
     let config = PathBuf::from(&command[2]);
@@ -102,10 +109,10 @@ pub fn resolve(rootfs: &Path, command: &[String]) -> Result<Option<Managed>> {
     let codex = configuration["codex"]
         .as_str()
         .context("managed Codex executable missing")?;
-    super::validate_executable(rootfs, codex)?;
+    host::validate_executable(host, runners, codex)?;
     ensure!(
         manifest["codex"] == codex,
-        "managed Codex executable differs from rootfs manifest"
+        "managed Codex executable differs from the startup manifest"
     );
     let clients = PathBuf::from(
         configuration["client_config_home"]
@@ -177,11 +184,13 @@ fn real_path(path: &Path, directory: bool) -> Result<()> {
 }
 
 impl Managed {
+    /// Snapshot the private settings under the run root and bind each declared
+    /// private file read-only at its host path; the runtime creates the
+    /// mountpoints of files the host mapping does not already carry.
     pub fn prepare(
         &self,
         root: &Path,
         step: &str,
-        rootfs: &Path,
         mounts: &mut Vec<serde_json::Value>,
     ) -> Result<()> {
         let private = root.join("private/codex").join(step);
@@ -210,13 +219,6 @@ impl Managed {
                 );
                 continue;
             }
-            let target = guest_path(rootfs, &entry.destination)?;
-            std::fs::create_dir_all(target.parent().context("private mount parent missing")?)?;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(target)?;
             mounts.push(serde_json::json!({"type":"bind","source":entry.source,"destination":entry.destination,
                 "options":["bind","ro","nosuid","nodev","noexec"]}));
         }

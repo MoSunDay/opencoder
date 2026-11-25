@@ -96,6 +96,18 @@ class PreflightTests(unittest.TestCase):
             {'target': '/mnt/bin', 'fstype': 'nfs', 'options': 'ro,vers=3', 'source': '127.0.0.1:/'}]})
         self.assertEqual(preflight.mount(Path('/mnt/bin'), operations)['target'], '/mnt/bin')
 
+    def test_runners_dir_is_accepted_while_unknown_dag_fields_are_rejected(self):
+        for target in ('agent', 'server'):
+            agent, server = configs()
+            {'agent': agent, 'server': server}[target]['dag']['runners_dir'] = '/images/dag/usr/bin'
+            with self.subTest(target=target):
+                preflight.configuration(agent, server)
+        for target in ('agent', 'server'):
+            agent, server = configs()
+            {'agent': agent, 'server': server}[target]['dag']['python_dir'] = '/image/usr/bin/python3'
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, 'obsolete DAG configuration'):
+                preflight.configuration(agent, server)
+
     def test_missing_paths_writable_exports_and_external_databases_fail_before_stop(self):
         for section, key in [('dag', 'rootfs_dir'), ('dag', 'binary_dir'), ('dag', 'workspace_dir'), ('agent', 'agents_dir')]:
             agent, server = configs()

@@ -1,7 +1,8 @@
 //! Shared DAG container end to end: a single agent step's
 //! WHOLE session (LLM loop + tools) runs inside the read-only sandbox
 //! (`runc`, or the native clone3 backend when `DAG_TEST_SANDBOX` pins it)
-//! via the rootfs-installed `agent-step-runner`, while the host keeps the
+//! via the node's `agent-step-runner`, bound read-only at
+//! `/run/opencoder/bin` from the runners image, while the host keeps the
 //! session row + artifacts contract. Pins: structured output recovered from
 //! the container-written `output.json`, runner artifacts
 //! (`transcript.txt`/`session.json`), host/container session-id agreement,
@@ -157,13 +158,16 @@ fn agent_step_session_runs_inside_runc_container() {
         "a write into the read-only knowledge root succeeded"
     );
 
-    // Bundle shape: direct argv, injected LLM env, ro knowledge mount.
+    // Bundle shape: direct argv of the runners' `dag-runner` over the empty
+    // root anchor sealed read-only, no injected LLM secret, ro knowledge mount.
     let bundle = read_json(&fleet.run_root(RUN).join("bundle/config.json"));
     assert_eq!(
         bundle["process"]["args"],
-        json!(["/usr/bin/dag-runner", "init"]),
+        json!(["/run/opencoder/bin/dag-runner", "init"]),
         "bundle process.args: {bundle}"
     );
+    assert_eq!(bundle["root"]["path"], json!("root"), "{bundle}");
+    assert_eq!(bundle["root"]["readonly"], json!(true), "{bundle}");
     let env = bundle["process"]["env"]
         .as_array()
         .cloned()

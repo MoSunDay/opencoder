@@ -94,7 +94,9 @@ impl ContainerFixture {
         std::fs::create_dir_all(&mount).unwrap();
         let mut config = Config::default();
         config.dag.sandbox = DagSandbox::from_test_env();
-        config.dag.rootfs_dir = Some(rootfs());
+        let rootfs = rootfs();
+        config.dag.rootfs_dir = Some(rootfs.clone());
+        config.dag.runners_dir = Some(rootfs.join("usr/bin"));
         let export = spawn_nfs_server(&NfsServerOpts {
             export_root: source,
             host: "127.0.0.1".into(),
@@ -103,7 +105,19 @@ impl ContainerFixture {
         })
         .unwrap();
         let port = export.local_addr().unwrap().port();
-        run("mount", &["-t", "nfs", "-o", &format!("ro,vers=3,tcp,port={port},mountport={port},nolock,soft,timeo=10,retrans=1,actimeo=0,lookupcache=none"), "127.0.0.1:/", mount.to_str().unwrap()]);
+        run(
+            "mount",
+            &[
+                "-t",
+                "nfs",
+                "-o",
+                &format!(
+                    "ro,vers=3,tcp,port={port},mountport={port},nolock,soft,timeo=10,retrans=1,actimeo=0,lookupcache=none"
+                ),
+                "127.0.0.1:/",
+                mount.to_str().unwrap(),
+            ],
+        );
         config.dag.workspace_dir = Some(mount.join("workspace"));
         config.dag.binary_dir = Some(mount.join("binaries"));
         config.agent.agents_dir = Some(mount.join("agents"));
@@ -119,6 +133,7 @@ impl ContainerFixture {
         config.dag.workspace_dir = self.config.dag.workspace_dir.clone();
         config.dag.binary_dir = self.config.dag.binary_dir.clone();
         config.dag.rootfs_dir = self.config.dag.rootfs_dir.clone();
+        config.dag.runners_dir = self.config.dag.runners_dir.clone();
         config.dag.sandbox = self.config.dag.sandbox;
     }
 }

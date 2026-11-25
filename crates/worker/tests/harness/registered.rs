@@ -5,11 +5,15 @@ use super::{dispatch, read, save, settled, support, Fleet};
 use serde_json::json;
 
 pub async fn verify(fleet: &Fleet) {
+    // The profile carries the sandbox CLI path: the fake harness lives in the
+    // node's runners directory, which every sandbox binds at /run/opencoder/bin
+    // (the default /usr/bin/codex would be the host's own CLI).
     let profile = fleet
         .call(
             "PUT",
             "/api/harnesses/codex/profiles/regression-test",
-            json!({"model":"employee-model","reasoning_effort":"high"}),
+            json!({"model":"employee-model","reasoning_effort":"high",
+                "executable":"/run/opencoder/bin/codex"}),
         )
         .await;
     assert_eq!(profile.status, 200, "{profile:?}");

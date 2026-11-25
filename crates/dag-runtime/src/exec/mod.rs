@@ -26,13 +26,6 @@ pub struct ExecDeps {
     pub config: opencoder_core::Config,
 }
 
-/// Guest-visible mount point of the node's read-only knowledge root.
-pub(crate) const KNOWLEDGE_MOUNT: &str = "/workspace/knowledge";
-
-/// Guest-visible mount point of a pinned, read-only agents pool
-/// (agent cards + four shared resource pools) in sandboxed sessions.
-pub(crate) const AGENTS_MOUNT: &str = "/workspace/agent";
-
 /// Pure per-step execution context handed to the executors.
 pub struct StepCtx {
     pub run_id: String,
@@ -47,8 +40,8 @@ pub struct StepCtx {
     /// Run-scoped event sink for incremental agent transcript frames.
     pub log: Option<crate::exec::logs::StepLog>,
     /// Node-configured knowledge root (`dag.knowledge_root`): exposed
-    /// READ-ONLY to sandboxed steps at [`KNOWLEDGE_MOUNT`]. `None` = no
-    /// knowledge mount anywhere.
+    /// READ-ONLY to sandboxed steps at the guest knowledge mount owned by
+    /// `exec::native::io`. `None` = no knowledge mount anywhere.
     pub knowledge_root: Option<PathBuf>,
 }
 

@@ -39,8 +39,14 @@ pub struct DagConfig {
     pub workspace_dir: Option<std::path::PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<std::path::PathBuf>,
+    /// Runtime image directory; its `usr/bin` holds the runners when
+    /// `runners_dir` is unset. Platform image replacement rewrites this key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rootfs_dir: Option<std::path::PathBuf>,
+    /// Host directory holding `dag-runner` and `agent-step-runner`; bound
+    /// read-only at `/run/opencoder/bin` inside every DAG sandbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runners_dir: Option<std::path::PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub knowledge_root: Option<std::path::PathBuf>,
     #[serde(default)]

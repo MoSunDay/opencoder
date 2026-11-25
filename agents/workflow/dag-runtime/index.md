@@ -16,11 +16,12 @@ Server 不链接此运行时。
 - [layout.rs](../../../crates/dag-runtime/src/layout.rs) — 单行 re-export
   （`pub use opencoder_dag::layout::run_parent`），实现锚点在
   [dag 模块](../dag/index.md)
-- [sandbox/run/](../../../crates/dag-runtime/src/sandbox/run/mod.rs) — 容器装配：镜像校验、挂载（`mounts.rs`、`config.rs`）
+- [sandbox/run/](../../../crates/dag-runtime/src/sandbox/run/mod.rs) — 容器装配：运行器目录校验、宿主只读映射与挂载（`mounts.rs`、`config.rs`）
+- [sandbox/host.rs](../../../crates/dag-runtime/src/sandbox/host.rs) — 宿主映射：节点数据目录上的只读 tmpfs `/`，宿主 `/usr /etc /bin /sbin /lib /lib64` 与运行器目录（`/run/opencoder/bin`）只读绑定
 - [sandbox/supervisor.rs](../../../crates/dag-runtime/src/sandbox/supervisor.rs) — 步骤进程树监督
 - [sandbox/runc/](../../../crates/dag-runtime/src/sandbox/runc/cleanup.rs) — 容器删除回收与 init 退出核对
 - [sandbox/clone3/](../../../crates/dag-runtime/src/sandbox/clone3/mod.rs) — 原生 clone3 后端：`dag.sandbox` 选择与进程身份（`mod.rs`）、启动器 `launch`（`launcher.rs`、`launch.rs`）、步骤中继 `exec`（`exec.rs`）、挂载 / 降权 / 进程规格（`mounts.rs`、`privilege.rs`、`process.rs`）
-- [sandbox/codex/](../../../crates/dag-runtime/src/sandbox/codex/mod.rs) — Codex 启动契约：`broker.rs`、`startup.rs`、bundle
+- [sandbox/codex/](../../../crates/dag-runtime/src/sandbox/codex/mod.rs) — Codex 启动契约：`broker.rs`、`startup.rs`（托管启动清单从宿主 `/usr/share/opencoder/codex-startup.json` 读取）
 - [exec/](../../../crates/dag-runtime/src/exec/mod.rs) — 步骤执行器与共享管线（`StepCtx`、native、agent_runc 等）
 - [step_io.rs](../../../crates/dag-runtime/src/step_io.rs) — 从运行循环提取的单步产物落盘
 - [step_log.rs](../../../crates/dag-runtime/src/step_log.rs)、[dag_events.rs](../../../crates/dag-runtime/src/dag_events.rs) — 步骤输出落库与运行事件
@@ -28,9 +29,13 @@ Server 不链接此运行时。
 - [exec/native/artifacts.rs](../../../crates/dag-runtime/src/exec/native/artifacts.rs) — 声明驱动的任务产物归档
 
 ## 镜像与工具
-- [prepare-dag-rootfs.sh](../../../scripts/prepare-dag-rootfs.sh) — 镜像制备；配套 `scripts/dag-rootfs/` 安装脚本
-- [examples/codex-startup-probe.rs](../../../crates/dag-runtime/examples/codex-startup-probe.rs) — 真实 runc 下的 Codex 启动探测
-- [examples/connection-mount-probe.rs](../../../crates/dag-runtime/examples/connection-mount-probe.rs) — 连接只读挂载验证
+沙箱不再使用按次运行的 rootfs 镜像作为 `/`：根是节点数据目录上的只读 tmpfs，宿主 `/usr /etc /bin /sbin /lib /lib64`
+只读绑定进容器，运行器目录（`dag-runner`、`agent-step-runner`、`agent-session-runner`）只读绑定在 `/run/opencoder/bin`。
+步骤直接使用宿主的 `python3`、`git`、`rg` 与 coreutils；镜像只需 `usr/bin/` 下的三个运行器，不安装 Python、
+工具、ldd 库镜像、Codex 或托管启动。配置键 `dag.runners_dir` 指向运行器目录；旧键 `dag.rootfs_dir` 仅作回退，
+取 `<rootfs_dir>/usr/bin`。Agent 步骤的 Codex 须安装在宿主映射路径（`/usr/...`）或运行器目录（`/run/opencoder/bin/...`）。
+已移除：`sandbox/oci.rs`、`sandbox/rootfs.rs`、`codex/bundle.rs` 与 `dag prepare-rootfs` CLI。
+- [prepare-dag-rootfs.sh](../../../scripts/prepare-dag-rootfs.sh) — 运行器镜像制备：构建并拷贝三个运行器到 `<out>/usr/bin`（即 `dag.runners_dir`）
 - [tests/](../../../crates/dag-runtime/tests/sandbox_environment.rs) — 沙箱、preflight 与 run_loop 集成测试
 - [runc_scheduling/main.py](../../../scripts/acceptance/runc_scheduling/main.py) — 两节点验收（`DAG_TEST_SANDBOX` 钉 `runc` / `clone3` 后端）
 
@@ -39,4 +44,4 @@ Server 不链接此运行时。
 - [执行约定](../../../rules/04-dag-execution-contract.md)、[DAG 能力](../../../features/platform/dag/index.md)
 - [dag-binary](../dag-binary/index.md)、[worker](../../execution/worker/index.md)
 - [动态步骤](../../../crates/dag/src/dynamic.rs)、[Codex 启动](../../../crates/dag-runtime/src/sandbox/codex/mod.rs)、
-  [rootfs 制备](../../../scripts/prepare-dag-rootfs.sh)
+  [运行器镜像制备](../../../scripts/prepare-dag-rootfs.sh)

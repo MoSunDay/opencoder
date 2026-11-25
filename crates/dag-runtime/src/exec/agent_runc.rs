@@ -161,7 +161,11 @@ async fn execute_session(
     let cwd = format!("{}/{}", io::CONTEXT_MOUNT, ctx.relative_dir());
     let process = crate::sandbox::run::StepProcess {
         key,
-        argv: vec!["/usr/bin/agent-step-runner".into()],
+        argv: vec![format!(
+            "{}/{}",
+            crate::sandbox::host::RUNNERS_MOUNT,
+            crate::sandbox::host::STEP_RUNNER
+        )],
         env,
         cwd,
         timeout_secs: ctx.step.timeout_secs,

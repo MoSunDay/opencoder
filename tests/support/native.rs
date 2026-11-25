@@ -10,8 +10,17 @@ pub struct NativeMounts {
     pub server_config: Value,
 }
 
-pub fn copy_rootfs(target: &Path) {
-    let source = std::env::var_os("DAG_TEST_ROOTFS")
+/// Runners every image carries in `usr/bin`; a node resolves the image's
+/// `usr/bin` as its runners directory and binds it read-only at
+/// `/run/opencoder/bin` (the image is no root filesystem any more: every
+/// sandbox root is a tmpfs over the host's read-only system directories).
+const RUNNERS: [&str; 3] = ["dag-runner", "agent-step-runner", "agent-session-runner"];
+
+/// The shared runners image of the fleet tests: `DAG_TEST_ROOTFS`, else
+/// `<server bin dir>/dag-rootfs` (`scripts/prepare-dag-rootfs.sh`). Only its
+/// `usr/bin` reaches a node or a sandbox.
+pub fn runners_image() -> PathBuf {
+    let image = std::env::var_os("DAG_TEST_ROOTFS")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             super::sibling_bin(super::SERVER_BIN)
@@ -19,22 +28,39 @@ pub fn copy_rootfs(target: &Path) {
                 .unwrap()
                 .join("dag-rootfs")
         });
-    for name in ["dag-runner", "agent-step-runner", "agent-session-runner"] {
+    assert!(image.is_absolute(), "DAG_TEST_ROOTFS must be absolute");
+    image
+}
+
+fn assert_runners(image: &Path) {
+    for name in RUNNERS {
         assert!(
-            source.join("usr/bin").join(name).is_file(),
-            "prepare the paired test image before running tests"
+            image.join("usr/bin").join(name).is_file(),
+            "prepare the paired runners image before running tests: scripts/prepare-dag-rootfs.sh {}",
+            image.display()
         );
     }
-    std::fs::create_dir_all(target).unwrap();
+}
+
+/// Per-test copy of the runners image: `usr/bin` only (the runners next to
+/// any legacy tool files of the image), so a scenario can add its own
+/// harness binary beside the runners — the copy then serves as the node's
+/// runners directory, bound read-only at `/run/opencoder/bin`.
+pub fn copy_runners_image(target: &Path) {
+    let source = runners_image();
+    assert_runners(&source);
+    let bin = target.join("usr/bin");
+    std::fs::create_dir_all(&bin).unwrap();
     let result = Command::new("cp")
         .arg("-a")
-        .arg(source.join("."))
-        .arg(target)
+        .arg(source.join("usr/bin/."))
+        .arg(&bin)
         .output()
         .unwrap();
     assert!(
         result.status.success(),
-        "copy test rootfs: {}",
+        "copy runners image to {}: {}",
+        target.display(),
         String::from_utf8_lossy(&result.stderr)
     );
 }
@@ -44,30 +70,16 @@ impl NativeMounts {
         Self::prepare_for(workdir, extra, true)
     }
 
-    /// Server-managed host conversations require resources but no runc image.
+    /// Server-managed host conversations require resources but no runners image.
     pub fn conversations(workdir: &Path, extra: Value) -> Self {
         Self::prepare_for(workdir, extra, false)
     }
 
     fn prepare_for(workdir: &Path, extra: Value, dag: bool) -> Self {
-        let rootfs = if dag {
-            let rootfs = std::env::var_os("DAG_TEST_ROOTFS")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    super::sibling_bin(super::SERVER_BIN)
-                        .parent()
-                        .unwrap()
-                        .join("dag-rootfs")
-                });
-            assert!(rootfs.is_absolute(), "DAG_TEST_ROOTFS must be absolute");
-            for name in ["dag-runner", "agent-step-runner"] {
-                assert!(
-                    rootfs.join("usr/bin").join(name).is_file(),
-                    "prepare native test rootfs: scripts/prepare-dag-rootfs.sh {}",
-                    rootfs.display()
-                );
-            }
-            Some(rootfs)
+        let image = if dag {
+            let image = runners_image();
+            assert_runners(&image);
+            Some(image)
         } else {
             None
         };
@@ -121,8 +133,9 @@ impl NativeMounts {
             };
             mounts.push((mount, endpoint));
         }
-        if let Some(rootfs) = rootfs {
-            node["dag"]["rootfs_dir"] = json!(rootfs);
+        // The node resolves the image's `usr/bin` as its runners directory.
+        if let Some(image) = image {
+            node["dag"]["rootfs_dir"] = json!(image);
             node["dag"]["data_dir"] = json!(workdir.join("node-state/dag/runs"));
             node["dag"]["sandbox"] = json!(opencoder_core::config::DagSandbox::from_test_env());
         }

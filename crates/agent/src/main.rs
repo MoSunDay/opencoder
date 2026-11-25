@@ -89,26 +89,10 @@ enum AgentCommand {
         #[arg(last = true, required = true, hide = true)]
         command: Vec<OsString>,
     },
-    /// Node-side DAG tooling (offline: no server, store, or LLM wiring).
-    Dag {
-        #[command(subcommand)]
-        command: DagCommand,
-    },
     /// Offline node-storage maintenance.
     Storage {
         #[command(subcommand)]
         command: StorageCommand,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum DagCommand {
-    /// Scaffold the shared read-only rootfs used by `sandbox: runc` binary
-    /// steps (mount points, resolv.conf copy, provisioning README).
-    PrepareRootfs {
-        /// Directory to write the rootfs scaffold tree into.
-        #[arg(long)]
-        out: PathBuf,
     },
 }
 
@@ -153,66 +137,15 @@ fn init_logging() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
-/// `dag prepare-rootfs`: write the shared-rootfs scaffold and print the
-/// created tree. Pure filesystem work — deliberately reachable without
-/// any network, store, or LLM setup.
-#[cfg(not(windows))]
-fn prepare_rootfs(out: &std::path::Path) -> Result<()> {
-    opencoder_dag_runtime::sandbox::oci::write_rootfs_template(out)
-        .with_context(|| format!("write rootfs template under {}", out.display()))?;
-    println!("rootfs scaffold written to {}", out.display());
-    println!();
-    print_tree(out);
-    println!();
-    println!(
-        "next: provision native runners and tools under usr/ — see {} for the provisioning guide",
-        out.join("README.md").display()
-    );
-    Ok(())
-}
-
-/// Depth-first listing of a freshly created directory tree (children
-/// sorted per directory so the output is deterministic).
-#[cfg(not(windows))]
-fn print_tree(root: &std::path::Path) {
-    fn walk(dir: &std::path::Path, prefix: &str) {
-        let mut names: Vec<String> = std::fs::read_dir(dir)
-            .map(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        names.sort();
-        let last = names.len().saturating_sub(1);
-        for (i, name) in names.iter().enumerate() {
-            let tail = i == last;
-            println!("{}{}{}", prefix, if tail { "└── " } else { "├── " }, name);
-            let path = dir.join(name);
-            if path.is_dir() {
-                walk(
-                    &path,
-                    &format!("{}{}", prefix, if tail { "    " } else { "│   " }),
-                );
-            }
-        }
-    }
-    println!("{}", root.display());
-    walk(root, "");
-}
-
-#[cfg(windows)]
-fn prepare_rootfs(_out: &std::path::Path) -> Result<()> {
-    anyhow::bail!("DAG rootfs tooling requires Linux")
-}
-
 fn main() -> Result<()> {
     let args = Args::parse();
     if args.build_info {
         println!("{}", opencoder_core::version::build_info_json());
         return Ok(());
     }
+    // The hidden internal process supervisor short-circuits BEFORE any
+    // logging, runtime, server/token/store or LLM wiring: it only owns one
+    // external workload and exits with that workload's code.
     if let Some(AgentCommand::InternalProcessSupervisor {
         runc_root,
         runc_id,
@@ -254,14 +187,7 @@ async fn run(args: Args) -> Result<()> {
     }
 
     // Offline tooling short-circuits BEFORE the server/token/store/LLM
-    // wiring below: `dag prepare-rootfs` only touches the local filesystem.
-    if let Some(AgentCommand::Dag {
-        command: DagCommand::PrepareRootfs { out },
-    }) = &args.command
-    {
-        return prepare_rootfs(out);
-    }
-
+    // wiring below: `storage migrate-layout` only touches the local filesystem.
     let workdir = args
         .workdir
         .clone()
@@ -443,24 +369,6 @@ mod tests {
             "/run/credentials/token"
         ])
         .is_err());
-    }
-
-    #[test]
-    fn dag_prepare_rootfs_args_parse() {
-        let args = Args::try_parse_from([
-            "opencoder-agent",
-            "dag",
-            "prepare-rootfs",
-            "--out",
-            "/tmp/x",
-        ])
-        .expect("dag prepare-rootfs must parse");
-        match args.command {
-            Some(AgentCommand::Dag {
-                command: DagCommand::PrepareRootfs { out },
-            }) => assert_eq!(out, PathBuf::from("/tmp/x")),
-            other => panic!("unexpected command: {other:?}"),
-        }
     }
 
     #[test]

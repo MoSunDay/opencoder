@@ -4,22 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 out="${1:-}"
-[ -n "$out" ] || { echo "usage: $0 <rootfs-dir> [--codex <native-codex-binary>] [--codex-startup <immutable-launcher-dir>] [--python <python3.11+-binary>]" >&2; exit 2; }
-shift
-codex_binary=""
-codex_startup=""
-python_binary="python3"
-while [ "$#" -gt 0 ]; do
-  [ "$#" -ge 2 ] || { echo "option requires an executable" >&2; exit 2; }
-  case "$1" in
-    --codex) codex_binary="$2" ;;
-    --codex-startup) codex_startup="$2" ;;
-    --python) python_binary="$2" ;;
-    *) echo "unknown option: $1" >&2; exit 2 ;;
-  esac
-  shift 2
-done
-[ -z "$codex_startup" ] || [ -n "$codex_binary" ] || { echo "--codex-startup requires --codex" >&2; exit 2; }
+[ -n "$out" ] || { echo "usage: $0 <image-dir>" >&2; exit 2; }
+[ "$#" -eq 1 ] || { echo "unknown option: $2" >&2; exit 2; }
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 
@@ -31,39 +17,19 @@ target_dir="$(cargo metadata --manifest-path "$repo_root/Cargo.toml" --no-deps -
 bins=("$target_dir/debug/examples/dag-runner" "$target_dir/debug/examples/agent-step-runner" \
   "$target_dir/debug/examples/agent-session-runner")
 
-echo "==> writing the scaffold via 'opencoder-agent dag prepare-rootfs'"
-cargo run -q --manifest-path "$repo_root/Cargo.toml" -p opencoder-agent -- dag prepare-rootfs --out "$out" >/dev/null
+# The image is only the runners directory (<out>/usr/bin). Steps run with the
+# host's tools through the read-only host bindings; nothing else is installed.
+mkdir -p "$out/usr/bin"
 
 echo "==> installing the DAG supervisor at usr/bin/dag-runner and the agent runners at usr/bin/agent-step-runner + usr/bin/agent-session-runner"
 cp "${bins[0]}" "$out/usr/bin/dag-runner"
 cp "${bins[1]}" "$out/usr/bin/agent-step-runner"
 cp "${bins[2]}" "$out/usr/bin/agent-session-runner"
-# Debug symbols belong in the build tree, not in each container's private
-# rootfs copy. These examples are otherwise over 1 GiB together.
+# Debug symbols belong in the build tree, not in the image. These examples are
+# otherwise over 1 GiB together.
 strip --strip-debug "$out/usr/bin/dag-runner" \
   "$out/usr/bin/agent-step-runner" \
   "$out/usr/bin/agent-session-runner"
 
-echo "==> mirroring the binaries' shared libs into the rootfs"
-for bin in "${bins[@]}"; do
-  ldd "$bin" | awk '/=> \//{print $3} /^[[:space:]]*\//{print $1}'
-done | sort -u | while read -r lib; do
-  dest="$out$lib"
-  mkdir -p "$(dirname "$dest")"
-  cp -L "$lib" "$dest"
-done
-
-bash "$repo_root/scripts/dag-rootfs/install-tools.sh" "$out"
-bash "$repo_root/scripts/dag-rootfs/install-python.sh" "$out" "$python_binary"
-
-if [ -n "$codex_binary" ]; then
-  bash "$repo_root/scripts/dag-rootfs/install-codex.sh" "$out" "$codex_binary"
-fi
-if [ -n "$codex_startup" ]; then
-  cargo build --manifest-path "$repo_root/Cargo.toml" -p opencoder-cli
-  source "$repo_root/scripts/dag-rootfs/common.sh"
-  install_binary "$out" "$target_dir/debug/opencoder-cli" /usr/bin/opencoder-cli
-  bash "$repo_root/scripts/dag-rootfs/install-codex-startup.sh" "$out" "$codex_startup" "$codex_binary"
-fi
-
-echo "==> rootfs ready at $out; set dag.rootfs_dir to this immutable directory"
+echo "==> runners image ready at $out; set dag.runners_dir to $out/usr/bin"
+echo "    agent steps use the host's python3/git/rg; Codex must live under a mapped host path (/usr/...) or in $out/usr/bin"

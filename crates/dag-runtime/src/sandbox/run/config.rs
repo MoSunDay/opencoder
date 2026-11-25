@@ -2,29 +2,24 @@ use super::mounts;
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+use crate::sandbox::host;
 use anyhow::{ensure, Context, Result};
 use opencoder_dag::{DagClaimedRun, StepKind};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(super) fn capabilities() -> Value {
     let filesystem = ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER"];
     json!({"bounding":filesystem,"effective":filesystem,"inheritable":[],"permitted":filesystem,"ambient":[]})
 }
 
-fn bind(
-    rootfs: &Path,
-    mounts: &mut Vec<Value>,
-    source: &Path,
-    destination: &str,
-    writable: bool,
-) -> Result<()> {
+/// A shallow bind of one host path: only its declared path, without inheriting
+/// writable submounts. The runtime creates missing mountpoints inside the
+/// sandbox; nothing is mounted on the host.
+fn bind(entries: &mut Vec<Value>, source: &Path, destination: &str, writable: bool) -> Result<()> {
     mounts::real_dir(source)?;
-    let target = super::super::codex::guest_path(rootfs, destination)?;
-    std::fs::create_dir_all(&target)?;
-    mounts.push(
+    entries.push(
         json!({"type":"bind","source":source,"destination":destination,
-        // Each entry binds only its declared path, without inheriting writable submounts.
         "options":["bind",if writable {"rw"} else {"ro"},"nosuid","nodev"]}),
     );
     Ok(())
@@ -32,20 +27,20 @@ fn bind(
 
 // Freeze the visible knowledge submounts as individual read-only binds. A plain
 // bind hides them; rbind + ro only protects the top mount on older Linux/runc.
-fn bind_knowledge(rootfs: &Path, entries: &mut Vec<Value>, source: &Path) -> Result<()> {
+fn bind_knowledge(entries: &mut Vec<Value>, mountinfo: &str, source: &Path) -> Result<()> {
     let destination = crate::exec::native::io::KNOWLEDGE_MOUNT;
-    bind(rootfs, entries, source, destination, false)?;
+    bind(entries, source, destination, false)?;
     let source = source.canonicalize()?;
-    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo")?;
-    for nested in mounts::nested_mounts(&mountinfo, &source)? {
+    for nested in mounts::nested_mounts(mountinfo, &source)? {
         let guest = Path::new(destination).join(nested.strip_prefix(&source)?);
         let guest = guest
             .to_str()
             .context("knowledge mount path must be UTF-8")?;
         let metadata = std::fs::symlink_metadata(&nested)?;
         if metadata.is_dir() {
-            bind(rootfs, entries, &nested, guest, false)?;
+            bind(entries, &nested, guest, false)?;
         } else {
+            // The host placeholder of a mounted file is the sandbox mountpoint.
             ensure!(
                 metadata.is_file(),
                 "knowledge submount must be a directory or regular file"
@@ -55,13 +50,6 @@ fn bind_knowledge(rootfs: &Path, entries: &mut Vec<Value>, source: &Path) -> Res
                     .parent()
                     .context("knowledge submount has no parent")?,
             )?;
-            let target = super::super::codex::guest_path(rootfs, guest)?;
-            std::fs::create_dir_all(target.parent().context("knowledge target has no parent")?)?;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(target)?;
             entries.push(json!({"type":"bind","source":nested,"destination":guest,
                 "options":["bind","ro","nosuid","nodev"]}));
         }
@@ -69,41 +57,37 @@ fn bind_knowledge(rootfs: &Path, entries: &mut Vec<Value>, source: &Path) -> Res
     Ok(())
 }
 
+/// The OCI bundle of one run. `host_root` maps the host directories every
+/// sandbox binds read-only; `root` owns the run's workspace and private
+/// directories. Mountpoints are not created here: the root is a tmpfs.
 pub(super) fn render(
     root: &Path,
+    host_root: &Path,
     config: &opencoder_core::Config,
     run: &DagClaimedRun,
     agent_uid: u32,
 ) -> Result<Value> {
-    let rootfs = root.join("bundle/rootfs");
-    let mut mounts = vec![
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo")?;
+    let mut mounts = host::mounts(&mountinfo, host_root, &host::runners_dir(config)?)?;
+    mounts.extend([
         json!({"destination":"/proc","type":"proc","source":"proc","options":["nosuid","nodev","noexec"]}),
         json!({"destination":"/tmp","type":"tmpfs","source":"tmpfs","options":["rw","nosuid","nodev","mode=1777","size=256m"]}),
         json!({"destination":"/dev","type":"tmpfs","source":"tmpfs","options":["rw","nosuid","mode=755","size=16m"]}),
         json!({"destination":"/dev/pts","type":"devpts","source":"devpts",
             "options":["rw","nosuid","noexec","newinstance","ptmxmode=0666","mode=0620","gid=5"]}),
-    ];
+    ]);
+    bind(&mut mounts, &root.join("workspace"), "/workspace", true)?;
     bind(
-        &rootfs,
-        &mut mounts,
-        &root.join("workspace"),
-        "/workspace",
-        true,
-    )?;
-    bind(
-        &rootfs,
         &mut mounts,
         &root.join("private"),
         "/run/opencoder-private",
         false,
     )?;
-    mounts::permissions(&rootfs.join("run/opencoder-private"), agent_uid, 0o700)?;
     if let Some(source) = config.dag.knowledge_root.as_deref() {
-        bind_knowledge(&rootfs, &mut mounts, source)?;
+        bind_knowledge(&mut mounts, &mountinfo, source)?;
     }
     if let Some(source) = config.agent.agents_dir.as_deref() {
         bind(
-            &rootfs,
             &mut mounts,
             source,
             crate::exec::native::io::AGENTS_MOUNT,
@@ -112,7 +96,6 @@ pub(super) fn render(
     }
     if let Some(source) = config.dag.execution_private_root.as_deref() {
         bind(
-            &rootfs,
             &mut mounts,
             source,
             opencoder_core::fleet::private_files::GUEST_ROOT,
@@ -131,7 +114,6 @@ pub(super) fn render(
         let meta = root.join(&step.name).join("meta");
         std::fs::create_dir_all(&meta)?;
         bind(
-            &rootfs,
             &mut mounts,
             &meta,
             &format!("/workspace/{}/meta", step.name),
@@ -139,7 +121,7 @@ pub(super) fn render(
         )?;
         if let StepKind::Agent { agent, .. } = step.kind.executable() {
             if let Some(launch) =
-                super::super::codex::resolve(config, agent.as_deref().unwrap_or("act"), &rootfs)?
+                super::super::codex::resolve(config, agent.as_deref().unwrap_or("act"), host_root)?
             {
                 use std::os::unix::fs::MetadataExt;
                 ensure!(
@@ -163,55 +145,24 @@ pub(super) fn render(
                     "Codex home must not shadow a runtime mount"
                 );
                 if !mounts.iter().any(|mount| mount["destination"] == guest) {
-                    bind(&rootfs, &mut mounts, &launch.home, guest, true)?;
+                    bind(&mut mounts, &launch.home, guest, true)?;
                 }
                 if let Some(startup) = &launch.startup {
-                    startup.prepare(root, &step.name, &rootfs, &mut mounts)?;
+                    startup.prepare(root, &step.name, &mut mounts)?;
                 }
             }
         }
     }
+    let runner = format!("{}/{}", host::RUNNERS_MOUNT, host::RUNNER);
     Ok(json!({"ociVersion":"1.0.0","hostname":"dag-run",
         "annotations":{"org.opencoder.dag.run":run.run_id,"org.opencoder.dag.definition":run.dag_id},
-        "process":{"terminal":false,"user":{"uid":agent_uid,"gid":65532},"args":["/usr/bin/dag-runner","init"],
-            "env":["PATH=/usr/bin:/bin"],"cwd":"/workspace","noNewPrivileges":true,
+        "process":{"terminal":false,"user":{"uid":agent_uid,"gid":65532},"args":[runner,"init"],
+            "env":[format!("PATH={}", host::GUEST_PATH)],"cwd":"/workspace","noNewPrivileges":true,
             "capabilities":capabilities()},
-        "root":{"path":"rootfs","readonly":true},"mounts":mounts,
+        // `root` is the empty bundle anchor; the first mount is the tmpfs `/`
+        // and `readonly` seals it after every entry is mounted.
+        "root":{"path":"root","readonly":true},"mounts":mounts,
         "linux":{"namespaces":[{"type":"pid"},{"type":"ipc"},{"type":"uts"},{"type":"mount"}],
             "maskedPaths":["/proc/kcore","/proc/keys","/proc/timer_list"],
             "readonlyPaths":["/proc/sys","/proc/sysrq-trigger"]}}))
-}
-
-pub(super) fn rootfs_source(config: &opencoder_core::Config) -> Result<PathBuf> {
-    let path = config
-        .dag
-        .rootfs_dir
-        .as_ref()
-        .context("DAG rootfs_dir is required")?;
-    mounts::real_dir(path)?;
-    let expected = serde_json::to_value(opencoder_core::version::build_info())?;
-    for binary in ["dag-runner", "agent-step-runner"] {
-        let runner = path.join("usr/bin").join(binary);
-        let metadata = std::fs::symlink_metadata(&runner)
-            .with_context(|| format!("rootfs is missing {binary}"))?;
-        ensure!(
-            metadata.is_file() && !metadata.file_type().is_symlink(),
-            "rootfs {binary} must be a regular file"
-        );
-        let info = std::process::Command::new(&runner)
-            .arg("--build-info")
-            .output()
-            .with_context(|| format!("read rootfs {binary} build metadata"))?;
-        ensure!(
-            info.status.success() && info.stdout.len() <= 8192,
-            "rootfs {binary} build metadata unavailable"
-        );
-        let actual: Value = serde_json::from_slice(&info.stdout)
-            .with_context(|| format!("invalid rootfs {binary} build metadata"))?;
-        ensure!(
-            actual == expected,
-            "rootfs {binary} version does not match this execution node"
-        );
-    }
-    Ok(path.clone())
 }

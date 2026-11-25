@@ -97,6 +97,13 @@ async fn probe(root: &Path, config: &opencoder_core::Config, script: &str) -> (i
     };
     let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap();
     assert!(!mounts.contains(&root.display().to_string()));
+    // The root anchor never carries a mount or a file on the host: every
+    // sandbox mount lives in the runtime's own namespace.
+    let mut anchor = std::fs::read_dir(root.join("bundle/root")).unwrap();
+    assert!(
+        anchor.next().is_none(),
+        "root anchor is not empty on the host"
+    );
     println!(
         "{}",
         json!({"run_id":id,"root":root,"backend":backend,"released":released,"container_mounts_released":true})

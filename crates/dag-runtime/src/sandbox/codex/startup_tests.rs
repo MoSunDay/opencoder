@@ -1,10 +1,18 @@
 use super::*;
+
+/// Fixtures map the host root only; no runners directory is configured.
+fn resolve(host: &Path, command: &[String]) -> Result<Option<Managed>> {
+    super::resolve(host, None, command)
+}
 use serde_json::json;
 use std::os::unix::fs::PermissionsExt;
 
+/// A fixture host mapping: the startup program, its Codex and the manifest
+/// live under the fixture's `usr`, at the guest paths the sandbox binds.
 struct Fixture {
     temp: tempfile::TempDir,
-    rootfs: PathBuf,
+    host: PathBuf,
+    program: PathBuf,
     command: Vec<String>,
 }
 
@@ -12,36 +20,33 @@ impl Fixture {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
-        let launcher = root.join("launcher");
-        let rootfs = root.join("rootfs");
+        let host = root.join("host");
         for path in [
-            launcher.clone(),
-            rootfs.join("usr/share/opencoder"),
+            host.join("usr/libexec/opencoder"),
+            host.join("usr/share/opencoder"),
+            host.join("usr/bin"),
             root.join("home"),
             root.join("clients/opencoder"),
             root.join("connections"),
         ] {
             std::fs::create_dir_all(path).unwrap();
         }
-        let program = launcher.join("run");
-        std::fs::write(&program, "#!/usr/bin/python3\n").unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let guest = guest_path(&rootfs, program.to_str().unwrap()).unwrap();
-        std::fs::create_dir_all(guest.parent().unwrap()).unwrap();
-        std::fs::copy(&program, guest).unwrap();
+        let program = "/usr/libexec/opencoder/run";
+        let file = host.join("usr/libexec/opencoder/run");
+        std::fs::write(&file, "#!/usr/bin/python3\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
         let codex = "/usr/bin/codex";
-        std::fs::create_dir_all(rootfs.join("usr/bin")).unwrap();
-        std::fs::write(rootfs.join("usr/bin/codex"), "#!/bin/sh\n").unwrap();
+        std::fs::write(host.join("usr/bin/codex"), "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(
-            rootfs.join("usr/bin/codex"),
+            host.join("usr/bin/codex"),
             std::fs::Permissions::from_mode(0o755),
         )
         .unwrap();
         std::fs::write(
-            rootfs.join("usr/share/opencoder/codex-startup.json"),
+            host.join("usr/share/opencoder/codex-startup.json"),
             json!({
                 "schema_version":1,"program":program,"codex":codex,
-                "files":{"run":format!("{:x}",Sha256::digest(std::fs::read(&program).unwrap()))}
+                "files":{"run":format!("{:x}",Sha256::digest(std::fs::read(&file).unwrap()))}
             })
             .to_string(),
         )
@@ -76,9 +81,10 @@ impl Fixture {
         .unwrap();
         Self {
             temp,
-            rootfs,
+            host,
+            program: file,
             command: vec![
-                program.display().to_string(),
+                program.into(),
                 "--config".into(),
                 config.display().to_string(),
             ],
@@ -89,7 +95,7 @@ impl Fixture {
 #[test]
 fn managed_startup_freezes_config_and_mounts_only_declared_private_files() {
     let fixture = Fixture::new();
-    let startup = resolve(&fixture.rootfs, &fixture.command).unwrap().unwrap();
+    let startup = resolve(&fixture.host, &fixture.command).unwrap().unwrap();
     assert_eq!(startup.mounts.len(), 6);
     for relative in ["connections/service.json", "connections/token"] {
         assert!(startup.mounts.iter().any(|mount| {
@@ -100,9 +106,7 @@ fn managed_startup_freezes_config_and_mounts_only_declared_private_files() {
     let mut mounts = vec![];
     for step in ["first", "second"] {
         std::fs::create_dir_all(root.join("private/codex").join(step)).unwrap();
-        startup
-            .prepare(&root, step, &fixture.rootfs, &mut mounts)
-            .unwrap();
+        startup.prepare(&root, step, &mut mounts).unwrap();
     }
     assert_eq!(mounts.len(), 7);
     assert!(mounts
@@ -131,10 +135,10 @@ fn managed_startup_rejects_drift_aliases_and_repeated_state_root() {
     let mut repeated = original.clone();
     repeated["state_dir"] = json!("/second-root");
     std::fs::write(path, repeated.to_string()).unwrap();
-    assert!(resolve(&fixture.rootfs, &fixture.command).is_err());
+    assert!(resolve(&fixture.host, &fixture.command).is_err());
     std::fs::write(path, original.to_string()).unwrap();
-    std::fs::write(&fixture.command[0], "changed host launcher").unwrap();
-    assert!(resolve(&fixture.rootfs, &fixture.command).is_err());
+    std::fs::write(&fixture.program, "changed host launcher").unwrap();
+    assert!(resolve(&fixture.host, &fixture.command).is_err());
 }
 
 #[test]
@@ -148,7 +152,7 @@ fn managed_startup_only_reads_explicit_connection_files() {
         "invalid",
     )
     .unwrap();
-    assert!(resolve(&fixture.rootfs, &fixture.command).is_err());
+    assert!(resolve(&fixture.host, &fixture.command).is_err());
     for connections in [Some(json!([])), None] {
         if let Some(files) = connections {
             config["connection_files"] = files;
@@ -156,7 +160,7 @@ fn managed_startup_only_reads_explicit_connection_files() {
             config.as_object_mut().unwrap().remove("connection_files");
         }
         std::fs::write(path, config.to_string()).unwrap();
-        let startup = resolve(&fixture.rootfs, &fixture.command).unwrap().unwrap();
+        let startup = resolve(&fixture.host, &fixture.command).unwrap().unwrap();
         assert_eq!(startup.mounts.len(), 4);
         assert!(!startup.mounts.iter().any(|mount| {
             mount
@@ -186,16 +190,16 @@ fn managed_startup_rejects_invalid_connection_declarations_and_missing_tokens() 
     ] {
         config["connection_files"] = files;
         std::fs::write(path, config.to_string()).unwrap();
-        assert!(resolve(&fixture.rootfs, &fixture.command).is_err());
+        assert!(resolve(&fixture.host, &fixture.command).is_err());
     }
     config["connection_files"] = json!([connection]);
     std::fs::write(path, config.to_string()).unwrap();
     let token = fixture.temp.path().join("connections/token");
     let before = std::fs::read(&token).unwrap();
-    resolve(&fixture.rootfs, &fixture.command).unwrap();
+    resolve(&fixture.host, &fixture.command).unwrap();
     assert_eq!(std::fs::read(&token).unwrap(), before);
     std::fs::remove_file(&token).unwrap();
-    assert!(resolve(&fixture.rootfs, &fixture.command).is_err());
+    assert!(resolve(&fixture.host, &fixture.command).is_err());
     std::os::unix::fs::symlink(fixture.temp.path().join("token"), &token).unwrap();
-    assert!(resolve(&fixture.rootfs, &fixture.command).is_err());
+    assert!(resolve(&fixture.host, &fixture.command).is_err());
 }

@@ -1,6 +1,7 @@
 """Run history acceptance in isolated real Server/Host/Runtime/runc processes.
 
-python3 main.py --binaries BUNDLE/bin --rootfs PAIRED_ROOTFS --output EVIDENCE
+python3 main.py --binaries BUNDLE/bin --rootfs PAIRED_RUNNERS_IMAGE --output EVIDENCE
+(`--rootfs` keeps its historical name: the directory holds the native DAG runners under usr/bin.)
 Only this environment's uniquely named units and test data are created.
 """
 import argparse
@@ -102,8 +103,6 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     names = ['opencoder-server', 'opencoder-agent', 'dag-runner',
              'agent-step-runner', 'agent-session-runner']
-    if (args.rootfs / 'usr/share/opencoder/codex-startup.json').exists():
-        names.append('opencoder-cli')
     infos = [json.loads(subprocess.check_output([args.binaries / name, '--build-info'])) for name in names]
     assert all(info == infos[0] for info in infos), 'Execution binaries must be built together'
     digest = hashlib.sha256()

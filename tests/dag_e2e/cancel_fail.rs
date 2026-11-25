@@ -5,7 +5,9 @@
 //! keeps every step's meta.json; an agent step whose LLM stub answers
 //! with a non-retryable status fails the run (`error`).
 
-use crate::fixtures::{publish, SPIN_C};
+use std::os::unix::fs::PermissionsExt;
+
+use crate::fixtures::{publish, stdout_source, SPIN_C};
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::{LlmStub, Script};
 use serde_json::{json, Value};
@@ -123,37 +125,104 @@ fn cancel_mid_run_and_agent_step_failure() {
     assert!(requests[0].contains("fail me"), "prompt: {}", requests[0]);
 }
 
+/// The dispatch is refused before acceptance with the preflight's own reason.
+fn dispatch_refused(fleet: &Fleet, id: &str, reason: &str) {
+    let (status, body) = fleet.http(
+        "POST",
+        "/api/dag/defs/e2e-preflight/dispatch",
+        &json!({"id": id}),
+    );
+    assert_eq!(status, 400, "dispatch {id}: {body}");
+    let error = body["error"].as_str().unwrap_or_default();
+    assert!(error.contains("preflight"), "{id}: {error}");
+    assert!(error.contains(reason), "{id}: {error}");
+}
+
+/// The node's runners directory (`dag.runners_dir`, else `usr/bin` of
+/// `dag.rootfs_dir`) must exist and hold this node's own `dag-runner` and
+/// `agent-step-runner`: a missing, incomplete or foreign image is rejected
+/// in preflight before anything is accepted or started. The image is no
+/// root filesystem any more — nothing is copied or mounted from it.
 #[test]
-fn runc_preflight_rejects_missing_or_incomplete_rootfs() {
+fn preflight_rejects_missing_or_incomplete_runners_image() {
     let stub = LlmStub::spawn_text(&[]);
     let tmp = tempfile::tempdir().unwrap();
     let fleet = Fleet::spawn_native(tmp.path(), stub.port(), json!({}), "dag-preflight-node");
     publish(&fleet, "spin", SPIN_C);
-    let (status, body) = fleet.http("POST", "/api/dag/defs", &json!({"spec": {
-        "name":"e2e-preflight", "steps":[{"name":"run", "kind":{"type":"binary", "resource":"spin"}}]
-    }}));
-    assert_eq!(status, 200, "{body}");
-    let config_file = fleet.workdir.join("node-work/.opencoder/config.json");
-    let mut config: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&config_file).unwrap()).unwrap();
-    let incomplete = tmp.path().join("incomplete-rootfs");
-    for (index, path) in [tmp.path().join("missing-rootfs"), incomplete.clone()]
-        .into_iter()
-        .enumerate()
-    {
-        config["dag"]["rootfs_dir"] = json!(path);
-        std::fs::write(&config_file, config.to_string()).unwrap();
-        let (status, body) = fleet.http(
-            "POST",
-            "/api/dag/defs/e2e-preflight/dispatch",
-            &json!({"id":format!("dag-preflight-{index}")}),
-        );
-        assert_eq!(status, 400, "{body}");
-        assert!(
-            body["error"].as_str().unwrap().contains("preflight"),
-            "{body}"
-        );
-        std::fs::create_dir_all(&incomplete).unwrap();
+    publish(&fleet, "hello", &stdout_source("preflight ok"));
+    for (name, resource) in [("e2e-preflight", "spin"), ("e2e-preflight-ok", "hello")] {
+        let (status, body) = fleet.http("POST", "/api/dag/defs", &json!({"spec": {
+            "name": name, "steps":[{"name":"run", "kind":{"type":"binary", "resource": resource}}]
+        }}));
+        assert_eq!(status, 200, "{body}");
     }
+    let config_file = fleet.workdir.join("node-work/.opencoder/config.json");
+    let original: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&config_file).unwrap()).unwrap();
+    // Point the node at an image (`None` removes the key), read per dispatch.
+    let set_image = |path: Option<&std::path::Path>| {
+        let mut config = original.clone();
+        if let Some(path) = path {
+            config["dag"]["rootfs_dir"] = json!(path);
+        } else {
+            config["dag"].as_object_mut().unwrap().remove("rootfs_dir");
+        }
+        std::fs::write(&config_file, config.to_string()).unwrap();
+    };
+
+    // Neither config key: the node has no runners directory at all.
+    set_image(None);
+    dispatch_refused(&fleet, "dag-preflight-none", "DAG runners_dir is required");
+
+    // An image directory that does not exist, then one without any runner.
+    let image = tmp.path().join("runners-image");
+    set_image(Some(&image));
+    dispatch_refused(
+        &fleet,
+        "dag-preflight-missing",
+        &format!("directory unavailable: {}", image.join("usr/bin").display()),
+    );
+    std::fs::create_dir_all(image.join("usr/bin")).unwrap();
+    dispatch_refused(
+        &fleet,
+        "dag-preflight-incomplete",
+        "runners dag-runner is missing",
+    );
+
+    // A runner that is not this node's own build (the image ships a script
+    // answering `--build-info` with foreign metadata).
+    let info = serde_json::to_value(opencoder_core::version::build_info()).unwrap();
+    let mut foreign = info.clone();
+    foreign["git_commit"] = json!("0000000000000000000000000000000000000000");
+    std::fs::write(
+        image.join("usr/bin/dag-runner"),
+        format!("#!/bin/sh\nprintf '%s\\n' '{foreign}'\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        image.join("usr/bin/dag-runner"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    dispatch_refused(
+        &fleet,
+        "dag-preflight-foreign",
+        "runners dag-runner version does not match this execution node",
+    );
+
+    // The node's own image is restored: the same dispatch starts normally
+    // and runs the step to completion.
+    std::fs::write(&config_file, original.to_string()).unwrap();
+    let (status, body) = fleet.http(
+        "POST",
+        "/api/dag/defs/e2e-preflight-ok/dispatch",
+        &json!({"id": "dag-preflight-ok"}),
+    );
+    assert_eq!(status, 202, "dispatch with the paired image: {body}");
+    let doc = fleet.wait_terminal("dag-preflight-ok");
+    assert_eq!(doc["execution"]["status"], "done", "inspect: {doc}");
+    let output = std::fs::read_to_string(fleet.run_root("dag-preflight-ok").join("run/output.txt"))
+        .unwrap_or_else(|error| panic!("read run output: {error}"));
+    assert!(output.contains("preflight ok"), "{output}");
     assert_eq!(stub.request_count(), 0);
 }

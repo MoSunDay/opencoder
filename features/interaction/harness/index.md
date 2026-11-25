@@ -31,7 +31,8 @@ opencode/codex 双执行器契约与资源作用域；类型与设置以 core �
   — 远端 Operator 的托管设置与执行
 - [Codex 启动脚本](../../../crates/dag-runtime/src/sandbox/codex/mod.rs)、
   [外部输入协议](../../../crates/session/src/harness/codex/control/mod.rs)
-- [rootfs 制备](../../../scripts/prepare-dag-rootfs.sh)、
+- [运行器镜像制备](../../../scripts/prepare-dag-rootfs.sh) — 验收的 `--rootfs` 参数与 `DAG_TEST_ROOTFS`
+  沿用旧名，指向运行器镜像目录（运行器在 `usr/bin`），节点配置写 `dag.runners_dir`、
   [DAG 执行约定](../../../rules/04-dag-execution-contract.md)
 
 ## 相关

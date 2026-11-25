@@ -30,7 +30,9 @@ Commit: 8edc26f263fce6e842b0f58ce887eef56f150990
 - [执行规则](../../../rules/04-dag-execution-contract.md)、
   [动态步骤](../../../crates/dag/src/dynamic.rs)、
   [步骤控制](../../../crates/dag/src/control/mod.rs)
-- [镜像与 rootfs 制备](../../../scripts/prepare-dag-rootfs.sh)、
+- [运行器镜像制备](../../../scripts/prepare-dag-rootfs.sh) — 镜像只是运行器目录（`usr/bin` 下的三个运行器），
+  经旧的 `dag.rootfs_dir` 配置时取 `<rootfs_dir>/usr/bin`；手工配置优先写 `dag.runners_dir`。步骤使用宿主的
+  `python3`、`git`、`rg` 与 coreutils，镜像不安装其他内容、
   [目录去重与清理](../../../scripts/maintenance/catalog_cleanup/README.md)
 
 ## 相关

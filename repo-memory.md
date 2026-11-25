@@ -36,7 +36,7 @@ Rust 原生编码代理 workspace：`opencoder`（本地 CLI/TUI）、`opencoder
 
 - [agents/dag](agents/workflow/dag/index.md) — DAG 纯域 + 线协议（DTO LOCKED）。
 - [agents/dag-binary](agents/workflow/dag-binary/index.md) — Linux 二进制版本池、只读资源分发与版本固定。
-- [agents/dag-runtime](agents/workflow/dag-runtime/index.md) — 每次 DAG 运行归属单个节点、单个容器，共享写时复制工作区；Server 不链接。
+- [agents/dag-runtime](agents/workflow/dag-runtime/index.md) — 每次 DAG 运行归属单个节点、单个容器，共享写时复制工作区；沙箱 `/` 是节点数据目录下运行目录内空锚点（`bundle/root`）上的只读 tmpfs，宿主系统目录与运行器目录（`dag.runners_dir`，回退 `<dag.rootfs_dir>/usr/bin`，绑定在 `/run/opencoder/bin`）只读绑定其上，不再复制 rootfs 镜像；Server 不链接。
 
 **orchestration**
 

@@ -1,22 +1,23 @@
 //! Codex launch contract for the OCI runner. Credentials remain in the node's
 //! original Codex home; only paths and private settings cross the bundle seam.
+//! Executables are host paths of the sandbox host mapping (see `host`), never
+//! host wrappers run as a fallback.
 pub(crate) mod broker;
-mod bundle;
 mod startup;
 #[cfg(test)]
 mod tests;
 
+use crate::sandbox::host;
 use anyhow::{ensure, Context, Result};
 use opencoder_core::harness::{Harness, HarnessRuntime};
 use std::{
     collections::BTreeMap,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 pub const LAUNCH_MOUNT: &str = "/run/opencoder-codex/launch.json";
 const DEFAULT_BINARY: &str = "/usr/bin/codex";
 const GUEST_HOME: &str = "/tmp/codex-user";
-const GUEST_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const INHERITED: &[&str] = &[
     "HOME",
     "CODEX_HOME",
@@ -44,11 +45,12 @@ pub struct Launch {
 }
 
 /// Resolve the selected Agent's private profile against the node configuration.
-/// Rootfs executables are guest paths: host wrappers are never run as a fallback.
+/// `host` is the root of the sandbox host mapping (`host::host_root()`): the
+/// executable and startup program must be real files it binds read-only.
 pub fn resolve(
     config: &opencoder_core::Config,
     agent: &str,
-    rootfs: &Path,
+    host: &Path,
 ) -> Result<Option<Launch>> {
     opencoder_core::agent::scope::with_root_sync(config.agent.agents_dir.clone(), || {
         if opencoder_core::harness::agent_harness(agent) != Harness::Codex {
@@ -88,16 +90,24 @@ pub fn resolve(
             .as_ref()
             .and_then(|c| c.executable.as_deref())
             .unwrap();
-        validate_executable(rootfs, executable)?;
+        // `/run/opencoder/bin/...` executables live in the configured runners
+        // directory; every other path is a file of the host mapping.
+        let runners = host::runners_dir(config).ok();
+        let runners = runners.as_deref();
+        host::validate_executable(host, runners, executable)?;
         if let Some(program) = runtime
             .codex
             .as_ref()
             .and_then(|s| s.startup_script.first())
         {
-            validate_executable(rootfs, program)
-                .context("Codex startup script unavailable in rootfs")?;
+            host::validate_executable(host, runners, program)
+                .context("Codex startup script unavailable on the host")?;
         }
-        let startup = startup::resolve(rootfs, &runtime.codex.as_ref().unwrap().startup_script)?;
+        let startup = startup::resolve(
+            host,
+            runners,
+            &runtime.codex.as_ref().unwrap().startup_script,
+        )?;
         if let Some(startup) = &startup {
             ensure!(
                 startup.configuration["codex_home"].as_str() == home.to_str(),
@@ -155,7 +165,7 @@ fn guest_runtime(
     runtime
         .envs
         .entry("PATH".into())
-        .or_insert_with(|| GUEST_PATH.into());
+        .or_insert_with(|| host::GUEST_PATH.into());
     let settings = runtime.codex.get_or_insert_with(Default::default);
     settings
         .executable
@@ -171,52 +181,6 @@ fn guest_runtime(
     settings.envs = runtime.envs.clone();
     settings.validate().map_err(anyhow::Error::msg)?;
     Ok(runtime)
-}
-
-/// Validate paths before touching the host filesystem. Provisioned executable
-/// and mountpoint parents must be real directories, never host-followed links.
-pub(super) fn guest_path(rootfs: &Path, guest: &str) -> Result<PathBuf> {
-    let path = Path::new(guest);
-    ensure!(path.is_absolute(), "Codex guest path must be absolute");
-    let mut target = rootfs.to_path_buf();
-    for component in path.components() {
-        match component {
-            Component::RootDir => continue,
-            Component::Normal(name) => target.push(name),
-            _ => anyhow::bail!("invalid Codex guest path"),
-        }
-        match std::fs::symlink_metadata(&target) {
-            Ok(meta) => ensure!(
-                !meta.file_type().is_symlink(),
-                "Codex rootfs paths must not contain symlinks"
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Ok(target)
-}
-
-fn validate_executable(rootfs: &Path, executable: &str) -> Result<()> {
-    ensure!(
-        !["/tmp", "/proc", "/dev", "/run", "/workspace"]
-            .iter()
-            .any(|prefix| Path::new(executable).starts_with(prefix)),
-        "Codex executable must be installed in the read-only rootfs"
-    );
-    let path = guest_path(rootfs, executable)?;
-    let metadata = path.metadata().with_context(|| format!(
-        "Codex executable missing in rootfs at {}; provision it with prepare-dag-rootfs.sh --codex", path.display()))?;
-    ensure!(metadata.is_file(), "Codex rootfs executable must be a file");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        ensure!(
-            metadata.permissions().mode() & 0o111 != 0,
-            "Codex rootfs file is not executable"
-        );
-    }
-    Ok(())
 }
 
 /// Called inside the container. A Codex card without its private launch file

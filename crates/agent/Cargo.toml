@@ -27,9 +27,6 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
-[target.'cfg(not(windows))'.dependencies]
-opencoder-dag-runtime.workspace = true
-
 [dev-dependencies]
 opencoder-control.workspace = true
 base64.workspace = true

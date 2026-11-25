@@ -52,9 +52,12 @@ function updateConfig(directory, dag) {
 }
 
 async function prepareNative(root, server, nodes, rootfs, message = 'node artifact', dataDirs = {}) {
-  if (!rootfs || !path.isAbsolute(rootfs)) throw new Error('provide an absolute native DAG rootfs path as the first argument');
+  // `rootfs` is the native DAG runners image directory (kept for the --rootfs
+  // argument and DAG_TEST_ROOTFS); the runners live under usr/bin and the node
+  // config points dag.runners_dir at it.
+  if (!rootfs || !path.isAbsolute(rootfs)) throw new Error('provide an absolute native DAG runners image directory as the first argument');
   for (const name of ['dag-runner', 'agent-step-runner']) {
-    if (!fs.statSync(path.join(rootfs, 'usr/bin', name)).isFile()) throw new Error(`DAG rootfs is missing ${name}`);
+    if (!fs.statSync(path.join(rootfs, 'usr/bin', name)).isFile()) throw new Error(`native DAG runners image is missing ${name}`);
   }
   const source = path.join(root, 'native-source');
   const binaries = path.join(source, 'binaries');
@@ -75,7 +78,7 @@ async function prepareNative(root, server, nodes, rootfs, message = 'node artifa
     const binaryMount = path.join(mounts, 'binaries');
     const workspaceMount = path.join(mounts, 'workspace');
     for (const directory of [binaryMount, workspaceMount]) fs.mkdirSync(directory, { recursive: true });
-    updateConfig(node, { binary_dir: binaryMount, workspace_dir: workspaceMount, rootfs_dir: rootfs,
+    updateConfig(node, { binary_dir: binaryMount, workspace_dir: workspaceMount, runners_dir: path.join(rootfs, 'usr/bin'),
       data_dir: path.join(dataDirs[node] || path.join(node, 'state'), 'dag/runs') });
     plans.push([binaryMount, binaryPort], [workspaceMount, workspacePort]);
   }
@@ -103,7 +106,7 @@ async function prepareNative(root, server, nodes, rootfs, message = 'node artifa
             execFileSync('runc', ['--root', state, 'delete', '--force', `dag-run-${entry}`], { timeout: 30000 });
           }
           const mounts = fs.readFileSync('/proc/self/mountinfo', 'utf8');
-          for (const target of [path.join(run, 'bundle/rootfs'), path.join(run, 'workspace')]) {
+          for (const target of [path.join(run, 'workspace')]) {
             if (mounts.split('\n').some((line) => line.split(' ')[4] === target)) execFileSync('umount', [target], { timeout: 30000 });
           }
         }

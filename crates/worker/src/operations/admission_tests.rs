@@ -149,7 +149,7 @@ async fn rejected_project_commands_never_change_durable_admission() {
 }
 
 #[tokio::test]
-async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
+async fn missing_runners_dir_is_rejected_before_durable_acceptance() {
     let dir = tempfile::tempdir().unwrap();
     let _config = opencoder_core::config::scoped_config_home(dir.path().join("config-home"));
     let worker = Worker::open(
@@ -197,7 +197,7 @@ async fn missing_runc_rootfs_is_rejected_before_durable_acceptance() {
     assert!(reply
         .body
         .to_string()
-        .contains("DAG rootfs_dir is required"));
+        .contains("DAG runners_dir is required"));
     assert!(!dir
         .path()
         .join("node/dag/dag-rootfs/execution.json")

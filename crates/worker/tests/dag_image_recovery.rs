@@ -47,6 +47,10 @@ async fn retained_dag_uses_explicit_image_upgrade_without_replaying_completed_st
     copy_image(&original, &replacement);
     let config_file = root.path().join("work/opencoder.json");
     let mut config: Value = serde_json::from_slice(&std::fs::read(&config_file).unwrap()).unwrap();
+    // Platform image replacement rewrites `rootfs_dir`: keep the node on the
+    // fallback runners directory (`<image>/usr/bin`) instead of the shared
+    // fixture's explicit `runners_dir`, which an image swap never touches.
+    config["dag"].as_object_mut().unwrap().remove("runners_dir");
     config["dag"]["rootfs_dir"] = json!(original);
     std::fs::write(&config_file, serde_json::to_vec(&config).unwrap()).unwrap();
     let node = support::worker(root.path(), client.clone()).await;

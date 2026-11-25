@@ -79,7 +79,7 @@ async function main() {
       if (previous?.extra_artifacts?.brain_test) verifyArtifact(previous.extra_artifacts.brain_test, fingerprint, 'brain-test');
       report.extra_artifacts = { ...report.extra_artifacts, brain_test: fingerprint };
     }
-    for (const name of ['dag-runner', 'agent-step-runner', 'agent-session-runner']) assert.equal(sha256(path.join(rootfs, 'usr/bin', name)), report.artifacts[name], `rootfs runner differs: ${name}`);
+    for (const name of ['dag-runner', 'agent-step-runner', 'agent-session-runner']) assert.equal(sha256(path.join(rootfs, 'usr/bin', name)), report.artifacts[name], `runners image differs: ${name}`);
     const spa = path.join(repo, 'crates/web/spa/dist');
     const digest = crypto.createHash('sha256');
     const visit = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? visit(path.join(directory, entry.name)) : entry.isFile() ? [path.join(directory, entry.name)] : []);

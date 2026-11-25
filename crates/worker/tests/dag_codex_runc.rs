@@ -82,10 +82,7 @@ async fn prepared_container_timeout(root: &Path, config: &opencoder_core::Config
         (0, "alive".into())
     );
     container.cleanup().await.unwrap();
-    assert!(std::fs::read_dir(root.join("runc-state"))
-        .unwrap()
-        .next()
-        .is_none());
+    support::native::container::assert_runtime_released(root);
 }
 async fn wait_file(path: &Path) {
     tokio::time::timeout(Duration::from_secs(180), async {
@@ -98,8 +95,9 @@ async fn wait_file(path: &Path) {
 }
 
 async fn settled(worker: &opencoder_worker::Worker, id: &str) -> Value {
-    // Container preparation copies a real rootfs. On shared CI disks this
-    // can exceed the lightweight host-harness helper's 20-second window.
+    // Sandbox preparation binds the host mapping and mounts the per-run
+    // overlay; on shared CI disks this can exceed the lightweight
+    // host-harness helper's 20-second window.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
     loop {
         let reply = worker
@@ -120,18 +118,15 @@ async fn settled(worker: &opencoder_worker::Worker, id: &str) -> Value {
 }
 
 // One current-thread test owns the process environment; all credentials are
-// temporary fixtures. The actual OCI runner and kernel mounts are exercised.
+// temporary fixtures. The actual sandbox (OCI runtime or native clone3) and
+// kernel mounts are exercised on the backend `DAG_TEST_SANDBOX` selects.
 #[tokio::test]
 async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellation() {
-    if !opencoder_dag_runtime::sandbox::runc::runc_available() {
-        eprintln!("SKIP: runc unavailable");
-        return;
-    }
-    // The receipts pinned here (`runc-state`) exist only on the OCI backend.
     if opencoder_core::config::DagSandbox::from_test_env()
-        != opencoder_core::config::DagSandbox::Runc
+        == opencoder_core::config::DagSandbox::Runc
+        && !opencoder_dag_runtime::sandbox::runc::runc_available()
     {
-        eprintln!("SKIP: DAG_TEST_SANDBOX is not pinned to runc");
+        eprintln!("SKIP: runc unavailable");
         return;
     }
     // Build before installing the fixture HOME so rustup retains its host setup.
@@ -141,15 +136,18 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     let client = mock();
     let fleet = Fleet::new(1, client.clone()).await;
     let node_root = fleet.root().join("n0/node/dag");
-    let rootfs = node_root.join("rootfs");
-    fixture::rootfs(&rootfs, &runner);
+    // The runners directory is bound read-only at /run/opencoder/bin: the
+    // DAG runners and the fake Codex CLI share it; nothing else is installed.
+    let runners = node_root.join("runners");
+    fixture::runners(&runners, &runner);
     let knowledge = temp.path().join("knowledge");
     std::fs::create_dir(&knowledge).unwrap();
     std::fs::write(knowledge.join("guide.txt"), "read-only guide").unwrap();
     std::fs::write(
         fleet.root().join("n0/work/.opencoder/config.json"),
         json!({"model":"unconfigured/model","providers":{"unconfigured":{"api_key":""}},
-        "dag":{"knowledge_root":knowledge,"rootfs_dir":rootfs}})
+        "agent":{"codex":{"executable":"/run/opencoder/bin/codex"}},
+        "dag":{"knowledge_root":knowledge,"runners_dir":runners}})
         .to_string(),
     )
     .unwrap();
@@ -178,10 +176,7 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
         assert!(!config["process"]["env"]
             .to_string()
             .contains("OPENAI_API_KEY="));
-        assert!(std::fs::read_dir(accepted_root.join("runc-state"))
-            .unwrap()
-            .next()
-            .is_none());
+        support::native::container::assert_runtime_released(&accepted_root);
     }
     assert_eq!(
         std::fs::read_to_string(temp.path().join("home/.codex/auth.json")).unwrap(),
@@ -193,7 +188,10 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     registered::verify(&fleet).await;
 
     // Profile settings originate at Server, while their credential path points
-    // to the selected node. The CLI executable is resolved INSIDE the rootfs.
+    // to the selected node. The CLI executable and the startup program are
+    // guest paths of the sandbox host mapping: both live in the runners
+    // directory, which every sandbox binds read-only at /run/opencoder/bin
+    // (the default /usr/bin/codex would be the host's own CLI).
     let profile_home = temp.path().join("profile-login");
     std::fs::create_dir(&profile_home).unwrap();
     std::fs::write(profile_home.join("auth.json"), "fixture-login").unwrap();
@@ -203,7 +201,8 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
             "/api/harnesses/codex/profiles/selected",
             json!({
                 "model":"profile-model","reasoning_effort":"high",
-                "startup_script":["/bin/sh","/usr/bin/codex-start.sh"],
+                "executable":"/run/opencoder/bin/codex",
+                "startup_script":["/bin/sh","/run/opencoder/bin/codex-start.sh"],
                 "envs":{"CODEX_HOME":profile_home,"NOTE":"private-profile-fixture"}
             }),
         )
@@ -275,11 +274,16 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
             _ => unreachable!(),
         };
         assert!(meta["error"].as_str().unwrap().contains(expected), "{meta}");
+        // The DAG deadline includes sandbox staging; the OCI backend creates
+        // no state if cancellation arrives before container launch. A native
+        // run always records its init, which must be gone.
         let state = accepted_root.join("runc-state");
-        // The DAG deadline includes image staging; no runc state is created
-        // if cancellation arrives before container launch.
-        if timeout.is_none() || state.exists() {
-            assert!(std::fs::read_dir(state).unwrap().next().is_none());
+        if timeout.is_none()
+            || state.exists()
+            || opencoder_core::config::DagSandbox::from_test_env()
+                != opencoder_core::config::DagSandbox::Runc
+        {
+            support::native::container::assert_runtime_released(&accepted_root);
         }
     }
     save(&fleet, one("CODEX_WAIT", None)).await;
@@ -309,24 +313,19 @@ async fn server_dispatches_codex_in_runc_with_node_login_profiles_and_cancellati
     assert_eq!(cancelled.status, 200, "{cancelled:?}");
     let result = settled(&fleet.nodes[0], "dag-codex-runc-cancel").await;
     assert_eq!(result["execution"]["status"], "cancelled", "{result}");
-    assert!(std::fs::read_dir(cancel_root.join("runc-state"))
-        .unwrap()
-        .next()
-        .is_none());
+    support::native::container::assert_runtime_released(&cancel_root);
 
     let config = opencoder_core::Config::load(&fleet.root().join("n0/work")).unwrap();
     prepared_container_timeout(&node_root.join("cleanup-probe"), &config).await;
-    std::fs::rename(
-        rootfs.join("usr/bin/codex"),
-        rootfs.join("usr/bin/codex-disabled"),
-    )
-    .unwrap();
+    // Without the CLI in the runners directory the host mapping cannot reach
+    // /run/opencoder/bin/codex; admission fails before any container starts.
+    std::fs::rename(runners.join("codex"), runners.join("codex-disabled")).unwrap();
     let rejected = dispatch(&fleet, "dag-codex-runc-missing-cli", json!({})).await;
     assert_eq!(rejected.status, 400, "{rejected:?}");
     assert!(rejected
         .body
         .to_string()
-        .contains("executable missing in rootfs"));
+        .contains("Codex executable missing on the host at /run/opencoder/bin/codex"));
     assert_eq!(
         client.call_count(),
         0,

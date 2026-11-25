@@ -1,4 +1,4 @@
-use super::{super::clone3::Backend, Receipt};
+use super::{super::clone3::Backend, super::host, Receipt};
 use crate::step_log::{StepOutputLog, Stream};
 use anyhow::{ensure, Context, Result};
 use serde_json::json;
@@ -49,10 +49,13 @@ pub async fn execute(
     let pid_file = private.join(format!("{key}.pid"));
     let _cleanup = Files(vec![process_file.clone(), pid_file.clone()]);
     let broker = crate::sandbox::codex::broker::Broker::start(root, &key, &mut env).await?;
-    let mut args = vec!["/usr/bin/dag-runner".to_string(), "step".to_string()];
+    let mut args = vec![
+        format!("{}/{}", host::RUNNERS_MOUNT, host::RUNNER),
+        "step".to_string(),
+    ];
     args.extend(argv);
     let mut environment = vec![
-        "PATH=/usr/local/bin:/usr/bin:/bin".to_string(),
+        format!("PATH={}", host::GUEST_PATH),
         "HOME=/tmp".to_string(),
     ];
     environment.extend(env.into_iter().map(|(key, value)| format!("{key}={value}")));

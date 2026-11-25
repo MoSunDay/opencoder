@@ -1,8 +1,9 @@
-//! Native clone3 sandbox: PID/mount/UTS/IPC namespaces around the run's rootfs
-//! overlay, without an OCI runtime. The node keeps owning the overlays; the
-//! rootfs `dag-runner launch` applies the OCI config inside a private mount
-//! namespace and parents the sandbox init, while `dag-runner exec` relays one
-//! step into the live namespaces through `/proc/<init>`.
+//! Native clone3 sandbox: PID/mount/UTS/IPC namespaces around the run's root
+//! (see `host`), without an OCI runtime. The node keeps owning the run's
+//! directories; the runners directory's `dag-runner launch` applies the OCI
+//! config inside a private mount namespace and parents the sandbox init, while
+//! `dag-runner exec` relays one step into the live namespaces through
+//! `/proc/<init>`.
 pub(crate) mod exec;
 pub(crate) mod launch;
 pub(crate) mod launcher;

@@ -57,7 +57,7 @@ def recovery(runtime, nodes, resource):
     node = runtime.root / 'runtime/node-a'
     previous = json.loads((node / 'opencoder.json').read_text())
     drifted = json.loads(json.dumps(previous))
-    drifted['dag'].update(data_dir=str(node / 'wrong-run-directory'), binary_dir='/does-not-exist', rootfs_dir='/does-not-exist')
+    drifted['dag'].update(data_dir=str(node / 'wrong-run-directory'), binary_dir='/does-not-exist', runners_dir='/does-not-exist')
     write(node / 'opencoder.json', drifted)
     runtime.restart('node-a')
     wait(lambda: runtime.api('/api/executions/' + identifier)['execution']['status'] == 'interrupted', 'Recovery interruption indexed')

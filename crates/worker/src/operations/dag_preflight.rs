@@ -62,7 +62,7 @@ pub(super) fn validate(
                 opencoder_dag_runtime::sandbox::codex::resolve(
                     config,
                     agent.as_deref().unwrap_or("act"),
-                    config.dag.rootfs_dir.as_ref().unwrap(),
+                    opencoder_dag_runtime::sandbox::host::host_root(),
                 )?;
             }
         }

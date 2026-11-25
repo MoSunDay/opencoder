@@ -20,7 +20,9 @@ pub async fn all(node: &opencoder_worker::Worker, root: &Path) {
                 json!({"name":"cancel-team","captain":"act","members":[{"agent":"act"}]})
             }
             ExecutionKind::Dag => {
-                json!({"name":"cancel-dag","steps":[{"name":"wait","kind":{"type":"agent","prompt":"MATRIX_HANG"}}]})
+                // The sandboxed step runs the fake CLI from the runners
+                // directory through the DAG-only card.
+                json!({"name":"cancel-dag","steps":[{"name":"wait","kind":{"type":"agent","agent":"matrix-dag","prompt":"MATRIX_HANG"}}]})
             }
             ExecutionKind::Todos => {
                 json!({"schema_version":1,"id":"wf-cancel","name":"cancel","objective":"finish","constraints":[],"todos":[{"id":"t1","title":"step","requirement_background":"test","instructions":"MATRIX_HANG MATRIX_CANDIDATE","depends_on":[],"agent":"act","max_attempts":2,"acceptance":{"criteria":"done"}}]})

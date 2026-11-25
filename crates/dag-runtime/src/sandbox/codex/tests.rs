@@ -75,7 +75,7 @@ fn guest_settings_keep_profile_and_credentials_private() {
 }
 
 #[test]
-fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
+fn profile_resolution_validates_host_binary_and_private_profile() {
     use opencoder_core::harness::Versioned;
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -83,7 +83,7 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
     let root = temp.path();
     let home = root.join("login");
     let agents = root.join("agents");
-    let rootfs = root.join("rootfs");
+    let host = root.join("host");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(home.join("auth.json"), "fixture-login").unwrap();
     std::fs::create_dir_all(agents.join("check")).unwrap();
@@ -92,9 +92,10 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
         json!({"name":"check","harness":"codex","harness_profile":"selected"}).to_string(),
     )
     .unwrap();
+    std::fs::create_dir_all(host.join("usr/bin")).unwrap();
     let mut config = opencoder_core::Config::default();
     config.agent.agents_dir = Some(agents);
-    assert!(resolve(&config, "check", &rootfs)
+    assert!(resolve(&config, "check", &host)
         .unwrap_err_text()
         .contains("profile selected unavailable"));
     config.agent.runtime.profiles.insert(
@@ -111,17 +112,13 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
             },
         },
     );
-    assert!(resolve(&config, "check", &rootfs)
+    assert!(resolve(&config, "check", &host)
         .unwrap_err_text()
-        .contains("executable missing in rootfs"));
-    std::fs::create_dir_all(rootfs.join("usr/bin")).unwrap();
-    std::fs::write(rootfs.join("usr/bin/codex"), "#!/bin/sh\nexit 0").unwrap();
-    std::fs::set_permissions(
-        rootfs.join("usr/bin/codex"),
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
-    let launch = resolve(&config, "check", &rootfs).unwrap().unwrap();
+        .contains("executable missing on the host"));
+    let binary = host.join("usr/bin/codex");
+    std::fs::write(&binary, "#!/bin/sh\nexit 0").unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let launch = resolve(&config, "check", &host).unwrap().unwrap();
     assert_eq!(launch.home, home);
     assert_eq!(
         launch.runtime.envs["CODEX_HOME"],
@@ -136,7 +133,7 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
         .unwrap()
         .settings
         .startup_script = vec!["/usr/bin/missing-launcher".into()];
-    assert!(resolve(&config, "check", &rootfs)
+    assert!(resolve(&config, "check", &host)
         .unwrap_err_text()
         .contains("startup script"));
     config
@@ -148,59 +145,26 @@ fn profile_resolution_validates_guest_binary_and_builds_private_mounts() {
         .settings
         .startup_script
         .clear();
-    let run = root.join("run");
-    std::fs::create_dir_all(&run).unwrap();
-    let spec = crate::sandbox::oci::BundleSpec {
-        run_root: run.clone(),
-        step_slug: "check".into(),
-        command: vec!["/usr/bin/agent-step-runner".into()],
-        env: vec![],
-        timeout_hint: None,
-        knowledge: None,
-        agents: None,
-    };
-    let bundle = launch.write_bundle(&root.join("bundle"), &spec).unwrap();
-    let value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(bundle.join("config.json")).unwrap()).unwrap();
-    assert!(!value.to_string().contains("fixture-private-value"));
-    let mounts = value["mounts"].as_array().unwrap();
-    let login = mounts
-        .iter()
-        .find(|m| m["destination"] == json!(home))
-        .unwrap();
-    assert_eq!(login["source"], json!(home));
-    assert!(login["options"].as_array().unwrap().contains(&json!("rw")));
-    let manifest = mounts
-        .iter()
-        .find(|m| m["destination"] == LAUNCH_MOUNT)
-        .unwrap();
-    assert!(manifest["options"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("ro")));
-    assert_eq!(
-        std::fs::metadata(bundle.join("codex-private/launch.json"))
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
-    assert_eq!(
-        std::fs::read_dir(run).unwrap().count(),
-        0,
-        "private launch must not enter DAG artifacts"
-    );
-    assert_eq!(
-        std::fs::read_to_string(home.join("auth.json")).unwrap(),
-        "fixture-login"
-    );
-    assert!(resolve(&config, "act", &rootfs).unwrap().is_none());
-    std::fs::remove_file(rootfs.join("usr/bin/codex")).unwrap();
-    std::os::unix::fs::symlink("/bin/sh", rootfs.join("usr/bin/codex")).unwrap();
-    assert!(resolve(&config, "check", &rootfs)
+    assert!(resolve(&config, "act", &host).unwrap().is_none());
+    // A link is followed like the sandbox follows it: a target outside the
+    // mapping is refused even though the node could run it.
+    std::fs::remove_file(&binary).unwrap();
+    std::os::unix::fs::symlink("/opt/codex/bin/codex", &binary).unwrap();
+    assert!(resolve(&config, "check", &host)
         .unwrap_err_text()
-        .contains("symlinks"));
+        .contains("missing in the sandbox host mapping"));
+    // A profile executable under a writable guest path is refused before lookup.
+    config
+        .agent
+        .runtime
+        .profiles
+        .get_mut("selected")
+        .unwrap()
+        .settings
+        .executable = Some("/tmp/codex".into());
+    assert!(resolve(&config, "check", &host)
+        .unwrap_err_text()
+        .contains("read-only host mapping"));
 }
 
 // Keep private launch settings out of panic Debug output.

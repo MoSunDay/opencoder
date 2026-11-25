@@ -106,13 +106,15 @@ def native_temp_owner(temp, owner, recursive=False):
                     owner, str(temp)], check=True)
 
 
-def preflight(rootfs):
+def preflight(image):
+    # The image directory only holds the runners under usr/bin; the historical
+    # DAG_TEST_ROOTFS name is kept because the e2e harnesses still read it.
     for name in ('runc', 'mount.nfs', 'unshare', 'cc', 'node'):
         if shutil.which(name) is None:
             raise RuntimeError(f'required native test dependency missing: {name}')
     infos = []
     for name in ('dag-runner', 'agent-step-runner', 'agent-session-runner'):
-        path = rootfs / 'usr/bin' / name
+        path = image / 'usr/bin' / name
         if not path.is_file() or path.is_symlink():
             raise RuntimeError(f'prepare the native test image first: missing {path}')
         # The session runner only accepts its execution environment, not CLI flags.
@@ -182,6 +184,8 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     try:
         if args.stage == 'prepare':
+            # The directory keeps the historical DAG_TEST_ROOTFS name; it holds
+            # only the usr/bin runners of the image.
             logged(['bash', str(REPO / 'scripts/prepare-dag-rootfs.sh'),
                     str(output / 'rootfs')], output / 'prepare.log')
             preflight(output / 'rootfs')

@@ -175,8 +175,27 @@ fn seen_kind(mounts: &[Value], point: &str) -> Option<String> {
         .and_then(|mount| mount["kind"].as_str().map(str::to_string))
 }
 
+/// The sandbox root is a tmpfs the runtime mounts over an empty anchor
+/// inside its own mount namespace: on the host the anchor is a real
+/// directory that keeps neither a mount nor a file, before and after a run.
+fn assert_anchor_empty(run_root: &Path) {
+    let anchor = run_root.join("bundle/root");
+    let metadata = std::fs::symlink_metadata(&anchor)
+        .unwrap_or_else(|error| panic!("stat {}: {error}", anchor.display()));
+    assert!(
+        metadata.is_dir() && !metadata.file_type().is_symlink(),
+        "root anchor is not a real directory: {metadata:?}"
+    );
+    let left: Vec<String> = std::fs::read_dir(&anchor)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(left.is_empty(), "root anchor keeps {left:?} on the host");
+}
+
 /// The receipt names the backend the harness pinned; the bundle is the same
-/// OCI document for both backends.
+/// OCI document for both backends: the runners' `dag-runner` as init over
+/// an empty root anchor sealed read-only by the tmpfs `/` mounted first.
 fn assert_receipt(fleet: &Fleet, run: &str) {
     let run_root = fleet.run_root(run);
     let receipt = read_json(&run_root.join("container.json"));
@@ -188,8 +207,9 @@ fn assert_receipt(fleet: &Fleet, run: &str) {
     let bundle = read_json(&run_root.join("bundle/config.json"));
     assert_eq!(
         bundle["process"]["args"],
-        json!(["/usr/bin/dag-runner", "init"])
+        json!(["/run/opencoder/bin/dag-runner", "init"])
     );
+    assert_eq!(bundle["root"]["path"], json!("root"), "{bundle}");
     assert_eq!(bundle["root"]["readonly"], json!(true));
     assert_eq!(bundle["process"]["noNewPrivileges"], json!(true));
     let namespaces: Vec<&str> = bundle["linux"]["namespaces"]
@@ -256,10 +276,15 @@ fn step_sandbox_is_namespaced_readonly_and_unprivileged() {
     );
     assert_ne!(nspid, "1", "the step must not be the sandbox init");
 
-    // PID 1 is the rootfs supervisor: same credentials, pid 1 of the namespace.
+    // PID 1 is the sandbox supervisor (the runners' `dag-runner`): same
+    // credentials, pid 1 of the namespace.
     assert_eq!(facts["init_comm"], "dag-runner");
     credential.assert_status(&facts["init_status"], "init");
     assert_eq!(facts["init_status"]["nspid"], "1");
+    assert_eq!(
+        facts["init_exe"], "/run/opencoder/bin/dag-runner",
+        "the init runs from the runners bind: {facts}"
+    );
 
     // Namespaces: the step shares the init's; mount/pid/uts/ipc are private
     // to the sandbox, the network stays the node's.
@@ -275,19 +300,29 @@ fn step_sandbox_is_namespaced_readonly_and_unprivileged() {
         );
     }
     assert_eq!(facts["ns"]["net"].as_u64().unwrap(), namespace(me, "net"));
+    // The UTS hostname is the sandbox's own; the hostname file is not
+    // materialised any more but the host's `/etc/hostname`, bound read-only
+    // with the rest of the host mapping: same first line, same file identity.
     assert_eq!(facts["hostname"], "dag-run");
-    // Both backends materialise the same hostname as a rootfs file: the node
-    // writes it into the run's overlay before the sandbox starts.
-    assert_eq!(facts["etc_hostname"], "dag-run");
+    let host_hostname = std::fs::read_to_string("/etc/hostname").unwrap_or_default();
+    let host_line = host_hostname.lines().next().unwrap_or("");
+    assert_eq!(facts["etc_hostname"], host_line, "{facts}");
+    assert_eq!(
+        facts["etc_hostname_id"],
+        json!(dir_identity(Path::new("/etc/hostname"))),
+        "{facts}"
+    );
 
-    // Masked and read-only paths, writable scratch and workspace.
+    // Masked and read-only paths, writable scratch and workspace. The host
+    // mapping (`/etc`, `/usr/bin`) is bound read-only: the step cannot
+    // create a file there although it is the node's own execution user.
     assert_eq!(facts["kcore_size"], 0, "kcore must be masked");
     assert_eq!(facts["dev_null"], json!(true));
     assert_eq!(facts["dev_ptmx"], json!(true));
     assert_eq!(facts["ptmx_link"], "pts/ptmx");
     let rdonly = &facts["rdonly"];
     let write = &facts["write"];
-    for path in ["root", "etc", "knowledge"] {
+    for path in ["root", "etc", "usr_bin", "knowledge"] {
         assert_eq!(rdonly[path], 1, "{path} must be read-only: {rdonly}");
         assert_eq!(write[path], EROFS, "{path} accepted a write: {write}");
     }
@@ -303,10 +338,22 @@ fn step_sandbox_is_namespaced_readonly_and_unprivileged() {
         assert_eq!(write[path], 0, "{write}");
     }
 
-    // The mount table the step sees.
+    // The mount table the step sees: a sealed tmpfs `/` carrying the
+    // read-only host mapping and the runners bind, then the run's mounts.
     let seen = facts["mounts"].as_array().unwrap();
-    assert_eq!(seen_kind(seen, "/").as_deref(), Some("overlay"));
+    assert_eq!(seen_kind(seen, "/").as_deref(), Some("tmpfs"));
     assert_eq!(seen_ro(seen, "/"), Some(true));
+    for point in [
+        "/bin",
+        "/etc",
+        "/lib",
+        "/lib64",
+        "/sbin",
+        "/usr",
+        "/run/opencoder/bin",
+    ] {
+        assert_eq!(seen_ro(seen, point), Some(true), "mount {point}: {seen:?}");
+    }
     assert_eq!(seen_kind(seen, "/proc").as_deref(), Some("proc"));
     assert_eq!(seen_kind(seen, "/tmp").as_deref(), Some("tmpfs"));
     assert_eq!(seen_ro(seen, "/tmp"), Some(false));
@@ -324,12 +371,14 @@ fn step_sandbox_is_namespaced_readonly_and_unprivileged() {
 
     // Released once done: the recorded sandbox processes are gone and
     // nothing of the run is mounted any more (the OCI backend keeps no
-    // process record once its container is deleted).
+    // process record once its container is deleted); the root anchor is
+    // still the empty directory the node created.
     assert_released(
         &run_root,
         crate::clone3_fixtures::recorded(&run_root).as_ref(),
         fleet.agent_pid(),
     );
+    assert_anchor_empty(&run_root);
     assert_eq!(stub.request_count(), 0);
 }
 
@@ -360,7 +409,10 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
     assert_receipt(&fleet, run);
 
     // Host view of the live init: pid 1 of a private PID namespace, running
-    // unprivileged from the run's bundle rootfs.
+    // unprivileged with the tmpfs `/` the runtime mounted over the run's
+    // empty root anchor inside its own mount namespace: the init's root is
+    // neither the host's `/` nor the anchor directory itself, and the anchor
+    // on the host stays empty while the sandbox is up.
     let run_root = fleet.run_root(run);
     let live = wait_for_live(&run_root);
     let me = std::process::id();
@@ -371,20 +423,31 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
     assert_eq!(status_field(live.init.pid, "Name"), "dag-runner");
     Credential::of(&read_json(&run_root.join("bundle/config.json")))
         .assert_host(live.init.pid, "init");
-    assert_eq!(
-        dir_identity(Path::new(&format!("/proc/{}/root", live.init.pid))),
-        dir_identity(&run_root.join("bundle/rootfs")),
-        "the init's root is not the run's bundle rootfs"
+    let init_root = dir_identity(Path::new(&format!("/proc/{}/root", live.init.pid)));
+    assert_ne!(
+        init_root,
+        dir_identity(Path::new("/")),
+        "the init's root is the host's root"
     );
+    assert_ne!(
+        init_root,
+        dir_identity(&run_root.join("bundle/root")),
+        "the init's root is the host's anchor directory"
+    );
+    assert_anchor_empty(&run_root);
     for kind in ["mnt", "pid", "uts", "ipc"] {
         assert_ne!(namespace(live.init.pid as u32, kind), namespace(me, kind));
     }
     assert_eq!(namespace(live.init.pid as u32, "net"), namespace(me, "net"));
 
-    // The init's mount table: the OCI mounts of the bundle, root read-only.
+    // The init's mount table: the tmpfs root sealed read-only, the host
+    // mapping read-only over it, then the OCI mounts of the bundle.
     let table = mounts(live.init.pid as u32);
-    assert_eq!(mount_at(&table, "/").kind, "overlay");
+    assert_eq!(mount_at(&table, "/").kind, "tmpfs");
     assert!(mount_at(&table, "/").read_only());
+    for point in ["/etc", "/usr", "/run/opencoder/bin"] {
+        assert!(mount_at(&table, point).read_only(), "{point}: {table:?}");
+    }
     assert_eq!(mount_at(&table, "/proc").kind, "proc");
     assert_eq!(mount_at(&table, "/tmp").kind, "tmpfs");
     assert_eq!(mount_at(&table, "/dev").kind, "tmpfs");
@@ -400,14 +463,13 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
         assert!(mount_at(&table, point).read_only(), "{point}: {table:?}");
     }
 
-    // The node's own mount table carries exactly the run's two overlays.
+    // The node's own mount table carries exactly the run's workspace
+    // overlay: nothing of the sandbox root lives in the host's table.
     let agent = fleet.agent_pid();
-    let mut expected = vec![
-        run_root.join("bundle/rootfs").display().to_string(),
-        run_root.join("workspace").display().to_string(),
-    ];
-    expected.sort();
-    assert_eq!(mounts_under(agent, &run_root), expected);
+    assert_eq!(
+        mounts_under(agent, &run_root),
+        vec![run_root.join("workspace").display().to_string()]
+    );
 
     // The native launcher keeps the lease from the host's PID namespace.
     if let Some(launcher) = live.launcher {
@@ -430,4 +492,5 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
     assert_eq!(meta["outcome"], "cancelled", "{meta}");
     assert_released(&run_root, Some(&live), agent);
     assert_eq!(mounts_under(agent, &run_root), Vec::<String>::new());
+    assert_anchor_empty(&run_root);
 }

@@ -2205,7 +2205,6 @@ dependencies = [
  "clap",
  "opencoder-control",
  "opencoder-core",
- "opencoder-dag-runtime",
  "opencoder-llm",
  "opencoder-node",
  "opencoder-session",

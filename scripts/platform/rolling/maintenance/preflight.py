@@ -14,7 +14,9 @@ def configuration(agent, server):
     if server.get('storage', {}).get('backend', 'libsql') not in ('libsql', 'turso'):
         raise ValueError('maintenance requires verified local libsql recovery or Turso recovery')
     paths = {}
-    allowed = {'binary_dir', 'workspace_dir', 'data_dir', 'rootfs_dir',
+    # `rootfs_dir` stays for retained Runtime images (runners under usr/bin);
+    # `runners_dir` is the explicit runners directory of the current image.
+    allowed = {'binary_dir', 'workspace_dir', 'data_dir', 'rootfs_dir', 'runners_dir',
                'knowledge_root', 'nfs', 'workspace_nfs'}
     for config in (agent, server):
         if set(config.get('dag', {})) - allowed:

@@ -134,6 +134,8 @@ int main(void) {
     slurp("/proc/1/status", init, sizeof(init));
     slurp("/proc/1/comm", comm, sizeof(comm));
     comm[strcspn(comm, "\n")] = 0;
+    /* First line of the hostname file; the sandbox never writes one, so it is
+     * whatever the read-only host mapping carries (empty when absent). */
     slurp("/etc/hostname", file, sizeof(file));
     file[strcspn(file, "\n")] = 0;
     char host[256] = {0};
@@ -142,8 +144,18 @@ int main(void) {
     link[n > 0 ? (size_t)n : 0] = 0;
     n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
     exe[n > 0 ? (size_t)n : 0] = 0;
+    /* The init's executable as its own mount namespace names it. */
+    char init_exe[1024];
+    n = readlink("/proc/1/exe", init_exe, sizeof(init_exe) - 1);
+    init_exe[n > 0 ? (size_t)n : 0] = 0;
     struct stat st;
     long long kcore = stat("/proc/kcore", &st) == 0 ? (long long)st.st_size : -1;
+    /* Device and inode of the hostname file: a read-only bind keeps the
+     * host file's identity, so the test compares it with the host's own. */
+    struct stat hs;
+    int has_hostname = stat("/etc/hostname", &hs) == 0;
+    unsigned long long host_dev = has_hostname ? (unsigned long long)hs.st_dev : 0;
+    unsigned long long host_ino = has_hostname ? (unsigned long long)hs.st_ino : 0;
     int fd = open("/dev/null", O_RDWR | O_CLOEXEC);
     int dev_null = fd >= 0;
     if (dev_null) close(fd);
@@ -154,21 +166,26 @@ int main(void) {
     printf("{\"pid\":%d,\"uid\":%u,\"euid\":%u,\"gid\":%u,\"egid\":%u,\"status\":",
            getpid(), getuid(), geteuid(), getgid(), getegid());
     status_json(status);
-    printf(",\"init_comm\":\"%s\",\"init_status\":", comm);
+    printf(",\"init_comm\":\"%s\",\"init_exe\":\"%s\",\"init_status\":", comm, init_exe);
     status_json(init);
-    printf(",\"hostname\":\"%s\",\"etc_hostname\":\"%s\",\"exe\":\"%s\",\"ns\":", host, file, exe);
+    printf(",\"hostname\":\"%s\",\"etc_hostname\":\"%s\",\"etc_hostname_id\":[%llu,%llu],"
+           "\"exe\":\"%s\",\"ns\":",
+           host, file, host_dev, host_ino, exe);
     ns_json("self");
     printf(",\"init_ns\":");
     ns_json("1");
     printf(",\"kcore_size\":%lld,\"dev_null\":%s,\"dev_ptmx\":%s,\"ptmx_link\":\"%s\",", kcore,
            dev_null ? "true" : "false", dev_ptmx ? "true" : "false", link);
-    printf("\"rdonly\":{\"root\":%d,\"proc_sys\":%d,\"etc\":%d,\"tmp\":%d,\"workspace\":%d,\"knowledge\":%d},",
-           rdonly("/"), rdonly("/proc/sys"), rdonly("/etc"), rdonly("/tmp"), rdonly("/workspace"),
+    printf("\"rdonly\":{\"root\":%d,\"proc_sys\":%d,\"etc\":%d,\"usr_bin\":%d,\"tmp\":%d,"
+           "\"workspace\":%d,\"knowledge\":%d},",
+           rdonly("/"), rdonly("/proc/sys"), rdonly("/etc"), rdonly("/usr/bin"),
+           rdonly("/tmp"), rdonly("/workspace"),
            knowledge ? rdonly("/run/opencoder/knowledge") : -1);
-    printf("\"write\":{\"root\":%d,\"proc_sys\":%d,\"etc\":%d,\"tmp\":%d,\"workspace\":%d,\"knowledge\":%d},",
+    printf("\"write\":{\"root\":%d,\"proc_sys\":%d,\"etc\":%d,\"usr_bin\":%d,\"tmp\":%d,"
+           "\"workspace\":%d,\"knowledge\":%d},",
            probe_write("/.write-probe"), probe_write("/proc/sys/kernel/.write-probe"),
-           probe_write("/etc/.write-probe"), probe_write("/tmp/.write-probe"),
-           probe_write("/workspace/.write-probe"),
+           probe_write("/etc/.write-probe"), probe_write("/usr/bin/.write-probe"),
+           probe_write("/tmp/.write-probe"), probe_write("/workspace/.write-probe"),
            knowledge ? probe_write("/run/opencoder/knowledge/.write-probe") : -1);
     printf("\"mounts\":");
     mounts_json();

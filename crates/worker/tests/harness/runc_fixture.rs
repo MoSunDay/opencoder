@@ -73,57 +73,48 @@ pub fn runner() -> PathBuf {
     panic!("missing runner {}", directory.display());
 }
 
-pub fn rootfs(root: &Path, runner: &Path) {
-    opencoder_dag_runtime::sandbox::oci::write_rootfs_template(root).unwrap();
-    install(root, runner, "/usr/bin/agent-step-runner");
-    install(
+/// The per-test runners directory (`dag.runners_dir`): this node's own
+/// `dag-runner` and `agent-step-runner` beside the fake harness `codex` and
+/// its startup script. Every sandbox binds the directory read-only at
+/// `/run/opencoder/bin`, so the harness is reached there; every other
+/// program a step runs comes from the host mapping and is not installed.
+pub fn runners(root: &Path, runner: &Path) {
+    std::fs::create_dir_all(root).unwrap();
+    install(root, runner);
+    install(root, &runner.parent().unwrap().join("dag-runner"));
+    executable(root, "codex", include_str!("runc_codex.sh"));
+    executable(
         root,
-        &runner.parent().unwrap().join("dag-runner"),
-        "/usr/bin/dag-runner",
-    );
-    for binary in ["/bin/sh", "/usr/bin/cat", "/usr/bin/mv", "/usr/bin/sleep"] {
-        install(root, Path::new(binary), binary);
-    }
-    std::fs::write(root.join("usr/bin/codex"), include_str!("runc_codex.sh")).unwrap();
-    std::fs::write(
-        root.join("usr/bin/codex-start.sh"),
+        "codex-start.sh",
         r#"set -eu
 printf '%s\n' "$OPENCODER_HARNESS_CONTEXT" > "$OPENCODER_STEP_DIR/startup-context.json"
 printf 'before\n' > "$OPENCODER_STEP_DIR/startup-state"
 "$@"
 printf 'after\n' >> "$OPENCODER_STEP_DIR/startup-state"
 "#,
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(
-        root.join("usr/bin/codex"),
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
+    );
 }
 
-fn install(root: &Path, source: &Path, guest: &str) {
-    let target = root.join(guest.trim_start_matches('/'));
-    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    // Debug runners carry large symbol tables. Keep private OCI copies small
-    // without changing the executable code or shared-library requirements.
+/// Strip-copy one runner into the directory, keeping its name.
+fn install(directory: &Path, source: &Path) {
+    // Debug runners carry large symbol tables. Keep private copies small
+    // without changing the executable code; the shared libraries they need
+    // are the host's, bound read-only by the sandbox.
     assert!(Command::new("strip")
         .arg("--strip-debug")
         .arg("-o")
-        .arg(&target)
+        .arg(directory.join(source.file_name().unwrap()))
         .arg(source)
         .status()
         .unwrap()
         .success());
-    let libs = Command::new("ldd").arg(source).output().unwrap();
-    assert!(libs.status.success(), "ldd {}", source.display());
-    for line in String::from_utf8(libs.stdout).unwrap().lines() {
-        assert!(!line.contains("not found"), "{line}");
-        if let Some(lib) = line.split_whitespace().find(|s| s.starts_with('/')) {
-            let dest = root.join(lib.trim_start_matches('/'));
-            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
-            std::fs::copy(lib, dest).unwrap();
-        }
-    }
+}
+
+/// Write a harness script the sandbox executes by its `/run/opencoder/bin`
+/// name.
+fn executable(directory: &Path, name: &str, source: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = directory.join(name);
+    std::fs::write(&path, source).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }

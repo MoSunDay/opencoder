@@ -1,10 +1,10 @@
 mod config;
-mod mounts;
+pub(crate) mod mounts;
 mod output;
 mod process;
 mod recovery;
 
-use super::clone3::Backend;
+use super::{clone3::Backend, host};
 use anyhow::{ensure, Context, Result};
 use opencoder_dag::DagClaimedRun;
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,8 @@ pub(crate) struct Receipt {
     /// Backend owning the run; records written before clone3 existed are runc.
     #[serde(default)]
     pub backend: Backend,
-    /// Host path of the rootfs `dag-runner`, the clone3 launcher and relay.
+    /// Host path of the runners directory `dag-runner`, the clone3 launcher
+    /// and relay; `None` for runc and for records written before clone3.
     #[serde(default)]
     pub runner: Option<PathBuf>,
 }
@@ -115,19 +116,15 @@ impl RunContainer {
         anyhow::bail!("DAG container failed: {}", String::from_utf8_lossy(&bytes))
     }
 
-    /// The clone3 sandbox is the rootfs launcher process, whose stdin is
-    /// this owner's lease over the sandbox's lifetime.
+    /// The clone3 sandbox is the runners directory's launcher process, whose
+    /// stdin is this owner's lease over the sandbox's lifetime.
     async fn start_clone3(
         &self,
         config: &opencoder_core::Config,
         log: std::fs::File,
     ) -> Result<super::clone3::launch::Launcher> {
-        let rootfs = config
-            .dag
-            .rootfs_dir
-            .as_deref()
-            .context("DAG rootfs_dir is required")?;
-        super::clone3::launch::spawn(&self.root, &rootfs.join("usr/bin/dag-runner"), log).await
+        let runner = host::runners_source(config)?.join(host::RUNNER);
+        super::clone3::launch::spawn(&self.root, &runner, log).await
     }
 
     async fn startup_check(&self, run: &DagClaimedRun) -> Result<()> {
@@ -136,7 +133,7 @@ impl RunContainer {
             StepProcess {
                 key: "startup-check".into(),
                 argv: vec![
-                    "/usr/bin/dag-runner".into(),
+                    format!("{}/{}", host::RUNNERS_MOUNT, host::RUNNER),
                     "check".into(),
                     run.run_id.clone(),
                 ],
@@ -167,13 +164,15 @@ impl RunContainer {
             .workspace_dir
             .as_deref()
             .context("DAG workspace_dir is required")?;
-        let rootfs = config::rootfs_source(config)?;
+        let runners = host::runners_source(config)?;
         let uid = unsafe { libc::geteuid() };
         ensure!(
             uid != 65532,
             "node credential user cannot be the binary execution user"
         );
-        for directory in ["bundle", "private", "private/exec"] {
+        // The root anchor stays empty on the host: the runtime mounts the
+        // tmpfs `/` and every bind over it inside its own mount namespace.
+        for directory in ["bundle/root", "private", "private/exec"] {
             std::fs::create_dir_all(self.root.join(directory))?;
         }
         // Only the OCI backend keeps container state under the run root.
@@ -189,23 +188,7 @@ impl RunContainer {
             &self.root.join("workspace"),
         )?;
         mounts::permissions(&self.root.join("workspace"), uid, 0o2770)?;
-        mounts::overlay(
-            &rootfs,
-            &self.root.join("rootfs-upper"),
-            &self.root.join("rootfs-work"),
-            &self.root.join("bundle/rootfs"),
-        )?;
-        let value = config::render(&self.root, config, run, uid)?;
-        // The node materialises the configured hostname inside the run's own
-        // rootfs overlay for both backends: runc and the native launcher set
-        // the same kernel value, and runc alone would leave no file behind.
-        if let Some(host) = value["hostname"].as_str().filter(|host| !host.is_empty()) {
-            let rootfs = self.root.join("bundle/rootfs");
-            if rootfs.join("etc").is_dir() {
-                std::fs::write(rootfs.join("etc/hostname"), format!("{host}\n"))
-                    .context("write sandbox hostname file")?;
-            }
-        }
+        let value = config::render(&self.root, host::host_root(), config, run, uid)?;
         opencoder_core::atomic_write(
             &self.root.join("bundle/config.json"),
             &serde_json::to_vec_pretty(&value)?,
@@ -216,7 +199,7 @@ impl RunContainer {
                 id: self.id.clone(),
                 agent_uid: uid,
                 backend,
-                runner: (backend == Backend::Clone3).then(|| rootfs.join("usr/bin/dag-runner")),
+                runner: (backend == Backend::Clone3).then(|| runners.join(host::RUNNER)),
             })?,
         )?;
         Ok(())
@@ -233,6 +216,7 @@ impl RunContainer {
         }
         let root = self.root.clone();
         let unmount = tokio::task::spawn_blocking(move || {
+            // The rootfs overlay only exists in run roots of pre-upgrade nodes.
             let result = mounts::unmount(&root.join("bundle/rootfs"))
                 .and_then(|_| mounts::unmount(&root.join("workspace")));
             if let Err(error) = &result {
@@ -282,7 +266,7 @@ pub fn preflight(config: &opencoder_core::Config) -> Result<()> {
             "runc is required for every DAG run"
         );
     }
-    config::rootfs_source(config)?;
+    let runners = host::runners_source(config)?;
     let source = config
         .dag
         .workspace_dir
@@ -290,6 +274,8 @@ pub fn preflight(config: &opencoder_core::Config) -> Result<()> {
         .context("DAG workspace_dir is required")?;
     mounts::real_dir(source)?;
     crate::nfs::read_only_mount(source)?;
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo")?;
+    host::mounts(&mountinfo, host::host_root(), &runners)?;
     Ok(())
 }
 

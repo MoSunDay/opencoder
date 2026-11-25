@@ -50,6 +50,7 @@ pub(super) fn cleanup_abandoned(root: &Path, id: &str) -> Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
+    // The rootfs overlay only exists in run roots of pre-upgrade nodes.
     super::mounts::unmount(&root.join("bundle/rootfs"))?;
     super::mounts::unmount(&root.join("workspace"))
 }

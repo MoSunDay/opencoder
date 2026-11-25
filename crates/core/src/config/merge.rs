@@ -377,6 +377,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             for (key, target) in [
                 ("workspace_dir", &mut cfg.dag.workspace_dir),
                 ("rootfs_dir", &mut cfg.dag.rootfs_dir),
+                ("runners_dir", &mut cfg.dag.runners_dir),
                 ("data_dir", &mut cfg.dag.data_dir),
             ] {
                 if let Some(value) = d.get(key).and_then(|value| value.as_str()) {
@@ -676,12 +677,16 @@ mod tests {
         merge_into(
             &mut cfg,
             serde_json::json!({
-                "dag": { "binary_dir": "/custom/binaries", "nfs": { "enabled": true, "port": 0 } }
+                "dag": { "binary_dir": "/custom/binaries", "runners_dir": "/custom/runners", "nfs": { "enabled": true, "port": 0 } }
             }),
         );
         assert_eq!(
             cfg.dag.binary_dir.as_deref(),
             Some(std::path::Path::new("/custom/binaries"))
+        );
+        assert_eq!(
+            cfg.dag.runners_dir.as_deref(),
+            Some(std::path::Path::new("/custom/runners"))
         );
         assert!(cfg.dag.nfs.enabled);
         assert_eq!(cfg.dag.nfs.port, 0);

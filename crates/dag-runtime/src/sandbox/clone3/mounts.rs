@@ -4,6 +4,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::Value;
 use std::{
+    collections::VecDeque,
     ffi::CString,
     os::unix::ffi::OsStrExt,
     path::{Component, Path, PathBuf},
@@ -116,7 +117,7 @@ pub(super) fn parse_all(config: &Value) -> Result<Vec<Mount>> {
 }
 
 /// Guest destinations become host paths under `prefix`; the launcher prefixes
-/// the run's rootfs overlay, the chrooted child passes `/`.
+/// the run's root anchor, the chrooted child passes `/`.
 pub(super) fn target(prefix: &Path, destination: &Path) -> Result<CString> {
     let path = if destination.as_os_str().is_empty() {
         prefix.to_path_buf()
@@ -140,12 +141,27 @@ pub(super) fn apply(prefix: &Path, mount: &Mount) -> Result<()> {
         data.as_ptr().cast::<libc::c_void>()
     };
     // Like runc, missing mountpoints are created inside the private mount
-    // namespace; a source that is not a directory keeps its target untouched.
+    // namespace: directories for directory sources and filesystems, an empty
+    // file (parents included) for a file bind unless its target exists, so a
+    // placeholder inside a read-only bind is never rewritten.
     let path = prefix.join(&mount.destination);
     let directory = matches!(mount.kind, Kind::Tmpfs | Kind::Devpts) || mount.source.is_dir();
     if directory && !path.exists() {
         std::fs::create_dir_all(&path)
             .with_context(|| format!("create mountpoint {}", mount.destination.display()))?;
+    }
+    if mount.kind == Kind::Bind && !mount.source.is_dir() {
+        let file = follow_links(prefix, &mount.destination)?;
+        if !file.exists() {
+            std::fs::create_dir_all(file.parent().context("mountpoint has no parent")?)
+                .with_context(|| format!("create mountpoint {}", mount.destination.display()))?;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&file)
+                .with_context(|| format!("create mountpoint {}", mount.destination.display()))?;
+        }
     }
     let failure = |what: &str| {
         anyhow::Error::from(std::io::Error::last_os_error())
@@ -205,24 +221,17 @@ pub(super) fn apply(prefix: &Path, mount: &Mount) -> Result<()> {
     Ok(())
 }
 
-/// `root.readonly`: the rootfs becomes a read-only bind inside the private
-/// mount namespace; the mounts applied afterwards stay writable, as with runc.
-pub(super) fn readonly_root(rootfs: &Path) -> Result<()> {
-    let target = target(rootfs, Path::new(""))?;
+/// `root.readonly` once every entry is mounted: the top mount of the root (the
+/// tmpfs `/` the first entry mounted) is remounted read-only, so only the
+/// flags of that mount change and the entries below keep their own, as with
+/// runc. A bind of the root onto itself instead would hide the entries from
+/// every lookup through it. The tmpfs is private to this mount namespace, so
+/// the node never sees the remount.
+pub(super) fn seal_root(root: &Path) -> Result<()> {
+    let target = target(root, Path::new(""))?;
     let flags =
         libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NODEV | libc::MS_NOSUID;
     unsafe {
-        ensure!(
-            libc::mount(
-                target.as_ptr(),
-                target.as_ptr(),
-                std::ptr::null(),
-                libc::MS_BIND,
-                std::ptr::null()
-            ) == 0,
-            "bind sandbox rootfs: {}",
-            std::io::Error::last_os_error()
-        );
         ensure!(
             libc::mount(
                 std::ptr::null(),
@@ -231,7 +240,7 @@ pub(super) fn readonly_root(rootfs: &Path) -> Result<()> {
                 flags,
                 std::ptr::null()
             ) == 0,
-            "remount sandbox rootfs read-only: {}",
+            "remount sandbox root read-only: {}",
             std::io::Error::last_os_error()
         );
     }
@@ -287,6 +296,74 @@ pub(super) fn devices(prefix: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The path a relative guest destination denotes under `prefix` once its
+/// links are followed the way mount(2) follows a mountpoint; only used to
+/// materialise a missing file target. Bounded like the kernel's ELOOP limit.
+fn follow_links(prefix: &Path, destination: &Path) -> Result<PathBuf> {
+    let mut steps: VecDeque<Step> = destination
+        .components()
+        .map(|component| match component {
+            Component::RootDir | Component::CurDir => None,
+            Component::Normal(name) => Some(Step::Name(name.to_owned())),
+            Component::ParentDir => Some(Step::Parent),
+            _ => Some(Step::Invalid),
+        })
+        .collect::<Option<_>>()
+        .context("mount destination must be normalized")?;
+    let mut resolved = prefix.to_path_buf();
+    for _ in 0..40 {
+        let Some(step) = steps.pop_front() else {
+            // A missing file target is created at this path: a link chain
+            // that leaves the root would reach the node's filesystem.
+            ensure!(
+                resolved.starts_with(prefix),
+                "mount target {} leaves the sandbox root through a link",
+                destination.display()
+            );
+            return Ok(resolved);
+        };
+        match step {
+            Step::Parent => {
+                resolved.pop();
+                continue;
+            }
+            Step::Name(name) => resolved.push(name),
+            Step::Invalid => bail!("mount destination must be normalized"),
+        }
+        match std::fs::symlink_metadata(&resolved) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let link = std::fs::read_link(&resolved)?;
+                if link.is_absolute() {
+                    resolved = prefix.to_path_buf();
+                } else {
+                    resolved.pop();
+                }
+                let hops: VecDeque<Step> = link
+                    .components()
+                    .map(|component| match component {
+                        Component::RootDir | Component::CurDir => None,
+                        Component::Normal(name) => Some(Step::Name(name.to_owned())),
+                        Component::ParentDir => Some(Step::Parent),
+                        _ => Some(Step::Invalid),
+                    })
+                    .collect::<Option<_>>()
+                    .context("mount target must be normalized")?;
+                steps = hops.into_iter().chain(steps).collect();
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("resolve mountpoint"),
+        }
+    }
+    bail!("mount destination follows too many links")
+}
+
+enum Step {
+    Name(std::ffi::OsString),
+    Parent,
+    Invalid,
 }
 
 fn normalized(destination: &str) -> Result<PathBuf> {

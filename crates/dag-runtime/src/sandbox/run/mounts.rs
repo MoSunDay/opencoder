@@ -86,9 +86,9 @@ pub(super) fn permissions(path: &Path, uid: u32, mode: u32) -> Result<()> {
     Ok(())
 }
 
-/// Resolve mountinfo paths beneath the authorized knowledge root, parents first.
-/// Duplicate/covered mount records use the currently visible source path once.
-pub(super) fn nested_mounts(mountinfo: &str, root: &Path) -> Result<Vec<PathBuf>> {
+/// Resolve mountinfo paths beneath a host root, parents first. Duplicate/
+/// covered mount records use the currently visible source path once.
+pub(crate) fn nested_mounts(mountinfo: &str, root: &Path) -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for line in mountinfo.lines() {
         let point = line

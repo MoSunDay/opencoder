@@ -227,9 +227,10 @@ pub fn namespace(pid: u32, kind: &str) -> u64 {
 }
 
 /// Device and inode of a path, so a sandbox init's `/` (reached through
-/// the `/proc/<pid>/root` magic link) is compared with the run's bundle
-/// rootfs by identity: a root runc bind-mounted inside its private mount
-/// namespace has no host path to compare.
+/// the `/proc/<pid>/root` magic link) is compared by identity with the
+/// host's `/` and the run's empty root anchor: the tmpfs `/` the runtime
+/// mounts over the anchor inside its private mount namespace has no host
+/// path to compare.
 pub fn dir_identity(path: &Path) -> (u64, u64) {
     use std::os::unix::fs::MetadataExt;
     let meta =

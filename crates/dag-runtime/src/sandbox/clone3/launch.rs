@@ -1,7 +1,7 @@
 //! Node-side handle of a live clone3 sandbox. `RunContainer::start` spawns the
-//! rootfs `dag-runner launch` (see `launcher.rs`) and keeps its stdin as the
-//! lease: when the lease closes the launcher kills the init, so the sandbox
-//! cannot outlive its owner.
+//! runners directory's `dag-runner launch` (see `launcher.rs`) and keeps its
+//! stdin as the lease: when the lease closes the launcher kills the init, so
+//! the sandbox cannot outlive its owner.
 use anyhow::{bail, ensure, Context, Result};
 use std::{
     path::Path,

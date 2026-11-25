@@ -7,7 +7,7 @@ Commit: 91cfda26d3acb3c00b0a28384809312b4f6f2029
 - 保留当前视觉风格。只检查本次修改的页面、组件及其直接影响的导航或交互链路；TUI 仅在相关改动时验收。测试与验收范围遵循 [规则 02](02-regression-gate.md)，除非用户明确要求不运行全站验收。
 - `scripts/acceptance/ui/scope.js` 记录每个页面对应的功能验收；增加或移除导航页时同步修改验收范围，未覆盖的页面使验收失败。
 - 全站入口仅在用户明确要求全量验收时使用：`node scripts/acceptance/ui/main.js --bin-dir <独立二进制目录> --rootfs <配套镜像> --output <新的证据目录>`。`--resume` 只能复用范围及构建产物摘要相同的成功记录，失败保留原日志并重跑，SPA 漂移检查始终重跑；`--brain-test <同批构建的测试可执行文件>` 可避免共享 Cargo 目录重建版本不一致，仍须通过测试内的原生镜像版本检查。
-- 前置条件：当前 SPA 已构建、二进制构建信息一致、SPA 摘要与 Server 一致、镜像中的 runner 与二进制目录一致；使用项目安装的 Playwright 浏览器，或通过已有 `CHROME_PATH` 指定浏览器。TUI 验收需要 `pyte`，Rust 浏览器用例需要 Cargo；测试只使用临时凭据、数据库、目录和私有挂载空间，不操作生产服务或已有认证数据。
+- 前置条件：当前 SPA 已构建、二进制构建信息一致、SPA 摘要与 Server 一致、配套镜像已由 `scripts/prepare-dag-rootfs.sh` 制备（只构建 runner 镜像，即 `usr/bin` 下的三个 runner；节点配置写 `dag.runners_dir`）且镜像中的 runner 与二进制目录一致；使用项目安装的 Playwright 浏览器，或通过已有 `CHROME_PATH` 指定浏览器。TUI 验收需要 `pyte`，Rust 浏览器用例需要 Cargo；测试只使用临时凭据、数据库、目录和私有挂载空间，不操作生产服务或已有认证数据。
 
 ## 按改动选择的链路
 

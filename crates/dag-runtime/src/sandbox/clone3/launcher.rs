@@ -1,8 +1,9 @@
 //! The launcher body (`dag-runner launch <run_root>`), run on the node as root
 //! by `launch::spawn`. It owns the sandbox's mount namespace and parents its
-//! init: unshare, apply the OCI mounts over the run's rootfs overlay, `clone3`
-//! into a PID namespace, then the child chroots, mounts `proc` from inside
-//! the namespace, masks paths, drops privileges and execs the init.
+//! init: unshare, apply the OCI mounts over the run's empty root anchor (the
+//! tmpfs `/` first), seal the root read-only, `clone3` into a PID namespace,
+//! then the child chroots, mounts `proc` from inside the namespace, masks
+//! paths, drops privileges and execs the init.
 use super::{
     launch::diagnostic,
     mounts,
@@ -21,8 +22,8 @@ use std::{
 /// Everything the init needs, resolved before `clone3` so the child only
 /// issues raw syscalls.
 struct Plan {
-    rootfs: PathBuf,
-    rootfs_c: CString,
+    root: PathBuf,
+    root_c: CString,
     mounts: Vec<mounts::Mount>,
     protection: mounts::Protection,
     proc: Option<(CString, u64)>,
@@ -47,13 +48,13 @@ pub(crate) fn launch(root: &Path) -> Result<i32> {
         (stdin.st_mode & libc::S_IFMT) == libc::S_IFIFO,
         "clone3 sandbox launcher stdin must be the node's lease pipe"
     );
-    let rootfs = root.join("bundle/rootfs");
-    ensure!(rootfs.is_dir(), "clone3 sandbox rootfs overlay is missing");
-    Plan::prepare(&rootfs, &config)?.run(root)
+    let anchor = super::super::host::root_dir(root);
+    ensure!(anchor.is_dir(), "clone3 sandbox root anchor is missing");
+    Plan::prepare(&anchor, &config)?.run(root)
 }
 
 impl Plan {
-    fn prepare(rootfs: &Path, config: &Value) -> Result<Plan> {
+    fn prepare(root: &Path, config: &Value) -> Result<Plan> {
         let mut process = Process::parse(&config["process"])?;
         process.lease(super::LEASE_FD);
         let all = mounts::parse_all(config)?;
@@ -72,9 +73,8 @@ impl Plan {
             .filter(|mount| mount.kind != mounts::Kind::Proc)
             .collect();
         Ok(Self {
-            rootfs: rootfs.to_path_buf(),
-            rootfs_c: CString::new(rootfs.as_os_str().as_bytes())
-                .context("run root contains NUL")?,
+            root: root.to_path_buf(),
+            root_c: CString::new(root.as_os_str().as_bytes()).context("run root contains NUL")?,
             mounts,
             protection: mounts::protection(config)?,
             proc,
@@ -112,23 +112,26 @@ impl Plan {
                 )?;
             }
         }
-        if self.readonly_root {
-            mounts::readonly_root(&self.rootfs)?;
-        }
         for mount in &self.mounts {
-            mounts::apply(&self.rootfs, mount)?;
+            mounts::apply(&self.root, mount)?;
             if mount.destination == Path::new("dev") && mount.kind == mounts::Kind::Tmpfs {
-                mounts::devices(&self.rootfs)?;
+                mounts::devices(&self.root)?;
             }
         }
         if let Some((target, _)) = &self.proc {
             // The chrooted child mounts proc from inside the PID namespace;
             // its mountpoint has to exist in the root already.
             let guest = target.to_string_lossy();
-            let path = self.rootfs.join(guest.trim_start_matches('/'));
+            let path = self.root.join(guest.trim_start_matches('/'));
             if !path.exists() {
                 std::fs::create_dir_all(&path).context("create proc mountpoint")?;
             }
+        }
+        // `root.readonly` seals the mounted root (the tmpfs `/`) like runc:
+        // after every entry, so mountpoints could be created and the binds
+        // keep their own flags.
+        if self.readonly_root {
+            mounts::seal_root(&self.root)?;
         }
         self.clone_init(root)
     }
@@ -158,7 +161,13 @@ impl Plan {
             // The child never returns to Rust: PID 1 of the new namespace.
             unsafe { self.child(ready_write, null.as_raw_fd(), argv.as_ptr(), env.as_ptr()) }
         }
-        drop((ready_write, null));
+        // Raw descriptors: the write end has to close here, or an init that
+        // exits before reporting readiness would never read as EOF below.
+        checked(
+            unsafe { libc::close(ready_write) },
+            "close sandbox readiness pipe",
+        )?;
+        drop(null);
         let pid = result as libc::pid_t;
         let init = super::identity(pid).context("read clone3 init identity")?;
         let mut ready = [0u8; READY.len()];
@@ -206,7 +215,7 @@ impl Plan {
         env: *const *const libc::c_char,
     ) -> ! {
         const STEPS: [&str; 7] = [
-            "enter rootfs",
+            "enter root",
             "mount proc",
             "protect proc",
             "report readiness",
@@ -218,7 +227,7 @@ impl Plan {
             report("init", "duplicate lease", errno());
         }
         libc::dup2(null, 0);
-        if libc::chdir(self.rootfs_c.as_ptr()) != 0
+        if libc::chdir(self.root_c.as_ptr()) != 0
             || libc::chroot(c".".as_ptr()) != 0
             || libc::chdir(c"/".as_ptr()) != 0
         {

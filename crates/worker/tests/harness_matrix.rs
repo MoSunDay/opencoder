@@ -131,7 +131,9 @@ async fn team(node: &opencoder_worker::Worker) {
     assert_eq!(result["topic"]["final_summary"], "MATRIX_TEAM_DONE");
 }
 async fn dag(node: &opencoder_worker::Worker) {
-    let spec = json!({"name":"matrix-dag","steps":[{"name":"first","kind":{"type":"agent","agent":"plan","prompt":"MATRIX_DAG_FIRST"}},{"name":"second","depends_on":["first"],"kind":{"type":"agent","agent":"act","prompt":"MATRIX_DAG_SECOND"}}]});
+    // DAG steps run in a sandbox: the DAG-only card runs the fake CLI from the
+    // runners directory (`/run/opencoder/bin/codex`), never the host `PATH`.
+    let spec = json!({"name":"matrix-dag","steps":[{"name":"first","kind":{"type":"agent","agent":"matrix-dag","prompt":"MATRIX_DAG_FIRST"}},{"name":"second","depends_on":["first"],"kind":{"type":"agent","agent":"matrix-dag","prompt":"MATRIX_DAG_SECOND"}}]});
     let result = create(node, "dag-matrix", ExecutionKind::Dag, json!({}), spec).await;
     assert_eq!(result["execution"]["status"], "done", "DAG: {result}");
 }

@@ -9,10 +9,12 @@ Agent 页的“全部执行”和 TODO 打开的是同一个执行。
 
 ~~~sh
 PLATFORM_BIN_DIR=/path/to/matching/bin \
-node scripts/acceptance/project/capabilities/main.js /path/to/matching/rootfs
+node scripts/acceptance/project/capabilities/main.js /path/to/matching/runners-image
 ~~~
 
-该场景已纳入全站 UI 验收。浏览器创建一个项目、一个专项和四个 TODO，
+该场景已纳入全站 UI 验收。位置参数（或 `--rootfs` / `DAG_TEST_ROOTFS`，沿用旧名）指向
+`scripts/prepare-dag-rootfs.sh` 制备的运行器镜像目录：只有 `usr/bin` 下的 runner，
+步骤使用宿主工具，节点配置写 `dag.runners_dir`。浏览器创建一个项目、一个专项和四个 TODO，
 分别派发给 Agent、Operator、DAG 和 schema 7 大脑计划；大脑先并行执行
 Agent、Operator，再将实际输出绑定给 DAG 验证。使用真实 Server、节点、
 HTTP、持久化与 runc，仅模型响应是确定性夹具。
@@ -46,7 +48,7 @@ node scripts/acceptance/project/capabilities/main.js \
 ~~~sh
 PLATFORM_BIN_DIR=/path/to/matching/bin \
 node scripts/acceptance/project/capabilities/main.js \
-  --rootfs /path/to/matching/rootfs --model-config /path/to/private/model-config.json \
+  --rootfs /path/to/matching/runners-image --model-config /path/to/private/model-config.json \
   --observe-model
 ~~~
 

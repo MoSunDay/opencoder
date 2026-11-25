@@ -148,7 +148,7 @@ class Runtime:
         self.base = wait(listening, 'Server startup')
         for name in ['node-a', 'node-b']:
             node = self.root / 'runtime' / name
-            dag = {'rootfs_dir': str(self.rootfs), 'data_dir': str(node / 'state/dag/runs'),
+            dag = {'runners_dir': str(self.rootfs / 'usr/bin'), 'data_dir': str(node / 'state/dag/runs'),
                    'sandbox': self.sandbox}
             for key, listener in [('binary_dir', binary_port), ('workspace_dir', workspace_port)]:
                 mount = node / key
@@ -243,7 +243,7 @@ class Runtime:
             if (state / ('dag-run-' + journal.parent.name)).exists():
                 subprocess.run(['runc', '--root', str(state), 'delete', '--force', 'dag-run-' + journal.parent.name], check=True, timeout=30)
             mounts = Path('/proc/self/mountinfo').read_text().splitlines()
-            for target in [root / 'bundle/rootfs', root / 'workspace']:
+            for target in [root / 'workspace']:
                 if any(line.split()[4] == str(target) for line in mounts):
                     subprocess.run(['umount', str(target)], check=True, timeout=30)
         for mount in reversed(self.mounts):

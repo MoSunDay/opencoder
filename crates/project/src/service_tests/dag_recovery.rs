@@ -55,10 +55,9 @@ async fn dag_acceptance_pins_config_and_lost_driver_cleanup_precedes_terminal_st
     std::mem::forget(container);
     assert!(crate::recover::converge_lost_run(&deps, &record.id).await);
     assert_eq!(run_status(&store, &record.id).await, RunStatus::Cancelled);
-    assert!(std::fs::read_dir(root.join("runc-state"))
-        .unwrap()
-        .next()
-        .is_none());
+    // No sandbox survives the cleanup on either backend: empty OCI state
+    // (runc) or a released native init (clone3).
+    native::assert_runtime_released(&root);
     assert!(!std::fs::read_to_string("/proc/self/mountinfo")
         .unwrap()
         .contains(root.to_str().unwrap()));

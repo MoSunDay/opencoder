@@ -5,7 +5,7 @@ Run as root on a Linux host with systemd, NFS client support, Nginx and runc:
 ```sh
 python3 -B scripts/acceptance/maintenance_release/main.py \
   --platform-bundle /absolute/candidate/bundle \
-  --rootfs /absolute/candidate/rootfs \
+  --rootfs /absolute/candidate/runners-image \
   --old-bundle /absolute/retained/old/bundle \
   --corrective-bundle /absolute/compatible/different-commit/bundle
 ```
@@ -14,6 +14,11 @@ The controller source and candidate bundle must belong to the same clean commit.
 All old Server, Host, Runtime and resource service binaries come from the retained
 old bundle. The old activation probe uses its WASM protocol exclusively in this
 acceptance fixture. The product has no legacy execution fallback.
+
+`--rootfs` keeps its historical name: the directory is the native DAG runners image built by
+`scripts/prepare-dag-rootfs.sh` (only the runners under `usr/bin`; steps use the host tools).
+Platform maintenance keeps configuring it through the retained `dag.rootfs_dir` key, whose
+runners directory is `<rootfs_dir>/usr/bin`; an explicit `dag.runners_dir` is also accepted.
 
 Each run creates an `mr-*` evidence directory with independent configuration,
 token, databases, ports, Nginx and source workspace. Actual host systemd executes

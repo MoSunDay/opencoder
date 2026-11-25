@@ -1,5 +1,5 @@
 // Real Server + Agent crash containment. All state and processes are fixtures.
-// PLATFORM_BIN_DIR=target/debug DAG_TEST_ROOTFS=/path/rootfs node this-file
+// PLATFORM_BIN_DIR=target/debug DAG_TEST_ROOTFS=/path/to/runners-image node this-file
 const assert = require('assert/strict');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -10,6 +10,7 @@ const { spawn, spawnSync } = require('child_process');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-node-sigkill-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../target/debug');
+// DAG_TEST_ROOTFS is the native DAG runners image directory (runners under usr/bin).
 const sourceRootfs = process.env.DAG_TEST_ROOTFS;
 const token = crypto.randomBytes(24).toString('hex');
 const children = [];
@@ -110,7 +111,7 @@ function pythonTreeCode(prefix) {
 }
 
 async function main() {
-  assert(sourceRootfs && fs.statSync(sourceRootfs).isDirectory(), 'set DAG_TEST_ROOTFS to a prepared rootfs');
+  assert(sourceRootfs && fs.statSync(sourceRootfs).isDirectory(), 'set DAG_TEST_ROOTFS to a prepared native DAG runners image');
   assert.equal(spawnSync('runc', ['--version']).status, 0, 'runc must be installed');
   const serverDir = path.join(root, 'server');
   const nodeDir = path.join(root, 'node');

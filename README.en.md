@@ -80,6 +80,11 @@ Or use the install script:
 curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/install.sh | bash
 ```
 
+Prebuilt platform bundles (Linux x86_64 / macOS aarch64, each with `manifest.json`
+and `SHA256SUMS`) are published on
+[GitHub Releases](https://github.com/MoSunDay/opencoder/releases); install an
+extracted bundle with `scripts/install.sh --bundle <dir> --dest-dir /usr/local/bin`.
+
 ### Configuration
 
 On the first interactive launch, OpenCoder creates `~/.opencoder/config.json` and opens an in-TUI model setup form when the effective configuration is not yet usable. After the provider, model, endpoint, and API key pass local validation, the same TUI continues directly to the task composer. Existing usable project or environment configuration is honored without prompting.

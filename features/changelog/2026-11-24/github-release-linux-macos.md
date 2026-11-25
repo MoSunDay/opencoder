@@ -48,3 +48,25 @@
 - macOS aarch64：本机为 Linux，无法本地编译；由 tag 触发的 GitHub Actions
   `macos-latest` 作业构建，结果在发布页产物与工作流运行记录中核验。
 - 测试范围：本次改动及其直接影响链路；未运行全量测试。
+
+## 发布执行记录（2026-11-25）
+
+- 触发：tag `v0.1.1` → Release 工作流
+  [run 45510608532](https://github.com/MoSunDay/opencoder/actions/runs/45510608532)：
+  `bundle (linux-x86_64)`、`bundle (macos-aarch64)` 与 `publish github release` 均 success。
+- Release：<https://github.com/MoSunDay/opencoder/releases/tag/v0.1.1>
+  - `opencoder-0.1.1-linux-x86_64.tar.gz`（91,709,505 字节，sha256
+    `9e687c6cfc5e4e141a7e34053c74877d228d4826642bac8f760e20c0a47dd640`）+ `.sha256`
+  - `opencoder-0.1.1-macos-aarch64.tar.gz`（40,505,998 字节，sha256
+    `f0bb32ac0564f20fba1084039855d7c651016869f5408297909033e9f5e25beb`）+ `.sha256`
+- 下载核验：两个归档 `sha256sum -c` → OK；包内 `SHA256SUMS` 逐项 → OK。
+- Linux 包：7 个二进制（opencoder / opencoder-cli / opencoder-server / opencoder-agent /
+  dag-runner / agent-step-runner / agent-session-runner）；`opencoder --version` =
+  `0.1.1 (844df6f0)`，`--build-info` 的 `git_dirty=false`、`commit 844df6f09…`、
+  `spa_sha256` 与 dist 树一致；在 glibc 2.35 主机运行仅有 `GLIBC_2.39` weak version
+  警告（二进制构建于 ubuntu-24.04）。
+- macOS 包：3 个二进制均为 `Mach-O 64-bit arm64 executable`；本机为 Linux 无法执行，
+  `manifest.json` 与 `SHA256SUMS` 已核验（commit / version / spa_sha256 与 Linux 包一致）。
+- 期间修正：run 2 的 Linux 构建失败（加固原生依赖与 Node 版本后消失）；run 3 两个平台
+  构建成功但 `gh release create` 1 秒内失败，改为 `--notes-file` 并把失败日志写入
+  step summary / error annotation 后 run 4 成功。

@@ -85,6 +85,10 @@ and `SHA256SUMS`) are published on
 [GitHub Releases](https://github.com/MoSunDay/opencoder/releases); install an
 extracted bundle with `scripts/install.sh --bundle <dir> --dest-dir /usr/local/bin`.
 
+The Linux bundle is built on ubuntu-24.04 (glibc 2.39) and has been verified to run on a
+glibc 2.35 host (a `GLIBC_2.39` weak version warning is printed at startup); older glibc
+versions are unverified.
+
 ### Configuration
 
 On the first interactive launch, OpenCoder creates `~/.opencoder/config.json` and opens an in-TUI model setup form when the effective configuration is not yet usable. After the provider, model, endpoint, and API key pass local validation, the same TUI continues directly to the task composer. Existing usable project or environment configuration is honored without prompting.

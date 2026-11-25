@@ -86,6 +86,9 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 [GitHub Releases](https://github.com/MoSunDay/opencoder/releases)；解包后可用
 `scripts/install.sh --bundle <解包目录> --dest-dir /usr/local/bin` 安装。
 
+Linux 包在 ubuntu-24.04（glibc 2.39）上构建，已在 glibc 2.35 主机上验证可运行（启动时有
+`GLIBC_2.39` weak version 警告）；更低的 glibc 版本未验证。
+
 ### 配置
 
 首次交互式启动时，OpenCoder 会创建 `~/.opencoder/config.json`；若合并后的配置尚不可用，会在 TUI 内引导填写第一个模型。provider、model、端点和 API key 通过本地校验后，将在同一个 TUI 中直接进入任务输入界面；已有可用的项目配置或环境变量配置则不会重复提示。

@@ -74,6 +74,20 @@ jobs:
           actual="$(uname -m)"
           [[ "$actual" == "$expect" ]] || { echo "runner arch $actual != $expect" >&2; exit 1; }
 
+      # Reject a mistyped tag before spending a full Rust build on it.
+      - name: verify tag matches workspace version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk -F'"' '/^version = "/ {print $2; exit}' Cargo.toml)"
+          [[ -n "$version" ]] || { echo "workspace version not found" >&2; exit 1; }
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [[ "$GITHUB_REF_NAME" == "v$version" ]] || {
+              echo "tag $GITHUB_REF_NAME does not match workspace version v$version" >&2
+              exit 1
+            }
+          fi
+
       - name: build release bundle
         shell: bash
         run: |
@@ -102,12 +116,6 @@ jobs:
           set -euo pipefail
           version="$(awk -F'"' '/^version = "/ {print $2; exit}' Cargo.toml)"
           [[ -n "$version" ]] || { echo "workspace version not found" >&2; exit 1; }
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            [[ "$GITHUB_REF_NAME" == "v$version" ]] || {
-              echo "tag $GITHUB_REF_NAME does not match workspace version v$version" >&2
-              exit 1
-            }
-          fi
           asset="opencoder-${version}-${{ matrix.platform }}.tar.gz"
           COPYFILE_DISABLE=1 tar -czf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP/bundle" .
           (
@@ -162,6 +170,7 @@ jobs:
           - opencoder-${GITHUB_REF_NAME#v}-macos-aarch64.tar.gz (+ .sha256)
 
           Each archive carries bin/, manifest.json and SHA256SUMS.
+          Changelog (feature to test mapping): https://github.com/${GITHUB_REPOSITORY}/tree/${GITHUB_REF_NAME}/features/changelog
           Verify an archive with: sha256sum -c <archive>.sha256
           NOTES
           gh release create "$GITHUB_REF_NAME" \

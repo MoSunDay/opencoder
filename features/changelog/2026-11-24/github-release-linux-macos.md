@@ -70,3 +70,31 @@
 - 期间修正：run 2 的 Linux 构建失败（加固原生依赖与 Node 版本后消失）；run 3 两个平台
   构建成功但 `gh release create` 1 秒内失败，改为 `--notes-file` 并把失败日志写入
   step summary / error annotation 后 run 4 成功。
+
+## 收尾修正（2026-11-25）
+
+- `.github/workflows/release.yml`：tag 与 workspace 版本一致性校验前移为构建前的独立 step
+  （原先位于构建之后的归档 step，tag 打错时两个 runner 都会白跑完整构建）；归档 step 仅保留
+  版本提取。
+- `.github/workflows/release.yml`：Release 说明追加 tag 对应的 `features/changelog/` 目录链接，
+  便于从发布页找到「功能 → 测试名」映射。
+- `README.md` / `README.en.md`：补充 Linux 包的 glibc 基线（ubuntu-24.04 / glibc 2.39 构建，
+  glibc 2.35 主机验证可运行，更低版本未验证）。
+- 溯源说明：tag `v0.1.1` 指向 `844df6f09`，该提交不在 main 祖先链上（并行开发期间 main 历史被
+  重写），其 tree 与 `f81f64ca0` 相同（`2cfab4b0c`）；发布内容与 `--build-info` 的 commit 以
+  tag 为准。已发布的 v0.1.1 Release 说明未含 changelog 链接（本机无发布凭据，无法回填），
+  新说明模板自下一次 tag 起生效。
+
+## 测试覆盖（收尾修正）
+
+| 功能 | 测试名 | 文件 |
+|------|--------|------|
+| 工作流 YAML 语法 | `python3 -c "yaml.safe_load(open('.github/workflows/release.yml'))"` | `.github/workflows/release.yml` |
+| 工作流 `run` 脚本语法 | 提取全部 `run:` 块（`${{ }}` 替换为占位符）后逐块 `bash -n` | `.github/workflows/release.yml` |
+| 版本校验 step | 以 `GITHUB_REF_NAME=v0.1.1`（通过）/ `v0.1.2`（拒绝）/ `main` 分支（跳过）模拟执行 step 脚本 | `.github/workflows/release.yml` |
+| Release 说明模板 | 以 `GITHUB_REF_NAME=v0.1.1` 渲染 heredoc，断言含 changelog 链接 | `.github/workflows/release.yml` |
+
+- 定向检查：YAML 解析 → OK；`bash -n` 全部 `run` 块 → 0 失败；版本 step 三种输入 → exit 0 / 1 / 0
+  符合预期；说明模板渲染 → 链接正确；归档 step 不再含重复校验。
+- 文档：README 与 changelog 仅检查内容与链接；工作流改动未在 GitHub 上实际触发（下一次推 tag 时
+  生效）。未运行全量测试。

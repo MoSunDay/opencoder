@@ -20,6 +20,7 @@ mod clone3_probe;
 mod fixtures;
 mod flow;
 mod input_args;
+mod sandbox_sharing;
 mod structured_output;
 
 mod dynamic;

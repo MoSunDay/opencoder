@@ -138,7 +138,9 @@ impl Transition {
             "ambient capabilities must be permitted and inheritable"
         );
         ensure!(
-            caps.effective.iter().all(|cap| caps.permitted.contains(cap)),
+            caps.effective
+                .iter()
+                .all(|cap| caps.permitted.contains(cap)),
             "effective capabilities must be permitted"
         );
         Ok(Self {
@@ -158,14 +160,18 @@ impl Transition {
             }
             let result = libc::prctl(libc::PR_CAPBSET_DROP, cap as libc::c_ulong, 0, 0, 0);
             if result != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINVAL) {
-                return std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EINVAL);
+                return std::io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or(libc::EINVAL);
             }
         }
         if libc::setgroups(0, std::ptr::null()) != 0
             || libc::setresgid(self.gid, self.gid, self.gid) != 0
             || libc::setresuid(self.uid, self.uid, self.uid) != 0
         {
-            return std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EPERM);
+            return std::io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(libc::EPERM);
         }
         let words = |set: &BTreeSet<u32>| -> [u32; 2] {
             let mut words = [0u32; 2];
@@ -178,20 +184,37 @@ impl Transition {
         let permitted = words(&self.caps.permitted);
         let inheritable = words(&self.caps.inheritable);
         let data = [
-            Data { effective: effective[0], permitted: permitted[0], inheritable: inheritable[0] },
-            Data { effective: effective[1], permitted: permitted[1], inheritable: inheritable[1] },
+            Data {
+                effective: effective[0],
+                permitted: permitted[0],
+                inheritable: inheritable[0],
+            },
+            Data {
+                effective: effective[1],
+                permitted: permitted[1],
+                inheritable: inheritable[1],
+            },
         ];
-        let header = Header { version: VERSION_3, pid: 0 };
+        let header = Header {
+            version: VERSION_3,
+            pid: 0,
+        };
         if libc::syscall(libc::SYS_capset, &header, data.as_ptr()) != 0 {
-            return std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EPERM);
+            return std::io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(libc::EPERM);
         }
         for cap in &self.caps.ambient {
             if libc::prctl(libc::PR_CAP_AMBIENT_RAISE, *cap as libc::c_ulong, 0, 0, 0) != 0 {
-                return std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EPERM);
+                return std::io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or(libc::EPERM);
             }
         }
         if self.no_new_privs && libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
-            return std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EPERM);
+            return std::io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(libc::EPERM);
         }
         0
     }
@@ -229,7 +252,10 @@ mod tests {
     #[test]
     fn capabilities_parse_names_and_reject_garbage() {
         assert_eq!(
-            Capabilities::parse(Some(&json!({"bounding":["CAP_CHOWN","CAP_SETFCAP"],"ambient":["CAP_BPF"]}))).unwrap(),
+            Capabilities::parse(Some(
+                &json!({"bounding":["CAP_CHOWN","CAP_SETFCAP"],"ambient":["CAP_BPF"]})
+            ))
+            .unwrap(),
             Capabilities {
                 bounding: BTreeSet::from([0, 31]),
                 ambient: BTreeSet::from([39]),
@@ -247,7 +273,12 @@ mod tests {
         let root = json!({"uid":0,"gid":65532});
         assert_eq!(
             Transition::new(Some(&root), caps(), true).unwrap(),
-            Transition { uid: 0, gid: 65532, caps: caps(), no_new_privs: true }
+            Transition {
+                uid: 0,
+                gid: 65532,
+                caps: caps(),
+                no_new_privs: true
+            }
         );
         // A non-root process keeps only the bounding restriction, like runc.
         let agent = json!({"uid":1000,"gid":65532});

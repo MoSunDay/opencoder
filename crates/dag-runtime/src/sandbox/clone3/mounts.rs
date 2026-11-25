@@ -85,13 +85,13 @@ impl Mount {
             "nodev" => self.flags |= libc::MS_NODEV,
             "noexec" => self.flags |= libc::MS_NOEXEC,
             "suid" | "dev" | "exec" => {}
-            "rprivate" | "private" | "rslave" | "slave" | "rshared" | "shared"
-            | "runbindable" | "unbindable" => {}
+            "rprivate" | "private" | "rslave" | "slave" | "rshared" | "shared" | "runbindable"
+            | "unbindable" => {}
             // Filesystem options reach the kernel as mount data; a bind mount
             // ignores them, so for binds every unknown word fails closed.
             _ => {
-                let word = !option.is_empty()
-                    && option.bytes().all(|b| b.is_ascii_graphic() && b != b',');
+                let word =
+                    !option.is_empty() && option.bytes().all(|b| b.is_ascii_graphic() && b != b',');
                 if self.kind == Kind::Bind || !word {
                     bail!("unsupported OCI mount option {option:?}");
                 }
@@ -131,8 +131,8 @@ pub(super) fn target(prefix: &Path, destination: &Path) -> Result<CString> {
 pub(super) fn apply(prefix: &Path, mount: &Mount) -> Result<()> {
     ensure!(mount.kind != Kind::Proc, "proc belongs to the sandbox init");
     let target = target(prefix, &mount.destination)?;
-    let source = CString::new(mount.source.as_os_str().as_bytes())
-        .context("mount source contains NUL")?;
+    let source =
+        CString::new(mount.source.as_os_str().as_bytes()).context("mount source contains NUL")?;
     let data = mount.data()?;
     let data = if data.to_bytes().is_empty() {
         std::ptr::null()
@@ -170,7 +170,13 @@ pub(super) fn apply(prefix: &Path, mount: &Mount) -> Result<()> {
                 flags |= libc::MS_REMOUNT
                     | mount.flags
                     | if mount.readonly { libc::MS_RDONLY } else { 0 };
-                libc::mount(std::ptr::null(), target.as_ptr(), std::ptr::null(), flags, std::ptr::null())
+                libc::mount(
+                    std::ptr::null(),
+                    target.as_ptr(),
+                    std::ptr::null(),
+                    flags,
+                    std::ptr::null(),
+                )
             }
             Kind::Tmpfs => libc::mount(
                 c"tmpfs".as_ptr(),
@@ -203,19 +209,28 @@ pub(super) fn apply(prefix: &Path, mount: &Mount) -> Result<()> {
 /// mount namespace; the mounts applied afterwards stay writable, as with runc.
 pub(super) fn readonly_root(rootfs: &Path) -> Result<()> {
     let target = target(rootfs, Path::new(""))?;
-    let flags = libc::MS_BIND
-        | libc::MS_REMOUNT
-        | libc::MS_RDONLY
-        | libc::MS_NODEV
-        | libc::MS_NOSUID;
+    let flags =
+        libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NODEV | libc::MS_NOSUID;
     unsafe {
         ensure!(
-            libc::mount(target.as_ptr(), target.as_ptr(), std::ptr::null(), libc::MS_BIND, std::ptr::null()) == 0,
+            libc::mount(
+                target.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                libc::MS_BIND,
+                std::ptr::null()
+            ) == 0,
             "bind sandbox rootfs: {}",
             std::io::Error::last_os_error()
         );
         ensure!(
-            libc::mount(std::ptr::null(), target.as_ptr(), std::ptr::null(), flags, std::ptr::null()) == 0,
+            libc::mount(
+                std::ptr::null(),
+                target.as_ptr(),
+                std::ptr::null(),
+                flags,
+                std::ptr::null()
+            ) == 0,
             "remount sandbox rootfs read-only: {}",
             std::io::Error::last_os_error()
         );
@@ -242,9 +257,19 @@ pub(super) fn devices(prefix: &Path) -> Result<()> {
         let source = CString::new(source.as_os_str().as_bytes())?;
         let point = CString::new(target.as_os_str().as_bytes())?;
         let result = unsafe {
-            libc::mount(source.as_ptr(), point.as_ptr(), std::ptr::null(), libc::MS_BIND, std::ptr::null())
+            libc::mount(
+                source.as_ptr(),
+                point.as_ptr(),
+                std::ptr::null(),
+                libc::MS_BIND,
+                std::ptr::null(),
+            )
         };
-        ensure!(result == 0, "bind /dev/{name}: {}", std::io::Error::last_os_error());
+        ensure!(
+            result == 0,
+            "bind /dev/{name}: {}",
+            std::io::Error::last_os_error()
+        );
     }
     for (link, original) in [
         // The devpts instance's own ptmx: a 5:2 node opened outside the
@@ -312,12 +337,23 @@ pub(super) fn protection(config: &Value) -> Result<Protection> {
 
 /// Async-signal-safe (the sandbox init calls it after its `chroot`).
 pub(super) unsafe fn protect(protection: &Protection) -> i32 {
-    let errno = || std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EPERM);
+    let errno = || {
+        std::io::Error::last_os_error()
+            .raw_os_error()
+            .unwrap_or(libc::EPERM)
+    };
     for path in &protection.masked {
         if libc::access(path.as_ptr(), libc::F_OK) != 0 {
             continue;
         }
-        if libc::mount(c"/dev/null".as_ptr(), path.as_ptr(), std::ptr::null(), libc::MS_BIND, std::ptr::null()) != 0 {
+        if libc::mount(
+            c"/dev/null".as_ptr(),
+            path.as_ptr(),
+            std::ptr::null(),
+            libc::MS_BIND,
+            std::ptr::null(),
+        ) != 0
+        {
             return errno();
         }
     }
@@ -327,8 +363,20 @@ pub(super) unsafe fn protect(protection: &Protection) -> i32 {
         }
         let bind = libc::MS_BIND | libc::MS_REC;
         let remount = libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY;
-        if libc::mount(path.as_ptr(), path.as_ptr(), std::ptr::null(), bind, std::ptr::null()) != 0
-            || libc::mount(std::ptr::null(), path.as_ptr(), std::ptr::null(), remount, std::ptr::null()) != 0
+        if libc::mount(
+            path.as_ptr(),
+            path.as_ptr(),
+            std::ptr::null(),
+            bind,
+            std::ptr::null(),
+        ) != 0
+            || libc::mount(
+                std::ptr::null(),
+                path.as_ptr(),
+                std::ptr::null(),
+                remount,
+                std::ptr::null(),
+            ) != 0
         {
             return errno();
         }
@@ -352,18 +400,40 @@ mod tests {
         ]});
         let mounts = parse_all(&config).unwrap();
         assert_eq!(mounts.len(), 5);
-        assert_eq!(mounts[0], Mount { kind: Kind::Bind, source: PathBuf::from("/run/x"), destination: PathBuf::from("workspace"),
-            recursive: false, readonly: false, flags: libc::MS_NOSUID | libc::MS_NODEV, data: vec![] });
+        assert_eq!(
+            mounts[0],
+            Mount {
+                kind: Kind::Bind,
+                source: PathBuf::from("/run/x"),
+                destination: PathBuf::from("workspace"),
+                recursive: false,
+                readonly: false,
+                flags: libc::MS_NOSUID | libc::MS_NODEV,
+                data: vec![]
+            }
+        );
         assert!(mounts[1].recursive && mounts[1].readonly);
-        assert_eq!(mounts[2].flags, libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC);
+        assert_eq!(
+            mounts[2].flags,
+            libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC
+        );
         assert_eq!(mounts[2].data, ["mode=1777", "size=256m"]);
-        assert_eq!(mounts[3].data, ["newinstance", "ptmxmode=0666", "mode=0620", "gid=5"]);
+        assert_eq!(
+            mounts[3].data,
+            ["newinstance", "ptmxmode=0666", "mode=0620", "gid=5"]
+        );
         assert_eq!(mounts[4].kind, Kind::Proc);
-        assert!(parse_all(&json!({"mounts":[{"type":"bind","destination":"/w","options":["bind"]}]})).is_err());
+        assert!(parse_all(
+            &json!({"mounts":[{"type":"bind","destination":"/w","options":["bind"]}]})
+        )
+        .is_err());
         assert!(parse_all(&json!({"mounts":[{"type":"overlay","destination":"/w"}]})).is_err());
         assert!(parse_all(&json!({"mounts":[{"type":"bind","source":"/a","destination":"/w","options":["rshared"]}]})).is_ok());
         assert!(parse_all(&json!({"mounts":[{"type":"bind","source":"/a","destination":"/w","options":["idmap"]}]})).is_err());
-        assert!(parse_all(&json!({"mounts":[{"type":"proc","destination":"/proc","options":["ro"]}]})).is_err());
+        assert!(parse_all(
+            &json!({"mounts":[{"type":"proc","destination":"/proc","options":["ro"]}]})
+        )
+        .is_err());
         assert!(parse_all(&json!({"mounts":[]})).is_ok());
         assert!(parse_all(&json!({})).is_err());
     }
@@ -371,13 +441,26 @@ mod tests {
     #[test]
     fn destinations_are_absolute_normalized_guest_paths() {
         assert_eq!(normalized("/").unwrap(), PathBuf::new());
-        assert_eq!(normalized("/run/opencoder-private/exec").unwrap(), PathBuf::from("run/opencoder-private/exec"));
+        assert_eq!(
+            normalized("/run/opencoder-private/exec").unwrap(),
+            PathBuf::from("run/opencoder-private/exec")
+        );
         assert_eq!(normalized("/a//b/").unwrap(), PathBuf::from("a/b"));
         assert!(normalized("relative").is_err());
         assert!(normalized("/a/../b").is_err());
         assert_eq!(normalized("/a/./b").unwrap(), PathBuf::from("a/b"));
-        assert_eq!(target(Path::new("/r"), &normalized("/proc/sys").unwrap()).unwrap().to_bytes(), b"/r/proc/sys");
-        assert_eq!(target(Path::new("/r"), &normalized("/").unwrap()).unwrap().to_bytes(), b"/r");
+        assert_eq!(
+            target(Path::new("/r"), &normalized("/proc/sys").unwrap())
+                .unwrap()
+                .to_bytes(),
+            b"/r/proc/sys"
+        );
+        assert_eq!(
+            target(Path::new("/r"), &normalized("/").unwrap())
+                .unwrap()
+                .to_bytes(),
+            b"/r"
+        );
     }
 
     #[test]
@@ -390,6 +473,9 @@ mod tests {
         assert!(empty.masked.is_empty() && empty.readonly.is_empty());
         assert!(protection(&json!({"linux":{"readonlyPaths":["/proc/../x"]}})).is_err());
         assert!(protection(&json!({"linux":{"maskedPaths":[1]}})).is_err());
-        assert!(protection(&json!({"maskedPaths":["/proc/kcore"]})).unwrap().masked.is_empty());
+        assert!(protection(&json!({"maskedPaths":["/proc/kcore"]}))
+            .unwrap()
+            .masked
+            .is_empty());
     }
 }

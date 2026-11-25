@@ -245,12 +245,10 @@ fn hidden_say_pair_behind_a_subagent_row_does_not_end_blank() {
         sealed_say("final answer"),
     ]);
     assert!(!marker_between.last_block_ends_blank());
-    assert!(
-        marker_between
-            .tool_call_headers()
-            .iter()
-            .all(|h| h.header_line_idx == 0)
-    );
+    assert!(marker_between
+        .tool_call_headers()
+        .iter()
+        .all(|h| h.header_line_idx == 0));
 }
 
 /// Replay yields the same shape — child blocks interleave under their

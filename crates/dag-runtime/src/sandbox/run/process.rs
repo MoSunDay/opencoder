@@ -1,7 +1,4 @@
-use super::{
-    super::clone3::Backend,
-    Receipt,
-};
+use super::{super::clone3::Backend, Receipt};
 use crate::step_log::{StepOutputLog, Stream};
 use anyhow::{ensure, Context, Result};
 use serde_json::json;
@@ -87,7 +84,11 @@ pub async fn execute(
                 .as_deref()
                 .context("clone3 receipt is missing the runner path")?;
             let mut command = Command::new(runner);
-            command.arg("exec").arg(root).arg(&key).stdin(Stdio::piped());
+            command
+                .arg("exec")
+                .arg(root)
+                .arg(&key)
+                .stdin(Stdio::piped());
             command
         }
     };

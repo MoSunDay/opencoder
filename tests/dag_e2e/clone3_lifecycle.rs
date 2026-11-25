@@ -73,7 +73,8 @@ fn pinned_native_backend_needs_no_runc_and_is_never_replaced_by_it() {
             {"name": "run", "kind": {"type":"binary", "resource":"hello"}},
         ]}),
     );
-    let cases: [(usize, &str, bool); 3] = [(0, "clone3", true), (1, "runc", false), (2, "clone3", true)];
+    let cases: [(usize, &str, bool); 3] =
+        [(0, "clone3", true), (1, "runc", false), (2, "clone3", true)];
     for (index, sandbox, accepted) in cases {
         pin_sandbox(&fleet, sandbox);
         let run = format!("dag-pinned-native-{index}");
@@ -83,7 +84,10 @@ fn pinned_native_backend_needs_no_runc_and_is_never_replaced_by_it() {
             // preflight, naming the requirement: no fallback to clone3.
             assert_eq!(status, 400, "dispatch {run}: {body}");
             let error = body["error"].as_str().unwrap_or_default();
-            assert!(error.contains("preflight") && error.contains("runc"), "{error}");
+            assert!(
+                error.contains("preflight") && error.contains("runc"),
+                "{error}"
+            );
             continue;
         }
         assert_eq!(status, 202, "dispatch {run}: {body}");
@@ -94,7 +98,10 @@ fn pinned_native_backend_needs_no_runc_and_is_never_replaced_by_it() {
         let receipt = read_json(&run_root.join("container.json"));
         assert_eq!(receipt["backend"], "clone3", "{receipt}");
         // Nothing of the OCI runtime is materialised for a native run.
-        assert!(!run_root.join("runc-state").exists(), "OCI state under a native run");
+        assert!(
+            !run_root.join("runc-state").exists(),
+            "OCI state under a native run"
+        );
     }
     assert_eq!(stub.request_count(), 0);
 }
@@ -121,7 +128,9 @@ fn node_restart_interrupts_the_run_and_resume_reuses_it() {
     );
     let (status, body) = dispatch_raw(&fleet, definition, run);
     assert_eq!(status, 202, "dispatch {run}: {body}");
-    fleet.wait_status(run, "late step running", 30, |doc| doc["dag_steps"]["running"] == 1);
+    fleet.wait_status(run, "late step running", 30, |doc| {
+        doc["dag_steps"]["running"] == 1
+    });
     let run_root = fleet.run_root(run);
     let live = wait_for_live(&run_root);
     let node_id = fleet.node_id();

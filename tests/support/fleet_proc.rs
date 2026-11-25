@@ -205,7 +205,14 @@ impl Fleet {
     }
 
     pub fn spawn_conversations(workdir: &Path, stub_port: u16, node_name: &str) -> Self {
-        Self::spawn_inner(workdir, stub_port, json!({}), node_name, Some(false), Vec::new())
+        Self::spawn_inner(
+            workdir,
+            stub_port,
+            json!({}),
+            node_name,
+            Some(false),
+            Vec::new(),
+        )
     }
 
     fn spawn_inner(

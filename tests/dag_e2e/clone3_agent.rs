@@ -10,7 +10,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::clone3_fixtures::{assert_released, backend_ready, expected_backends, read_json, recorded};
+use crate::clone3_fixtures::{
+    assert_released, backend_ready, expected_backends, read_json, recorded,
+};
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::LlmStub;
 use crate::support::native::copy_rootfs;
@@ -51,7 +53,10 @@ fn write_agent_card(agents: &Path) {
         &agents.join("prompts/probe/meta.json"),
         &json!({"name": "probe", "current": 1, "history": [1]}).to_string(),
     );
-    write(&agents.join("prompts/probe/v1/soul.md"), "Sandbox harness probe\n");
+    write(
+        &agents.join("prompts/probe/v1/soul.md"),
+        "Sandbox harness probe\n",
+    );
 }
 
 #[test]
@@ -103,12 +108,19 @@ fn harness_agent_step_runs_the_rootfs_binary_inside_the_sandbox() {
     assert_eq!(status, 202, "dispatch {RUN}: {body}");
     let doc = fleet.wait_terminal(RUN);
     assert_eq!(doc["execution"]["status"], "done", "inspect: {doc}");
-    assert_eq!(stub.request_count(), 0, "a harness step never calls the LLM");
+    assert_eq!(
+        stub.request_count(),
+        0,
+        "a harness step never calls the LLM"
+    );
 
     // Receipts archived on the host from the sandboxed harness run.
     let run_root = fleet.run_root(RUN);
     let step_dir = run_root.join(STEP);
-    assert_eq!(read_json(&step_dir.join("output.json")), json!({"ok": true}));
+    assert_eq!(
+        read_json(&step_dir.join("output.json")),
+        json!({"ok": true})
+    );
     let session = read_json(&step_dir.join("session.json"));
     assert_eq!(session["harness"], "codex", "{session}");
     assert_eq!(session["thread_id"], "e2e-codex-thread", "{session}");
@@ -116,16 +128,23 @@ fn harness_agent_step_runs_the_rootfs_binary_inside_the_sandbox() {
     let meta = read_json(&step_dir.join("meta.json"));
     assert_eq!(meta["outcome"], "done", "{meta}");
     assert_eq!(meta["session_id"], session["session_id"], "{meta}");
-    assert!(step_dir.join("messages.json").is_file(), "archived receipts");
-    assert!(step_dir.join("transcript.txt").is_file(), "archived receipts");
+    assert!(
+        step_dir.join("messages.json").is_file(),
+        "archived receipts"
+    );
+    assert!(
+        step_dir.join("transcript.txt").is_file(),
+        "archived receipts"
+    );
 
     // The harness ran as the `exec` JSONL protocol driver from inside the
     // sandbox and could refresh its credential home, which is rw-bound.
-    let argv: Vec<String> = std::fs::read_to_string(run_root.join("upper").join(STEP).join("argv.txt"))
-        .unwrap()
-        .lines()
-        .map(str::to_string)
-        .collect();
+    let argv: Vec<String> =
+        std::fs::read_to_string(run_root.join("upper").join(STEP).join("argv.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
     assert!(argv.iter().any(|arg| arg == "exec"), "{argv:?}");
     assert!(argv.iter().any(|arg| arg == "--json"), "{argv:?}");
     assert_eq!(argv.last().unwrap(), "-", "{argv:?}");
@@ -137,16 +156,22 @@ fn harness_agent_step_runs_the_rootfs_binary_inside_the_sandbox() {
     // Backend receipt and the sandbox shape the harness ran in.
     let receipt = read_json(&run_root.join("container.json"));
     assert!(
-        expected_backends()
-            .contains(&receipt["backend"].as_str().unwrap_or_default()),
+        expected_backends().contains(&receipt["backend"].as_str().unwrap_or_default()),
         "{receipt}"
     );
     let bundle = read_json(&run_root.join("bundle/config.json"));
-    assert_eq!(bundle["process"]["args"], json!(["/usr/bin/dag-runner", "init"]));
+    assert_eq!(
+        bundle["process"]["args"],
+        json!(["/usr/bin/dag-runner", "init"])
+    );
     assert_eq!(bundle["root"]["readonly"], json!(true));
-    let env = bundle["process"]["env"].as_array().cloned().unwrap_or_default();
+    let env = bundle["process"]["env"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert!(
-        !env.iter().any(|entry| entry.as_str().unwrap_or_default().contains("API_KEY=")),
+        !env.iter()
+            .any(|entry| entry.as_str().unwrap_or_default().contains("API_KEY=")),
         "{env:?}"
     );
     let mounts = bundle["mounts"].as_array().cloned().unwrap_or_default();
@@ -157,13 +182,22 @@ fn harness_agent_step_runs_the_rootfs_binary_inside_the_sandbox() {
                 == codex_home.canonicalize().ok()
         })
         .unwrap_or_else(|| panic!("no credential home mount in {mounts:?}"));
-    assert!(home_mount["options"].as_array().unwrap().contains(&json!("rw")));
-    assert!(!home_mount["options"].as_array().unwrap().contains(&json!("ro")));
+    assert!(home_mount["options"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("rw")));
+    assert!(!home_mount["options"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("ro")));
     let private = mounts
         .iter()
         .find(|mount| mount["destination"] == json!("/run/opencoder-private"))
         .unwrap_or_else(|| panic!("no private mount in {mounts:?}"));
-    assert!(private["options"].as_array().unwrap().contains(&json!("ro")));
+    assert!(private["options"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("ro")));
     assert_released(&run_root, recorded(&run_root).as_ref(), fleet.agent_pid());
 
     // A rootfs without the harness binary is refused before anything runs.
@@ -175,5 +209,8 @@ fn harness_agent_step_runs_the_rootfs_binary_inside_the_sandbox() {
     );
     assert_eq!(status, 400, "dispatch without the harness: {body}");
     let error = body["error"].as_str().unwrap_or_default();
-    assert!(error.contains("preflight") && error.contains("executable"), "{error}");
+    assert!(
+        error.contains("preflight") && error.contains("executable"),
+        "{error}"
+    );
 }

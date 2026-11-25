@@ -39,7 +39,10 @@ pub(crate) fn launch(root: &Path) -> Result<i32> {
     );
     let config: Value = serde_json::from_slice(&std::fs::read(root.join("bundle/config.json"))?)?;
     let mut stdin: libc::stat = unsafe { std::mem::zeroed() };
-    checked(unsafe { libc::fstat(0, &mut stdin) }, "inspect launcher stdin")?;
+    checked(
+        unsafe { libc::fstat(0, &mut stdin) },
+        "inspect launcher stdin",
+    )?;
     ensure!(
         (stdin.st_mode & libc::S_IFMT) == libc::S_IFIFO,
         "clone3 sandbox launcher stdin must be the node's lease pipe"
@@ -57,7 +60,12 @@ impl Plan {
         let proc = all
             .iter()
             .find(|mount| mount.kind == mounts::Kind::Proc)
-            .map(|mount| Ok::<_, anyhow::Error>((mounts::target(Path::new("/"), &mount.destination)?, mount.flags)))
+            .map(|mount| {
+                Ok::<_, anyhow::Error>((
+                    mounts::target(Path::new("/"), &mount.destination)?,
+                    mount.flags,
+                ))
+            })
             .transpose()?;
         let mounts: Vec<_> = all
             .into_iter()
@@ -65,7 +73,8 @@ impl Plan {
             .collect();
         Ok(Self {
             rootfs: rootfs.to_path_buf(),
-            rootfs_c: CString::new(rootfs.as_os_str().as_bytes()).context("run root contains NUL")?,
+            rootfs_c: CString::new(rootfs.as_os_str().as_bytes())
+                .context("run root contains NUL")?,
             mounts,
             protection: mounts::protection(config)?,
             proc,
@@ -156,22 +165,33 @@ impl Plan {
         let mut offset = 0;
         while offset < ready.len() {
             let count = unsafe {
-                libc::read(ready_read, ready[offset..].as_mut_ptr().cast(), ready.len() - offset)
+                libc::read(
+                    ready_read,
+                    ready[offset..].as_mut_ptr().cast(),
+                    ready.len() - offset,
+                )
             };
             if count < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
                 continue;
             }
             if count <= 0 {
                 let _ = reap(pid);
-                bail!("clone3 sandbox init failed before exec: {}", diagnostic(root));
+                bail!(
+                    "clone3 sandbox init failed before exec: {}",
+                    diagnostic(root)
+                );
             }
             offset += count as usize;
         }
         let record = InitRecord {
             init,
-            launcher: super::identity(std::process::id() as i32).context("read launcher identity")?,
+            launcher: super::identity(std::process::id() as i32)
+                .context("read launcher identity")?,
         };
-        opencoder_core::atomic_write(&root.join(super::INIT_RECORD), &serde_json::to_vec(&record)?)?;
+        opencoder_core::atomic_write(
+            &root.join(super::INIT_RECORD),
+            &serde_json::to_vec(&record)?,
+        )?;
         unsafe { supervise(pidfd, pid) }
     }
 
@@ -198,11 +218,21 @@ impl Plan {
             report("init", "duplicate lease", errno());
         }
         libc::dup2(null, 0);
-        if libc::chdir(self.rootfs_c.as_ptr()) != 0 || libc::chroot(c".".as_ptr()) != 0 || libc::chdir(c"/".as_ptr()) != 0 {
+        if libc::chdir(self.rootfs_c.as_ptr()) != 0
+            || libc::chroot(c".".as_ptr()) != 0
+            || libc::chdir(c"/".as_ptr()) != 0
+        {
             report("init", STEPS[0], errno());
         }
         if let Some((target, flags)) = &self.proc {
-            if libc::mount(c"proc".as_ptr(), target.as_ptr(), c"proc".as_ptr(), *flags, std::ptr::null()) != 0 {
+            if libc::mount(
+                c"proc".as_ptr(),
+                target.as_ptr(),
+                c"proc".as_ptr(),
+                *flags,
+                std::ptr::null(),
+            ) != 0
+            {
                 report("init", STEPS[1], errno());
             }
         }
@@ -210,7 +240,9 @@ impl Plan {
         if code != 0 {
             report("init", STEPS[2], code);
         }
-        if libc::write(ready, READY.as_ptr() as *mut libc::c_void, READY.len()) != READY.len() as isize {
+        if libc::write(ready, READY.as_ptr() as *mut libc::c_void, READY.len())
+            != READY.len() as isize
+        {
             report("init", STEPS[3], errno());
         }
         let code = self.process.transition.apply();
@@ -284,8 +316,16 @@ unsafe fn supervise(pidfd: i32, pid: libc::pid_t) -> Result<i32> {
         libc::signal(signal, stop as *const () as libc::sighandler_t);
     }
     let mut polls = [
-        libc::pollfd { fd: pidfd, events: libc::POLLIN, revents: 0 },
-        libc::pollfd { fd: 0, events: 0, revents: 0 },
+        libc::pollfd {
+            fd: pidfd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: 0,
+            events: 0,
+            revents: 0,
+        },
     ];
     let mut stopping = false;
     loop {
@@ -341,7 +381,10 @@ pub(super) fn checked(result: i32, what: &str) -> Result<()> {
 
 fn pipe() -> Result<(i32, i32)> {
     let mut fds = [0; 2];
-    checked(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) }, "open sandbox pipe")?;
+    checked(
+        unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) },
+        "open sandbox pipe",
+    )?;
     Ok((fds[0], fds[1]))
 }
 

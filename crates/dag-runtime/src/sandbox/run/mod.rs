@@ -4,8 +4,8 @@ mod output;
 mod process;
 mod recovery;
 
-use anyhow::{ensure, Context, Result};
 use super::clone3::Backend;
+use anyhow::{ensure, Context, Result};
 use opencoder_dag::DagClaimedRun;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -216,8 +216,7 @@ impl RunContainer {
                 id: self.id.clone(),
                 agent_uid: uid,
                 backend,
-                runner: (backend == Backend::Clone3)
-                    .then(|| rootfs.join("usr/bin/dag-runner")),
+                runner: (backend == Backend::Clone3).then(|| rootfs.join("usr/bin/dag-runner")),
             })?,
         )?;
         Ok(())

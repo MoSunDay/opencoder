@@ -153,7 +153,8 @@ mod tests {
             let config: DagConfig = serde_json::from_str(text).unwrap();
             assert_eq!(config.sandbox, expected, "{text}");
             assert_eq!(
-                serde_json::from_value::<DagConfig>(serde_json::to_value(&config).unwrap()).unwrap(),
+                serde_json::from_value::<DagConfig>(serde_json::to_value(&config).unwrap())
+                    .unwrap(),
                 config
             );
         }

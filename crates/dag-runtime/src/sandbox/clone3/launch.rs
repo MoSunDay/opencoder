@@ -150,4 +150,3 @@ impl Drop for Launcher {
         }
     }
 }
-

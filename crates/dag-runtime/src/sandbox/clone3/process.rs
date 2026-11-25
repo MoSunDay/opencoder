@@ -118,12 +118,18 @@ mod tests {
     fn process_rejects_incomplete_specs() {
         let mut spec = process();
         spec["args"] = json!([]);
-        assert!(Process::parse(&spec).unwrap_err().to_string().contains("empty"));
+        assert!(Process::parse(&spec)
+            .unwrap_err()
+            .to_string()
+            .contains("empty"));
         spec["args"] = json!(["/bin/sh", 7]);
         assert!(Process::parse(&spec).is_err());
         spec["args"] = json!(["/bin/sh"]);
         spec["cwd"] = json!("workspace");
-        assert!(Process::parse(&spec).unwrap_err().to_string().contains("absolute"));
+        assert!(Process::parse(&spec)
+            .unwrap_err()
+            .to_string()
+            .contains("absolute"));
         spec["cwd"] = json!("/w\u{0}ork");
         assert!(Process::parse(&spec).is_err());
         spec["cwd"] = json!("/");

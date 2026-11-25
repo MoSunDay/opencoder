@@ -9,8 +9,6 @@ mod container;
 
 struct BindMounts(Vec<std::path::PathBuf>);
 
-
-
 impl BindMounts {
     fn bind(&mut self, source: &Path, target: &Path) {
         let status = Command::new("mount")
@@ -44,14 +42,15 @@ async fn probe(root: &Path, config: &opencoder_core::Config, script: &str) -> (i
     .unwrap();
     let backend = opencoder_dag_runtime::sandbox::clone3::select(config).unwrap();
     let owner = RunContainer::start(root, config, &run).await.unwrap();
-    let init = (backend == Backend::Clone3)
-        .then(|| {
-            let record: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(root.join("private/clone3/init.json")).unwrap())
-                    .unwrap();
-            (record["init"]["pid"].as_i64().unwrap(), record["init"]["start_time"].as_u64().unwrap())
-        })
-        ;
+    let init = (backend == Backend::Clone3).then(|| {
+        let record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("private/clone3/init.json")).unwrap())
+                .unwrap();
+        (
+            record["init"]["pid"].as_i64().unwrap(),
+            record["init"]["start_time"].as_u64().unwrap(),
+        )
+    });
     let result = execute(
         root,
         StepProcess {
@@ -89,7 +88,10 @@ async fn probe(root: &Path, config: &opencoder_core::Config, script: &str) -> (i
                     .and_then(|(_, tail)| tail.split_whitespace().nth(19))
                     .is_some_and(|field| field.parse::<u64>() == Ok(start_time))
             });
-            assert!(!still_running, "clone3 init {pid} survived cleanup: {stat:?}");
+            assert!(
+                !still_running,
+                "clone3 init {pid} survived cleanup: {stat:?}"
+            );
             "init_gone"
         }
     };

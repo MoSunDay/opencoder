@@ -114,7 +114,9 @@ pub fn runc_list(run_root: &Path) -> Option<Value> {
         .args(["list", "--format", "json"])
         .output()
         .ok()?;
-    output.status.success()
+    output
+        .status
+        .success()
         .then(|| serde_json::from_slice(&output.stdout).ok())
         .flatten()
 }
@@ -132,7 +134,12 @@ pub fn wait_for_live(run_root: &Path) -> Live {
             .and_then(|list| list.as_array().and_then(|rows| rows.first().cloned()))
             .and_then(|row| row["pid"].as_i64())
             .and_then(|pid| identity(i32::try_from(pid).unwrap()));
-        if let Some(live) = native.or_else(|| oci.map(|init| Live { init, launcher: None })) {
+        if let Some(live) = native.or_else(|| {
+            oci.map(|init| Live {
+                init,
+                launcher: None,
+            })
+        }) {
             return live;
         }
         assert!(
@@ -163,7 +170,10 @@ pub fn wait_gone(live: &Live, label: &str) {
         if !alive {
             return;
         }
-        assert!(Instant::now() < deadline, "{label}: sandbox processes survived 30 s");
+        assert!(
+            Instant::now() < deadline,
+            "{label}: sandbox processes survived 30 s"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -222,8 +232,8 @@ pub fn namespace(pid: u32, kind: &str) -> u64 {
 /// namespace has no host path to compare.
 pub fn dir_identity(path: &Path) -> (u64, u64) {
     use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(path)
-        .unwrap_or_else(|error| panic!("stat {}: {error}", path.display()));
+    let meta =
+        std::fs::metadata(path).unwrap_or_else(|error| panic!("stat {}: {error}", path.display()));
     (meta.dev(), meta.ino())
 }
 

@@ -255,6 +255,8 @@ mod tests {
             Ok(1),
         ])));
         // A lease that cannot be read leaves the sandbox unowned: stop now.
-        assert!(lease_ended(&mut Scripted(vec![Err(ErrorKind::BrokenPipe.into())])));
+        assert!(lease_ended(&mut Scripted(vec![Err(
+            ErrorKind::BrokenPipe.into()
+        )])));
     }
 }

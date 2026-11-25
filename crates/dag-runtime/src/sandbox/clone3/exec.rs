@@ -55,7 +55,8 @@ pub(crate) fn relay(root: &Path, key: &str) -> Result<i32> {
     let env = pointers(&process.env);
     // Opened on the node: once the relay enters the sandbox root, the run
     // root's absolute path no longer resolves to the node's filesystem.
-    let exec_dir = std::fs::File::open(&exec).with_context(|| format!("open {}", exec.display()))?;
+    let exec_dir =
+        std::fs::File::open(&exec).with_context(|| format!("open {}", exec.display()))?;
     let pid_name = CString::new(format!("{key}.pid")).context("step key contains NUL")?;
     unsafe {
         namespaces.enter()?;
@@ -131,7 +132,10 @@ impl Namespaces {
     /// the children forked afterwards, so it is entered last.
     unsafe fn enter(self) -> Result<()> {
         // A relay inside a runtime thread must own its filesystem state.
-        checked(libc::unshare(libc::CLONE_FS), "unshare step relay filesystem")?;
+        checked(
+            libc::unshare(libc::CLONE_FS),
+            "unshare step relay filesystem",
+        )?;
         checked(
             libc::setns(self.mounts.as_raw_fd(), libc::CLONE_NEWNS),
             "enter sandbox mount namespace",
@@ -139,9 +143,18 @@ impl Namespaces {
         checked(libc::fchdir(self.root.as_raw_fd()), "enter sandbox root")?;
         checked(libc::chroot(c".".as_ptr()), "chroot into sandbox root")?;
         checked(libc::chdir(c"/".as_ptr()), "enter sandbox /")?;
-        checked(libc::setns(self.uts.as_raw_fd(), libc::CLONE_NEWUTS), "enter sandbox UTS namespace")?;
-        checked(libc::setns(self.ipc.as_raw_fd(), libc::CLONE_NEWIPC), "enter sandbox IPC namespace")?;
-        checked(libc::setns(self.pid.as_raw_fd(), libc::CLONE_NEWPID), "enter sandbox PID namespace")?;
+        checked(
+            libc::setns(self.uts.as_raw_fd(), libc::CLONE_NEWUTS),
+            "enter sandbox UTS namespace",
+        )?;
+        checked(
+            libc::setns(self.ipc.as_raw_fd(), libc::CLONE_NEWIPC),
+            "enter sandbox IPC namespace",
+        )?;
+        checked(
+            libc::setns(self.pid.as_raw_fd(), libc::CLONE_NEWPID),
+            "enter sandbox PID namespace",
+        )?;
         Ok(())
     }
 }
@@ -179,8 +192,16 @@ unsafe fn supervise(pidfd: i32, pid: libc::pid_t) -> Result<i32> {
         libc::signal(signal, stop as *const () as libc::sighandler_t);
     }
     let mut polls = [
-        libc::pollfd { fd: pidfd, events: libc::POLLIN, revents: 0 },
-        libc::pollfd { fd: 0, events: 0, revents: 0 },
+        libc::pollfd {
+            fd: pidfd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: 0,
+            events: 0,
+            revents: 0,
+        },
     ];
     let mut stopping: Option<Instant> = None;
     let mut killed = false;

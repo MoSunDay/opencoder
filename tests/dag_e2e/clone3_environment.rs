@@ -13,7 +13,7 @@ use crate::clone3_fixtures::{
     mounts_under, namespace, read_json, status_field, wait_for_live,
 };
 use crate::clone3_probe::PROBE_C;
-use crate::fixtures::{publish, SPIN_C, stdout_source};
+use crate::fixtures::{publish, stdout_source, SPIN_C};
 use crate::support::fleet_proc::Fleet;
 use crate::support::llm_stub::LlmStub;
 
@@ -95,12 +95,36 @@ impl Credential {
     }
 
     fn assert_host(&self, pid: i32, label: &str) {
-        assert_eq!(status_field(pid, "Uid"), Self::quad(&self.uid.to_string()), "{label}");
-        assert_eq!(status_field(pid, "Gid"), Self::quad(&self.gid.to_string()), "{label}");
-        assert_eq!(status_field(pid, "CapBnd"), Self::hex(self.bounding), "{label}");
-        assert_eq!(status_field(pid, "CapPrm"), Self::hex(self.permitted), "{label}");
-        assert_eq!(status_field(pid, "CapEff"), Self::hex(self.effective), "{label}");
-        assert_eq!(status_field(pid, "CapAmb"), Self::hex(self.ambient), "{label}");
+        assert_eq!(
+            status_field(pid, "Uid"),
+            Self::quad(&self.uid.to_string()),
+            "{label}"
+        );
+        assert_eq!(
+            status_field(pid, "Gid"),
+            Self::quad(&self.gid.to_string()),
+            "{label}"
+        );
+        assert_eq!(
+            status_field(pid, "CapBnd"),
+            Self::hex(self.bounding),
+            "{label}"
+        );
+        assert_eq!(
+            status_field(pid, "CapPrm"),
+            Self::hex(self.permitted),
+            "{label}"
+        );
+        assert_eq!(
+            status_field(pid, "CapEff"),
+            Self::hex(self.effective),
+            "{label}"
+        );
+        assert_eq!(
+            status_field(pid, "CapAmb"),
+            Self::hex(self.ambient),
+            "{label}"
+        );
         assert_eq!(status_field(pid, "NoNewPrivs"), "1", "{label}");
     }
 }
@@ -158,12 +182,14 @@ fn assert_receipt(fleet: &Fleet, run: &str) {
     let receipt = read_json(&run_root.join("container.json"));
     assert_eq!(receipt["id"], json!(format!("dag-run-{run}")), "{receipt}");
     assert!(
-        expected_backends()
-            .contains(&receipt["backend"].as_str().unwrap_or_default()),
+        expected_backends().contains(&receipt["backend"].as_str().unwrap_or_default()),
         "backend of {receipt}"
     );
     let bundle = read_json(&run_root.join("bundle/config.json"));
-    assert_eq!(bundle["process"]["args"], json!(["/usr/bin/dag-runner", "init"]));
+    assert_eq!(
+        bundle["process"]["args"],
+        json!(["/usr/bin/dag-runner", "init"])
+    );
     assert_eq!(bundle["root"]["readonly"], json!(true));
     assert_eq!(bundle["process"]["noNewPrivileges"], json!(true));
     let namespaces: Vec<&str> = bundle["linux"]["namespaces"]
@@ -219,9 +245,15 @@ fn step_sandbox_is_namespaced_readonly_and_unprivileged() {
     assert_eq!(facts["gid"], credential.gid);
     assert_eq!(facts["egid"], credential.gid);
     credential.assert_status(status, "step");
-    assert_eq!(credential.bounding, 0xb, "the bounding set is the fixture's");
+    assert_eq!(
+        credential.bounding, 0xb,
+        "the bounding set is the fixture's"
+    );
     let nspid = status["nspid"].as_str().unwrap();
-    assert_eq!(nspid.parse::<u64>().unwrap(), facts["pid"].as_u64().unwrap());
+    assert_eq!(
+        nspid.parse::<u64>().unwrap(),
+        facts["pid"].as_u64().unwrap()
+    );
     assert_ne!(nspid, "1", "the step must not be the sandbox init");
 
     // PID 1 is the rootfs supervisor: same credentials, pid 1 of the namespace.
@@ -262,7 +294,10 @@ fn step_sandbox_is_namespaced_readonly_and_unprivileged() {
     // procfs answers a missing entry with ENOENT on its read-only sys tree;
     // what matters is that the create was refused.
     assert_eq!(rdonly["proc_sys"], 1, "{rdonly}");
-    assert!(matches!(write["proc_sys"].as_i64(), Some(EROFS) | Some(2)), "{write}");
+    assert!(
+        matches!(write["proc_sys"].as_i64(), Some(EROFS) | Some(2)),
+        "{write}"
+    );
     for path in ["tmp", "workspace"] {
         assert_eq!(rdonly[path], 0, "{rdonly}");
         assert_eq!(write[path], 0, "{write}");
@@ -319,7 +354,9 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
         ]}),
     );
     dispatch(&fleet, definition, run);
-    fleet.wait_status(run, "hold step running", 30, |doc| doc["dag_steps"]["running"] == 1);
+    fleet.wait_status(run, "hold step running", 30, |doc| {
+        doc["dag_steps"]["running"] == 1
+    });
     assert_receipt(&fleet, run);
 
     // Host view of the live init: pid 1 of a private PID namespace, running
@@ -327,7 +364,10 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
     let run_root = fleet.run_root(run);
     let live = wait_for_live(&run_root);
     let me = std::process::id();
-    assert_eq!(status_field(live.init.pid, "NSpid"), format!("{} 1", live.init.pid));
+    assert_eq!(
+        status_field(live.init.pid, "NSpid"),
+        format!("{} 1", live.init.pid)
+    );
     assert_eq!(status_field(live.init.pid, "Name"), "dag-runner");
     Credential::of(&read_json(&run_root.join("bundle/config.json")))
         .assert_host(live.init.pid, "init");
@@ -352,7 +392,11 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
     assert_eq!(pts.kind, "devpts");
     assert!(!pts.read_only());
     assert!(!mount_at(&table, "/workspace").read_only());
-    for point in ["/proc/sys", "/run/opencoder-private", "/workspace/hold/meta"] {
+    for point in [
+        "/proc/sys",
+        "/run/opencoder-private",
+        "/workspace/hold/meta",
+    ] {
         assert!(mount_at(&table, point).read_only(), "{point}: {table:?}");
     }
 
@@ -367,7 +411,10 @@ fn live_sandbox_is_visible_from_the_host_and_released_on_cancel() {
 
     // The native launcher keeps the lease from the host's PID namespace.
     if let Some(launcher) = live.launcher {
-        assert_eq!(status_field(launcher.pid, "NSpid"), launcher.pid.to_string());
+        assert_eq!(
+            status_field(launcher.pid, "NSpid"),
+            launcher.pid.to_string()
+        );
         assert_eq!(namespace(launcher.pid as u32, "pid"), namespace(me, "pid"));
         assert_ne!(namespace(launcher.pid as u32, "mnt"), namespace(me, "mnt"));
     }

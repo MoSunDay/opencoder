@@ -137,12 +137,20 @@ pub fn assert_runtime_released(root: &Path) {
         ),
         // A native run materialises nothing of the OCI runtime.
         DagSandbox::Clone3 => {
-            assert!(!state.exists(), "OCI state under a native run: {}", root.display());
+            assert!(
+                !state.exists(),
+                "OCI state under a native run: {}",
+                root.display()
+            );
         }
         // Either shape, as long as nothing is left behind.
         DagSandbox::Auto => {
             if let Ok(mut entries) = std::fs::read_dir(&state) {
-                assert!(entries.next().is_none(), "runtime state of a released run: {}", root.display());
+                assert!(
+                    entries.next().is_none(),
+                    "runtime state of a released run: {}",
+                    root.display()
+                );
             }
         }
     }

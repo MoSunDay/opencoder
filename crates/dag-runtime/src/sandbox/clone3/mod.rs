@@ -252,11 +252,15 @@ mod tests {
 
     #[test]
     fn stat_parsing_skips_comm_with_spaces_and_parens() {
-        let stat = "42 (dag (runner) x) S 1 42 42 0 -1 4194560 10 0 0 0 1 0 0 0 20 0 1 0 98765 100 7";
+        let stat =
+            "42 (dag (runner) x) S 1 42 42 0 -1 4194560 10 0 0 0 1 0 0 0 20 0 1 0 98765 100 7";
         assert_eq!(parse_stat(stat), Some((98765, true)));
         // starttime is field 22: the value after it (vsize) must not be mistaken for it.
         assert_ne!(parse_stat(stat), Some((100, true)));
-        assert_eq!(parse_stat(&stat.replace(") S 1", ") Z 1")), Some((98765, false)));
+        assert_eq!(
+            parse_stat(&stat.replace(") S 1", ") Z 1")),
+            Some((98765, false))
+        );
         assert_eq!(parse_stat("invalid"), None);
         assert!(identity(0).is_none());
     }

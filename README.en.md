@@ -85,9 +85,9 @@ and `SHA256SUMS`) are published on
 [GitHub Releases](https://github.com/MoSunDay/opencoder/releases); install an
 extracted bundle with `scripts/install.sh --bundle <dir> --dest-dir /usr/local/bin`.
 
-The Linux bundle is built on ubuntu-24.04 (glibc 2.39) and has been verified to run on a
-glibc 2.35 host (a `GLIBC_2.39` weak version warning is printed at startup); older glibc
-versions are unverified.
+The Linux bundle is built on ubuntu-24.04 (glibc 2.39); its binaries have been verified to
+start on a glibc 2.35 host (`--version` / `--build-info`; a `GLIBC_2.39` weak version warning
+is printed at startup). Older glibc versions are unverified.
 
 ### Configuration
 

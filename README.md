@@ -86,8 +86,8 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 [GitHub Releases](https://github.com/MoSunDay/opencoder/releases)；解包后可用
 `scripts/install.sh --bundle <解包目录> --dest-dir /usr/local/bin` 安装。
 
-Linux 包在 ubuntu-24.04（glibc 2.39）上构建，已在 glibc 2.35 主机上验证可运行（启动时有
-`GLIBC_2.39` weak version 警告）；更低的 glibc 版本未验证。
+Linux 包在 ubuntu-24.04（glibc 2.39）上构建，已在 glibc 2.35 主机上验证二进制可启动
+（`--version` / `--build-info`；启动时有 `GLIBC_2.39` weak version 警告）；更低的 glibc 版本未验证。
 
 ### 配置
 

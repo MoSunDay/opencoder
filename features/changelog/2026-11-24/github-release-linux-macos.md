@@ -79,11 +79,14 @@
 - `.github/workflows/release.yml`：Release 说明追加 tag 对应的 `features/changelog/` 目录链接，
   便于从发布页找到「功能 → 测试名」映射。
 - `README.md` / `README.en.md`：补充 Linux 包的 glibc 基线（ubuntu-24.04 / glibc 2.39 构建，
-  glibc 2.35 主机验证可运行，更低版本未验证）。
-- 溯源说明：tag `v0.1.1` 指向 `844df6f09`，该提交不在 main 祖先链上（并行开发期间 main 历史被
-  重写），其 tree 与 `f81f64ca0` 相同（`2cfab4b0c`）；发布内容与 `--build-info` 的 commit 以
-  tag 为准。已发布的 v0.1.1 Release 说明未含 changelog 链接（本机无发布凭据，无法回填），
-  新说明模板自下一次 tag 起生效。
+  glibc 2.35 主机验证二进制可启动（`--version` / `--build-info`），更低版本未验证）。
+- 溯源说明：tag `v0.1.1` 指向 `844df6f09`，该提交不在 main 祖先链上（main 历史在并行开发期间
+  已变更，原因未追溯），其 tree 与 `f81f64ca0` 相同（`2cfab4b0c`）；发布内容与 `--build-info`
+  的 commit 以 tag 为准。已发布的 v0.1.1 Release 说明未含 changelog 链接（本机无发布凭据，
+  无法回填），新说明模板自下一次 tag 起生效。
+- 措辞收敛：README 的「验证可运行」改为「验证二进制可启动（`--version` / `--build-info`）」，
+  溯源说明只陈述可验证事实。版本提取 `awk '/^version = "/'` 在虚拟 manifest 下正确，且 tag
+  校验使用同一提取，提取错误会在构建前失败而非误发布，故保持不改。
 
 ## 测试覆盖（收尾修正）
 

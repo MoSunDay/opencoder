@@ -1,4 +1,3 @@
-import { summaryColumns } from './summary/view.jsx';
 import { SummaryHistory } from './summary/history.jsx';
 import { peopleColumns } from './people/fields.jsx';
 import { EditButton } from '../ui/permissions.jsx';
@@ -18,7 +17,6 @@ export function initiativeColumns({ openInitiative }) {
     { title: '所属项目', key: 'project', width: 300, kind: 'enum', searchValue: (r) => r.goal_title || '未关联', render: (_, r) => <TableText>{r.goal_title}</TableText> },
     { title: 'TODO 数', key: 'todos', width: 100, kind: 'number', searchValue: (r) => r.progress.total, render: (_, r) => r.progress.total },
     ...peopleColumns(),
-    ...summaryColumns,
     { title: '进度', key: 'progress', width: 170, kind: 'number', searchValue: (r) => r.progress.percent, render: (_, r) => <TodoProgress progress={r.progress} /> },
   ];
 }
@@ -45,7 +43,7 @@ export function InitiativesTab({ overview, loading, refresh, onNotice, openIniti
   </Space> }];
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
     <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建子项</EditButton>
-    <ProjectTable scroll={{ x: 2060 }} label="子项表格" rows={rows} columns={columns} onRowClick={(row) => openInitiative(row.id)} loading={loading} locale={{ emptyText: '还没有子项' }} />
+    <ProjectTable scroll={{ x: 1570 }} label="子项表格" rows={rows} columns={columns} onRowClick={(row) => openInitiative(row.id)} loading={loading} locale={{ emptyText: '还没有子项' }} />
     <MdEditDrawer open={open} title={editing ? '编辑子项' : '新建子项'} detailLabel="子项目标" initial={editing}
       extraTop={<><Form.Item name="goal_id" label="所属项目"><Select {...searchSelect} aria-label="goal_id" placeholder="独立子项" options={projectOptions(overview)} /></Form.Item></>}
       onCancel={() => setOpen(false)} onOk={save} />

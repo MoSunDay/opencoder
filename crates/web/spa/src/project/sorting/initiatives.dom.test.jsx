@@ -63,6 +63,9 @@ it.each(['projects', 'initiatives', 'project-initiatives'])('opens history from 
   render(kind === 'projects' ? <ProjectsTab overview={overview} refresh={p.refresh} onNotice={p.onNotice} openProject={open} />
     : kind === 'initiatives' ? <InitiativesTab overview={overview} refresh={p.refresh} onNotice={p.onNotice} openInitiative={open} />
       : <ProjectInitiatives {...p} rows={[rows[0]]} openInitiative={open} />);
+  // 现状 lives in the detail drawer; every table projection stays summary-free.
+  expect(screen.queryByRole('columnheader', { name: '现状' })).toBeNull();
+  expect(screen.queryByRole('columnheader', { name: '现状更新时间' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '现状历史' }));
   const history = await screen.findByRole('dialog', { name: '现状修改记录' });
   expect(await within(history).findByText('历史正文')).toBeTruthy();

@@ -1,4 +1,3 @@
-import { summaryColumns } from './summary/view.jsx';
 import { SummaryHistory } from './summary/history.jsx';
 import { peopleColumns } from './people/fields.jsx';
 import { EditButton } from '../ui/permissions.jsx';
@@ -38,7 +37,6 @@ export function ProjectsTab({ overview, loading, refresh, onNotice, openProject 
     { title: 'TODO 数', key: 'todos', width: 100, kind: 'number', searchValue: (r) => r.progress.total, render: (_, r) => r.progress.total },
     { title: '总进度', key: 'progress', width: 170, kind: 'number', searchValue: (r) => r.progress.percent, render: (_, r) => <TodoProgress progress={r.progress} /> },
     ...peopleColumns(),
-    ...summaryColumns,
     { ...dateColumn, width: 170 },
     { title: '操作', key: 'actions', width: 170, fixed: 'right', render: (_, row) => <Space size={4} wrap onClick={(e) => e.stopPropagation()}>
       <SummaryHistory compact collection="goals" record={row} refresh={refresh} /><Dropdown menu={{ items: [
@@ -50,7 +48,7 @@ export function ProjectsTab({ overview, loading, refresh, onNotice, openProject 
   return <Space orientation="vertical" style={{ width: '100%' }} size={12}>
     {contextHolder}
     <EditButton type="primary" onClick={() => { setEditing(null); setOpen(true); }}>新建项目</EditButton>
-    <ProjectTable scroll={{ x: 1840 }} label="项目表格" rows={rows} columns={columns} onRowClick={(row) => openProject(row.id)} loading={loading} locale={{ emptyText: '还没有项目' }} />
+    <ProjectTable scroll={{ x: 1350 }} label="项目表格" rows={rows} columns={columns} onRowClick={(row) => openProject(row.id)} loading={loading} locale={{ emptyText: '还没有项目' }} />
     <MdEditDrawer open={open} title={editing ? '编辑项目' : '新建项目'} initial={editing} onCancel={() => setOpen(false)} onOk={save} />
   </Space>;
 }

@@ -7,6 +7,8 @@ import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
 import { HEADERLESS_REASONS, NAV_CATEGORIES, PAGE_META, allowedPages, categoryHome, groupedMenuItemsOf, menuItemsOf, selectItemsOf, visibleCategories, withCurrentPage } from './nav.js';
 
+// Group headings render icon + text; the plain category name is the last child.
+const groupText = (group) => (isValidElement(group.label) ? group.label.props.children.at(-1) : group.label);
 // Flat {category, page, menu, icon} rows for table-driven assertions.
 const ALL_ITEMS = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => ({ ...i, category: c.key })));
 const ALL_PAGES = ALL_ITEMS.map((i) => i.page);
@@ -100,7 +102,7 @@ describe('groupedMenuItemsOf (header brand menu)', () => {
   it('groups the complete IA by category in order, reusing menuItemsOf children', () => {
     const groups = groupedMenuItemsOf(NAV_CATEGORIES);
     expect(groups.map((group) => group.type)).toEqual(['group', 'group', 'group', 'group']);
-    expect(groups.map((group) => group.label)).toEqual(['项目', 'Agent', 'Ontology', '后台管理']);
+    expect(groups.map(groupText)).toEqual(['项目', 'Agent', 'Ontology', '后台管理']);
     expect(groups.flatMap((group) => group.children.map((item) => item.key))).toEqual(ALL_PAGES);
     // Flattened labels and icons are exactly the per-category menu projection.
     expect(groups.flatMap((group) => group.children))
@@ -108,9 +110,24 @@ describe('groupedMenuItemsOf (header brand menu)', () => {
     expect(groups[3].children).toEqual(menuItemsOf(NAV_CATEGORIES[3].items));
   });
 
+  it('decorates every group heading with a decorative category icon', () => {
+    // antd icons are forwardRef objects, not functions: assert through the
+    // element they render into instead of `typeof icon`.
+    expect(new Set(NAV_CATEGORIES.map((category) => category.icon)).size).toBe(NAV_CATEGORIES.length);
+    const groups = groupedMenuItemsOf(NAV_CATEGORIES);
+    groups.forEach((group, index) => {
+      expect(isValidElement(group.label)).toBe(true);
+      const [icon, text] = group.label.props.children;
+      expect(isValidElement(icon)).toBe(true);
+      expect(icon.type).toBe(NAV_CATEGORIES[index].icon);
+      expect(icon.props['aria-hidden']).toBe(true);
+      expect(text).toBe(NAV_CATEGORIES[index].label);
+    });
+  });
+
   it('groups only the categories handed in (permission-filtered IA)', () => {
     const groups = groupedMenuItemsOf(visibleCategories({ role: 'viewer' }));
-    expect(groups.map((group) => group.label)).toEqual(['项目', 'Agent', 'Ontology']);
+    expect(groups.map(groupText)).toEqual(['项目', 'Agent', 'Ontology']);
     expect(groups.flatMap((group) => group.children.map((item) => item.key)))
       .toEqual(ALL_ITEMS.filter((item) => item.category !== 'admin').map((item) => item.page));
   });

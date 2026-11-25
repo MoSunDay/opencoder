@@ -49,7 +49,9 @@ describe('header brand menu', () => {
 
     const scoped = within(panel);
     for (const category of NAV_CATEGORIES) {
-      expect(scoped.getByText(category.label, { selector: '.ant-menu-item-group-title' })).toBeTruthy();
+      const heading = scoped.getByText(category.label, { selector: '.fleet-nav-group-label' });
+      expect(heading.closest('.ant-menu-item-group-title')).toBeTruthy();
+      expect(heading.querySelector('.anticon')).toBeTruthy();
     }
     for (const item of ALL_ITEMS) {
       const name = new RegExp(`${escapeLabel(item.menu)}$`);

@@ -127,10 +127,11 @@ async function main() {
         const table = tab === 'Tag' ? page.getByLabel('Tag 表格', { exact: true }) : page.getByRole('tabpanel', { name: tab, exact: true }).locator('.project-table');
         await table.waitFor();
         if (tab === '项目' || tab === '子项') {
-          await table.locator('thead').getByText('现状', { exact: true }).waitFor();
-          await table.locator('thead').getByText('现状更新时间', { exact: true }).waitFor();
+          // 现状 moved out of the tables: it stays in the detail drawer only.
+          const head = await table.locator('thead').allInnerTexts();
+          assert(!head.includes('现状') && !head.includes('现状更新时间'), `${tab} table must not list 现状 columns`);
           const summary = tab === '项目' ? overview.goals[0].current_summary : overview.goals[0].initiatives[0].current_summary;
-          assert.equal(await table.getByText(summary, { exact: true }).count(), 1);
+          assert.equal(await table.getByText(summary, { exact: true }).count(), 0);
         }
         const bounds = await table.evaluate((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, content: el.scrollWidth, width: el.clientWidth }));
         assert(bounds.left >= -1 && bounds.right <= width + 1 && bounds.content <= bounds.width + 1, `${tab} width ${width}: ${JSON.stringify(bounds)}`);

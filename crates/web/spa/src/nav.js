@@ -17,6 +17,7 @@ import {
   ProfileOutlined,
   ProjectOutlined,
   RobotOutlined,
+  SettingOutlined,
   ApartmentOutlined,
   DatabaseOutlined,
   LinkOutlined,
@@ -33,6 +34,7 @@ export const NAV_CATEGORIES = [
   {
     key: 'project',
     label: '项目',
+    icon: ProjectOutlined,
     items: [
       { page: 'project', menu: 'Overview', icon: ProjectOutlined },
       { page: 'projectTags', menu: 'Tag', icon: TagsOutlined },
@@ -41,6 +43,7 @@ export const NAV_CATEGORIES = [
   {
     key: 'agent',
     label: 'Agent',
+    icon: RobotOutlined,
     items: [
       { page: 'brain', menu: '大脑调度', icon: ThunderboltOutlined },
       { page: 'topics', menu: '全部执行', icon: ProfileOutlined },
@@ -55,6 +58,7 @@ export const NAV_CATEGORIES = [
   {
     key: 'ontology',
     label: 'Ontology',
+    icon: ApartmentOutlined,
     items: [
       { page: 'ontologyGraph', menu: '图谱', icon: ApartmentOutlined },
       { page: 'ontologyEntities', menu: '实体', icon: DatabaseOutlined },
@@ -66,6 +70,7 @@ export const NAV_CATEGORIES = [
   {
     key: 'admin',
     label: '后台管理',
+    icon: SettingOutlined,
     items: [
       { page: 'nodes', menu: '节点列表', icon: ClusterOutlined },
       { page: 'users', menu: '用户权限', icon: TeamOutlined },
@@ -148,13 +153,17 @@ export function menuItemsOf(items) {
 }
 
 /// antd Menu GROUP items for the complete visible IA: one group per category
-/// (label = category.label) and menuItemsOf children. The header brand menu
-/// renders this; the Sider keeps its single-category menuItemsOf projection.
+/// (label = category icon + category.label) and menuItemsOf children. The
+/// header brand menu renders this; the Sider keeps its single-category
+/// menuItemsOf projection. The icon is decorative (aria-hidden) so the group
+/// title's accessible text stays the plain category label.
 export function groupedMenuItemsOf(categories) {
   return categories.map((category) => ({
     type: 'group',
     key: `group-${category.key}`,
-    label: category.label,
+    label: createElement('span', { className: 'fleet-nav-group-label' },
+      createElement(category.icon, { 'aria-hidden': true }),
+      category.label),
     children: menuItemsOf(category.items),
   }));
 }

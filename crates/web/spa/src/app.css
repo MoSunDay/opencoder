@@ -163,6 +163,14 @@ body {
   font-weight: 600;
   letter-spacing: 0.4px;
 }
+.fleet-nav-panel .fleet-nav-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fleet-nav-panel .fleet-nav-group-label .anticon {
+  font-size: 12px;
+}
 .fleet-header-side {
   margin-left: auto;
   display: flex;

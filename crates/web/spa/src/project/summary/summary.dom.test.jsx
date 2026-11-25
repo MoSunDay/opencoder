@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import '../../test/setup-dom.js';
 
 vi.mock('../../api.js', () => ({ apiGet: vi.fn(async () => ({ people: [] })) }));
-import { CurrentSummary, summaryColumns } from './view.jsx';
+import { CurrentSummary } from './view.jsx';
 import { MdEditDrawer } from '../views/mdDrawer.jsx';
-import { ProjectTable } from '../views/projectTable.jsx';
 
 beforeEach(() => localStorage.clear());
 
@@ -37,19 +36,6 @@ it('edits and clears the summary but omits unchanged text when only other fields
   fireEvent.click(screen.getByRole('button', { name: '保 存' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(3));
   expect(save.mock.calls[2][0].current_summary).toBe('');
-});
-
-it('includes summary text and update time in project table filters', async () => {
-  render(<ProjectTable label="现状表格" columns={summaryColumns} rows={[
-    { id: 'a', current_summary: '核心工作：接口联调' },
-    { id: 'b', current_summary: '剩余卡点：设备不足' },
-  ]} />);
-  fireEvent.click(screen.getByLabelText('筛选现状'));
-  const input = await screen.findByLabelText('搜索现状');
-  fireEvent.change(input, { target: { value: '设备不足' } });
-  fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
-  await waitFor(() => expect(within(screen.getByLabelText('现状表格')).queryByText('核心工作：接口联调')).toBeNull());
-  expect(within(screen.getByLabelText('现状表格')).getByText('剩余卡点：设备不足')).toBeTruthy();
 });
 
 it('does not overwrite a newly refreshed summary when saving an unchanged edit buffer', async () => {

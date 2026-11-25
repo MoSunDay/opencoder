@@ -383,5 +383,10 @@ pub async fn bootstrap_is_noop(conn: &Connection, runtime_reporting: bool) -> Re
         .context("runtime table count row")?
         .get::<i64>(0)?;
     drop(rows);
-    Ok(present == 3)
+    if present != 3 {
+        return Ok(false);
+    }
+    // A legacy guidance queue (no `eligible` column) only converges inside
+    // `reporting::initialize`, so it makes the bootstrap a real step again.
+    super::reporting::schema_is_current(conn).await
 }

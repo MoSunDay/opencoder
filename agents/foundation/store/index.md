@@ -30,7 +30,8 @@ Commit: 0abfe0c77
   调度台账与定义表
 - [schema.rs](../../../crates/store/src/turso_store/bootstrap/schema.rs)
   （bootstrap/）— schema 初始化与版本升级；只读版本探针让 schema 就绪的
-  暖打开跳过写锁引导+checkpoint（不等待跨进程写锁）；升级链与专项迁移在
+  暖打开跳过写锁引导+checkpoint（不等待跨进程写锁），探针同时校验活跃索引
+  与 guidance 队列形状，legacy 形状仍走完整 bootstrap；升级链与专项迁移在
   [bootstrap/schema/](../../../crates/store/src/turso_store/bootstrap/schema)
   （migrations.rs、catalog.rs、access.rs、project_links.rs、session_activity.rs 等；v41 活跃索引换形与坏页探测/回填）
 - [tokens.rs](../../../crates/store/src/turso_store/identity/users/tokens.rs) —

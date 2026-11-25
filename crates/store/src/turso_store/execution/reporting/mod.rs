@@ -1,6 +1,6 @@
 mod queue;
 mod read;
-use anyhow::Result;
+use anyhow::{Context, Result};
 pub(super) use queue::{acknowledge, recover, update};
 pub(super) use read::{acks, has_pending, operation, pending, state};
 use turso::Connection;
@@ -33,6 +33,36 @@ pub(super) async fn initialize(conn: &Connection) -> Result<()> {
     }
     conn.execute("CREATE INDEX IF NOT EXISTS execution_reports_ready ON execution_report_queue(key) WHERE eligible=1", ()).await?;
     Ok(())
+}
+
+/// Whether the queue already carries this build's shape. `initialize` is the
+/// only place that adds the `eligible` column and its partial index, so a
+/// legacy queue makes the bootstrap a real step instead of a warm-open no-op.
+pub(super) async fn schema_is_current(conn: &Connection) -> Result<bool> {
+    let mut columns = conn
+        .query("PRAGMA table_info(execution_report_queue)", ())
+        .await?;
+    let mut has_eligible = false;
+    while let Some(row) = columns.next().await? {
+        has_eligible |= row.get::<String>(1)? == "eligible";
+    }
+    drop(columns);
+    if !has_eligible {
+        return Ok(false);
+    }
+    let mut rows = conn
+        .query(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'execution_reports_ready'",
+            (),
+        )
+        .await?;
+    let present = rows
+        .next()
+        .await?
+        .context("report ready index count row")?
+        .get::<i64>(0)?;
+    drop(rows);
+    Ok(present == 1)
 }
 
 pub(super) async fn format(conn: &Connection, reader: u32, writer: u32) -> Result<()> {

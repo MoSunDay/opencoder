@@ -20,8 +20,8 @@ env:
   CARGO_PROFILE_TEST_DEBUG: '0'
 
 jobs:
-  libsql:
-    name: libsql project store contract
+  store:
+    name: turso project store contract
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -34,20 +34,20 @@ jobs:
         shell: bash
         run: |
           set +e
-          cargo test --locked -p opencoder-store 2>&1 | tee "$RUNNER_TEMP/libsql-tests.log"
+          cargo test --locked -p opencoder-store 2>&1 | tee "$RUNNER_TEMP/store-tests.log"
           result=${PIPESTATUS[0]}
           set -e
           if [ "$result" -ne 0 ]; then
-            failure=$(tail -n 60 "$RUNNER_TEMP/libsql-tests.log" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
-            printf '::error title=libsql contract failure::%s\n' "$failure"
+            failure=$(tail -n 60 "$RUNNER_TEMP/store-tests.log" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
+            printf '::error title=store contract failure::%s\n' "$failure"
           fi
           exit "$result"
-      - name: Preserve libsql test output
+      - name: Preserve store test output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: libsql-project-tests
-          path: ${{ runner.temp }}/libsql-tests.log
+          name: turso-project-tests
+          path: ${{ runner.temp }}/store-tests.log
           if-no-files-found: error
           retention-days: 7
 

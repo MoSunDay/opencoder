@@ -107,3 +107,21 @@
   删除。仓库内依赖这些名称的测试与验收脚本已全部迁移；仓库外脚本需同步。
 - 部署：dist 内嵌进 server 二进制，线上要看到效果需重建并重启 server；本次未改 API、CLI、
   Rust 代码与依赖。
+
+## 发布构建与验收实例部署（提交后补记）
+
+- 提交 `4ac4659dd` 后 `CARGO_TARGET_DIR=/tmp/oc-rel-target scripts/platform/release/build.sh --output
+  /tmp/oc-rel-brand/dist/opencoder-platform-4ac4659dd` → manifest 与 7 个二进制校验通过，
+  `0.1.1 (4ac4659dd)`、`git_dirty=false`、`spa_sha256=bd873f6a…465d3d`，兼容矩阵与 `43d373697`
+  相同（protocol 1 / data_format 12）。构建日志里 `opencoder-core` 的 2 条 warning 为既有警告，
+  本次未改 Rust。
+- `scripts/acceptance/ontology/main.py --server <包>/bin/opencoder-server --root /tmp/oc-ontology-acc-4ac4659dd`
+  （私有挂载命名空间 + 真实只读 NFS）→ `passed: true`、`nfs_read_only: true`，浏览器回执
+  `desktop: ["项目","Agent","Ontology","后台管理"]`，4 页检查全部为 true，清理完成。
+- 验收实例 8091：`install.sh --source <包>/bin/opencoder-server --dest target/release/opencoder-server
+  --no-build --backup`，回滚点 `target/release/opencoder-server.bak.20261126223537`（`43d373697`）；
+  22:35:41 重启 `opencoder-server-acceptance`，`/api/health` → `0.1.1 (4ac4659dd)`，已装二进制
+  SHA256 与发布包一致；重启后 journal 零 ERROR/WARN。真实浏览器打开 8091：面板为
+  `项目 / Agent / Ontology / 后台管理 [current]`，页面错误 0，截图
+  `/tmp/uitest/brand-tabs/live-8091-open.png`。
+- 18080 Fleet 仍为 `43d373697`（旧菜单），四单元 active；是否把本次 UI 改动发到 Fleet 待决定。

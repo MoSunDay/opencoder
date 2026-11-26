@@ -15,6 +15,9 @@ const CATEGORY_TAB = '.fleet-mobile-nav[role="tablist"] [role="tab"]';
 const ACTIVE_CATEGORY_TAB = `${CATEGORY_TAB}[aria-selected="true"]`;
 const PAGE_SELECT = '.ant-select.fleet-mobile-nav';
 const PAGE_OPTIONS = '.ant-select-dropdown:visible .ant-select-item-option-content';
+// The SPA's own breakpoint (app.css): below 768px the Sider is display:none
+// and the Content carries the category tabs + page Select instead.
+const NARROW_BELOW = 768;
 
 let categoriesPromise;
 
@@ -31,11 +34,22 @@ function categoryOfPage(categories, name) {
   return categories.find((category) => category.items.some((item) => matches(item.menu)));
 }
 
+/// Hover opens the panel on pointer ENTRY: a panel closed while the pointer
+/// stayed on the trigger (Escape, a tab pick) never sees a second mouseenter,
+/// so the brand would only react after the click fallback below. Park the
+/// pointer in the middle of the header first — empty space far from the wordmark
+/// and the header-side controls — so every hover is a real entry.
+async function parkPointer(page) {
+  const size = page.viewportSize();
+  if (size) await page.mouse.move(Math.floor(size.width / 2), 2);
+}
+
 /// Brand → category tab. Hover opens the panel for fine pointers; a coarse
 /// pointer only opens it on click.
 async function openCategory(page, label) {
   const brand = page.locator(BRAND);
   const tab = page.locator(PANEL).getByRole('menuitem', { name: label, exact: true });
+  await parkPointer(page);
   await brand.hover();
   try {
     await tab.waitFor({ state: 'visible', timeout: 3000 });
@@ -48,25 +62,36 @@ async function openCategory(page, label) {
   await tab.waitFor({ state: 'hidden' });
 }
 
+/// Which page menu this viewport uses, once the shell has rendered it. The
+/// Sider and the tabs only mount after /api/me, so this auto-waits: a caller
+/// that navigates straight after goto() must not be mistaken for a narrow
+/// viewport (isVisible() on a not-yet-mounted Sider is simply false).
+async function pageSurface(page) {
+  const width = page.viewportSize()?.width ?? await page.evaluate(() => window.innerWidth);
+  const narrow = width < NARROW_BELOW;
+  await page.locator(narrow ? CATEGORY_TAB : SIDER).waitFor({ state: 'visible' });
+  return narrow;
+}
+
 /// Open one page by its Sider menu label (exact string or RegExp).
 async function openPage(page, name) {
   const categories = await navCategories();
   const category = categoryOfPage(categories, name);
   if (!category) throw new Error(`no page menu label matches ${name}`);
-  const sider = page.locator(SIDER);
-  const target = sider.getByRole('menuitem', { name, exact: true });
-  if (await sider.isVisible()) {
-    if (!(await target.isVisible())) await openCategory(page, category.label);
-    await target.click();
+  if (await pageSurface(page)) {
+    // Narrow viewport: category tabs + the page Select replace the Sider.
+    const active = page.locator(ACTIVE_CATEGORY_TAB);
+    if (!(await active.count()) || (await active.textContent()).trim() !== category.label) {
+      await page.locator(CATEGORY_TAB).getByText(category.label, { exact: true }).click();
+    }
+    await page.locator(`${PAGE_SELECT} input`).click();
+    await page.locator(PAGE_OPTIONS).getByText(name, { exact: true }).click();
     return;
   }
-  // Narrow viewport: category tabs + the page Select replace the Sider.
-  const active = page.locator(ACTIVE_CATEGORY_TAB);
-  if (!(await active.count()) || (await active.textContent()).trim() !== category.label) {
-    await page.locator(CATEGORY_TAB).getByText(category.label, { exact: true }).click();
-  }
-  await page.locator(`${PAGE_SELECT} input`).click();
-  await page.locator(PAGE_OPTIONS).getByText(name, { exact: true }).click();
+  const sider = page.locator(SIDER);
+  const target = sider.getByRole('menuitem', { name, exact: true });
+  if (!(await target.isVisible())) await openCategory(page, category.label);
+  await target.click();
 }
 
 module.exports = { categoryOfPage, navCategories, openPage };

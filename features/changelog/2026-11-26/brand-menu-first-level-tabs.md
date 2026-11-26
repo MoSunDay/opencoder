@@ -67,7 +67,7 @@
 | 显式导航持久化到 localStorage | `首次进入不预写存储；显式导航把所选页写入 localStorage` | `crates/web/spa/src/navPersistence.dom.test.jsx` |
 | 项目深链与菜单导航 | `opens a shared project ahead of a saved page, follows history and clears the link on menu navigation` | `crates/web/spa/src/appProjectLinks.dom.test.jsx` |
 | 验收 helper：分类归属解析 | `every page label resolves back to its own category, as a string and as a RegExp`、`'Agent' resolves to the Agent category through its chat page, never through the category label`、`'实体' resolves to ontology; unknown or partial labels resolve to nothing` | `scripts/acceptance/harness/navigation.test.js` |
-| 验收 helper：桌面 / 窄屏路径与回退 | `openPage() walks brand → category tab → Sider page when the page is outside the active category`、`openPage() only clicks the Sider page when its category is already active`、`openCategory() falls back to clicking the brand when hovering does not open the panel`、`openPage() switches the category tab, then picks the page Select when the Sider is hidden` | `scripts/acceptance/harness/navigation.test.js` |
+| 验收 helper：桌面 / 窄屏路径与回退 | `openPage() walks brand → category tab → Sider page when the page is outside the active category`、`openPage() only clicks the Sider page when its category is already active`、`openCategory() falls back to clicking the brand when hovering does not open the panel`、`openPage() switches the category tab, then picks the page Select when the viewport is narrow、`openPage() waits for the shell instead of mistaking a not-yet-mounted Sider for a narrow viewport`` | `scripts/acceptance/harness/navigation.test.js` |
 | 验收 helper：失败透传与未知名称 | `openPage() surfaces non-timeout failures and rejects unknown labels before touching the page`、`navCategories() loads NAV_CATEGORIES from the SPA source of truth once per process` | `scripts/acceptance/harness/navigation.test.js` |
 
 ## 实际执行
@@ -130,3 +130,41 @@
   `项目 / Agent / Ontology / 后台管理 [current]`，页面错误 0，截图
   `/tmp/uitest/brand-tabs/live-8091-open.png`。
 - 18080 Fleet 仍为 `43d373697`（旧菜单），四单元 active；是否把本次 UI 改动发到 Fleet 待决定。
+
+## 收尾：验收 helper 实跑修正与复跑
+
+评审 TODO 3（hover 指针停放）与 TODO 5（实跑 `catalog.py`）的处理结果，只涉及验收脚本，
+不影响已部署的 8091 实例与 Fleet。
+
+- **hover 指针停放**：面板只在指针「进入」词标时打开；上一次面板是在指针仍停在词标上时关闭的
+  （Escape、点选 tab），再次 hover 不会再触发 mouseenter，只能等 3 s 超时后走点击回退。
+  `harness/navigation.js` 新增 `parkPointer(page)`——hover 前把指针移到视口顶部中线（词标与
+  右侧控件之外的空白），保证每次 hover 都是一次真实进入，点击回退只留给真正的失败。实测连续导航中
+  Escape 后 `openPage('DAG 工作流')` 由 6542 ms 降到 1319 ms。
+- **shell 竞态**（`catalog.py` 首跑失败暴露）：helper 原按 `sider.isVisible()` 即时判断视口，而
+  `ontology/entities.mjs`、`ontology/catalog.mjs` 在 `page.goto(base)` 后立刻 `openPage`，此时
+  `/api/me` 未返回、Sider 尚未挂载（`{identity && <Sider>}`），1280 宽被误判为窄屏，去等不会出现的
+  分类 tab 直到超时（证据 `/tmp/oc-ontology-catalog-4ac4659dd/`：`browser.log` 记录
+  `.fleet-mobile-nav … [role="tab"]` is not visible，`entities-1280-failure.png`）。改为
+  `pageSurface(page)`：按视口宽度选分支（`NARROW_BELOW = 768`，对应 `app.css` 中 `<768` 隐藏
+  Sider 的断点），并等待对应的 Sider 或分类 tab 可见后再操作，不再依赖即时可见性。
+- `harness/navigation.test.js` 9 → 10 例：新增「shell 未挂载时不误判为窄屏」；窄屏用例标题由
+  `…when the Sider is hidden` 更正为 `…when the viewport is narrow`。「测试覆盖」表已同步。
+
+实际执行（helper 改动之后）：
+
+- `node --test scripts/acceptance/harness/navigation.test.js` → 10 passed / 0 failed。
+- `scripts/acceptance/ontology/catalog.py --server <verified-server-4ac4659dd>/opencoder-server --root /tmp/oc-ontology-catalog-4ac4659dd-r2`
+  → `{"passed": true}`（首跑 `/tmp/oc-ontology-catalog-4ac4659dd` 即上述竞态导致的失败）。
+- `scripts/acceptance/ontology/main.py --server <verified-server-4ac4659dd>/opencoder-server --root /tmp/oc-ontology-acc-4ac4659dd-r2`
+  （私有挂载命名空间 + 真实只读 NFS）→ `passed: true`、`nfs_read_only: true`，浏览器回执 4 页检查
+  全部为 true，`desktop: ["项目","Agent","Ontology","后台管理"]`，清理完成。
+- `node scripts/acceptance/project_workbench_ui.js` → `{"result":"PASS", widths:[1920,1280,768,390],
+  page_errors:[]}`，截图 `/tmp/uitest/brand-tabs/project-ui/`。
+- `node scripts/acceptance/spa_responsive.js --width {1920,1280,768,390}` → 四个宽度 exit 0，各访问
+  17 页，回执 `passed: true`、`page_errors: []`、`fixture_misses: []`，布局测量各 44 次 0 溢出
+  （测量次数取决于当次每页是否点开浮层 / 非激活 tab，首跑为 43/43/44/44）。截图
+  `/tmp/uitest/brand-tabs/responsive-<宽度>/`。
+- 以上浏览器命令均带 `CHROME_PATH=/usr/bin/chromium-browser`。
+- Clippy / Rust 测试 / SPA 构建与 Vitest：本次只改验收 helper，未改 Rust、SPA 源码与 dist，不适用；
+  对应结果见上文 `4ac4659dd` 的记录。`agents/*`、`features/*` 索引不涉及该 helper，无需同步。

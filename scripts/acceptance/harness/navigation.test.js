@@ -35,7 +35,13 @@ function fakePage(world) {
       waitFor: ({ state }) => { world.log.push(`wait ${state} ${key}`); world.waitFor?.(state, key); },
     };
   };
-  return at([]);
+  // The real page also exposes the viewport and the mouse (pointer parking
+  // before a brand hover); 1440 wide parks the pointer at x = 720. A world
+  // sets `width: 390` to script the narrow layout (<768px: tabs + Select).
+  return Object.assign(at([]), {
+    viewportSize: () => ({ width: world.width ?? 1440, height: 900 }),
+    mouse: { move: (x, y) => world.log.push(`move ${x},${y}`) },
+  });
 }
 
 const loaded = navCategories();
@@ -106,6 +112,8 @@ test('openPage() walks brand → category tab → Sider page when the page is ou
   };
   await openPage(fakePage(world), 'Overview');
   assert.deepEqual(world.log, [
+    `wait visible ${SIDER}`,
+    'move 720,2',
     'hover .fleet-brand',
     `wait visible ${PANEL_PAGE} 项目 exact`,
     `click ${PANEL_PAGE} 项目 exact`,
@@ -117,7 +125,7 @@ test('openPage() walks brand → category tab → Sider page when the page is ou
 test('openPage() only clicks the Sider page when its category is already active', async () => {
   const world = { log: [], visible: { [SIDER]: true, [`${SIDER_PAGE} Tag exact`]: true } };
   await openPage(fakePage(world), 'Tag');
-  assert.deepEqual(world.log, [`click ${SIDER_PAGE} Tag exact`]);
+  assert.deepEqual(world.log, [`wait visible ${SIDER}`, `click ${SIDER_PAGE} Tag exact`]);
 });
 
 test('openCategory() falls back to clicking the brand when hovering does not open the panel', async () => {
@@ -125,13 +133,16 @@ test('openCategory() falls back to clicking the brand when hovering does not ope
   const world = {
     log: [],
     visible: { [SIDER]: true },
-    waitFor: (state) => {
-      if (state === 'visible' && waits++ === 0) throw Object.assign(new Error('Timeout 3000ms exceeded.'), { name: 'TimeoutError' });
+    waitFor: (state, key) => {
+      // Only the brand panel tab fails to appear; the shell wait up front succeeds.
+      if (state === 'visible' && key === `${PANEL_PAGE} 项目 exact` && waits++ === 0) throw Object.assign(new Error('Timeout 3000ms exceeded.'), { name: 'TimeoutError' });
     },
     onClick: (key) => { if (key === `${PANEL_PAGE} 项目 exact`) world.visible[`${SIDER_PAGE} Overview exact`] = true; },
   };
   await openPage(fakePage(world), 'Overview');
   assert.deepEqual(world.log, [
+    `wait visible ${SIDER}`,
+    'move 720,2',
     'hover .fleet-brand',
     `wait visible ${PANEL_PAGE} 项目 exact`,
     'click .fleet-brand',
@@ -142,26 +153,53 @@ test('openCategory() falls back to clicking the brand when hovering does not ope
   ]);
 });
 
-test('openPage() switches the category tab, then picks the page Select when the Sider is hidden', async () => {
+test('openPage() switches the category tab, then picks the page Select when the viewport is narrow', async () => {
   // The right category is already selected: only the page Select is touched.
-  const same = { log: [], count: { [ACTIVE_TAB]: 1 }, text: { [ACTIVE_TAB]: ' Agent ' } };
+  const same = { log: [], width: 390, count: { [ACTIVE_TAB]: 1 }, text: { [ACTIVE_TAB]: ' Agent ' } };
   await openPage(fakePage(same), /^Agent$/);
   assert.deepEqual(same.log, [
+    `wait visible ${TAB}`,
     `click ${SELECT_INPUT}`,
     `click ${OPTION} > text=/^Agent$/ exact`,
   ]);
   // Another category is selected: its tab is clicked first.
-  const other = { log: [], count: { [ACTIVE_TAB]: 1 }, text: { [ACTIVE_TAB]: '后台管理' } };
+  const other = { log: [], width: 390, count: { [ACTIVE_TAB]: 1 }, text: { [ACTIVE_TAB]: '后台管理' } };
   await openPage(fakePage(other), 'Agent 配置');
   assert.deepEqual(other.log, [
+    `wait visible ${TAB}`,
     `click ${TAB} > text=Agent exact`,
     `click ${SELECT_INPUT}`,
     `click ${OPTION} > text=Agent 配置 exact`,
   ]);
   // No tab reports aria-selected: the category tab is clicked too.
-  const none = { log: [] };
+  const none = { log: [], width: 390 };
   await openPage(fakePage(none), '实体');
-  assert.equal(none.log[0], `click ${TAB} > text=Ontology exact`);
+  assert.deepEqual(none.log, [
+    `wait visible ${TAB}`,
+    `click ${TAB} > text=Ontology exact`,
+    `click ${SELECT_INPUT}`,
+    `click ${OPTION} > text=实体 exact`,
+  ]);
+});
+
+test('openPage() waits for the shell instead of mistaking a not-yet-mounted Sider for a narrow viewport', async () => {
+  // Straight after goto(): the Sider mounts only after /api/me, so isVisible()
+  // is false at first sight and the tabs never appear at desktop width.
+  const world = {
+    log: [],
+    waitFor: (state, key) => { if (key === SIDER && state === 'visible') world.visible = { [SIDER]: true }; },
+    onClick: (key) => { if (key === `${PANEL_PAGE} 项目 exact`) world.visible[`${SIDER_PAGE} Overview exact`] = true; },
+  };
+  await openPage(fakePage(world), 'Overview');
+  assert.deepEqual(world.log, [
+    `wait visible ${SIDER}`,
+    'move 720,2',
+    'hover .fleet-brand',
+    `wait visible ${PANEL_PAGE} 项目 exact`,
+    `click ${PANEL_PAGE} 项目 exact`,
+    `wait hidden ${PANEL_PAGE} 项目 exact`,
+    `click ${SIDER_PAGE} Overview exact`,
+  ]);
 });
 
 test('openPage() surfaces non-timeout failures and rejects unknown labels before touching the page', async () => {

@@ -110,18 +110,23 @@
 
 ## 发布构建与验收实例部署（提交后补记）
 
-- 提交 `4ac4659dd` 后 `CARGO_TARGET_DIR=/tmp/oc-rel-target scripts/platform/release/build.sh --output
-  /tmp/oc-rel-brand/dist/opencoder-platform-4ac4659dd` → manifest 与 7 个二进制校验通过，
-  `0.1.1 (4ac4659dd)`、`git_dirty=false`、`spa_sha256=bd873f6a…465d3d`，兼容矩阵与 `43d373697`
-  相同（protocol 1 / data_format 12）。构建日志里 `opencoder-core` 的 2 条 warning 为既有警告，
-  本次未改 Rust。
-- `scripts/acceptance/ontology/main.py --server <包>/bin/opencoder-server --root /tmp/oc-ontology-acc-4ac4659dd`
+- 提交 `4ac4659dd`（22:23:25）后 `CARGO_TARGET_DIR=/tmp/oc-rel-target scripts/platform/release/build.sh`
+  于 22:23:36 启动（脚本自带工作树洁净检查）：主构建 5m50s，`opencoder-core` 约 22:24:30 读入
+  源码，`opencoder-server` 22:29:50 链接完成；`--build-info` 为 `0.1.1 (4ac4659dd)`、
+  `git_dirty=false`、`spa_sha256=bd873f6a…465d3d`，兼容矩阵与 `43d373697` 相同（protocol 1 /
+  data_format 12）。**该发布包不可用于发布**：构建期间（22:25:57 起）并行会话开始改写
+  `crates/core/src/config/*`，主构建读源在其之前、server 二进制未受影响，但随后编译的
+  三个 runner example 读到了进行中的 config 代码（出现 `validate_value is never used` 这条
+  洁净代码中不存在的警告）。已丢弃整个包，只保留经 SHA256 核对、部署到 8091 的
+  `/tmp/oc-rel-brand/verified-server-4ac4659dd/opencoder-server`（`cacbe917…22eda`）；
+  若要把本改动发到 Fleet，须在洁净工作树重新执行 `build.sh`。
+- `scripts/acceptance/ontology/main.py --server <verified-server-4ac4659dd>/opencoder-server --root /tmp/oc-ontology-acc-4ac4659dd`
   （私有挂载命名空间 + 真实只读 NFS）→ `passed: true`、`nfs_read_only: true`，浏览器回执
   `desktop: ["项目","Agent","Ontology","后台管理"]`，4 页检查全部为 true，清理完成。
-- 验收实例 8091：`install.sh --source <包>/bin/opencoder-server --dest target/release/opencoder-server
+- 验收实例 8091：`install.sh --source <verified-server-4ac4659dd>/opencoder-server --dest target/release/opencoder-server
   --no-build --backup`，回滚点 `target/release/opencoder-server.bak.20261126223537`（`43d373697`）；
   22:35:41 重启 `opencoder-server-acceptance`，`/api/health` → `0.1.1 (4ac4659dd)`，已装二进制
-  SHA256 与发布包一致；重启后 journal 零 ERROR/WARN。真实浏览器打开 8091：面板为
+  SHA256 与保留的 server 二进制一致；重启后 journal 零 ERROR/WARN。真实浏览器打开 8091：面板为
   `项目 / Agent / Ontology / 后台管理 [current]`，页面错误 0，截图
   `/tmp/uitest/brand-tabs/live-8091-open.png`。
 - 18080 Fleet 仍为 `43d373697`（旧菜单），四单元 active；是否把本次 UI 改动发到 Fleet 待决定。

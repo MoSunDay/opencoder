@@ -59,8 +59,9 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - [nav.js](../../../crates/web/spa/src/nav.js)、
   [shell/brandNav.jsx](../../../crates/web/spa/src/shell/brandNav.jsx)、
   [shell/categoryTabs.jsx](../../../crates/web/spa/src/shell/categoryTabs.jsx) —
-  平台导航分类；头部品牌菜单承载完整 IA（hover/click），移动端为分类 tabs +
-  Select，Sider 只保留当前分类 Menu
+  平台导航分类；头部品牌菜单只列一级导航（tab），每个分类一项（图标 + 分类名，
+  hover/click），选择后进入该分类首页；Sider 只保留当前分类 Menu，移动端为
+  分类 tabs + Select
 - `project/` — 项目/子项/TODO/Tag 表格、表单、看板与评论
 - [project/navigation/links.js](../../../crates/web/spa/src/project/navigation/links.js)
   — `project/initiative/todo` 定位编解码

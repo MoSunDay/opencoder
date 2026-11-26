@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { checkDetails, checkGraph } from './experience.mjs';
 import { chromium } from '../../../crates/web/spa/node_modules/playwright-core/index.mjs';
+import navigation from '../harness/navigation.js';
 
 const [base, output] = process.argv.slice(2);
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
@@ -8,7 +9,7 @@ const page = await browser.newPage({ viewport: { width: 1200, height: 850 } });
 const failures = [];
 page.on('pageerror', (error) => failures.push(error.message));
 const dialog = page.locator('.ant-modal[role="dialog"]:visible');
-// Sider page menu; scoping avoids the brand panel's copies of the same items while it closes.
+// Sider page menu; scoping keeps page clicks out of the header brand panel.
 const sider = page.locator('#fleet-page-menu');
 const headerless = async (ready) => {
   await ready.waitFor();
@@ -30,14 +31,18 @@ const submit = async () => {
 try {
   await page.addInitScript(() => localStorage.setItem('oc_ontology_env', JSON.stringify('browser_env')));
   await page.goto(`${base}/?token=ontology-fixture`);
-  // Desktop: the Sider carries no category tablist; every category is reached through the
-  // brand panel (shell/brandNav.jsx). Tab overflow is still verified below on the mobile nav.
+  // Desktop: the Sider carries no category tablist and lists the pages of the active category;
+  // the brand panel (shell/brandNav.jsx) lists the first-level tabs only. Tab overflow is still
+  // verified below on the mobile nav.
   assert.equal(await page.locator('.fleet-sidebar [role=tablist]').count(), 0);
   await page.locator('.fleet-brand').hover();
   const panel = page.locator('.fleet-nav-panel');
   const category = await panel.evaluate((element) => [...element.querySelectorAll('[role=menuitem]')].map((item) => item.textContent.trim()));
-  for (const name of ['图谱', '实体', '实体类型', '关系类型', '数据保鲜']) assert(category.includes(name), `brand panel lacks ${name}`);
-  await panel.getByRole('menuitem', { name: '图谱', exact: true }).click();
+  assert(category.includes('Ontology'), `brand panel lacks the Ontology tab: ${JSON.stringify(category)}`);
+  for (const name of ['图谱', '实体', '实体类型', '关系类型', '数据保鲜']) assert(!category.includes(name), `brand panel lists tabs only, found the page ${name}`);
+  await navigation.openPage(page, '图谱');
+  const pages = await sider.evaluate((element) => [...element.querySelectorAll('[role=menuitem]')].map((item) => item.textContent.trim()));
+  for (const name of ['图谱', '实体', '实体类型', '关系类型', '数据保鲜']) assert(pages.includes(name), `sider page menu lacks ${name}`);
   await headerless(page.getByRole('button', { name: '调整范围', exact: true }));
   await sider.getByRole('menuitem', { name: /实体类型$/ }).click();
   await headerless(page.getByRole('cell', { name: '服务', exact: true }));

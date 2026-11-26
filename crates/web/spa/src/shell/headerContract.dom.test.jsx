@@ -44,7 +44,7 @@ import {
 } from '../nav.js';
 import { PANELS } from './panels.jsx';
 
-/// Every menu page of the full IA, in menu order — the same projection
+/// Every menu page of every category, in menu order — the same projection
 /// nav.test.js derives (nav.js exports the categories, not a flat list).
 const ALL_PAGES = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => i.page));
 

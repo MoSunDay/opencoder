@@ -9,6 +9,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const { openPage } = require('./harness/navigation.js');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-t12-verify-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../target/debug');
@@ -148,9 +149,8 @@ async function chooseInForm(label, text) {
 }
 
 async function openAgentPage(name) {
-  // 品牌菜单包含全部类别与页面：悬停品牌打开面板，再点目标页菜单项。
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name }).click();
+  // 品牌菜单只列一级分类：openPage 先选分类，再从侧边栏（窄屏为「页面导航」Select）进入目标页。
+  await openPage(page, name);
 }
 
 async function openExecution(id) {
@@ -242,7 +242,7 @@ async function verifyDag(nodeId, nodeName) {
 
 async function verifyTeamRetry() {
   await api('POST', '/api/teams', { name: 'verify-team', captain: 'act', members: [{ agent: 'act' }] }); // 成员即 agent（无 id/role 字段），captain 必须是成员 agent 之一
-  await openAgentPage('团队组队');
+  await openAgentPage('Team 组队');
   await page.getByText('verify-team', { exact: true }).waitFor();
   await page.getByRole('row', { name: /verify-team/ }).getByRole('button', { name: '启动团队' }).click();
   const modal = page.getByRole('dialog', { name: '启动 verify-team' });

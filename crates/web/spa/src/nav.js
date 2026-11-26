@@ -1,8 +1,9 @@
 // nav.js — the single source of truth for the fleet-console information
 // architecture (IA): 项目 / Agent / Ontology / 后台管理, each owning
 // an ordered page list. Three navigation surfaces derive from the same
-// categories: the header brand hover menu shows the FULL IA
-// (groupedMenuItemsOf), the Sider renders a Menu scoped to the active
+// categories: the header brand hover menu lists ONLY the first-level tabs —
+// one flat item per category (categoryMenuItemsOf), picking one lands on the
+// category home — the Sider renders a Menu scoped to the pages of the active
 // category, and mobile keeps scrollable category tabs + a page Select. The
 // active category is PURELY derived from the store `page` (no extra global
 // navigation state). `items` is the single source for every consumer below.
@@ -152,34 +153,34 @@ export function menuItemsOf(items) {
   }));
 }
 
-/// antd Menu GROUP items for the complete visible IA: one group per category
-/// (label = category icon + category.label) and menuItemsOf children. The
-/// header brand menu renders this; the Sider keeps its single-category
-/// menuItemsOf projection. The icon is decorative (aria-hidden) so the group
-/// title's accessible text stays the plain category label.
-export function groupedMenuItemsOf(categories) {
+/// antd Menu items for the header brand menu: the first-level tabs only — one
+/// flat item per category (key = category key, label = category label, no
+/// children), so the popover never repeats the page lists the Sider and the
+/// mobile Select already own. Picking a tab navigates to categoryHome(key).
+/// The icon is decorative (aria-hidden) so the menuitem's accessible name
+/// stays the plain category label.
+export function categoryMenuItemsOf(categories) {
   return categories.map((category) => ({
-    type: 'group',
-    key: `group-${category.key}`,
-    label: createElement('span', { className: 'fleet-nav-group-label' },
-      createElement(category.icon, { 'aria-hidden': true }),
-      category.label),
-    children: menuItemsOf(category.items),
+    key: category.key,
+    label: category.label,
+    icon: createElement(category.icon, { 'aria-hidden': true }),
   }));
 }
 
-/// Annotate a Menu item tree with `aria-current="page"` on the selected leaf.
-/// Pure: recurse into groups, return fresh item objects/arrays, never mutate
-/// the input (nav.js items are shared by every navigation surface). Leaves
-/// that are not selected get `aria-current: undefined`, which React omits from
-/// the DOM instead of rendering an empty attribute.
-export function withCurrentPage(items, selectedPage) {
-  return items.map((item) => {
-    if (Array.isArray(item.children)) {
-      return { ...item, children: withCurrentPage(item.children, selectedPage) };
-    }
-    return { ...item, 'aria-current': item.key === selectedPage ? 'page' : undefined };
-  });
+/// Key of the category owning `page`, or undefined when no handed-in
+/// category lists it (unknown page, or a page hidden by permission scoping)
+/// — the brand menu then highlights no tab. Pure.
+export function categoryKeyOfPage(categories, page) {
+  return categories.find((category) => category.items.some((item) => item.page === page))?.key;
+}
+
+/// Annotate a flat Menu item list with `aria-current="page"` on the selected
+/// item. Pure: returns fresh item objects in a fresh array, never mutates the
+/// input (nav.js items are shared by every navigation surface). Items that
+/// are not selected get `aria-current: undefined`, which React omits from the
+/// DOM instead of rendering an empty attribute.
+export function withCurrentPage(items, selected) {
+  return items.map((item) => ({ ...item, 'aria-current': item.key === selected ? 'page' : undefined }));
 }
 
 /// antd Select options for the mobile picker from a raw item LIST.

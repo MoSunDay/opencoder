@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const capabilityContracts = require('./capability-contracts');
 const { captureFailure } = require('./failure');
+const { openPage } = require('../harness/navigation.js');
 
 const base = process.argv[2];
 assert(base, 'Fleet base URL required');
@@ -77,8 +78,7 @@ async function main() {
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'browser-fixture'));
     await page.goto(base, { waitUntil: 'networkidle' });
-    await page.locator('.fleet-brand').hover();
-    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '大脑调度', exact: true }).click();
+    await openPage(page, '大脑调度');
     await page.getByRole('tab', { name: '工作台' }).waitFor();
     assert.equal(await page.getByRole('button', { name: '创建并执行计划' }).count(), 0);
     await capabilityContracts(page, artifacts);

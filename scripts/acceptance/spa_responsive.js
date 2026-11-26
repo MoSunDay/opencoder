@@ -84,9 +84,9 @@ async function main() {
           continue;
         }
       } else {
-        const category = NAV_CATEGORIES.find((entry) => entry.label === seg);
+        // The brand panel lists the first-level tabs only; clicking the category lands on its first page.
         await page.locator(BRAND).hover();
-        await page.locator(PANEL).getByRole('menuitem', { name: category.items[0].menu, exact: true }).click();
+        await page.locator(PANEL).getByRole('menuitem', { name: seg, exact: true }).click();
       }
       await pause(400);
       const pages = WIDTH < 768 ? await pagesOf(page) : await labels(page, '.fleet-sidebar .ant-menu-item');

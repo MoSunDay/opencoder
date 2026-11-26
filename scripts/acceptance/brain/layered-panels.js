@@ -2,6 +2,7 @@ const { chromium } = require('../../../crates/web/spa/node_modules/playwright-co
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { openPage } = require('../harness/navigation.js');
 
 async function inspectPanels({ base, token, id, view, operations, marker, evidence }) {
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
@@ -15,8 +16,7 @@ async function inspectPanels({ base, token, id, view, operations, marker, eviden
   try {
     await page.addInitScript((value) => localStorage.setItem('oc_token', value), token);
     await page.goto(`${base}/?brain_run=${id}`, { waitUntil: 'domcontentloaded' });
-    await page.locator('.fleet-brand').hover();
-    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '大脑调度', exact: true }).click();
+    await openPage(page, '大脑调度');
     await page.locator('.brain-run').first().getByText('已完成', { exact: true }).waitFor();
     await page.locator('.react-flow__controls-fitview').click();
     await page.screenshot({ path: path.join(evidence, 'overview.png'), animations: 'disabled' });

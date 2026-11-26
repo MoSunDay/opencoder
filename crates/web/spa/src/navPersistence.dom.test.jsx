@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 导航选择持久化（项目 / Agent / 节点 三分类）DOM 契约：
-//   1. 显式导航（头部品牌完整菜单、Sider Menu、移动端 Segmented/Select 都汇入
+//   1. 显式导航（头部品牌一级导航菜单、Sider Menu、移动端 Segmented/Select 都汇入
 //      goPage）把所选页镜像进 localStorage（键 = nav.js NAV_STORAGE_KEY，
 //      usehooks-ts JSON 序列化），首次进入不预写；
 //   2. 重新挂载 <App/> 时在首帧绘制前恢复（useLayoutEffect → store page 回位、
@@ -99,18 +99,24 @@ describe('导航选择持久化（项目 / Agent / 节点）', () => {
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBeNull();
 
     await screen.findByText('smoke · 管理员');
-    // 显式导航走头部品牌的完整导航菜单（portal 内的 .fleet-nav-panel）。
-    const brand = screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ });
+    // 显式导航走头部品牌的一级导航菜单（portal 内的 .fleet-nav-panel）：只列
+    // 分类 tab，选「项目」落到该分类首页（project = Overview）。
+    const brand = screen.getByRole('button', { name: /Opencoder Fleet.*打开一级导航/ });
     fireEvent.click(brand);
-    let panel = await screen.findByRole('navigation', { name: '完整导航' });
-    fireEvent.click(within(panel).getByRole('menuitem', { name: /Overview$/ }));
+    let panel = await screen.findByRole('navigation', { name: '一级导航' });
+    fireEvent.click(within(panel).getByRole('menuitem', { name: '项目' }));
     expect(getState().page).toBe('project');
     // usehooks-ts 的 JSON 序列化形状（引号内为页面键）。
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('project'));
 
+    // 非首页页面经 Sider Menu（#fleet-page-menu）到达：先选「Agent」分类落到
+    // brain 首页，再在侧栏里选 DAG 工作流。
     fireEvent.click(brand);
-    panel = await screen.findByRole('navigation', { name: '完整导航' });
-    fireEvent.click(within(panel).getByRole('menuitem', { name: /DAG 工作流$/ }));
+    panel = await screen.findByRole('navigation', { name: '一级导航' });
+    fireEvent.click(within(panel).getByRole('menuitem', { name: 'Agent' }));
+    expect(getState().page).toBe('brain');
+    expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('brain'));
+    fireEvent.click(within(document.getElementById('fleet-page-menu')).getByRole('menuitem', { name: /DAG 工作流/ }));
     expect(getState().page).toBe('dag');
     expect(localStorage.getItem(NAV_STORAGE_KEY)).toBe(JSON.stringify('dag'));
   });

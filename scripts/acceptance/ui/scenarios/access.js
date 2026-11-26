@@ -1,10 +1,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { openPage } = require('../../harness/navigation.js');
 
 async function access({ page, browser, base, api, root }) {
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '用户权限', exact: true }).click();
+  await openPage(page, '用户权限');
   await page.getByRole('button', { name: '创建用户' }).click();
   await page.getByLabel('用户名', { exact: true }).fill('accept-viewer');
   await page.getByRole('dialog', { name: '创建用户' }).getByRole('button', { name: '创建用户' }).click();
@@ -42,10 +42,10 @@ async function access({ page, browser, base, api, root }) {
   try {
     await reader.goto(`${base}/#token=${token}`);
     await reader.getByText('accept-viewer · 只读', { exact: true }).waitFor();
-    await reader.locator('.fleet-brand').hover();
-    await reader.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
+    await openPage(reader, 'Overview');
     await reader.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).click();
     await reader.getByRole('menuitem', { name: /Overview$/ }).waitFor();
+    // 只读用户的一级 tab 里没有「后台管理」。
     const panel = reader.locator('.fleet-nav-panel');
     await reader.locator('.fleet-brand').hover();
     await panel.waitFor();

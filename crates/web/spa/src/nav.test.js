@@ -1,17 +1,17 @@
 // nav.test.js — pure-node unit tests for the IA single source of truth
 // (nav.js): category membership and fallbacks, per-category menu scoping,
-// and PAGE_META coverage. No DOM here — the shell rendering lives in
-// app.dom.test.jsx.
+// the brand first-level tab projection, and PAGE_META coverage. No DOM here
+// — the shell rendering lives in app.dom.test.jsx.
 
 import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
-import { HEADERLESS_REASONS, NAV_CATEGORIES, PAGE_META, allowedPages, categoryHome, groupedMenuItemsOf, menuItemsOf, selectItemsOf, visibleCategories, withCurrentPage } from './nav.js';
+import { HEADERLESS_REASONS, NAV_CATEGORIES, PAGE_META, allowedPages, categoryHome, categoryKeyOfPage, categoryMenuItemsOf, menuItemsOf, selectItemsOf, visibleCategories, withCurrentPage } from './nav.js';
 
-// Group headings render icon + text; the plain category name is the last child.
-const groupText = (group) => (isValidElement(group.label) ? group.label.props.children.at(-1) : group.label);
 // Flat {category, page, menu, icon} rows for table-driven assertions.
 const ALL_ITEMS = NAV_CATEGORIES.flatMap((c) => c.items.map((i) => ({ ...i, category: c.key })));
 const ALL_PAGES = ALL_ITEMS.map((i) => i.page);
+const CATEGORY_KEYS = NAV_CATEGORIES.map((c) => c.key);
+const CATEGORY_LABELS = NAV_CATEGORIES.map((c) => c.label);
 
 describe('NAV_CATEGORIES shape', () => {
   it('declares the four IA categories in order', () => {
@@ -98,54 +98,80 @@ describe('menuItemsOf / selectItemsOf scoping', () => {
   });
 });
 
-describe('groupedMenuItemsOf (header brand menu)', () => {
-  it('groups the complete IA by category in order, reusing menuItemsOf children', () => {
-    const groups = groupedMenuItemsOf(NAV_CATEGORIES);
-    expect(groups.map((group) => group.type)).toEqual(['group', 'group', 'group', 'group']);
-    expect(groups.map(groupText)).toEqual(['项目', 'Agent', 'Ontology', '后台管理']);
-    expect(groups.flatMap((group) => group.children.map((item) => item.key))).toEqual(ALL_PAGES);
-    // Flattened labels and icons are exactly the per-category menu projection.
-    expect(groups.flatMap((group) => group.children))
-      .toEqual(NAV_CATEGORIES.flatMap((category) => menuItemsOf(category.items)));
-    expect(groups[3].children).toEqual(menuItemsOf(NAV_CATEGORIES[3].items));
+describe('categoryMenuItemsOf (header brand menu)', () => {
+  it('lists exactly one flat tab per category in IA order, without child pages', () => {
+    const tabs = categoryMenuItemsOf(NAV_CATEGORIES);
+    expect(tabs).toHaveLength(NAV_CATEGORIES.length);
+    expect(tabs.map((tab) => tab.key)).toEqual(['project', 'agent', 'ontology', 'admin']);
+    expect(tabs.map((tab) => tab.label)).toEqual(['项目', 'Agent', 'Ontology', '后台管理']);
+    // First level only: no group wrapper and no page children (the Sider owns
+    // the page lists). Page keys/labels that are not ALSO category keys/labels
+    // (the `project` home page and the chat page's "Agent" label collide by
+    // design) never appear as tabs.
+    expect(tabs.every((tab) => tab.type === undefined && tab.children === undefined)).toBe(true);
+    for (const item of ALL_ITEMS) {
+      if (!CATEGORY_KEYS.includes(item.page)) expect(tabs.some((tab) => tab.key === item.page)).toBe(false);
+      if (!CATEGORY_LABELS.includes(item.menu)) expect(tabs.some((tab) => tab.label === item.menu)).toBe(false);
+    }
   });
 
-  it('decorates every group heading with a decorative category icon', () => {
+  it('decorates every tab with its category icon, marked decorative', () => {
     // antd icons are forwardRef objects, not functions: assert through the
     // element they render into instead of `typeof icon`.
     expect(new Set(NAV_CATEGORIES.map((category) => category.icon)).size).toBe(NAV_CATEGORIES.length);
-    const groups = groupedMenuItemsOf(NAV_CATEGORIES);
-    groups.forEach((group, index) => {
-      expect(isValidElement(group.label)).toBe(true);
-      const [icon, text] = group.label.props.children;
-      expect(isValidElement(icon)).toBe(true);
-      expect(icon.type).toBe(NAV_CATEGORIES[index].icon);
-      expect(icon.props['aria-hidden']).toBe(true);
-      expect(text).toBe(NAV_CATEGORIES[index].label);
+    categoryMenuItemsOf(NAV_CATEGORIES).forEach((tab, index) => {
+      expect(isValidElement(tab.icon)).toBe(true);
+      expect(tab.icon.type).toBe(NAV_CATEGORIES[index].icon);
+      expect(tab.icon.props['aria-hidden']).toBe(true);
+      // Plain string label: the menuitem accessible name is the category name.
+      expect(tab.label).toBe(NAV_CATEGORIES[index].label);
     });
   });
 
-  it('groups only the categories handed in (permission-filtered IA)', () => {
-    const groups = groupedMenuItemsOf(visibleCategories({ role: 'viewer' }));
-    expect(groups.map(groupText)).toEqual(['项目', 'Agent', 'Ontology']);
-    expect(groups.flatMap((group) => group.children.map((item) => item.key)))
-      .toEqual(ALL_ITEMS.filter((item) => item.category !== 'admin').map((item) => item.page));
+  it('lists only the categories handed in (permission-filtered IA)', () => {
+    const tabs = categoryMenuItemsOf(visibleCategories({ role: 'viewer' }));
+    expect(tabs.map((tab) => tab.key)).toEqual(['project', 'agent', 'ontology']);
+    expect(tabs.map((tab) => tab.label)).toEqual(['项目', 'Agent', 'Ontology']);
+    expect(tabs.some((tab) => tab.key === 'admin' || tab.label === '后台管理')).toBe(false);
+  });
+});
+
+describe('categoryKeyOfPage', () => {
+  it('resolves a page to the key of the category that owns it', () => {
+    expect(categoryKeyOfPage(NAV_CATEGORIES, 'nodes')).toBe('admin');
+    expect(categoryKeyOfPage(NAV_CATEGORIES, 'dag')).toBe('agent');
+    expect(categoryKeyOfPage(NAV_CATEGORIES, 'ontologyEntities')).toBe('ontology');
+    // Every page, home or not, resolves to exactly one category.
+    for (const item of ALL_ITEMS) {
+      expect(categoryKeyOfPage(NAV_CATEGORIES, item.page)).toBe(item.category);
+    }
+  });
+
+  it('returns undefined for an unknown page or a page outside the handed-in categories', () => {
+    expect(categoryKeyOfPage(NAV_CATEGORIES, 'nope')).toBeUndefined();
+    expect(categoryKeyOfPage(NAV_CATEGORIES, undefined)).toBeUndefined();
+    expect(categoryKeyOfPage([], 'nodes')).toBeUndefined();
+    // Permission scoping comes from the handed-in list: a viewer owns no admin page.
+    expect(categoryKeyOfPage(visibleCategories({ role: 'viewer' }), 'nodes')).toBeUndefined();
+    // Pure: the categories are left untouched.
+    expect(NAV_CATEGORIES.map((category) => category.key)).toEqual(['project', 'agent', 'ontology', 'admin']);
   });
 });
 
 describe('withCurrentPage (current-page marker)', () => {
-  it('marks only the selected leaf in the grouped brand projection', () => {
-    const groups = groupedMenuItemsOf(NAV_CATEGORIES);
-    const marked = withCurrentPage(groups, 'dag');
-    expect(marked).not.toBe(groups);
-    expect(marked.map((group) => group.label)).toEqual(groups.map((group) => group.label));
-    expect(marked.flatMap((group) => group.children).filter((item) => item['aria-current'] === 'page').map((item) => item.key))
-      .toEqual(['dag']);
-    expect(marked.flatMap((group) => group.children).filter((item) => item.key !== 'dag').every((item) => item['aria-current'] === undefined))
-      .toBe(true);
-    // Groups are recreated with mapped children, never mutated in place.
-    expect(marked.every((group, index) => group !== groups[index])).toBe(true);
-    expect(marked.flatMap((group) => group.children).some((item) => 'aria-current' in item)).toBe(true);
+  it('marks only the selected tab in the flat brand projection', () => {
+    const tabs = categoryMenuItemsOf(NAV_CATEGORIES);
+    const marked = withCurrentPage(tabs, 'agent');
+    expect(marked).not.toBe(tabs);
+    expect(marked.map((tab) => tab.key)).toEqual(tabs.map((tab) => tab.key));
+    expect(marked.map((tab) => tab['aria-current'])).toEqual([undefined, 'page', undefined, undefined]);
+    // Fresh objects in a fresh array, never mutated in place; the icon
+    // element is passed through untouched.
+    expect(marked.every((tab, index) => tab !== tabs[index])).toBe(true);
+    expect(marked.map((tab) => tab.icon)).toEqual(tabs.map((tab) => tab.icon));
+    expect(tabs.some((tab) => 'aria-current' in tab)).toBe(false);
+    // No match (unknown page) marks nothing.
+    expect(withCurrentPage(tabs, 'nodes').map((tab) => tab['aria-current'])).toEqual([undefined, undefined, undefined, undefined]);
   });
 
   it('marks a flat Sider projection and leaves unselected or unknown pages unmarked', () => {

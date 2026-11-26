@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('../../../crates/web/spa/node_modules/playwright-core');
+const { openPage } = require('../harness/navigation.js');
 const { verifyComments, verifyDetails } = require('./interactions');
 const { verifyExecutionLinks } = require('./design/links');
 const { verifyCardSurfaces } = require('./design/cards');
@@ -65,8 +66,7 @@ async function main() {
     const cap = { id: 'agent:form-layout', kind: 'agent', target: '表单显示验收', summary: '执行设置表单', definition: {}, required_inputs: ['目标路径', '验收要求'], input_desc: '填写关键信息和能力需要的参数。' };
     await page.route('**/api/brain/library', (route) => route.fulfill({ json: { capabilities: [cap] } }));
     await page.goto(base, { waitUntil: 'networkidle' });
-    await page.locator('.fleet-brand').hover();
-    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
+    await openPage(page, 'Overview');
     const tab = (name) => page.locator('.fleet-content .ant-tabs').getByRole('tab', { name, exact: true });
     await tab('TODO').click();
     const dialog = (name) => page.getByRole('dialog', { name, exact: true });

@@ -37,7 +37,7 @@ TypeScript + React + antd 页面通过平台请求访问现有 Ontology API。�
 ## 验证与接缝
 
 - 单元及 DOM 测试与上述模块相邻；[testSetup.ts](../../../crates/web/spa/src/ontology/testSetup.ts) 提供浏览器环境适配。
-- [Ontology 浏览器验收](../../../scripts/acceptance/ontology/main.py)、[详情与图谱操作](../../../scripts/acceptance/ontology/experience.mjs) 使用独立 Server 和真实只读 NFS，检查草稿、图谱控制、观测恢复、列表定位及品牌完整导航菜单。
+- [Ontology 浏览器验收](../../../scripts/acceptance/ontology/main.py)、[详情与图谱操作](../../../scripts/acceptance/ontology/experience.mjs) 使用独立 Server 和真实只读 NFS，检查草稿、图谱控制、观测恢复、列表定位及品牌一级导航（分类 tab）。
 - [Ontology 服务](../../ontology/index.md) · [功能规则](../../../features/platform/ontology/index.md) · [Web 索引](index.md)
 
 实体页内容区为 Tabs【实体 | 目录】，默认「实体」：

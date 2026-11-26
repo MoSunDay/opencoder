@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { openPage } = require('./navigation.js');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-wrap-browser-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../../target/debug');
@@ -128,8 +129,7 @@ async function main() {
   await expand();
   await page.screenshot({ path: path.join(root, 'expanded.png'), animations: 'disabled' });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
+  await openPage(page, '全部执行');
   await page.getByRole('button', { name: id, exact: true }).click();
   await page.getByText(/WRAP_BROWSER_OK: sample-content: LOCAL_OK/).first().waitFor();
   await expand();

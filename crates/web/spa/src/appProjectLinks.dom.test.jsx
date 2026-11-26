@@ -13,11 +13,15 @@ it('opens a shared project ahead of a saved page, follows history and clears the
   act(() => setState({ page: 'topics' }));
   expect(screen.getByText('项目 · 既有目标', { selector: '.ant-drawer-title' })).toBeTruthy();
   expect(getState().page).toBe('project');
-  // Explicit navigation now goes through the header brand's complete menu.
-  fireEvent.click(screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ }));
-  const panel = await screen.findByRole('navigation', { name: '完整导航' });
-  fireEvent.click(within(panel).getByRole('menuitem', { name: /用户权限$/ }));
+  // Explicit navigation now goes through the header brand's first-level tabs
+  // (后台管理 → its home page nodes, which clears the link); a specific page
+  // (users) is then picked in the scoped Sider Menu.
+  fireEvent.click(screen.getByRole('button', { name: /Opencoder Fleet.*打开一级导航/ }));
+  const panel = await screen.findByRole('navigation', { name: '一级导航' });
+  fireEvent.click(within(panel).getByRole('menuitem', { name: '后台管理' }));
   await waitFor(() => expect(window.location.hash).toBe(''));
+  expect(getState().page).toBe('nodes');
+  fireEvent.click(within(document.getElementById('fleet-page-menu')).getByRole('menuitem', { name: /用户权限$/ }));
   expect(getState().page).toBe('users');
   expect(screen.queryByText('项目 · 既有目标', { selector: '.ant-drawer-title' })).toBeNull();
   act(() => { window.location.hash = 'project=g-seed'; });

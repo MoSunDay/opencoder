@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { openPage } = require('../harness/navigation.js');
 
 function options(argv) {
   assert.equal(argv.length % 2, 0, 'arguments must be --name value pairs');
@@ -30,8 +31,7 @@ async function ready(page, nodeName) {
 
 async function enter(page, base, mode, nodeName) {
   await page.goto(base, { waitUntil: 'networkidle' });
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: /Agent$/ }).click();
+  await openPage(page, 'Agent');
   await page.getByText(mode === 'agent' ? 'Agent 模式' : 'Operator 模式', { exact: true }).click();
   const node = await ready(page, nodeName);
   assert(node.kinds.includes(mode), `node does not support ${mode}`);

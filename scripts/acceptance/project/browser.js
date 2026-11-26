@@ -1,4 +1,5 @@
 const { chromium } = require('../../../crates/web/spa/node_modules/playwright-core');
+const { openPage } = require('../harness/navigation.js');
 const fs = require('fs');
 const path = require('path');
 async function closeDrawers(page) {
@@ -10,8 +11,7 @@ async function closeDrawers(page) {
   }
 }
 async function projectPage(page) {
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
+  await openPage(page, 'Overview');
   await page.locator('.fleet-content .ant-tabs').getByRole('tab', { name: '项目', exact: true }).waitFor();
 }
 async function openBrowser(h, errors) {

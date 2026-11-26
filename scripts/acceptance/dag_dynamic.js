@@ -3,6 +3,7 @@ const assert = require('assert/strict');
 const fs = require('fs');
 const path = require('path');
 const harness = require('./todo_workbench/harness');
+const navigation = require('./harness/navigation.js');
 let h;
 let release;
 const held = new Promise((resolve) => { release = resolve; });
@@ -14,10 +15,7 @@ async function main() {
     return { instance: full.includes('INSTANCE_ZERO') ? 'zero-result' : 'one-result' };
   }, { dag: true, rootfs: process.argv[2] });
   const { page, api, root, until } = h;
-  const openPage = async (name) => {
-    await page.locator('.fleet-brand').hover();
-    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name, exact: true }).click();
-  };
+  const openPage = (name) => navigation.openPage(page, name);
   console.log(JSON.stringify({ root }));
   const id = 'dag-dynamic-browser';
   await api('POST', '/api/dag/defs', { spec: { name: 'dynamic-browser', steps: [

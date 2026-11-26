@@ -1,11 +1,12 @@
 // main.jsx — app shell: antd Layout with brand Header + connection badge,
 // left Sider (page Menu scoped to the active category), Content switching per
 // page, and the login gate. The whole navigation derives from nav.js
-// NAV_CATEGORIES: the header brand opens the complete IA menu (hover/click,
-// shell/brandNav.jsx), the Sider scopes to the category of `page`, and mobile
-// renders the same two levels as scrollable tabs + Select. The active category
-// is derived from `page` itself, so there is no second navigation state to
-// keep in sync.
+// NAV_CATEGORIES: the header brand opens the first-level category tabs
+// (hover/click, shell/brandNav.jsx — picking one lands on the category
+// home), the Sider scopes to the pages of `page`'s category, and mobile
+// renders the same two levels as scrollable tabs + Select. The active
+// category is derived from `page` itself, so there is no second navigation
+// state to keep in sync.
 // The last explicitly chosen page is mirrored to localStorage through the
 // usehooks-ts `useLocalStorage` hook (nav.js NAV_STORAGE_KEY) and restored
 // pre-paint on mount, so 项目 / Agent / 节点 selections survive a reload.

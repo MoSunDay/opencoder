@@ -2,11 +2,11 @@
 const assert = require('assert/strict');
 const path = require('path');
 const fs = require('fs');
+const { openPage } = require('./navigation.js');
 
 module.exports = async ({ page, api, until, root, envs }) => {
   const workspace = path.join(root, 'workspace');
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '节点列表', exact: true }).click();
+  await openPage(page, '节点列表');
   await page.getByRole('button', { name: '调度配置', exact: true }).click();
   await page.getByLabel('node-max-runs').fill('2');
   await page.getByLabel('node-queue-order').click();
@@ -40,8 +40,7 @@ module.exports = async ({ page, api, until, root, envs }) => {
   await api('POST', '/api/agents/resources/skills', { name: 'browser-skills', files: [file('review/SKILL.md', '# Review\nInspect files.')] });
   await api('POST', '/api/agents/resources/tools', { name: 'browser-tools', files: [file('probe.sh', '#!/bin/sh\nprintf probe')] });
   await api('POST', '/api/agents', { name: 'browser-agent', current: { prompt: 'browser-prompt', skills: 'browser-skills', tools: 'browser-tools' } });
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Agent 配置', exact: true }).click();
+  await openPage(page, 'Agent 配置');
   await page.getByRole('tab', { name: 'Agent 列表', exact: true }).waitFor();
   const row = page.getByRole('row').filter({ hasText: 'browser-agent' });
   await row.waitFor();

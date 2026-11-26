@@ -4,6 +4,7 @@ const { chromium } = require('../../../crates/web/spa/node_modules/playwright-co
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { openPage } = require('../harness/navigation.js');
 
 const [configPath, planId, version, title, evidence, dist] = process.argv.slice(2);
 assert(configPath && planId && version && title && evidence, 'CONFIG PLAN_ID VERSION PLAN_TITLE EVIDENCE required');
@@ -34,8 +35,7 @@ async function openPlan(browser, includeRetry) {
     await route.fulfill({ json: data });
   });
   await page.goto(settings.public_url, { waitUntil: 'domcontentloaded' });
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '大脑调度', exact: true }).click();
+  await openPage(page, '大脑调度');
   await page.getByRole('tab', { name: '计划库' }).click();
   await page.getByPlaceholder('搜索计划名称').fill(title);
   await page.getByText(title, { exact: true }).click();

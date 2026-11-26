@@ -112,8 +112,9 @@ body {
   position: relative;
   z-index: 2;
 }
-/* The brand is the full-navigation trigger: a real button styled as the
-   wordmark, so hover/click/focus open the menu popover without adding chrome. */
+/* The brand is the first-level navigation trigger: a real button styled as
+   the wordmark, so hover/click/focus open the category-tab popover without
+   adding chrome. */
 .fleet-brand {
   display: inline-flex;
   align-items: center;
@@ -143,33 +144,18 @@ body {
   font-size: 11px;
   color: var(--oc-text-tertiary);
 }
-/* Full-IA popover opened by the brand: a compact column with its own scroll
-   so a deep category list never outgrows the viewport. */
+/* First-level tabs popover opened by the brand: a narrow column that aligns
+   with the 200px Sider. Four items never overflow, so no scroll box. */
 .fleet-brand-popover .ant-popover-inner { padding: 6px; }
 .fleet-nav-panel {
-  width: min(320px, calc(100vw - 48px));
-  max-height: min(70vh, 560px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  width: min(200px, calc(100vw - 48px));
 }
 .fleet-nav-panel .ant-menu {
   background: transparent;
   border-inline-end: 0;
 }
-.fleet-nav-panel .ant-menu-item-group-title {
-  padding: 8px 12px 4px;
-  color: var(--oc-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-}
-.fleet-nav-panel .fleet-nav-group-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.fleet-nav-panel .fleet-nav-group-label .anticon {
-  font-size: 12px;
+.fleet-nav-panel .ant-menu-item .anticon {
+  font-size: 16px;
 }
 .fleet-header-side {
   margin-left: auto;
@@ -505,8 +491,8 @@ body {
   overflow-y: auto;
 }
 
-/* Mobile-only IA controls: the header brand opens the complete navigation
-   menu, and narrow consoles keep the two-level category tabs + page Select
+/* Mobile-only IA controls: the header brand opens the first-level category
+   tabs, and narrow consoles keep the two-level category tabs + page Select
    rows inside the Content. */
 .fleet-category-tabs {
   display: flex;

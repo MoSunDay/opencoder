@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { chromium } from '../../../crates/web/spa/node_modules/playwright-core/index.mjs';
 import { checkEntities } from './entities.mjs';
+import navigation from '../harness/navigation.js';
 
 const [base, output] = process.argv.slice(2);
 const browser = await chromium.launch({
@@ -40,9 +41,8 @@ const measure = async (width, tab) => {
 try {
   const entities = await checkEntities(browser, base, output);
   await page.goto(base);
-  // Desktop: the brand panel (shell/brandNav.jsx) carries every category; the Sider has no category tablist.
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '实体', exact: true }).click();
+  // Desktop: the brand panel lists the category tabs only; openPage() then picks the page in the Sider.
+  await navigation.openPage(page, '实体');
   await page.getByRole('textbox', { name: '搜索名称或标识' }).fill('受理控制');
   await page.getByRole('button', { name: '受理控制', exact: true }).click();
   await drawer.getByText('此能力由平台同步维护', { exact: true }).waitFor();

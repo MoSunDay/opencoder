@@ -7,6 +7,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const { openPage } = require('./harness/navigation.js');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-todo-init-ui-'));
 const bin = process.env.PLATFORM_BIN_DIR || path.join(__dirname, '../../target/debug');
@@ -179,8 +180,7 @@ async function createTodo(id, nodeId) {
 }
 
 async function openExecution(id) {
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
+  await openPage(page, '全部执行');
   await page.getByRole('button', { name: /^刷\s*新$/ }).click();
   await page.getByRole('button', { name: id, exact: true }).click();
   const drawer = page.locator('.ant-drawer:visible');

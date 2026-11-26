@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('../../crates/web/spa/node_modules/playwright-core');
+const { openPage } = require('./harness/navigation.js');
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main() {
@@ -55,8 +56,7 @@ async function main() {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript((value) => localStorage.setItem('oc_token', value), token);
     await page.goto(base, { waitUntil: 'networkidle' });
-    await page.locator('.fleet-brand').hover();
-    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
+    await openPage(page, 'Overview');
     const tab = (name) => page.locator('.fleet-content .ant-tabs').getByRole('tab', { name, exact: true });
     const table = (name) => page.getByLabel(name, { exact: true });
     const resetScroll = (element) => element.locator('.ant-table-content').evaluate((el) => { el.scrollLeft = 0; });

@@ -1,6 +1,7 @@
 // Isolated browser acceptance over the current SPA bundle and a mutable fixture API.
 const { chromium } = require('../../crates/web/spa/node_modules/playwright-core');
 const { FIXTURES } = require('./spa_responsive_fixtures');
+const { openPage } = require('./harness/navigation.js');
 const { createServer } = require('node:http');
 const { readFile, mkdir, writeFile } = require('node:fs/promises');
 const path = require('node:path');
@@ -107,8 +108,7 @@ async function main() {
   try {
     await page.addInitScript(() => localStorage.setItem('oc_token', 'fixture-token'));
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: 'networkidle' });
-    await page.locator('.fleet-brand').hover();
-    await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: 'Overview', exact: true }).click();
+    await openPage(page, 'Overview');
     await page.getByRole('button', { name: '项目浏览器验收', exact: true }).waitFor();
     assert.deepEqual(await page.locator('#fleet-page-menu').getByRole('menuitem').allTextContents(), ['Overview', 'Tag']);
     assert.deepEqual(await page.locator('.fleet-content .ant-tabs').getByRole('tab').allTextContents(), ['项目', '子项', 'TODO']);

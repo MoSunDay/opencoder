@@ -1,12 +1,10 @@
 const assert=require('assert/strict');
 const path=require('path');
+const navigation=require('../harness/navigation.js');
 
 async function verifyEditor(h,definition){
   const {page,api,until,root}=h;
-  const openPage=async name=>{
-    await page.locator('.fleet-brand').hover();
-    await page.locator('.fleet-nav-panel').getByRole('menuitem',{name,exact:true}).click();
-  };
+  const openPage=async name=>navigation.openPage(page,name);
   const writes=[];
   page.on('request',request=>{
     const url=new URL(request.url());

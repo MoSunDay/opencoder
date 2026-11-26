@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { prepareNative, artifactPath } = require('./harness/native');
+const { openPage } = require('./harness/navigation.js');
 require('./harness/namespace').isolateFixture();
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencoder-artifact-browser-'));
@@ -123,8 +124,7 @@ async function main() {
   });
   await page.addInitScript((credential) => localStorage.setItem('oc_token', credential), token);
   await page.goto(base, { waitUntil: 'networkidle' });
-  await page.locator('.fleet-brand').hover();
-  await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '全部执行', exact: true }).click();
+  await openPage(page, '全部执行');
   await page.getByRole('button', { name: 'dag-browser-artifact' }).click();
   await page.locator('.ant-drawer').waitFor();
   await page.locator('.ant-drawer .ant-select').first().click();

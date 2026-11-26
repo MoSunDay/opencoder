@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import navigation from '../harness/navigation.js';
 
 export async function checkEntities(browser, base, output) {
   const result = { measurements: [], unassigned: false, creation: false, retry: false };
@@ -34,9 +35,8 @@ export async function checkEntities(browser, base, output) {
         await page.locator('.fleet-content > .fleet-mobile-nav[role=tablist]').getByRole('tab', { name: 'Ontology', exact: true }).click();
         await choose(page.locator('.ant-select.fleet-mobile-nav'), '实体');
       } else {
-        // Desktop: the brand panel (shell/brandNav.jsx) carries every category; the Sider has no category tablist.
-        await page.locator('.fleet-brand').hover();
-        await page.locator('.fleet-nav-panel').getByRole('menuitem', { name: '实体', exact: true }).click();
+        // Desktop: the brand panel lists the category tabs only; openPage() then picks the page in the Sider.
+        await navigation.openPage(page, '实体');
       }
       const entity = page.getByRole('button', { name: '无目录测试实体', exact: true });
       const search = page.getByRole('textbox', { name: '搜索名称或标识' });

@@ -1,9 +1,10 @@
-// brandNav.jsx — the header wordmark is the entry to the COMPLETE navigation
-// menu: hovering or clicking the brand button opens one popover holding every
-// visible category (group heading = category.label) and page. Picking an item
-// closes the panel, returns focus to the trigger, then navigates through
-// onNavigate — the same explicit goPage path the Sider Menu and the mobile
-// tabs/Select use.
+// brandNav.jsx — the header wordmark is the entry to the FIRST-LEVEL
+// navigation menu: hovering or clicking the brand button opens one popover
+// listing only the category tabs (icon + category name, no child pages —
+// those stay in the Sider and the mobile Select). Picking a tab closes the
+// panel, returns focus to the trigger, then navigates to that category's
+// home page through onNavigate — the same explicit goPage path the Sider Menu
+// and the mobile tabs/Select use.
 //
 // Keyboard / screen-reader contract (low-risk, on top of antd Popover):
 //   - the button names itself with the visible wordmark and links to the menu
@@ -13,16 +14,18 @@
 //   - hovering never steals focus;
 //   - Escape from the panel or the open button closes it and refocuses the
 //     wordmark;
-//   - each menuitem carries aria-current="page" for the active page.
+//   - the tab of the category owning the current page carries
+//     aria-current="page".
 //
-// The Sider stays scoped to the active category and mobile keeps its in-content
-// tabs + Select (main.jsx). Only the panel content depends on nav.js, so this
-// component carries no navigation state beyond the open/closed flag.
+// The Sider stays scoped to the pages of the active category and mobile keeps
+// its in-content tabs + Select (main.jsx). Only the panel content depends on
+// nav.js, so this component carries no navigation state beyond the open/
+// closed flag.
 
 import { DownOutlined } from '@ant-design/icons';
 import { Menu, Popover } from 'antd';
 import { useEffect, useRef, useState } from 'react';
-import { groupedMenuItemsOf, withCurrentPage } from '../nav.js';
+import { categoryHome, categoryKeyOfPage, categoryMenuItemsOf, withCurrentPage } from '../nav.js';
 
 const MENU_ID = 'fleet-brand-menu';
 const COARSE_POINTER_QUERY = '(pointer: coarse)';
@@ -47,6 +50,9 @@ function focusFirstMenuItem() {
 
 export function BrandNavMenu({ categories, selectedPage, onNavigate }) {
   const [open, setOpen] = useState(false);
+  // The highlighted tab is derived from the current page: whichever category
+  // owns it. A page outside the handed-in list highlights nothing.
+  const activeCategory = categoryKeyOfPage(categories, selectedPage);
   // Resolve the input capability once per mount; the pointer type does not
   // change while the shell is open.
   const [coarsePointer] = useState(() => isCoarsePointer());
@@ -78,13 +84,14 @@ export function BrandNavMenu({ categories, selectedPage, onNavigate }) {
   useEffect(() => () => clearTimeout(focusTimerRef.current), []);
 
   /// Close first so the popover never lingers over the page being opened,
-  /// then hand focus back to the trigger before navigating.
-  const choosePage = (page) => {
+  /// then hand focus back to the trigger before navigating to the category
+  /// home. The click key is the category key, not a page key.
+  const chooseCategory = (categoryKey) => {
     clearTimeout(focusTimerRef.current);
     focusOnOpenRef.current = false;
     setOpen(false);
     brandRef.current?.focus();
-    onNavigate(page);
+    onNavigate(categoryHome(categoryKey));
   };
 
   const closeAndRestoreFocus = () => {
@@ -139,13 +146,13 @@ export function BrandNavMenu({ categories, selectedPage, onNavigate }) {
   }, [open]);
 
   const panel = (
-    <nav className="fleet-nav-panel" aria-label="完整导航" onKeyDown={handlePanelKeyDown}>
+    <nav className="fleet-nav-panel" aria-label="一级导航" onKeyDown={handlePanelKeyDown}>
       <Menu
         id={MENU_ID}
         mode="inline"
-        selectedKeys={[selectedPage]}
-        items={withCurrentPage(groupedMenuItemsOf(categories), selectedPage)}
-        onClick={({ key }) => choosePage(key)}
+        selectedKeys={activeCategory ? [activeCategory] : []}
+        items={withCurrentPage(categoryMenuItemsOf(categories), activeCategory)}
+        onClick={({ key }) => chooseCategory(key)}
         style={{ borderInlineEnd: 0 }}
       />
     </nav>
@@ -166,7 +173,7 @@ export function BrandNavMenu({ categories, selectedPage, onNavigate }) {
         ref={brandRef}
         type="button"
         className="fleet-brand"
-        aria-label="Opencoder Fleet：打开完整导航"
+        aria-label="Opencoder Fleet：打开一级导航"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? MENU_ID : undefined}

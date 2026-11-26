@@ -3,13 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { getState, setCredentials, setState, HEADERLESS_REASONS, NAV_CATEGORIES, ConfigProvider, Popconfirm, zhCN, dayjs, theme, mountApp } from './test/appShell.jsx';
 
-/// The header brand opens the complete IA in a portal popover; every brand
-/// interaction below starts from the closed state, so a click reliably opens
-/// it (hover is covered by shell/brandNav.dom.test.jsx).
+/// The header brand opens the first-level category tabs in a portal popover
+/// (picking one lands on that category's home page; a specific page is then
+/// picked in the scoped Sider Menu). Every brand interaction below starts
+/// from the closed state, so a click reliably opens it (hover is covered by
+/// shell/brandNav.dom.test.jsx).
+const BRAND_NAME = /Opencoder Fleet.*打开一级导航/;
 async function openBrandMenu() {
-  fireEvent.click(screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ }));
-  return screen.findByRole('navigation', { name: '完整导航' });
+  fireEvent.click(screen.getByRole('button', { name: BRAND_NAME }));
+  return screen.findByRole('navigation', { name: '一级导航' });
 }
+
+/// The scoped Sider page Menu (main.jsx `#fleet-page-menu`).
+const siderMenu = () => within(document.getElementById('fleet-page-menu'));
 
 describe('App shell navigation and layout', () => {
   it('opens an execution link before restoring a saved project page', async () => {
@@ -32,8 +38,9 @@ describe('App shell navigation and layout', () => {
     act(() => setState({ page: 'project' }));
     expect(screen.getByText('operator-history', { selector: '.ant-drawer-title' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /全部执行/ }).classList.contains('ant-menu-item-selected')).toBe(true);
+    // Brand → 项目 tab lands on the category home (Overview) and clears the link.
     const brandPanel = await openBrandMenu();
-    fireEvent.click(within(brandPanel).getByRole('menuitem', { name: /Overview$/ }));
+    fireEvent.click(within(brandPanel).getByRole('menuitem', { name: '项目' }));
     await waitFor(() => expect(window.location.hash).toBe(''));
     expect(getState().page).toBe('project');
   });
@@ -106,12 +113,13 @@ describe('App shell navigation and layout', () => {
     setCredentials('smoke-token', '');
     await mountApp();
     await screen.findByText('smoke · 管理员');
-    const brand = screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ });
+    const brand = screen.getByRole('button', { name: BRAND_NAME });
     expect(brand.classList.contains('fleet-brand')).toBe(true);
     expect(brand.getAttribute('aria-haspopup')).toBe('menu');
     expect(brand.textContent).toContain('Opencoder Fleet');
     // The old scrollable Sider category strip is gone; navigation now lives
-    // either in this brand menu or in the scoped Sider Menu below.
+    // in this brand menu (category tabs) and in the scoped Sider Menu below
+    // (pages of the active category).
     expect(document.querySelector('.fleet-sidebar [role="tablist"]')).toBeNull();
     // Default page (nodes) scopes the Sider menu to the node category. Icon
     // glyphs carry their own aria-label, so match menuitem names by regex.
@@ -170,18 +178,21 @@ describe('App shell navigation and layout', () => {
       ).toBeTruthy();
     });
 
-  it('navigates through the header brand menu and lands on the selected page', async () => {
+  it('navigates through the header brand menu to a category home and re-scopes the Sider', async () => {
     setCredentials('smoke-token', '');
     await mountApp();
     await screen.findByText('smoke · 管理员');
     const panel = await openBrandMenu();
-    // The complete IA offers pages outside the current (admin) category.
-    fireEvent.click(within(panel).getByRole('menuitem', { name: /大脑调度$/ }));
+    // The brand lists category tabs only: the Agent tab lands on the agent
+    // category home (brain), a page outside the current (admin) category.
+    expect(within(panel).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['项目', 'Agent', 'Ontology', '后台管理']);
+    expect(within(panel).queryByRole('menuitem', { name: /大脑调度/ })).toBeNull();
+    fireEvent.click(within(panel).getByRole('menuitem', { name: 'Agent' }));
     expect(getState().page).toBe('brain');
-    expect(screen.getByRole('button', { name: /Opencoder Fleet.*打开完整导航/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: BRAND_NAME }).getAttribute('aria-expanded')).toBe('false');
     // The Sider re-scopes + highlights the menu item (scope it: the closing
-    // brand panel still carries the same page label during its motion).
-    const brainItem = within(document.querySelector('.fleet-sidebar')).getByRole('menuitem', { name: /大脑调度/ });
+    // brand panel still carries the Agent tab label during its motion).
+    const brainItem = siderMenu().getByRole('menuitem', { name: /大脑调度/ });
     expect(brainItem.classList.contains('ant-menu-item-selected')).toBe(true);
     expect(brainItem.getAttribute('aria-current')).toBe('page');
     // …and the panel behind it renders (agent-category brain page).
@@ -193,14 +204,17 @@ describe('App shell navigation and layout', () => {
     await mountApp();
     await screen.findByText('smoke · 管理员');
     const panel = await openBrandMenu();
-    fireEvent.click(within(panel).getByRole('menuitem', { name: /Overview$/ }));
+    fireEvent.click(within(panel).getByRole('menuitem', { name: '项目' }));
     expect(getState().page).toBe('project');
     // Menuitem names carry the icon glyph's own aria-label → match by regex
     // (same convention as the surrounding landmark assertions).
-    const sider = within(document.querySelector('.fleet-sidebar'));
+    const sider = siderMenu();
     expect(await sider.findByRole('menuitem', { name: /Overview$/ })).toBeTruthy();
     expect(sider.getByRole('menuitem', { name: /Tag$/ })).toBeTruthy();
     expect(sider.queryByRole('menuitem', { name: /大脑调度/ })).toBeNull();
     expect(sider.queryByRole('menuitem', { name: /节点列表/ })).toBeNull();
+    // A specific non-home page is reached from the scoped Sider, not the brand.
+    fireEvent.click(sider.getByRole('menuitem', { name: /Tag$/ }));
+    expect(getState().page).toBe('projectTags');
   });
 });

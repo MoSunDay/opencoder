@@ -64,7 +64,7 @@ Ontology / 后台管理）标题前补上对应图标；项目表与子项表不
   history and restore`、`PASS filtered drag`、`PASS grouped sync and failed save
   rollback` 通过；随后在 TODO 看板分组步骤 `navigate('Tag')` 被未关闭的
   `ant-drawer-mask` 拦截而超时——在改动前的 `HEAD b4edda6bd`（独立 worktree）上
-  同一步骤同样失败，属既有问题，与本次改动无关，未在本改动中处理。
+  同一步骤同样失败，属脚本既有问题，已在下方「收尾补正」中修复并跑通。
 - 完整浏览器验收套件（`scripts/acceptance/ui/main.js`）未运行。
 
 ## 构建与部署
@@ -74,3 +74,28 @@ Ontology / 后台管理）标题前补上对应图标；项目表与子项表不
   opencoder-server-acceptance`：服务 active，`GET /` 200。
 - 18080 Fleet（`/usr/local/bin` 二进制，`0b2016c5a-dirty`）尚未换装，需按既有
   `scripts/install.sh` 流程另行发布才能看到本次 UI 调整。
+
+## 收尾补正（提交 43d373697 之后）
+
+- **负向断言曾是空洞的**：antd 表头的可访问名是「`<标题> 筛选<标题>`」（筛选按钮并入
+  名称），`queryByRole('columnheader', { name: '现状' })` 的精确匹配在列存在时也返回
+  null。改为锚定正则 `/^现状(?!更新时间)/`、`/^现状更新时间/`，并在其前加正向对照
+  （`/^进度/`、三表共有的 `/^负责人/`）证明查找可解析。变异验证：临时把两列加回
+  `initiativeColumns` 后 `initiativeStatus.dom.test.jsx`、`sorting/initiatives.dom.test.jsx`
+  的两处用例均失败，还原后通过。
+- **验收脚本既有失败根因**：`scripts/acceptance/project_workbench_ui.js` 在「子项」页签
+  打开子项抽屉后直接 `navigate('Tag')`；但 `projectHierarchy` 会由子项推出所属项目
+  （05bfe3270「return shared TODO and initiative details to their parents」），关闭子项
+  抽屉会回到父项目抽屉，遮罩未消失。脚本改为关闭子项抽屉后再关闭项目抽屉并等待隐藏，
+  与同一脚本前半段（`detail` → `board` → `project` 逐层关闭）的既有写法一致。
+- 定向回归：
+  `npx vitest run src/project/views/initiativeStatus.dom.test.jsx
+  src/project/sorting/initiatives.dom.test.jsx src/project/summary/summary.dom.test.jsx`
+  → 3 files / 15 passed / 0 failed（SPA `src/` 未改，`dist/` 无需重建）。
+- `CHROME_PATH=/usr/bin/chromium-browser node scripts/acceptance/project_workbench_ui.js`
+  → 退出码 0，五组全部 PASS：`responsive tables`、`fullscreen initiative and TODO
+  drawers, summary history and restore`、`filtered drag`、`grouped sync and failed save
+  rollback`、`tag CRUD, owner changes and failed-save draft`（后者此前因遮罩拦截从未
+  跑到），回执 `receipt.json` `result: PASS`，屏宽 1920 / 1280 / 768 / 390，
+  `page_errors: []`。
+- 18080 Fleet 仍未换装（HEAD 现含其他提交，需按正式发布流程另行决定）。

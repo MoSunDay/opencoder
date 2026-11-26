@@ -244,6 +244,10 @@ async function main() {
     await board.getByText('按 Tag 分组', { exact: true }).waitFor();
     assert.equal(await board.getByRole('button', { name: '可拖动任务', exact: true }).count(), 2);
     await board.locator('.ant-drawer-close').click();
+    // Closing an initiative returns to its parent project (projectHierarchy
+    // derives the owning project), so the project drawer is still open here.
+    await project.locator('.ant-drawer-close').click();
+    await project.waitFor({ state: 'hidden' });
     await navigate('Tag');
     const tags = page.getByLabel('Tag 表格', { exact: true });
     await tags.getByText('模块', { exact: true }).first().waitFor();

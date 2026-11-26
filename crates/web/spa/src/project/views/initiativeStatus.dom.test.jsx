@@ -26,9 +26,12 @@ it('initiative table and create/edit forms have no state, and retain TODO progre
   render(<InitiativesTab {...props} />);
   const table = within(screen.getByLabelText('子项表格'));
   expect(table.queryByText('状态')).toBeNull();
-  // 现状 moved to the detail drawer: the table keeps no summary columns.
-  expect(table.queryByRole('columnheader', { name: '现状' })).toBeNull();
-  expect(table.queryByRole('columnheader', { name: '现状更新时间' })).toBeNull();
+  // 现状 moved to the detail drawer: the table keeps no summary columns. A
+  // header's accessible name is "<title> 筛选<title>" (filter button), hence
+  // the anchored regexes; the positive control proves the lookup resolves.
+  expect(table.getByRole('columnheader', { name: /^进度/ })).toBeTruthy();
+  expect(table.queryByRole('columnheader', { name: /^现状(?!更新时间)/ })).toBeNull();
+  expect(table.queryByRole('columnheader', { name: /^现状更新时间/ })).toBeNull();
   expect(table.getByText('子项甲')).toBeTruthy();
   expect(table.getByText('100%')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '新建子项' }));

@@ -64,8 +64,11 @@ it.each(['projects', 'initiatives', 'project-initiatives'])('opens history from 
     : kind === 'initiatives' ? <InitiativesTab overview={overview} refresh={p.refresh} onNotice={p.onNotice} openInitiative={open} />
       : <ProjectInitiatives {...p} rows={[rows[0]]} openInitiative={open} />);
   // 现状 lives in the detail drawer; every table projection stays summary-free.
-  expect(screen.queryByRole('columnheader', { name: '现状' })).toBeNull();
-  expect(screen.queryByRole('columnheader', { name: '现状更新时间' })).toBeNull();
+  // A header's accessible name is "<title> 筛选<title>" (filter button), hence
+  // the anchored regexes; the positive control proves the lookup resolves.
+  expect(screen.getByRole('columnheader', { name: /^负责人/ })).toBeTruthy();
+  expect(screen.queryByRole('columnheader', { name: /^现状(?!更新时间)/ })).toBeNull();
+  expect(screen.queryByRole('columnheader', { name: /^现状更新时间/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '现状历史' }));
   const history = await screen.findByRole('dialog', { name: '现状修改记录' });
   expect(await within(history).findByText('历史正文')).toBeTruthy();

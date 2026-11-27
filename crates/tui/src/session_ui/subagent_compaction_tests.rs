@@ -6,6 +6,8 @@
 //! Both child paths are covered: the persisted-event replay
 //! (`reconstruct_child_view`, used by resume / `/task` switch / parent
 //! rebuild) and the live `SubagentChild` routing inside `ChatView::apply`.
+//! The grandchild-card carry-over of the fold itself lives in
+//! `reset_fold_tests.rs`; it shares this module's fixtures.
 
 use super::replay::build_subagent_block;
 use super::subagent_block_tests::{task_record, EmptyChildStore};
@@ -15,7 +17,7 @@ use opencoder_session::SessionEvent;
 use opencoder_store::SubagentStatus;
 use std::sync::Arc;
 
-fn summary_message(id: &str, summary: &str) -> Message {
+pub(super) fn summary_message(id: &str, summary: &str) -> Message {
     // Shape mirrors `opencoder_session::compaction::compaction_message`.
     let mut m = Message::user(
         id,
@@ -35,14 +37,14 @@ fn compaction_blocks(view: &ChatView) -> Vec<&ChatBlock> {
         .collect()
 }
 
-fn child_view(block: &ChatBlock) -> &ChatView {
+pub(super) fn child_view(block: &ChatBlock) -> &ChatView {
     match block {
         ChatBlock::Subagent { view, .. } => view,
         other => panic!("expected Subagent block, got {other:?}"),
     }
 }
 
-fn flattened(view: &ChatView) -> String {
+pub(super) fn flattened(view: &ChatView) -> String {
     view.flatten()
         .iter()
         .map(|l| l.to_string())

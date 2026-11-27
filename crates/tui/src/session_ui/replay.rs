@@ -66,7 +66,7 @@ fn flush_segment(
 /// Mirrors the session-side `SUMMARY_PREFIX` marker (single source of truth:
 /// `opencoder_session::compaction`), which the resume path also uses to
 /// rebuild the head of a compacted transcript.
-fn compaction_summary_of(msg: &Message) -> Option<String> {
+pub(super) fn compaction_summary_of(msg: &Message) -> Option<String> {
     if !msg.synthetic {
         return None;
     }
@@ -78,7 +78,7 @@ fn compaction_summary_of(msg: &Message) -> Option<String> {
 
 /// Whether the transcript starts from (or contains) a synthetic compaction
 /// summary head — the marker of a compacted rebuild.
-fn has_compaction_summary(messages: &[Message]) -> bool {
+pub(super) fn has_compaction_summary(messages: &[Message]) -> bool {
     messages.iter().any(|m| compaction_summary_of(m).is_some())
 }
 
@@ -93,7 +93,7 @@ fn has_compaction_summary(messages: &[Message]) -> bool {
 /// rebuilds share one order by construction
 /// (`[Compaction, retained tail, continued run]`), matching what the live
 /// path shows when compaction completes.
-fn push_compaction_summary_block(chat: &mut ChatView, summary: &str) {
+pub(super) fn push_compaction_summary_block(chat: &mut ChatView, summary: &str) {
     chat.blocks.push(ChatBlock::Compaction {
         text: sanitize_multiline(summary).into_owned(),
         collapsed: true,
@@ -541,40 +541,6 @@ pub async fn rebuild_after_reset(
     chat.turn_block_start = chat.blocks.len();
 }
 
-/// Store-free mirror of [`rebuild_after_reset`] for NESTED views (subagent
-/// child, sidecar): their reset reaches them as an event inside
-/// `ChatView::apply`, where no store handle exists to rebuild subagent
-/// records or prefetch images. Same fold and the same cross-reset carry-over
-/// as the parent's off-loop rebuild — `[Compaction, retained tail,
-/// continued run]` — so a compacted child renders ONE collapsed summary block
-/// at the head of its transcript instead of its whole pre-compaction history
-/// plus every summary it ever produced. `pending_turn_echo` follows the same
-/// rule as the parent: dropped on a compacting rebuild, kept otherwise.
-/// Grandchild counters are carried over (their blocks are not rebuilt from
-/// records here); lifetime tokens are floored so `[tok cost]` never regresses.
-pub fn rebuild_view_from_messages(chat: &mut ChatView, msgs: &[Message]) {
-    let agent = chat.agent.clone();
-    let saved_annotation_text = chat.annotation_text.clone();
-    let saved_submitted = chat.submitted;
-    let saved_first_prompt = chat.first_prompt.clone();
-    let saved_tokens_total = chat.tokens_total;
-    let saved_turn_echo = chat.pending_turn_echo.clone();
-    let saved_running = chat.subagents_running;
-    let saved_total = chat.subagents_total;
-    let compacting = has_compaction_summary(msgs);
-    *chat = replay_messages(&agent, msgs);
-    chat.tokens_total = chat.tokens_total.max(saved_tokens_total);
-    chat.annotation_text = saved_annotation_text;
-    chat.submitted = saved_submitted;
-    chat.first_prompt = saved_first_prompt;
-    chat.pending_turn_echo = if compacting { None } else { saved_turn_echo };
-    chat.subagents_running = saved_running;
-    chat.subagents_total = saved_total;
-    // A compaction rebuild owns the whole transcript: reliable completion
-    // repair must never target pre-reset blocks.
-    chat.turn_block_start = chat.blocks.len();
-}
-
 /// Reconstruct a `ChatBlock::Subagent` from a persisted `SubagentTaskRecord`,
 /// including rebuilding the child `ChatView` from stored events.
 pub(super) async fn build_subagent_block(
@@ -768,20 +734,5 @@ where
 /// Text-only message replay (no subagent reconstruction). Used as a fallback
 /// for child views without persisted events, and by tests.
 pub fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
-    let empty = HashMap::new();
-    let mut chat = ChatView {
-        agent: sanitize_single_line(agent_name).into_owned(),
-        ..Default::default()
-    };
-    for msg in messages {
-        if let Some(summary) = compaction_summary_of(msg) {
-            push_compaction_summary_block(&mut chat, &summary);
-            continue;
-        }
-        replay_one(&mut chat, msg, &empty);
-    }
-    // Same fold as `replay_into_chat` — one shared step-shape guarantee.
-    coalesce_steps(&mut chat.blocks);
-    chat.context_used = estimate_messages_for_display(messages) as u64;
-    chat
+    super::reset_fold::replay_messages_with(agent_name, messages, Vec::new())
 }

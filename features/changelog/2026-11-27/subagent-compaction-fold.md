@@ -22,15 +22,21 @@
 
 ## 行为与实现
 
-- `crates/tui/src/session_ui/replay.rs`：新增 `rebuild_view_from_messages(chat, msgs)`——
+- `crates/tui/src/session_ui/reset_fold.rs`（初版落在 `replay.rs`，收尾时按 800 行预算迁出）：
+  `rebuild_view_from_messages(chat, msgs)`——
   `rebuild_after_reset` 的 store-free 镜像：`[摘要, 尾段, 续跑]` 同序折叠；结转
   `tokens_total`（取 max，`[tok cost]` 不回退）、`annotation_text` / `submitted` /
-  `first_prompt`（保留旧值，与父路径同规则）、`subagents_running` / `subagents_total`
-  （孙代理计数；其块不经记录重建）；`pending_turn_echo` 与父视图同规则——压缩重建丢弃、
+  `first_prompt`（保留旧值，与父路径同规则）、`subagents_running` / `subagents_total` 与孙代理
+  `Subagent` 卡片一并结转——卡片按「task id == 派生消息里 `task` tool_use 的 id」重挂在派生它的
+  assistant 消息之后（与 `replay_into_chat` 的 `tasks_by_parent` 同位；卡片 token 已在结转的
+  `tokens_total` 内，重挂不再累加），派生消息已被折叠的卡片按 orphan 规则追加在尾段之后并保持
+  可路由——父视图离线重建对这类记录是直接丢弃，嵌套折叠手里有活卡片，选择保留；
+  `pending_turn_echo` 与父视图同规则——压缩重建丢弃、
   clear-context 重建保留；`turn_block_start` 推到重建后的块尾（可靠补写不得命中 reset 前的块）。
 - `crates/tui/src/chat.rs`：`SessionEvent::TranscriptReset(msgs)` 分支由空操作改为调用上述
   重建。父视图的 reset 在 `app_loop.rs` 被拦截（离线重建），不会走到这里；只有嵌套视图
-  （subagent 子视图）经 `SubagentChild` 路由或 `reconstruct_child_view` 事件回放进入。
+  （subagent 子视图经 `SubagentChild` 路由、sidecar 面板视图经 `SidecarChild` 路由）或
+  `reconstruct_child_view` 事件回放进入。
 - 结果：子视图压缩后只剩**一个**折叠 `Compaction` 块且位于 `blocks[0]`；连续压缩两次时
   第二次 `TranscriptReset` 携带的折叠转录只含最新摘要，旧摘要块随历史一起消失——与父视图
   resume / `/task` 切换 / mid-run 重建所见完全一致。
@@ -46,6 +52,9 @@
 | 实时 `SubagentChild(TranscriptReset)` 路由同序折叠 | `child_live_reset_folds_the_nested_view_like_the_parent` | 同上 |
 | 无 store 重建的跨 reset 结转（tok cost / 孙代理计数 / echo） | `store_free_rebuild_carries_lifetime_state_but_drops_compacting_echo` | 同上 |
 | clear-context reset 保留 echo、无 Compaction 块 | `store_free_rebuild_keeps_echo_when_reset_is_not_a_compaction` | `crates/tui/src/session_ui/subagent_compaction_tests.rs` |
+| 嵌套 reset 重挂孙代理卡片（派生消息存活）、计数一致、事件仍可路由 | `child_live_reset_reattaches_grandchild_cards_under_their_parent_message` | `crates/tui/src/session_ui/reset_fold_tests.rs` |
+| 派生消息已折叠的孙代理卡片按 orphan 追加、不丢弃 | `child_live_reset_keeps_grandchild_cards_whose_spawning_message_was_folded` | 同上 |
+| 事件回放路径：`SubagentStart` 卡片跨 `TranscriptReset` 存活 | `child_replay_keeps_grandchild_cards_across_the_folded_reset` | 同上 |
 | reset 重建经 replay 重算 provider truth | `real_context_survives_compaction_transcript_reset_and_model_switch` | `crates/tui/src/chat_tests/tok_cost.rs`（断言更新） |
 
 - 定向回归：`cargo test -p opencoder-tui --lib subagent_compaction` → 5 passed；
@@ -65,12 +74,20 @@
   增加「尾段 prompt 不被提升为 first_prompt」断言；`chat.rs` 分支注释补上 remote 父路径为 app loop
   内联回放。复跑 `--lib subagent_compaction`（5）、`--lib transcript_reset`（9）、`--lib tok_cost`（22）、
   `--lib sidecar`（50，含 `SidecarChild` 路由进同一分支）、`--lib first_prompt`（3）；clippy 零警告、fmt 无差异。
+- 收尾记录（P2 修复）：孙代理卡片随嵌套折叠结转（见上）；`rebuild_view_from_messages` 迁至
+  `session_ui/reset_fold.rs`（`replay.rs` 787 → 738 行），`replay_messages` 改为其无卡片参数的薄封装；
+  新增 `reset_fold_tests.rs` 3 例（共享 `subagent_compaction_tests` 的夹具）。共享工作区当时含他人
+  在途且暂时无法编译的测试文件，故在「HEAD + 本次改动」的隔离 worktree 复跑：`--lib reset_fold`（4，
+  含 1 例既有同名匹配）、`subagent_compaction`（5）、`compaction`（30）、`subagent`（79）、
+  `transcript_reset`（9）、`tok_cost`（22）、`sidecar`（50）、`replay`（44）、`reset_rebuild`（2）、
+  `first_prompt`（3）；`--test compaction_summary_replay`（7）、`resume_context_used`（7）、
+  `tok_cost_replay`（8）；均 0 failed；clippy 零警告、fmt 无差异。
 - 测试范围：本次修改及其直接影响链路；未运行全量 Rust / SPA 测试与浏览器验收。
 
 ## Impact Surface
 
 - TUI：进入 subagent 视角时，压缩后的子转录以 `Compaction` 摘要块开头，压缩前历史与历次
   旧摘要不再显示；父视图、Web、CLI/API、依赖与 Ontology 目录均未改变。
-- 已知局限（P2，后续迭代）：嵌套 reset 走纯消息回放（`apply` 内无 store），子视图压缩后其孙代理
-  `Subagent` 卡片不再重建（改动前为原样保留）；`subagents_running/total` 计数结转保留，嵌套侧无
-  渲染消费方，后续 `SubagentDone` 饱和递减、`Done` 归零仍自洽。父视图离线重建有 store，无此问题。
+- 孙代理卡片（收尾修复，初版为已知局限）：子视图压缩后其孙代理 `Subagent` 卡片不再消失——重挂在
+  派生消息之下，派生消息已折叠的按 orphan 追加；`subagents_running/total` 与可见卡片保持一致，
+  运行中的孙代理事件继续路由进卡片。父视图离线重建仍走 store 记录，行为不变。

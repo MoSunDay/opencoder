@@ -5,10 +5,11 @@
 use crate::chat::ChatView;
 
 mod replay;
+mod reset_fold;
 pub use replay::rebuild_after_reset;
-pub use replay::rebuild_view_from_messages;
 pub use replay::replay_into_chat;
 pub use replay::replay_messages;
+pub use reset_fold::rebuild_view_from_messages;
 
 /// Snapshot of all session-specific TUI state. The `input`, `cursor_idx`,
 /// `hist_idx`, and `last_esc` are intentionally NOT included — they are
@@ -628,3 +629,7 @@ mod compaction_replay_tests;
 #[cfg(test)]
 #[path = "session_ui/subagent_compaction_tests.rs"]
 mod subagent_compaction_tests;
+
+#[cfg(test)]
+#[path = "session_ui/reset_fold_tests.rs"]
+mod reset_fold_tests;

@@ -17,7 +17,7 @@ use crate::chat::ChatView;
 use crate::mcp_menu::patch::{colliding_server, normalized_server_name};
 use crate::mcp_menu::{handle_mcp_key, McpMenu, McpOutcome};
 use crate::theme;
-use crate::worker::UiCmd;
+use crate::worker::{ConfigReloadScope, UiCmd};
 
 use super::LoopFlow;
 
@@ -79,7 +79,13 @@ pub(crate) async fn handle_mcp_outcome(
                 Ok(path) => match Config::load(workdir) {
                     Ok(reloaded) => {
                         *config = reloaded.clone();
-                        let _ = cmd_tx.send(UiCmd::ReloadConfig(Box::new(reloaded))).await;
+                        let _ = cmd_tx
+                            .send(UiCmd::ReloadConfig {
+                                config: Box::new(reloaded),
+                                scope: ConfigReloadScope::Full,
+                                ack: None,
+                            })
+                            .await;
                         chat.push_marker(Line::from(format!("[/mcp] saved → {}", path.display())));
                     }
                     Err(e) => {
@@ -239,7 +245,10 @@ mod tests {
         .await;
 
         assert!(marker_text(&chat).contains("[/mcp] saved"));
-        assert!(matches!(cmd_rx.recv().await, Some(UiCmd::ReloadConfig(_))));
+        assert!(matches!(
+            cmd_rx.recv().await,
+            Some(UiCmd::ReloadConfig { .. })
+        ));
         assert!(config.mcp_servers.contains_key("c-d"));
         // And it landed in the global domain file (no project mcp.json).
         let saved: serde_json::Value = serde_json::from_str(

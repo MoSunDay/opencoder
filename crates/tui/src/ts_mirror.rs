@@ -19,7 +19,8 @@ use async_trait::async_trait;
 use opencoder_core::{Message, Role};
 use opencoder_store::{
     Delivery, ImportReport, InputAdmission, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord, TsRecord, TsRegistry,
+    SessionListItem, SessionMeta, SessionModelOverrides, SessionPatch, Store, SubagentTaskRecord,
+    TsRecord, TsRegistry,
 };
 use tokio::sync::Mutex;
 
@@ -176,6 +177,34 @@ impl Store for TsMirrorStore {
         Ok(())
     }
 
+    async fn create_session_with_model_overrides(
+        &self,
+        meta: &SessionMeta,
+        overrides: Option<&SessionModelOverrides>,
+    ) -> Result<()> {
+        self.inner
+            .create_session_with_model_overrides(meta, overrides)
+            .await?;
+        // Match create_session's mirror hook without routing through it and
+        // accidentally replacing the caller's NULL/{}/explicit metadata.
+        if meta.model.is_none() {
+            self.note_ts_session(meta).await;
+        }
+        Ok(())
+    }
+
+    async fn get_session_model_overrides(&self, id: &str) -> Result<Option<SessionModelOverrides>> {
+        self.inner.get_session_model_overrides(id).await
+    }
+
+    async fn set_session_model_overrides(
+        &self,
+        id: &str,
+        overrides: Option<&SessionModelOverrides>,
+    ) -> Result<()> {
+        self.inner.set_session_model_overrides(id, overrides).await
+    }
+
     async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>> {
         self.inner.get_session(id).await
     }
@@ -325,6 +354,113 @@ impl Store for TsMirrorStore {
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {
         self.inner.import_messages(session_id, msgs).await
+    }
+}
+
+#[cfg(test)]
+mod model_metadata_tests {
+    use super::*;
+    use opencoder_store::TursoStore;
+
+    async fn fixture() -> (TsMirrorStore, tempfile::TempDir) {
+        let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let tmp = tempfile::tempdir().unwrap();
+        let workdir = tmp.path().join("project");
+        tokio::fs::create_dir_all(&workdir).await.unwrap();
+        let registry = TsRegistry::open(tmp.path().join("ts.db")).await.unwrap();
+        (
+            TsMirrorStore {
+                inner,
+                registry,
+                workdir,
+                known: Mutex::new(HashSet::new()),
+            },
+            tmp,
+        )
+    }
+
+    fn ts_meta(id: &str) -> SessionMeta {
+        SessionMeta {
+            id: id.into(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn model_metadata_delegates_all_states_and_keeps_ts_mirroring() {
+        let (mirror, _tmp) = fixture().await;
+        let empty = SessionModelOverrides::default();
+        let explicit = SessionModelOverrides {
+            shared: Some("provider-s/shared-model".into()),
+            act: Some("provider-a/act-model".into()),
+            plan: Some("provider-b/plan-model".into()),
+        };
+
+        for (id, overrides) in [
+            ("legacy", None),
+            ("mode-aware", Some(&empty)),
+            ("explicit", Some(&explicit)),
+        ] {
+            mirror
+                .create_session_with_model_overrides(&ts_meta(id), overrides)
+                .await
+                .unwrap();
+        }
+
+        for (id, expected) in [
+            ("legacy", None),
+            ("mode-aware", Some(empty.clone())),
+            ("explicit", Some(explicit.clone())),
+        ] {
+            assert_eq!(
+                mirror.get_session_model_overrides(id).await.unwrap(),
+                expected
+            );
+            assert!(
+                mirror.registry.get(id).await.unwrap().is_some(),
+                "metadata-aware creation must retain the ts mirror hook"
+            );
+        }
+
+        let mut plain = ts_meta("plain");
+        plain.model = Some("provider/plain".into());
+        mirror
+            .create_session_with_model_overrides(&plain, Some(&explicit))
+            .await
+            .unwrap();
+        assert_eq!(
+            mirror.get_session_model_overrides("plain").await.unwrap(),
+            Some(explicit.clone())
+        );
+        assert!(
+            mirror.registry.get("plain").await.unwrap().is_none(),
+            "metadata-aware creation must not register a plain session"
+        );
+
+        let edited = SessionModelOverrides {
+            shared: Some("provider-s/edited-shared".into()),
+            act: Some("provider-c/edited-act".into()),
+            plan: None,
+        };
+        mirror
+            .set_session_model_overrides("legacy", Some(&edited))
+            .await
+            .unwrap();
+        assert_eq!(
+            mirror.get_session_model_overrides("legacy").await.unwrap(),
+            Some(edited)
+        );
+        mirror
+            .set_session_model_overrides("explicit", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            mirror
+                .get_session_model_overrides("explicit")
+                .await
+                .unwrap(),
+            None
+        );
     }
 }
 

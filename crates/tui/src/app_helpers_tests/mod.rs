@@ -7,6 +7,7 @@ use crossterm::event::KeyModifiers;
 use opencoder_store::SessionMeta;
 
 mod ctrl_l_tests;
+mod model_override_tests;
 mod mouse_helpers;
 mod mouse_scroll_tests;
 mod mouse_tests;
@@ -412,8 +413,8 @@ async fn restore_pending_mirrors_restores_display_text_at_reload() {
     );
 }
 
-#[test]
-fn reapply_session_model_overrides_resumed_model() {
+#[tokio::test]
+async fn reapply_session_model_overrides_resumed_model() {
     use opencoder_core::resolve_agent;
     use opencoder_llm::{ChatStream, MockChatClient};
     use std::path::PathBuf;
@@ -431,16 +432,26 @@ fn reapply_session_model_overrides_resumed_model() {
         PathBuf::from("/tmp"),
     );
     // Explicit --model wins over the stored model; returns the value to persist.
-    let changed = reapply_session_model(&mut s, &Some("anthropic/claude-3".into()));
+    let changed = reapply_session_model(&mut s, &Some("anthropic/claude-3".into()))
+        .await
+        .unwrap();
     assert_eq!(changed.as_deref(), Some("anthropic/claude-3"));
     assert_eq!(s.model, "claude-3");
+    assert_eq!(s.effective_model(), "anthropic/claude-3");
+    assert_eq!(
+        s.model_overrides(),
+        Some(&opencoder_store::SessionModelOverrides::default())
+    );
+    assert!(s.take_model_switch().is_none());
     assert_eq!(s.config.provider_id(), "anthropic");
     // No-op when the override already matches or is absent.
     assert_eq!(
-        reapply_session_model(&mut s, &Some("anthropic/claude-3".into())),
+        reapply_session_model(&mut s, &Some("anthropic/claude-3".into()))
+            .await
+            .unwrap(),
         None
     );
-    assert_eq!(reapply_session_model(&mut s, &None), None);
+    assert_eq!(reapply_session_model(&mut s, &None).await.unwrap(), None);
 }
 
 #[tokio::test]

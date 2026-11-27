@@ -126,6 +126,37 @@ macro_rules! store_implementation_0 {
 
         }).await
     }
+    async fn create_session_with_model_overrides(
+        &self,
+        meta: &SessionMeta,
+        overrides: Option<&crate::SessionModelOverrides>,
+    ) -> Result<()> {
+        let meta = meta.to_owned();
+        let overrides = overrides.cloned();
+        self.db.write(move |conn| async move {
+            sessions::create_with_model_overrides(&conn, &meta, overrides.as_ref()).await
+        }).await
+    }
+    async fn get_session_model_overrides(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::SessionModelOverrides>> {
+        let id = id.to_owned();
+        self.db.read(move |conn| async move {
+            sessions::get_model_overrides(&conn, &id).await
+        }).await
+    }
+    async fn set_session_model_overrides(
+        &self,
+        id: &str,
+        overrides: Option<&crate::SessionModelOverrides>,
+    ) -> Result<()> {
+        let id = id.to_owned();
+        let overrides = overrides.cloned();
+        self.db.write(move |conn| async move {
+            sessions::set_model_overrides(&conn, &id, overrides.as_ref()).await
+        }).await
+    }
     async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>> {
         let id = id.to_owned();
         self.db.read(move |conn| async move {

@@ -27,7 +27,7 @@ use opencoder_store::Store;
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::command::SlashAction;
 use crate::local_cmd;
-use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
+use crate::model_menu::{EnvMenu, ModeMenuKind, ModeSelection, ModelMenu};
 use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd};
 
 /// Which agent-switch command triggered the dispatch. Parameterizes the
@@ -119,19 +119,9 @@ pub(crate) async fn dispatch_mode_switch(
     LoopFlow::Proceed
 }
 
-/// Unified slash-command dispatch shared by both the `/` popup picker
-/// (`dispatch_command`) and free-text composer submit (`app.rs` Submit).
-/// Every recognized `/cmd` routes through here so the behavior is identical
-/// regardless of entry path. Takes a [`SlashAction`] directly (the popup
-/// extracts it from [`CommandOutcome`]; free-text uses [`command::parse`]).
-///
-/// Returns [`LoopFlow::Proceed`] for commands that only open a menu or
-/// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
-/// Notepad, Ps, Stop, Sidecar). For mode-switch commands
-/// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
-/// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]). While
-/// a turn is running, Act/Plan queue through `admit_tx` (apply at the idle
-/// boundary) is refused with the busy flash — see `dispatch_mode_switch`.
+/// Shared dispatch for picker and typed slash commands. Menu/chrome commands
+/// return `Proceed`; mode switches return their gate-and-start flow and may
+/// queue while a turn is running (see `dispatch_mode_switch`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_slash_action(
     action: SlashAction,
@@ -203,10 +193,25 @@ pub(crate) async fn dispatch_slash_action(
             ));
         }
         SlashAction::Model => {
-            *model_menu = Some(ModelMenu::List(ProviderList::new(config)));
+            *model_menu = Some(ModelMenu::ModeSelect(Box::new(ModeSelection::new(
+                crate::model_scope::menu_config(config, chat),
+                crate::model_scope::mode_for_agent(agent_name),
+                ModeMenuKind::Model,
+                workdir,
+                chat.model_overrides.clone(),
+            ))));
+        }
+        SlashAction::Env(command) => {
+            *model_menu = Some(ModelMenu::Env(EnvMenu::with_command(workdir, command)));
         }
         SlashAction::Config => {
-            *model_menu = Some(ModelMenu::Config(ConfigForm::new(config)));
+            *model_menu = Some(ModelMenu::ModeSelect(Box::new(ModeSelection::new(
+                crate::model_scope::menu_config(config, chat),
+                crate::model_scope::mode_for_agent(agent_name),
+                ModeMenuKind::Config,
+                workdir,
+                chat.model_overrides.clone(),
+            ))));
         }
         SlashAction::Mcp => {
             *mcp_menu = Some(crate::mcp_menu::McpMenu::List(

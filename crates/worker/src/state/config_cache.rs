@@ -3,8 +3,8 @@
 //! `Config::load` stats, parses and merges every candidate file on each
 //! call. The node snapshot/report cycle and inventory change checks repeat
 //! that work every few seconds, so the effective node config is cached and
-//! this module decides cheaply (stat only, no reads, no mutation) whether a
-//! reload is needed.
+//! this module decides cheaply (one active-marker lookup plus file stats, no
+//! config parsing or mutation) whether a reload is needed.
 
 use opencoder_core::Config;
 use std::{
@@ -12,25 +12,44 @@ use std::{
     time::SystemTime,
 };
 
-/// Stat-derived fingerprint of the existing files of a covered file set.
-/// Equal values mean no covered file was created, removed or rewritten (by
-/// mtime or size) since the previous computation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The complete observable state of one covered path. Missing, directories
+/// and non-regular file types must not collapse into the same fingerprint:
+/// core attempts to read any existing path, so those transitions can change a
+/// load from success to failure even when no regular file is present.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FileKind {
+    Missing,
+    Regular { bytes: u64, modified: SystemTime },
+    Directory,
+    Other,
+}
+
+/// One covered path and its file kind/stat metadata. Keeping entries separate
+/// avoids hiding a same-size edit to an older file behind a newer file's mtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileStat {
+    path: PathBuf,
+    kind: FileKind,
+}
+
+/// Stat-derived fingerprint of every path in a covered file set. Equal values
+/// mean no covered path changed presence, type, mtime or size.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct FileStats {
-    pub(crate) newest_mtime: Option<SystemTime>,
-    pub(crate) total_bytes: u64,
-    pub(crate) file_count: u64,
+    entries: Vec<FileStat>,
 }
 
 /// Everything a cached config was computed from: where the load reads its
 /// files (workdir plus the resolved global/XDG dirs, so callers with a
-/// different discovery view never reuse each other's entry) and the file
-/// stats at that location.
+/// different discovery view never reuse each other's entry), the interactive
+/// active-Env selection, and the file stats at those locations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigKey {
     workdir: PathBuf,
     global_dir: Option<PathBuf>,
     xdg_dirs: Vec<PathBuf>,
+    active_env: Option<PathBuf>,
+    stale_marker: bool,
     files: FileStats,
 }
 
@@ -56,39 +75,69 @@ pub(crate) fn candidate_files(
         }
     }
     for dir in xdg_dirs {
-        paths.push(dir.join("opencoder").join("config.json"));
+        for file in ["config.json", "cli.json", "skills.json"] {
+            paths.push(dir.join("opencoder").join(file));
+        }
     }
     paths.sort();
     paths.dedup();
     paths
 }
 
-/// Fingerprint the existing files among `paths`. A missing path contributes
-/// nothing, so creating or removing a covered file changes the result.
-pub(crate) fn file_stats(paths: &[PathBuf]) -> FileStats {
-    let mut stats = FileStats::default();
-    for path in paths {
-        let Ok(metadata) = std::fs::metadata(path) else {
-            continue;
-        };
-        if !metadata.is_file() {
-            continue;
-        }
-        stats.file_count += 1;
-        stats.total_bytes = stats.total_bytes.saturating_add(metadata.len());
-        let modified = metadata.modified().ok();
-        stats.newest_mtime = [stats.newest_mtime, modified].into_iter().flatten().max();
-    }
-    stats
+/// Fingerprint every path in `paths`, including missing and non-regular paths.
+/// Only `NotFound` means [`FileKind::Missing`]; every other stat or modified-
+/// time error is returned so an identical-looking old key cannot hide it.
+pub(crate) fn file_stats(paths: &[PathBuf]) -> opencoder_core::Result<FileStats> {
+    let mut entries = paths
+        .iter()
+        .map(|path| {
+            let metadata = match std::fs::metadata(path) {
+                Ok(metadata) => Some(metadata),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    return Err(opencoder_core::CoreError::Config(format!(
+                        "config input metadata {} failed: {error}",
+                        path.display()
+                    )));
+                }
+            };
+            let kind = match metadata {
+                None => FileKind::Missing,
+                Some(metadata) if metadata.is_dir() => FileKind::Directory,
+                Some(metadata) if metadata.is_file() => {
+                    let modified = metadata.modified().map_err(|error| {
+                        opencoder_core::CoreError::Config(format!(
+                            "config input modified time {} failed: {error}",
+                            path.display()
+                        ))
+                    })?;
+                    FileKind::Regular {
+                        bytes: metadata.len(),
+                        modified,
+                    }
+                }
+                Some(_) => FileKind::Other,
+            };
+            Ok(FileStat {
+                path: path.clone(),
+                kind,
+            })
+        })
+        .collect::<opencoder_core::Result<Vec<_>>>()?;
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(FileStats { entries })
 }
 
-/// Cache key for a config load from `workdir`. The global dir comes from
-/// `Config::global_config_path` so core's own home resolution (including its
-/// config-home override) is honored. The XDG locations cover both the
-/// platform dir and the override root beside the global dir: core redirects
-/// its XDG candidate there under the override, and without it that path is
-/// never read — the extra entry only costs one stat.
-pub(crate) fn config_key(workdir: &Path) -> ConfigKey {
+/// Cache key for the interactive `Config::load` from `workdir`. The global dir
+/// comes from `Config::global_config_path` so core's own home resolution
+/// (including its config-home override) is honored. The XDG locations cover
+/// both the platform dir and the override root beside the global dir: core
+/// redirects its XDG candidate there under the override, and without it that
+/// path is never read — the extra entry only costs one stat.
+///
+/// Only this interactive key consults `config_env_status`; explicit-home,
+/// frozen and operator loaders do not use the worker configuration cache.
+pub(crate) fn config_key(workdir: &Path) -> opencoder_core::Result<ConfigKey> {
     let global_dir = Config::global_config_path()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
@@ -96,13 +145,29 @@ pub(crate) fn config_key(workdir: &Path) -> ConfigKey {
     if let Some(root) = global_dir.as_deref().and_then(Path::parent) {
         xdg_dirs.push(root.to_path_buf());
     }
-    let files = file_stats(&candidate_files(workdir, global_dir.as_deref(), &xdg_dirs));
-    ConfigKey {
+
+    // Do not let a marker I/O error reuse a cached no-Env configuration.
+    let env = opencoder_core::config_env_status()?;
+    let mut candidates = candidate_files(workdir, global_dir.as_deref(), &xdg_dirs);
+    // The marker is covered even when stale, and active files are covered even
+    // when missing so creation/removal invalidates just like edits do.
+    candidates.push(env.marker_path.clone());
+    if let Some(directory) = env.active_path.as_ref() {
+        for file in ["config.json", "cli.json", "skills.json"] {
+            candidates.push(directory.join(file));
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+    let files = file_stats(&candidates)?;
+    Ok(ConfigKey {
         workdir: workdir.to_path_buf(),
         global_dir,
         xdg_dirs,
+        active_env: env.active_path,
+        stale_marker: env.stale_marker,
         files,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -134,8 +199,11 @@ mod tests {
                 expected.push(format!("{dir}/{file}"));
             }
         }
-        // ... plus each extra XDG location the caller covers.
-        expected.push("/xdg/opencoder/config.json".into());
+        // ... plus each extra XDG location the caller covers. XDG supports
+        // exactly the same files as an active Env, not MCP or schedules.
+        for file in ["config.json", "cli.json", "skills.json"] {
+            expected.push(format!("/xdg/opencoder/{file}"));
+        }
         let mut actual: Vec<String> = candidate_files(workdir, Some(global_dir), &xdg_dirs)
             .iter()
             .map(|path| path.display().to_string())
@@ -149,7 +217,7 @@ mod tests {
     fn file_stats_stay_equal_until_a_covered_file_changes() {
         let root = tempfile::tempdir().unwrap();
         let workdir = root.path();
-        let stats = |paths: &[PathBuf]| file_stats(paths);
+        let stats = |paths: &[PathBuf]| file_stats(paths).unwrap();
         let config = workdir.join(".opencoder").join("config.json");
         let candidates = || candidate_files(workdir, None, &[]);
 
@@ -175,14 +243,42 @@ mod tests {
     fn file_stats_treat_removed_files_as_missing() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("opencoder.json");
-        let before = file_stats(std::slice::from_ref(&path));
+        let before = file_stats(std::slice::from_ref(&path)).unwrap();
         write(&path, "{}");
-        assert_ne!(before, file_stats(std::slice::from_ref(&path)));
+        assert_ne!(before, file_stats(std::slice::from_ref(&path)).unwrap());
         std::fs::remove_file(&path).unwrap();
         assert_eq!(
             before,
-            file_stats(std::slice::from_ref(&path)),
+            file_stats(std::slice::from_ref(&path)).unwrap(),
             "removal must return to the all-missing fingerprint"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_stats_distinguish_missing_regular_directory_and_other_types() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.json");
+        let paths = std::slice::from_ref(&path);
+        let fingerprint = || file_stats(paths).unwrap();
+
+        let missing = fingerprint();
+        assert!(matches!(&missing.entries[0].kind, FileKind::Missing));
+        write(&path, "{}");
+        let regular = fingerprint();
+        assert!(matches!(&regular.entries[0].kind, FileKind::Regular { .. }));
+        assert_ne!(missing, regular);
+
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let directory = fingerprint();
+        assert!(matches!(&directory.entries[0].kind, FileKind::Directory));
+        assert_ne!(missing, directory, "a directory is not a missing file");
+
+        std::fs::remove_dir(&path).unwrap();
+        let _socket = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let other = fingerprint();
+        assert!(matches!(&other.entries[0].kind, FileKind::Other));
+        assert_ne!(directory, other);
     }
 }

@@ -13,6 +13,30 @@ use crate::chat::ChatView;
 /// belt-and-suspenders serializer — it is no longer load-bearing for safety.
 pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Acknowledge worker commands while preserving them for the test's original
+/// assertions. Failure-path tests drive their channels manually instead.
+pub(crate) fn auto_ack_commands(
+    mut commands: tokio::sync::mpsc::Receiver<crate::worker::UiCmd>,
+) -> tokio::sync::mpsc::Receiver<crate::worker::UiCmd> {
+    let (forward_tx, forward_rx) = tokio::sync::mpsc::channel(64);
+    tokio::spawn(async move {
+        while let Some(command) = commands.recv().await {
+            match &command {
+                crate::worker::UiCmd::ReloadConfig { ack: Some(ack), .. }
+                | crate::worker::UiCmd::ApplySession { ack, .. }
+                | crate::worker::UiCmd::ReloadEnv { ack, .. } => {
+                    let _ = ack.send(Ok(()));
+                }
+                _ => {}
+            }
+            if forward_tx.send(command).await.is_err() {
+                break;
+            }
+        }
+    });
+    forward_rx
+}
+
 mod cancel_keep_pending;
 mod cli_outcome_tests;
 mod mcp_outcome_tests;
@@ -20,6 +44,8 @@ mod model_outcome_tests;
 mod skill_outcome_tests;
 
 mod done_error_mirror_tests;
+mod env_model_failure_tests;
+mod env_model_tests;
 
 mod compact_done_rekick;
 mod stale_turn_done_tests;

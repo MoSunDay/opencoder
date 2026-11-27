@@ -29,12 +29,17 @@ pub use agent::{
     build_delegation_hidden, builtin_agents, effective_default_agent, resolve_agent,
     strip_build_delegation, tool_preamble, Agent, AgentKind, AgentMode, ToolFilter,
 };
+pub use config::local_env::{
+    activate_config_env, config_env_dir, config_env_status, create_config_env,
+    deactivate_config_env, delete_config_env, list_config_envs, validate_config_env_name,
+    ConfigEnvInfo, ConfigEnvStatus,
+};
 pub use config::validate_team_turn_budgets;
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, CliConfig, CompactionConfig, Config,
-    Endpoint, HttpHeader, InjectionTarget, KeymapConfig, McpServerConfig, NetworkConfig,
-    OutputStreamlineConfig, ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT, KEYMAP_INFO,
-    TEAM_TURN_BUDGET_MAX,
+    ConfigMode, ConfigSaveRoute, ConfigSaveTarget, Endpoint, HttpHeader, InjectionTarget,
+    KeymapConfig, McpServerConfig, ModeConfig, ModesConfig, NetworkConfig, OutputStreamlineConfig,
+    ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT, KEYMAP_INFO, TEAM_TURN_BUDGET_MAX,
 };
 pub use data_dir::{data_dir_for, data_root, workdir_hash};
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};

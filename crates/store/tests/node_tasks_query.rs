@@ -9,7 +9,8 @@
 //! Runs on `open_memory` — these are pure query semantics, no WAL involved.
 
 use opencoder_store::{
-    NodeTaskRecord, NodeTaskStatus, SessionMeta, Store, TursoStore, TASK_TYPE_NODE,
+    NodeTaskRecord, NodeTaskStatus, SessionMeta, SessionModelOverrides, Store, TursoStore,
+    TASK_TYPE_NODE,
 };
 
 async fn fresh() -> TursoStore {
@@ -41,6 +42,22 @@ async fn dispatch(store: &TursoStore, id: &str, node: &str, created_at: i64) -> 
 }
 
 // ── list_node_tasks_filtered ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn dispatched_session_starts_with_empty_mode_aware_metadata() {
+    let store = fresh().await;
+    let node = register(&store, "alpha").await;
+    let task = dispatch(&store, "a1", &node, 1_000).await;
+    assert_eq!(
+        store
+            .get_session_model_overrides(&task.session_id)
+            .await
+            .unwrap(),
+        Some(SessionModelOverrides::default())
+    );
+}
+
+// ── filters ───────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn filters_by_node_status_and_both() {

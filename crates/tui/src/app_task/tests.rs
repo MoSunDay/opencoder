@@ -1,15 +1,15 @@
 use super::*;
 use opencoder_core::harness::Harness;
-use opencoder_core::Message;
-use opencoder_llm::MockChatClient;
+use opencoder_core::{Message, ProviderConfig};
+use opencoder_llm::{ChatRequest, MockChatClient};
 use opencoder_store::TursoStore;
 
 // ── pending_replay_hint (pure) ──────────────────────────────────────
 
 #[test]
-fn new_task_keeps_active_provider_model_and_loads_other_settings() {
+fn new_task_keeps_current_shared_model_providers_and_other_settings() {
     let active = Config {
-        model: "prov-x/model-x".into(),
+        model: "outer/stale".into(),
         ..Config::default()
     };
     let disk = Config {
@@ -17,10 +17,105 @@ fn new_task_keeps_active_provider_model_and_loads_other_settings() {
         max_tokens: Some(8192),
         ..Config::default()
     };
-    let config = new_task_config(disk, &active);
+    let config = new_task_config(disk, &active, "prov-x/model-x");
     assert_eq!(config.model, "prov-x/model-x");
     assert_eq!(config.model_id(), "model-x");
     assert_eq!(config.max_tokens, Some(8192));
+}
+
+#[test]
+fn new_task_empty_shared_label_preserves_legacy_fallback() {
+    let active = Config {
+        model: "legacy/shared".into(),
+        ..Config::default()
+    };
+    let config = new_task_config(Config::default(), &active, "");
+    assert_eq!(config.model, "legacy/shared");
+}
+
+fn provider(protocol: &str, temperature: Option<f64>) -> ProviderConfig {
+    ProviderConfig {
+        protocol: protocol.into(),
+        base_url: "http://127.0.0.1:9".into(),
+        api_key: Some("test-key".into()),
+        temperature,
+        ..Default::default()
+    }
+}
+
+fn routing_config() -> Config {
+    let mut config = Config {
+        model: "main/shared".into(),
+        ..Default::default()
+    };
+    config
+        .providers
+        .insert("main".into(), provider("chat_completions", None));
+    config
+}
+
+fn route_request(model: &str) -> ChatRequest {
+    ChatRequest {
+        purpose: opencoder_llm::RequestPurpose::Conversation,
+        model: model.into(),
+        messages: Vec::new(),
+        tools: Vec::new(),
+        tool_choice: None,
+        temperature: None,
+        max_tokens: None,
+        reasoning_effort: None,
+        cache_salt: None,
+    }
+}
+
+#[test]
+fn new_task_client_routes_with_added_edited_and_deleted_providers() {
+    let disk = Config {
+        model: "disk/default".into(),
+        max_tokens: Some(4096),
+        ..Default::default()
+    };
+    let mut active = routing_config();
+    active
+        .providers
+        .insert("target".into(), provider("responses", None));
+
+    let added = new_task_config(disk.clone(), &active, "main/shared");
+    assert_eq!(added.max_tokens, Some(4096));
+    assert_eq!(added.providers, active.providers);
+    let added_client = new_task_client(&added).unwrap();
+    let added_body = added_client
+        .request_body(&route_request("target/added-model"))
+        .unwrap();
+    assert_eq!(added_body["model"], "added-model");
+    assert!(added_body.get("input").is_some());
+    assert!(added_body.get("messages").is_none());
+
+    active
+        .providers
+        .insert("target".into(), provider("chat_completions", Some(0.25)));
+    let edited = new_task_config(disk.clone(), &active, "main/shared");
+    let edited_client = new_task_client(&edited).unwrap();
+    let edited_body = edited_client
+        .request_body(&route_request("target/edited-model"))
+        .unwrap();
+    assert_eq!(edited_body["model"], "edited-model");
+    assert_eq!(edited_body["temperature"], 0.25);
+    assert!(edited_body.get("messages").is_some());
+
+    active.providers.remove("target");
+    let deleted = new_task_config(disk, &active, "main/shared");
+    assert!(!deleted.providers.contains_key("target"));
+    let deleted_client = new_task_client(&deleted).unwrap();
+    let error = deleted_client
+        .request_body(&route_request("target/deleted-model"))
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown model provider `target`"),
+        "deleted provider must not survive in the new client's snapshot: {error:#}"
+    );
 }
 
 #[test]
@@ -277,3 +372,12 @@ async fn load_session_for_switch_counts_only_pending_statuses() {
 
 #[path = "switch.rs"]
 mod switch;
+
+#[path = "resume_new.rs"]
+mod resume_new;
+
+#[path = "explicit_model.rs"]
+mod explicit_model;
+
+#[path = "restored_active.rs"]
+mod restored_active;

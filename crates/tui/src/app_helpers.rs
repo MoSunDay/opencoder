@@ -11,7 +11,7 @@ use anyhow::Result;
 use opencoder_core::{resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
 use opencoder_session::SessionState;
-use opencoder_store::{Delivery, SessionInput, SessionPatch, Store, TursoStore};
+use opencoder_store::{Delivery, SessionInput, Store, TursoStore};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Terminal;
@@ -35,41 +35,26 @@ pub(crate) fn resume_hint(id: &str) -> String {
     format!("resume with: opencoder -s {id}")
 }
 
-/// Re-apply an explicit `--model` to a resumed/newly-built session. `resume()`
-/// restores the model stored in the session row into `session.config.model`,
-/// so an explicit `--model` must win here. Returns the new model string when
-/// the session changed (caller persists it), else `None`. Mirrors the headless
-/// path in `crates/local/src/run.rs` -- the TUI previously lacked this and
-/// silently dropped `--model` on resume (chosen model not applied after restart).
-pub(crate) fn reapply_session_model(
+/// Select one process-level model for both endpoint setup and post-resume
+/// reapplication. Config loading applies `OPENCODER_MODEL`; CLI then wins.
+pub(crate) fn preferred_explicit_model(cli: Option<&str>, env: Option<&str>) -> Option<String> {
+    cli.or_else(|| env.filter(|model| !model.is_empty()))
+        .map(str::to_string)
+}
+
+/// Re-apply the winning process-level model after resume. Existing rows persist
+/// model and metadata with rollback on failure; fresh rows retain lazy creation.
+pub(crate) async fn reapply_session_model(
     session: &mut SessionState,
     model: &Option<String>,
-) -> Option<String> {
-    let m = model.as_ref()?;
-    if session.config.model == *m {
-        return None;
-    }
-    session.config.model = m.clone();
-    session.model = session.config.model_id().to_string();
-    Some(m.clone())
+) -> Result<Option<String>> {
+    let m = match model.as_ref() {
+        Some(model) => model,
+        None => return Ok(None),
+    };
+    let changed = session.apply_explicit_model_and_persist(m).await?;
+    Ok(changed.then(|| m.clone()))
 }
-
-/// Persist a model change (the `Some` returned by [`reapply_session_model`])
-/// back into the session row so subsequent resumes honor the new choice.
-pub(crate) async fn persist_session_model(store: &dyn Store, id: &str, model: String) {
-    let _ = store
-        .update_session(
-            id,
-            &SessionPatch {
-                model: Some(model),
-                updated_at: Some(opencoder_core::message::now_ms()),
-                ..Default::default()
-            },
-        )
-        .await;
-}
-
-/// Resolve the `(base_url, api_key)` pair used to build the LLM client at TUI
 /// startup. Selects the provider whose name matches the `model`'s `provider/`
 /// prefix via `Config::resolve_endpoint`, so a `model` like
 /// `deepseek/deepseek-chat` resolves against `providers["deepseek"]` rather
@@ -79,6 +64,18 @@ pub(crate) fn startup_endpoint(config: &Config) -> Result<Endpoint> {
     Ok(config.resolve_endpoint()?)
 }
 
+fn with_session_model_view(
+    session: &SessionState,
+    mut view: crate::chat::ChatView,
+) -> crate::chat::ChatView {
+    view.shared_model =
+        crate::model_scope::shared_model(&session.config, session.model_overrides());
+    view.model_overrides = session.model_overrides().cloned();
+    view.model = session.effective_model();
+    view.annotation_text = session.requirement.clone();
+    view
+}
+
 /// Build the initial `ChatView` for `run_app`: replay persisted history for a
 /// resumed session so the transcript is visible on startup, else a blank view.
 pub(crate) async fn initial_chat_view(
@@ -86,11 +83,14 @@ pub(crate) async fn initial_chat_view(
     store: &Arc<dyn Store>,
 ) -> crate::chat::ChatView {
     if let Some(remote) = &session.harness.remote {
-        return crate::chat::ChatView {
-            agent: remote.label(),
-            remote: true,
-            ..Default::default()
-        };
+        return with_session_model_view(
+            session,
+            crate::chat::ChatView {
+                agent: remote.label(),
+                remote: true,
+                ..Default::default()
+            },
+        );
     }
     // Cold-start floor = subtask folds recorded in the runtime registry;
     // message replay alone cannot see them.
@@ -114,7 +114,7 @@ pub(crate) async fn initial_chat_view(
     };
     view.subtask_done = crate::subtask_registry::done_count(&registry);
     view.subtask_total = crate::subtask_registry::total_count(&registry);
-    view
+    with_session_model_view(session, view)
 }
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc or Ctrl+L

@@ -165,6 +165,64 @@ async fn native_changes_automatically_update_catalog_and_keep_read_permissions()
 }
 
 #[tokio::test]
+async fn platform_tui_entry_synchronizes_interactive_env_and_mode_model_configuration() {
+    let f = Fixture::with_background(false).await;
+    let sync = "/api/ontology/envs/debug/sync";
+    f.ok("POST", sync, Value::Null).await;
+    let listed = f.list().await;
+    let row = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["capability"]["key"] == "platform:tui")
+        .expect("the existing TUI capability must be synchronized");
+    let capability = &row["capability"];
+    assert_eq!(capability["name"], "终端交互与配置");
+    let description = capability["description"].as_str().unwrap();
+    for text in [
+        "/env",
+        "/envs",
+        "/model",
+        "/config",
+        "/cli",
+        "/skill",
+        "Shared/Act/Plan",
+        "Shared 会话选择立即生效",
+        "优先于 modes.shared.model",
+        "{} 或缺省字段表示继承配置",
+        "整体 NULL 保留 legacy 语义",
+        "Provider 新增、编辑、删除",
+        "session-only",
+        "EnvAware",
+        "legacy Auto",
+        "Resume/Fork",
+        "外层 config/client/chat",
+        "失败保留原运行时",
+    ] {
+        assert!(description.contains(text), "missing {text}: {description}");
+    }
+    assert_eq!(
+        capability["cli"],
+        json!([
+            "TUI /env",
+            "TUI /envs",
+            "TUI /model",
+            "TUI /config",
+            "TUI /cli",
+            "TUI /skill",
+            "opencoder-cli raw call METHOD PATH"
+        ])
+    );
+    assert_eq!(capability["api"], json!(["/api/tui"]));
+
+    let (status, check) = f
+        .call(Role::Viewer, "GET", &format!("{sync}/check"), Value::Null)
+        .await;
+    assert_eq!(status, 200, "{check}");
+    assert_eq!(check["in_sync"], true, "{check}");
+}
+
+#[tokio::test]
 async fn capability_detail_returns_the_listed_document() {
     let f = Fixture::new().await;
     f.ok("POST", "/api/ontology/envs/debug/sync", Value::Null)

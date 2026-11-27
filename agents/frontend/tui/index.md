@@ -11,9 +11,19 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   `PendingSwitch` 把 `TaskPick` 与切换成功后采用的父会话绑在一起；显式切换
   （含 `/subtasks` Enter 下钻）先丢弃在途 `/agent` 查询，晚到的查询结果只在
   暂存槽为空时接受，失败切换不采用父指针
-- [app_bootstrap.rs](../../../crates/tui/src/app_bootstrap.rs) — 恢复运行态或远端绑定
+- [app_bootstrap.rs](../../../crates/tui/src/app_bootstrap.rs) — 启动、恢复运行态或
+  远端绑定；进程级模型按 `--model` > `OPENCODER_MODEL` > 持久化会话选择 >
+  per-mode config 解析，client 在显式覆盖后构造，resume 恢复持久化选择后再重应用
+  同一显式胜者
 - [app_task.rs](../../../crates/tui/src/app_task.rs) — 独立任务管理与本地新任务运行设置；
-  `/task` 新建任务在首条输入持久化前不落 session 行，模型请求前不会出现空 task
+  `/task` New 继承当前 Shared 有效模型、完整 Shared/Act/Plan 会话元数据和完整
+  `providers`（含 session-only 新增/编辑/删除），其他设置重新从磁盘加载；新 client
+  基于同一个 `new_config` 构造，不沿用旧 client 的 provider 路由快照。继承先只写入
+  新会话内存，首条输入持久化前不落 session 行，模型请求前不会出现空 task。
+  `/task` Resume/Fork 先恢复持久化选择，再按 startup 相同优先级重应用显式胜者，
+  并从覆盖后的 effective config 构造 client；只有恢复、client 构造、模型持久化及
+  新 worker 准备全部成功后才同步外层 config/client/chat/context，任一失败保留原
+  worker、模型状态、历史与草稿，不提交半切换状态
 - [worker.rs](../../../crates/tui/src/worker.rs) — 分派 Server 或本地会话 actor，
   桥接 `SessionEvent` 到聊天渲染；turn 代标：`ResetCancel(CancellationToken, gen)`
   重置取消令牌并携带代数、`TurnDone(String, gen)` 回显同代，app 状态逐 turn
@@ -61,11 +71,36 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   mid-run 压缩重建会丢弃在途 prompt 的 `User` 回显（保留尾部副本与
   `pending_turn_echo` 均不再重放），视图直接从 `Compaction` 摘要块继续；
   转录未记录该 prompt 的 clear-context 重建仍补回显边界；resume 回放不变
-- `src/model_menu/` — `/config` 表单（含 `subagent` 开关）与
-  `list.rs` 的 `/model` provider 列表
-- [model_session_switch.rs](../../../crates/tui/src/model_session_switch.rs) —
-  `/model` 会话级切换：改内存配置并热替换 LLM client，会话内即时生效、
-  不落 `opencoder.json`（新模型仍写入 session 行，恢复时遵循）
+- [src/model_menu/](../../../crates/tui/src/model_menu/mod.rs) — `/model` 与
+  `/config` 先选择 Shared/Act/Plan；Shared 沿用顶层配置，Act/Plan 分别编辑
+  `modes.act`/`modes.plan`，生成参数表单的 `i`/Delete 以显式 `null` 恢复继承。
+  Provider 新增、编辑、删除统一进入保存范围确认：`y`/`Y` 或 Enter 写磁盘，
+  `n`/`N` 仅改会话，Esc 取消本次变更且不切换模型；菜单显示 `Active Env` 与
+  解析后的 `Save target`。session-only Shared 选择写入可选 `shared` 元数据并立即
+  成为有效 Shared 模型，优先于 `modes.shared.model`；`{}` 或字段缺省表示继承配置，
+  整体 `NULL` 保持 legacy 单模型语义。
+  模型菜单与 `/cli`、`/skill` 显式使用 `EnvAware`：有活动 Env 时写入对应 Env 文件，
+  无活动时回退 legacy `Auto`；`Auto` 和显式项目/全局路由不会被活动 Env 劫持
+- [model_menu/env.rs](../../../crates/tui/src/model_menu/env.rs)、
+  [env_view.rs](../../../crates/tui/src/model_menu/env_view.rs) — `/env`、`/envs`
+  打开本地 Env 管理；支持 `/env [name]`、`use`/`activate`、`create`/`new`、
+  `delete`/`remove`/`rm` 与 `off`/`none`/`deactivate`，菜单键为 Enter 使用、
+  `n` 新建、`o` 不使用 Env、`d` 删除。切换后重载配置/client 与 CLI/Skill 状态、
+  同步 MCP pool，并以 `{}` 清除 Shared/Act/Plan 会话覆盖；已落行会话持久化目标 Env
+  的 Shared 基值，避免 resume 恢复旧 Shared；已消费的一次性 Skill body 标记保留
+- [model_session_switch.rs](../../../crates/tui/src/model_session_switch.rs)、
+  [worker/model_commands.rs](../../../crates/tui/src/worker/model_commands.rs) —
+  会话级 Shared/Act/Plan 选择持久化到可选模式覆盖元数据，随 resume/fork 保留；
+  完整配置 reload 才更新 legacy Shared 基值 `sessions.model`，不会覆盖独立 Shared
+  会话选择。Provider patch 支持新增/编辑/`null` 删除，`api_key: null` 清空 key、headers
+  整体替换，只合并进候选内存 `Config`，不写磁盘，也不属于可恢复的模型元数据。
+  单独模型切换复用 client；Provider 实际变化才构造新 client。`ApplySession` 与
+  `ReloadEnv` 均在 client 构造、会话持久化和 worker 运行时应用成功后返回 ack，UI
+  仅在 `Ok` ack 后提交外层 config/client/chat/context 并显示成功；发送失败、worker
+  结束或 Store/client 错误保留原 UI 运行时。普通 `ReloadConfig` 也按确认后提交：
+  Shared 模型先持久化，worker 确认运行时应用后 UI 才提交外层 config/client；失败不发
+  成功 `ModelSwitch`。`/cli`、`/skill` 投递失败不提交 live config，明确报告磁盘已保存
+  但 reload 投递失败
 - [app_display.rs](../../../crates/tui/src/app_display.rs) — `compute_display`
   展示标题优先取会话内当前模型（`chat.model`），空态才回退配置默认
 - [agent_menu.rs](../../../crates/tui/src/agent_menu.rs)、
@@ -106,7 +141,9 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - [control_helpers.rs](../../../crates/tui/src/control_helpers.rs) — 复合控制命令组装
 - `src/notepad/` — 全屏文件树 + vim 编辑器
 - `src/vim/` — vim 引擎
-- `src/ts_mirror.rs` — tmux 会话冷启动恢复
+- `src/ts_mirror.rs` — tmux 会话冷启动恢复；`TsMirrorStore` 原样委托模式模型元数据的
+  创建/读取/更新接口，保留 `NULL`、`{}` 与显式值，metadata-aware 创建仍触发既有
+  ts 镜像 hook
 - [hooks.rs](../../../crates/tui/src/hooks.rs) — `~/.opencoder/hooks.json` TUI 事件命令
 - [clipboard.rs](../../../crates/tui/src/clipboard.rs)、
   [app_loop_paste.rs](../../../crates/tui/src/app_loop_paste.rs) — 剪贴板图片转 PNG 附件

@@ -55,6 +55,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_app(
     opts: &TuiOpts,
+    explicit_model: &Option<String>,
     terminal: &mut Term,
     session: SessionState,
     store: Arc<dyn Store>,
@@ -78,11 +79,6 @@ pub(super) async fn run_app(
     question_hub.attach();
     let mut question_menu = crate::question_menu::dialog_state();
     let mut chat = initial_chat_view(&session, &store).await;
-    // The title renders the LIVE session model (resumed sessions carry their
-    // own persisted `sessions.model`, which can differ from the config
-    // default the old title always showed).
-    chat.model = session.config.model.clone();
-    chat.annotation_text = session.requirement.clone();
     let mut input = String::new();
     let mut pending_images: Vec<(String, String)> = Vec::new();
     let mut img_asm = crate::image_chunk::Assembly::new();
@@ -142,10 +138,8 @@ pub(super) async fn run_app(
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(crate::worker::UI_EVENT_CAPACITY);
     // Off-loop TranscriptReset rebuild actor: `inflight` guards the evt arm below.
     let (mut reset_rebuild, reset_inflight) = crate::reset_rebuild::ResetRebuildState::new();
-
     let (mut sidecar_ask, worker) =
         crate::app_helpers::start_worker(session, evt_tx, cmd_rx, store.clone());
-
     let (mut input_rx, supervisor_active) = crate::app_helpers::start_input();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(app_loop::ANIM_TICK_MS));
     let mut frame_ms = config.tui_frame_ms();
@@ -173,15 +167,32 @@ pub(super) async fn run_app(
     let mut subtask_view: Option<crate::subtask_detail::SubtaskView> = None;
     // Warm the `@capability` mention catalog (idle no-op when remote is off).
     subtask_ui.refresh_caps(&config);
-    // Resume any still-pending subtask pollers for the startup session; the
-    // server keeps executing while the TUI was closed. Remote sessions have
-    // no local parent registry to watch.
+    // Resume local subtask pollers; remote sessions have no local registry.
     if !chat.remote {
         subtask_ui
             .maybe_spawn_watcher(&config, &store, &session_id)
             .await;
     }
+    let startup_env_model = explicit_model.as_deref().filter(|_| opts.model.is_none());
     loop {
+        if app_loop::drain_pending_env(
+            &mut model_menu,
+            &mut client,
+            &mut config,
+            &mut compaction_threshold,
+            &mut context_limit,
+            &mut frame_ms,
+            &mut frame_ticker,
+            &cmd_tx,
+            &mut chat,
+            &workdir,
+            startup_env_model,
+        )
+        .await
+            == app_loop::LoopFlow::Quit
+        {
+            break;
+        }
         let (changed, pick) =
             crate::remote::poll_ui(&mut agent_menu, &mut selection, &mut mode_flash, anim_tick);
         if changed {
@@ -197,10 +208,10 @@ pub(super) async fn run_app(
             } else {
                 crate::question_menu::abandon_dialog(&mut question_menu, &question_hub);
             }
-
             let switched = app_task::switch_session(
                 pending.pick,
                 opts,
+                explicit_model,
                 &mut cmd_tx,
                 &mut evt_rx,
                 &workdir,
@@ -231,7 +242,11 @@ pub(super) async fn run_app(
             )
             .await;
             match switched {
-                Ok(()) => {
+                Ok(state) => {
+                    config = state.config;
+                    client = state.client;
+                    compaction_threshold = state.compaction_threshold;
+                    context_limit = state.context_limit;
                     // An in-flight rebuild for the PREVIOUS session must never install over the switched-to view.
                     reset_rebuild.invalidate();
                     mode_flash = None;
@@ -301,7 +316,6 @@ pub(super) async fn run_app(
         let input_disabled = app_display::is_input_disabled(&chat, subagent_focus);
         let now = opencoder_core::message::now_ms();
         let tail_ms = app_display::display_tail_ms(&chat, subagent_focus, now, running);
-
         if dirty && render_pending {
             if !skip_next_render {
                 app_loop::render_frame(
@@ -315,7 +329,7 @@ pub(super) async fn run_app(
                     display_ctx,
                     display_sys,
                     compaction_threshold,
-                    context_limit,
+                    crate::model_scope::context_limit(&config, &chat, context_limit),
                     &status,
                     display_steers,
                     display_queue,
@@ -414,7 +428,7 @@ pub(super) async fn run_app(
                             &question_hub, terminal, &mut cache_salt_menu, &mut keymap,
                             &mut keymap_menu, &mut command_menu, &sidecar_ask, &mut cancel,
                             &mut follow, &session_id, &agent_name, &mut input, &mut cursor_idx,
-                            &workdir, &mut mode_flash, anim_tick, &mut sys_tokens, &mut plan_edit,
+                            &workdir, startup_env_model, &mut mode_flash, anim_tick, &mut sys_tokens, &mut plan_edit,
                             &mut notepad, &mut clear_confirm, &mut agent_menu,
                             &mut subtask_view,
                         )
@@ -523,12 +537,8 @@ pub(super) async fn run_app(
                                     dirty = true;
                                     continue;
                                 }
-                                // Deferred steer: the raw text (tokens included) is admitted
-                                // verbatim; the runner absorbs it at the turn boundary via
-                                // record_compound, which resolves/activates/persists the
-                                // skill THEN — a `$skill` steer must not arm mid-turn.
-                                // No plan arm either: consumption-time only (TurnDone(plan)
-                                // reads the persisted plan-phase counter).
+                                // Deferred steer keeps raw tokens for consumption-time
+                                // skill resolution and plan arming at the turn boundary.
                                 let raw = text.trim().to_string();
                                 if !raw.is_empty() {
                                     // Off-loop actor owns the store write; a failed
@@ -544,10 +554,8 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::Queue(text) => {
-                                // Tab-queue: raw-text deferred admission — skill resolution
-                                // happens at consumption (idle boundary, record_compound).
-                                // The off-loop actor owns the store write; this loop never
-                                // waits on db_lock; a failed hand-off flashes (text via ↑).
+                                // Tab-queue defers raw text to the off-loop actor for
+                                // consumption-time skill resolution without waiting on db_lock.
                                 queue_submit_flash(
                                     &text, &admit_tx, &mut admit_st, &mut queue_items,
                                     &mut pending_images, &session_id, turn_gen, anim_tick,
@@ -776,12 +784,8 @@ pub(super) async fn run_app(
             }
         }
     }
-    // Quit-path terminal quiesce: stop the terminal from reporting further
-    // input (Kitty pop + mouse/paste off) and absorb the release/repeat
-    // reports of the quitting keypress before they can strand in the tty
-    // queue and be echoed as `442;1:3u`-style garbage by the shell (no tmux).
-    // Must run BEFORE `finish` while raw mode is still on, so drained bytes
-    // are never echoed by the tty line discipline.
+    // Quiesce terminal input before `finish`, draining key-release reports
+    // while raw mode still prevents them from being echoed by the shell.
     crate::input::drain_shutdown(&mut input_rx).await;
     app_bootstrap::finish(&supervisor_active, cmd_tx, worker).await;
     Ok(session_id)

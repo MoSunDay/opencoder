@@ -258,24 +258,27 @@ async fn create_local_meta(
     }
     let now = now_ms();
     store
-        .create_session(&SessionMeta {
-            kind: Some("agent".into()),
-            id: task.session_id.clone(),
-            title: task.title.clone(),
-            agent: task.agent.clone().or_else(|| Some("act".into())),
-            model: task.model.clone(),
-            workdir_hash: Some(opencoder_core::workdir_hash(workdir)),
-            created_at: now,
-            updated_at: now,
-            summary: None,
-            summary_seq: None,
-            summary_images: vec![],
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: Some("node".into()),
-            requirement: None,
-        })
+        .create_session_with_model_overrides(
+            &SessionMeta {
+                kind: Some("agent".into()),
+                id: task.session_id.clone(),
+                title: task.title.clone(),
+                agent: task.agent.clone().or_else(|| Some("act".into())),
+                model: task.model.clone(),
+                workdir_hash: Some(opencoder_core::workdir_hash(workdir)),
+                created_at: now,
+                updated_at: now,
+                summary: None,
+                summary_seq: None,
+                summary_images: vec![],
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: Some("node".into()),
+                requirement: None,
+            },
+            Some(&opencoder_store::SessionModelOverrides::default()),
+        )
         .await?;
     Ok(())
 }
@@ -283,6 +286,51 @@ async fn create_local_meta(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn local_meta_defaults_only_genuinely_new_sessions() {
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let task = |session_id: &str| ClaimedTask {
+            task_id: format!("task-{session_id}"),
+            session_id: session_id.into(),
+            title: Some("task".into()),
+            prompt: "prompt".into(),
+            agent: None,
+            model: None,
+            created_at: 1,
+        };
+
+        create_local_meta(&store, dir.path(), &task("fresh-node"))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .get_session_model_overrides("fresh-node")
+                .await
+                .unwrap(),
+            Some(opencoder_store::SessionModelOverrides::default())
+        );
+
+        store
+            .create_session(&SessionMeta {
+                id: "legacy-node".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        create_local_meta(&store, dir.path(), &task("legacy-node"))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .get_session_model_overrides("legacy-node")
+                .await
+                .unwrap(),
+            None
+        );
+    }
 
     /// The wire mapping must reuse the session crate's canonical SSE kinds
     /// and payload shapes — byte-identical to what the web layer persists.

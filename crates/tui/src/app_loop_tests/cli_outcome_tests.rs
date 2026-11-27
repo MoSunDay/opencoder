@@ -3,6 +3,7 @@
 //! confirmed delete) must land in the `cli.json` domain file, and a
 //! domain-only patch must never create or touch `config.json`.
 
+use super::{auto_ack_commands, HOME_TEST_LOCK};
 use crate::app::app_loop::*;
 use crate::chat::{ChatBlock, ChatView};
 use crate::cli_menu::{CliField, CliForm, CliList, CliMenu};
@@ -57,7 +58,8 @@ async fn handle_cli_outcome_save_toggle_delete_write_cli_domain_file() {
     let global_cli = tmp.path().join(".opencoder").join("cli.json");
 
     let mut config = Config::default();
-    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
+    let mut cmd_rx = auto_ack_commands(cmd_rx);
     let mut chat = ChatView::default();
 
     // 1) Save from a filled form → creates the global cli.json.
@@ -82,7 +84,7 @@ async fn handle_cli_outcome_save_toggle_delete_write_cli_domain_file() {
         marker_text(&chat)
     );
     assert!(
-        matches!(cmd_rx.recv().await, Some(UiCmd::ReloadConfig(_))),
+        matches!(cmd_rx.recv().await, Some(UiCmd::ReloadConfig { .. })),
         "a successful save must dispatch ReloadConfig"
     );
 
@@ -157,4 +159,178 @@ async fn handle_cli_outcome_save_toggle_delete_write_cli_domain_file() {
     assert!(!tmp.path().join(".opencoder").join("config.json").exists());
     assert!(!workdir.join("opencoder.json").exists());
     assert!(!workdir.join(".opencoder").join("cli.json").exists());
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn cli_save_uses_the_active_env_domain_file() {
+    let _guard = HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let _iso = opencoder_core::scoped_config_home(home.clone());
+    opencoder_core::create_config_env("alpha").unwrap();
+    opencoder_core::activate_config_env("alpha").unwrap();
+    let workdir = tmp.path().join("project");
+    std::fs::create_dir_all(&workdir).unwrap();
+
+    let mut config = Config {
+        model: "session-only/shared".into(),
+        ..Default::default()
+    };
+    config.providers.insert(
+        "session-only".into(),
+        opencoder_core::ProviderConfig {
+            base_url: "https://example.invalid/session".into(),
+            api_key: Some("placeholder".into()),
+            ..Default::default()
+        },
+    );
+    config.modes.act = Some(opencoder_core::ModeConfig {
+        model: Some("session-only/act".into()),
+        ..Default::default()
+    });
+    config.skills.insert(
+        "session-skill".into(),
+        opencoder_core::config::SkillConfig { enabled: true },
+    );
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(8);
+    let mut cmd_rx = auto_ack_commands(cmd_rx);
+    let mut chat = ChatView {
+        shared_model: config.model.clone(),
+        model: "session-only/act".into(),
+        ..Default::default()
+    };
+    let mut menu = Some(form_ready_to_save());
+    handle_cli_outcome(
+        &mut menu,
+        key(KeyCode::Enter),
+        &mut config,
+        &cmd_tx,
+        &mut chat,
+        &workdir,
+    )
+    .await;
+
+    let env_cli = home.join(".opencoder/envs/alpha/cli.json");
+    assert_eq!(read_json(&env_cli)["mycli"]["enabled"], false);
+    assert!(config.cli.contains_key("mycli"));
+    assert_eq!(config.model, "session-only/shared");
+    assert!(config.providers.contains_key("session-only"));
+    assert_eq!(
+        config
+            .modes
+            .act
+            .as_ref()
+            .and_then(|mode| mode.model.as_deref()),
+        Some("session-only/act")
+    );
+    assert!(config.skills.contains_key("session-skill"));
+    assert_eq!(chat.shared_model, "session-only/shared");
+    assert_eq!(chat.model, "session-only/act");
+    let command = cmd_rx.recv().await.expect("CLI domain reload");
+    match command {
+        UiCmd::ReloadConfig {
+            config: candidate,
+            scope: crate::worker::ConfigReloadScope::Cli,
+            ..
+        } => {
+            assert_eq!(candidate.model, "session-only/shared");
+            assert!(candidate.providers.contains_key("session-only"));
+            assert!(candidate.skills.contains_key("session-skill"));
+            assert!(candidate.cli.contains_key("mycli"));
+        }
+        other => panic!("unexpected reload command: {other:?}"),
+    }
+    assert!(!home.join(".opencoder/cli.json").exists());
+    assert!(!workdir.join(".opencoder/cli.json").exists());
+    assert!(!workdir.join("opencoder.json").exists());
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn cli_reload_dispatch_failure_keeps_live_config_and_reports_disk_save() {
+    let _guard = HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let _iso = opencoder_core::scoped_config_home(tmp.path().to_path_buf());
+    let workdir = tmp.path().join("project");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let mut config = Config::default();
+    let config_before = serde_json::to_value(&config).unwrap();
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(1);
+    drop(cmd_rx);
+    let mut chat = ChatView::default();
+    let mut menu = Some(form_ready_to_save());
+
+    handle_cli_outcome(
+        &mut menu,
+        key(KeyCode::Enter),
+        &mut config,
+        &cmd_tx,
+        &mut chat,
+        &workdir,
+    )
+    .await;
+
+    assert_eq!(serde_json::to_value(&config).unwrap(), config_before);
+    assert!(menu.is_none());
+    assert!(tmp.path().join(".opencoder/cli.json").exists());
+    let text = marker_text(&chat);
+    assert!(text.contains("reload dispatch failed"), "{text}");
+    assert!(text.contains("live config was not refreshed"), "{text}");
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn cli_worker_failure_keeps_outer_domain_and_reports_disk_save() {
+    let _guard = HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let _iso = opencoder_core::scoped_config_home(tmp.path().join("home"));
+    let workdir = tmp.path().join("project");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let mut config = Config::default();
+    let before = serde_json::to_value(&config).unwrap();
+    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(4);
+    let mut chat = ChatView::default();
+    let mut menu = Some(form_ready_to_save());
+
+    let (_, command) = tokio::join!(
+        handle_cli_outcome(
+            &mut menu,
+            key(KeyCode::Enter),
+            &mut config,
+            &cmd_tx,
+            &mut chat,
+            &workdir,
+        ),
+        async {
+            let command = cmd_rx.recv().await.expect("CLI reload command");
+            match &command {
+                UiCmd::ReloadConfig { ack: Some(ack), .. } => {
+                    ack.send(Err("injected worker failure".into())).unwrap();
+                }
+                other => panic!("unexpected command: {other:?}"),
+            }
+            command
+        }
+    );
+
+    assert!(matches!(
+        command,
+        UiCmd::ReloadConfig {
+            scope: crate::worker::ConfigReloadScope::Cli,
+            ..
+        }
+    ));
+    assert_eq!(serde_json::to_value(&config).unwrap(), before);
+    assert!(tmp.path().join("home/.opencoder/cli.json").exists());
+    let text = marker_text(&chat);
+    assert!(text.contains("runtime reload failed"), "{text}");
+    assert!(text.contains("disk changes were saved"), "{text}");
+    assert!(text.contains("live config was not refreshed"), "{text}");
 }

@@ -348,6 +348,13 @@ async fn subagent_persists_parent_child_to_store() {
         "child title must be the truncated prompt, got: {:?}",
         cm.title
     );
+    assert_eq!(
+        store
+            .get_session_model_overrides(&t.child_session_id)
+            .await
+            .unwrap(),
+        Some(opencoder_store::SessionModelOverrides::default())
+    );
 }
 
 #[tokio::test]

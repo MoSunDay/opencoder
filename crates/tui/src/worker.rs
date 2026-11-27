@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use opencoder_core::{message::now_ms, Config, Role};
-use opencoder_llm::ChatClient;
 use opencoder_session::{
     run as run_session, run_with_images, spawn_event_flusher, SessionEvent, SessionState,
     SharedCancel, SubagentSteerGate,
@@ -13,6 +12,39 @@ use opencoder_session::{
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+#[path = "worker/model_commands.rs"]
+mod model_commands;
+
+/// One-shot, operation-local completion channel. Each request owns a distinct
+/// channel, so late or unrelated session errors cannot complete/roll it back.
+pub type ConfigAck = mpsc::UnboundedSender<Result<(), String>>;
+
+/// Which part of a runtime configuration a reload is allowed to replace.
+/// Domain reloads deliberately retain the worker's Provider/model/mode state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigReloadScope {
+    Full,
+    Cli,
+    Skills,
+}
+
+/// Build an operation-correlated reload command. The UI must wait for the
+/// completion before committing its corresponding outer runtime state.
+pub(crate) fn acknowledged_config_reload(
+    config: Config,
+    scope: ConfigReloadScope,
+) -> (UiCmd, mpsc::UnboundedReceiver<Result<(), String>>) {
+    let (ack, completion) = mpsc::unbounded_channel();
+    (
+        UiCmd::ReloadConfig {
+            config: Box::new(config),
+            scope,
+            ack: Some(ack),
+        },
+        completion,
+    )
+}
 
 /// `Clone` keeps the turn-starting commands cheap to forward through the
 /// single-threaded worker command channel.
@@ -22,8 +54,30 @@ pub enum UiCmd {
     /// Manually trigger conversation compaction.
     Compact,
     SetSkill(Option<String>),
-    /// Hot-reload config at the next turn boundary. Sent by the `/config` menu.
-    ReloadConfig(Box<Config>),
+    /// Hot-reload config at the next turn boundary. Full reloads persist a
+    /// changed Shared model before committing worker memory. Cli/Skills
+    /// reloads replace only that domain and never rebuild the model client.
+    ReloadConfig {
+        config: Box<Config>,
+        scope: ConfigReloadScope,
+        /// Legacy fire-and-forget callers may omit this; interactive model and
+        /// domain saves use a correlated acknowledgment.
+        ack: Option<ConfigAck>,
+    },
+    /// Apply a session-scoped Provider/model patch and confirm its commit.
+    /// `provider_changed` alone controls client reconstruction.
+    ApplySession {
+        config: Box<Config>,
+        selection: Option<(opencoder_core::ConfigMode, String)>,
+        provider_changed: bool,
+        ack: ConfigAck,
+    },
+    /// Reload a freshly selected local Env and clear durable Act/Plan overrides.
+    /// The UI commits its outer state only after this operation acknowledges.
+    ReloadEnv {
+        config: Box<Config>,
+        ack: ConfigAck,
+    },
     /// Replace the plan text in the last non-empty Assistant message in-memory.
     /// Does not touch the append-only store (consistent with compaction/handoff
     /// which also rewrite the in-memory `messages` without appending a record).
@@ -405,74 +459,32 @@ pub async fn process_cmd(
             sess.set_skill(body);
             false
         }
-        UiCmd::ReloadConfig(new_cfg) => {
-            let applied_model;
-            let prev_model = sess.config.model.clone();
-            match new_cfg.resolve_endpoint() {
-                Ok(ep) => match ChatClient::from_config(&new_cfg, &ep) {
-                    Ok(new_client) => {
-                        sess.apply_config_reload(*new_cfg, Arc::new(new_client));
-                        applied_model = true;
-                    }
-                    Err(e) => {
-                        let model = new_cfg.model_id().to_string();
-                        sess.apply_config_reload_keep_client(*new_cfg);
-                        let msg = format!(
-                            "model switched to {model} but client build failed \
-                             ({e:#}); keeping previous client"
-                        );
-                        let ev = SessionEvent::Error(msg);
-                        forward_event(&ui_tx, ev);
-                        applied_model = true;
-                    }
-                },
-                Err(e) => {
-                    let model = new_cfg.model_id().to_string();
-                    sess.apply_config_reload_keep_client(*new_cfg);
-                    let msg = format!(
-                        "model switched to {model} but endpoint resolve failed \
-                         ({e:#}); keeping previous client"
-                    );
-                    let ev = SessionEvent::Error(msg);
-                    forward_event(&ui_tx, ev);
-                    applied_model = true;
-                }
+        UiCmd::ApplySession {
+            config,
+            selection,
+            provider_changed,
+            ack,
+        } => {
+            let result =
+                model_commands::apply_session(sess, &ui_tx, *config, selection, provider_changed)
+                    .await;
+            let _ = ack.send(result);
+            false
+        }
+        UiCmd::ReloadEnv { config, ack } => {
+            let result = model_commands::reload_env(sess, &ui_tx, *config).await;
+            let _ = ack.send(result);
+            false
+        }
+        UiCmd::ReloadConfig { config, scope, ack } => {
+            let result = model_commands::reload_config(sess, &ui_tx, *config, scope).await;
+            if let Some(ack) = ack {
+                let _ = ack.send(result);
+            } else if let Err(error) = result {
+                // Fire-and-forget callers have no correlated UI receiver. Keep
+                // the failure visible without pretending the reload succeeded.
+                forward_event(&ui_tx, SessionEvent::Error(error));
             }
-            // Persist the switched model to the store so resume() honors it
-            // (otherwise the stale `sessions.model` column reverts the switch
-            // on the next /task resume or `opencoder -s <id>` restart). Only
-            // when the model string actually changed: pure parameter
-            // saves also land here, and must not surface a
-            // spurious `[model]` marker or rewrite the store column.
-            if applied_model && sess.config.model != prev_model {
-                // The store column keeps the full `provider/model` string
-                // (resume honors it); the ModelSwitch display marker uses the
-                // bare model id so it matches the status bar (issue #1).
-                let model_full = sess.config.model.clone();
-                if let Some(store) = &sess.store {
-                    let _ = store
-                        .update_session(
-                            &sess.id,
-                            &opencoder_store::SessionPatch {
-                                model: Some(model_full),
-                                updated_at: Some(now_ms()),
-                                ..Default::default()
-                            },
-                        )
-                        .await;
-                }
-                let ev = SessionEvent::ModelSwitch(sess.config.model_id().to_string());
-                persist_event(&sess.store, &sess.id, &ev).await;
-                forward_event(&ui_tx, ev);
-            }
-            // Sync MCP connections with the reloaded config.
-            let desired: Vec<_> = sess
-                .config
-                .enabled_mcp_servers()
-                .into_iter()
-                .map(|(n, c)| (n, c.clone()))
-                .collect();
-            opencoder_session::mcp::pool::sync(&sess.id, &desired).await;
             false
         }
         UiCmd::EditPlan(new_text) => {
@@ -557,6 +569,10 @@ mod tests;
 #[cfg(test)]
 #[path = "worker/tests_compact_done.rs"]
 mod tests_compact_done;
+#[cfg(test)]
+mod tests_failures;
+#[cfg(test)]
+mod tests_model_commands;
 #[cfg(test)]
 mod tests_reload;
 #[cfg(test)]

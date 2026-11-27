@@ -23,24 +23,27 @@ pub async fn create_session(
 ) -> Result<()> {
     let now = now_ms();
     store
-        .create_session(&SessionMeta {
-            kind: Some("todos".into()),
-            id: state.parent_session_id.clone(),
-            title: Some(format!("todos workflow {}", state.workflow_id)),
-            agent: Some("workflow".into()),
-            model: Some(config.model.clone()),
-            workdir_hash: None,
-            created_at: now,
-            updated_at: now,
-            summary: None,
-            summary_seq: None,
-            summary_images: Vec::new(),
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: Some(TASK_TYPE_TODO_WORKFLOW.into()),
-            requirement: Some("Manage global TODO state and acceptance".into()),
-        })
+        .create_session_with_model_overrides(
+            &SessionMeta {
+                kind: Some("todos".into()),
+                id: state.parent_session_id.clone(),
+                title: Some(format!("todos workflow {}", state.workflow_id)),
+                agent: Some("workflow".into()),
+                model: Some(config.model.clone()),
+                workdir_hash: None,
+                created_at: now,
+                updated_at: now,
+                summary: None,
+                summary_seq: None,
+                summary_images: Vec::new(),
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: Some(TASK_TYPE_TODO_WORKFLOW.into()),
+                requirement: Some("Manage global TODO state and acceptance".into()),
+            },
+            Some(&opencoder_store::SessionModelOverrides::default()),
+        )
         .await
 }
 
@@ -183,4 +186,39 @@ async fn decide<T: serde::de::DeserializeOwned>(
     // genuine compaction summary. The full transcript is reloaded by
     // `opencoder_session::resume` at the top of this function anyway.
     Ok(decision)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn parent_session_persists_default_model_overrides() {
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
+        let state = WorkflowState {
+            workflow_id: "workflow".into(),
+            parent_session_id: "workflow-parent".into(),
+            status: WorkflowStatus::Running,
+            generation: 0,
+            world_epoch: 0,
+            active_todo_ids: Default::default(),
+            todos: Default::default(),
+            milestones: Default::default(),
+            incidents: vec![],
+            terminal_reason: None,
+        };
+
+        create_session(&store, &state, &Config::default())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .get_session_model_overrides("workflow-parent")
+                .await
+                .unwrap(),
+            Some(opencoder_store::SessionModelOverrides::default())
+        );
+    }
 }

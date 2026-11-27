@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::Store;
 use crate::types::{Delivery, SessionEventRecord, SessionInput, SessionMeta, SubagentTaskRecord};
+use crate::SessionModelOverrides;
 
 const MAGIC: &[u8; 8] = b"OPENCODR";
 const FORMAT_VERSION: u32 = 1;
@@ -24,6 +25,9 @@ pub struct SessionBundle {
     pub messages: Vec<Message>,
     pub events: Vec<SessionEventRecord>,
     pub inputs: Vec<SessionInput>,
+    /// Absent in older bundles and NULL for legacy single-model sessions.
+    #[serde(default)]
+    pub model_overrides: Option<SessionModelOverrides>,
     #[serde(default)]
     pub subagents: Vec<SubagentBundle>,
 }
@@ -43,6 +47,7 @@ pub async fn export_bundle(store: &dyn Store, session_id: &str) -> Result<Sessio
         .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
 
     let messages = store.load_messages(session_id).await?;
+    let model_overrides = store.get_session_model_overrides(session_id).await?;
     let events = store.events_after(session_id, 0).await?;
     // Orphaned (promoted-but-unrecorded) rows are invisible to
     // `pending_inputs`; recover first so the bundle exports them instead of
@@ -74,6 +79,7 @@ pub async fn export_bundle(store: &dyn Store, session_id: &str) -> Result<Sessio
         messages,
         events,
         inputs,
+        model_overrides,
         subagents,
     })
 }
@@ -176,7 +182,9 @@ async fn import_bundle_inner(
     // recursion-wrapped rollback), then propagate the error. Mirrors
     // `import_jsonl_file`.
     if let Err(e) = async {
-        store.create_session(&meta).await?;
+        store
+            .create_session_with_model_overrides(&meta, bundle.model_overrides.as_ref())
+            .await?;
 
         // Bulk insert messages.
         if !bundle.messages.is_empty() {
@@ -263,6 +271,7 @@ mod tests {
             messages: vec![msg],
             events: vec![],
             inputs: vec![],
+            model_overrides: None,
             subagents: vec![],
         }
     }
@@ -352,6 +361,7 @@ mod tests {
             messages: vec![Message::user("u1", "hi"), Message::assistant("a1")],
             events: vec![],
             inputs: vec![],
+            model_overrides: None,
             subagents: vec![],
         };
 
@@ -411,6 +421,7 @@ mod tests {
             messages: vec![],
             events: vec![],
             inputs: vec![],
+            model_overrides: None,
             subagents: vec![],
         };
 
@@ -436,6 +447,7 @@ mod tests {
             messages: vec![],
             events: vec![],
             inputs: vec![],
+            model_overrides: None,
             subagents: vec![SubagentBundle {
                 task: SubagentTaskRecord {
                     task_id: "task-1".into(),
@@ -557,6 +569,7 @@ mod tests {
                 sse_kind: None,
             }],
             inputs: vec![],
+            model_overrides: None,
             subagents: vec![],
         }
     }
@@ -581,6 +594,7 @@ mod tests {
                 messages: vec![],
                 events: vec![],
                 inputs: vec![],
+                model_overrides: None,
                 subagents: vec![SubagentBundle {
                     task: SubagentTaskRecord {
                         task_id: format!("task-{i}"),

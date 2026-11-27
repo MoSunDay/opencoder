@@ -72,6 +72,19 @@ impl ProviderPatch {
         providers.insert(self.name.clone(), provider);
         serde_json::json!({ "model": format!("{}/{}", self.name, self.model_id), "providers": serde_json::Value::Object(providers) })
     }
+
+    /// Scoped provider edits never replace the Shared default or an unrelated
+    /// Act/Plan model. Only the legacy Shared form retains its select-on-save
+    /// behavior.
+    pub fn to_json_for_mode(&self, mode: opencoder_core::ConfigMode) -> serde_json::Value {
+        let mut patch = self.to_json();
+        if mode != opencoder_core::ConfigMode::Shared {
+            if let Some(root) = patch.as_object_mut() {
+                root.remove("model");
+            }
+        }
+        patch
+    }
 }
 
 pub fn delete_provider_json(name: &str) -> serde_json::Value {
@@ -79,5 +92,22 @@ pub fn delete_provider_json(name: &str) -> serde_json::Value {
 }
 
 pub fn switch_provider_json(name: &str, model_id: &str) -> serde_json::Value {
-    serde_json::json!({ "model": format!("{}/{}", name, model_id) })
+    switch_mode_provider_json(opencoder_core::ConfigMode::Shared, name, model_id)
+}
+
+pub fn switch_mode_provider_json(
+    mode: opencoder_core::ConfigMode,
+    name: &str,
+    model_id: &str,
+) -> serde_json::Value {
+    let model = format!("{}/{}", name, model_id);
+    match mode {
+        opencoder_core::ConfigMode::Shared => serde_json::json!({ "model": model }),
+        opencoder_core::ConfigMode::Act => {
+            serde_json::json!({ "modes": { "act": { "model": model } } })
+        }
+        opencoder_core::ConfigMode::Plan => {
+            serde_json::json!({ "modes": { "plan": { "model": model } } })
+        }
+    }
 }

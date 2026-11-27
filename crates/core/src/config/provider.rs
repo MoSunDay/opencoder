@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderConfig {
     #[serde(default = "default_protocol")]
     pub protocol: String,
@@ -31,7 +31,7 @@ pub struct ProviderConfig {
 }
 
 /// A custom HTTP header applied to provider requests.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HttpHeader {
     pub name: String,
     pub value: String,

@@ -30,7 +30,7 @@ use opencoder_session::{resume, SessionState};
 use opencoder_store::{SessionMeta, Store, TursoStore};
 use opencoder_tui::chat::block_text;
 use opencoder_tui::session_ui::{replay_into_chat, SessionUiState};
-use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
+use opencoder_tui::worker::{process_cmd, ConfigReloadScope, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
 /// `Config::default().model` -- the live model a session carries before any
@@ -129,7 +129,15 @@ async fn seed_session(
     if from_agent != to_agent {
         run_cmd(&mut sess, UiCmd::Prompt(format!("/{to_agent}"), vec![])).await;
     }
-    run_cmd(&mut sess, UiCmd::ReloadConfig(Box::new(config_with(model)))).await;
+    run_cmd(
+        &mut sess,
+        UiCmd::ReloadConfig {
+            config: Box::new(config_with(model)),
+            scope: ConfigReloadScope::Full,
+            ack: None,
+        },
+    )
+    .await;
 
     let meta = store
         .get_session(id)

@@ -35,6 +35,7 @@ pub async fn fork_session_in(
         .await?
         .ok_or_else(|| anyhow!("session not found: {parent_id}"))?;
     let messages = store.load_messages(parent_id).await?;
+    let model_overrides = store.get_session_model_overrides(parent_id).await?;
     let runtime = store.harness_runtime(parent_id).await?;
     anyhow::ensure!(
         runtime.as_ref().is_none_or(|r| !r.in_flight),
@@ -62,7 +63,9 @@ pub async fn fork_session_in(
         task_type: None,
         requirement: None,
     };
-    store.create_session(&forked).await?;
+    store
+        .create_session_with_model_overrides(&forked, model_overrides.as_ref())
+        .await?;
     if let Some(mut runtime) = runtime {
         runtime.fork_from = runtime.thread_id.take();
         if workdir.is_some() {

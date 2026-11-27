@@ -3,7 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use opencoder_core::Config;
 
-use super::patch::{delete_provider_json, switch_provider_json};
+use super::patch::{delete_provider_json, switch_mode_provider_json};
 use super::provider_form::ProviderForm;
 use super::state::{ModelMenu, ModelOutcome};
 
@@ -29,6 +29,11 @@ pub struct ProviderList {
     /// applies session-only.
     pub confirm_save_default: Option<serde_json::Value>,
     pub default_base_url: String,
+    pub mode: opencoder_core::ConfigMode,
+    pub source: Option<Box<super::mode_select::ModeSelection>>,
+    pub save_target: Option<super::mode_select::SaveTargetInfo>,
+    pub current_model: String,
+    pub inherited_model: String,
 }
 
 impl ProviderList {
@@ -65,7 +70,35 @@ impl ProviderList {
             confirm_delete: None,
             confirm_save_default: None,
             default_base_url: config.base_url_for(config.provider_id()),
+            mode: opencoder_core::ConfigMode::Shared,
+            source: None,
+            save_target: None,
+            current_model: config.model.clone(),
+            inherited_model: config.model.clone(),
         }
+    }
+
+    pub fn for_mode(
+        source: super::mode_select::ModeSelection,
+        mode: opencoder_core::ConfigMode,
+    ) -> Self {
+        let effective = source.effective(mode);
+        let inherited_model = source.effective(opencoder_core::ConfigMode::Shared).model;
+        let save_target = source.save_target.clone();
+        let current_model = effective.model.clone();
+        let mut list = Self::new(&effective);
+        list.mode = mode;
+        list.source = Some(Box::new(source));
+        list.save_target = Some(save_target);
+        list.current_model = current_model;
+        list.inherited_model = inherited_model;
+        list
+    }
+
+    fn scoped_form(&self, mut form: ProviderForm) -> ProviderForm {
+        form.mode = self.mode;
+        form.return_scope = self.source.clone();
+        form
     }
 }
 
@@ -81,7 +114,17 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
                     return (ModelOutcome::Save(delete_provider_json(&n)), None);
                 }
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            KeyCode::Char('n') | KeyCode::Char('N') => {
+                let name = list.entries.get(idx).map(|e| e.name.clone());
+                list.confirm_delete = None;
+                if let Some(n) = name {
+                    return (
+                        ModelOutcome::SaveSessionOnly(delete_provider_json(&n)),
+                        None,
+                    );
+                }
+            }
+            KeyCode::Esc => {
                 list.confirm_delete = None;
             }
             _ => {}
@@ -115,7 +158,13 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
     }
 
     match k.code {
-        KeyCode::Esc => (ModelOutcome::Cancel, None),
+        KeyCode::Esc => {
+            if let Some(source) = list.source {
+                (ModelOutcome::Idle, Some(ModelMenu::ModeSelect(source)))
+            } else {
+                (ModelOutcome::Cancel, None)
+            }
+        }
         KeyCode::Up => {
             if list.selected > 0 {
                 list.selected -= 1;
@@ -143,11 +192,14 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
                         entry.headers,
                     );
                     form.protocol = entry.protocol.clone();
-                    (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
+                    (
+                        ModelOutcome::Idle,
+                        Some(ModelMenu::Form(list.scoped_form(form))),
+                    )
                 } else {
-                    // Arm the "save as default?" prompt instead of switching
-                    // immediately.  Default (Enter/n) = session-only.
-                    let json = switch_provider_json(&entry.name, &entry.model_id);
+                    // Arm the save-scope prompt instead of switching
+                    // immediately: y/Enter persists and n is session-only.
+                    let json = switch_mode_provider_json(list.mode, &entry.name, &entry.model_id);
                     list.confirm_save_default = Some(json);
                     (ModelOutcome::Idle, Some(ModelMenu::List(list)))
                 }
@@ -165,7 +217,10 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
                     entry.headers,
                 );
                 form.protocol = entry.protocol.clone();
-                (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
+                (
+                    ModelOutcome::Idle,
+                    Some(ModelMenu::Form(list.scoped_form(form))),
+                )
             } else {
                 (ModelOutcome::Idle, Some(ModelMenu::List(list)))
             }
@@ -192,9 +247,15 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
                 headers: super::headers::HeadersEditor::new(Vec::new()),
                 headers_active: false,
                 focus: super::provider_form::ProviderField::Name,
+                confirm_save_default: None,
                 error: None,
+                mode: opencoder_core::ConfigMode::Shared,
+                return_scope: None,
             };
-            (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
+            (
+                ModelOutcome::Idle,
+                Some(ModelMenu::Form(list.scoped_form(form))),
+            )
         }
         KeyCode::Char('d') => {
             if !list.entries.is_empty() {

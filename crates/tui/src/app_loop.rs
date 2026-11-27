@@ -1,13 +1,6 @@
-//! Free-function helpers extracted from `app.rs`'s `run_app` event loop to keep
-//! that file under the 800-line iteration cap. These mirror the `app_helpers`
-//! extraction pattern: each is a `pub(crate)` free function taking `&mut` / `&`
-//! references to the loop's locals, so the call sites in `app.rs` stay thin.
-//!
-//! Control-flow note: several extracted blocks used `continue` (re-render the
-//! same loop turn) or `break` (quit the loop) inside `run_app`'s
-//! `loop { tokio::select! { ... } }`. Those are translated into a returned
-//! `LoopFlow` value that the caller maps back to `continue`/`break` — see the
-//! call sites in `app.rs`.
+//! Free-function event-loop helpers that keep `app.rs` call sites thin.
+//! `LoopFlow` translates extracted `continue`/`break` control flow for the
+//! caller's `tokio::select!` loop.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -59,14 +52,9 @@ pub(crate) use crate::app::app_display::{compute_display, DisplayState};
 #[cfg(test)]
 pub(crate) use crate::app::app_display::body_is_top_level;
 
-/// Advance the task-total clock using a single `last_clock` dt baseline.
-/// Provider/model round timing is event-driven in `ChatView`; it is distinct
-/// from this outer task clock because one running task can contain many rounds.
-///
-/// Order of operations (single shared `dt`/`last_clock` baseline):
-/// - `false -> true`: snap the baseline so idle time is not counted.
-/// - `true -> false`: freeze the task total.
-/// - `running` stays `true`: accumulate `dt` into the task total.
+/// Advance the task-total clock from one dt baseline. Idle transitions snap
+/// the baseline or freeze the total; running transitions accumulate `dt`.
+/// Provider-round timing remains event-driven in `ChatView`.
 pub(crate) fn tick_clock(
     running: bool,
     prev_running: &mut bool,
@@ -86,16 +74,9 @@ pub(crate) fn tick_clock(
     }
 }
 
-/// Whether an input event should prompt an immediate frame render.
-///
-/// The main loop renders only when `dirty && render_pending`; before this
-/// predicate was wired in, the only steady-state source of `render_pending`
-/// was the fps-configured `frame_ticker` (default 10 FPS = 100ms/帧), so key
-/// echo waited an average ~50ms (worst ~100ms) — visibly laggy for IME/CJK
-/// input where the user watches the screen to confirm each commit. Marking
-/// every Key/Paste/Mouse/Resize event as render-prompting decouples input
-/// echo latency from the fps setting (frames are ratatui diffs, so unchanged
-/// state renders an empty diff; idle CPU is unaffected).
+/// Whether an input event should prompt an immediate frame render. Treating
+/// Key/Paste/Mouse/Resize as render-prompting decouples input echo from the
+/// configured fps; unchanged frames still produce empty ratatui diffs.
 pub(crate) fn input_event_prompts_frame(ev: &crossterm::event::Event) -> bool {
     matches!(
         ev,
@@ -717,7 +698,7 @@ mod app_loop_model;
 
 #[cfg(test)]
 pub(crate) use app_loop_model::env_model_override;
-pub(crate) use app_loop_model::handle_model_outcome;
+pub(crate) use app_loop_model::{drain_pending_env, handle_model_outcome};
 
 #[path = "app_loop_mcp.rs"]
 mod app_loop_mcp;

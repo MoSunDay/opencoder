@@ -120,24 +120,27 @@ pub(super) async fn run_subagent(
         child = child.with_store(store.clone());
         // Seed the child session row so the FK on subagent_tasks resolves.
         let _ = store
-            .create_session(&opencoder_store::SessionMeta {
-                kind: None,
-                id: child_session_id.clone(),
-                title: Some(prompt.chars().take(60).collect()),
-                agent: Some(kind.clone()),
-                model: Some(parent.config.model.clone()),
-                workdir_hash: None,
-                created_at: now_ms(),
-                updated_at: now_ms(),
-                summary: None,
-                summary_seq: None,
-                summary_images: vec![],
-                handoff_seq: None,
-                handoff_plan: None,
-                skill: None,
-                task_type: Some(opencoder_store::TASK_TYPE_SUBAGENT.to_string()),
-                requirement: None,
-            })
+            .create_session_with_model_overrides(
+                &opencoder_store::SessionMeta {
+                    kind: None,
+                    id: child_session_id.clone(),
+                    title: Some(prompt.chars().take(60).collect()),
+                    agent: Some(kind.clone()),
+                    model: Some(parent.config.model.clone()),
+                    workdir_hash: None,
+                    created_at: now_ms(),
+                    updated_at: now_ms(),
+                    summary: None,
+                    summary_seq: None,
+                    summary_images: vec![],
+                    handoff_seq: None,
+                    handoff_plan: None,
+                    skill: None,
+                    task_type: Some(opencoder_store::TASK_TYPE_SUBAGENT.to_string()),
+                    requirement: None,
+                },
+                Some(&opencoder_store::SessionModelOverrides::default()),
+            )
             .await;
         // Mark the child session as already created so persist() doesn't
         // auto-create a duplicate row with conflicting metadata.

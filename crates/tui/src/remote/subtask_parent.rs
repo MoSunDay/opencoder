@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use opencoder_core::message::now_ms;
-use opencoder_store::Store;
+use opencoder_store::{SessionModelOverrides, Store};
 use std::sync::Arc;
 
 /// Load the parent session's runtime for a registry write, creating the
@@ -27,14 +27,17 @@ pub(crate) async fn ensure_parent_runtime(
     }
     let now = now_ms();
     store
-        .create_session(&opencoder_store::SessionMeta {
-            id: parent_session.to_string(),
-            agent: Some(agent.to_string()),
-            model: Some(model),
-            created_at: now,
-            updated_at: now,
-            ..Default::default()
-        })
+        .create_session_with_model_overrides(
+            &opencoder_store::SessionMeta {
+                id: parent_session.to_string(),
+                agent: Some(agent.to_string()),
+                model: Some(model),
+                created_at: now,
+                updated_at: now,
+                ..Default::default()
+            },
+            Some(&SessionModelOverrides::default()),
+        )
         .await?;
     let runtime = opencoder_core::harness::fresh_runtime(
         opencoder_core::harness::agent_harness(agent),
@@ -75,6 +78,43 @@ mod tests {
             store.harness_runtime("parent-1").await.unwrap().is_some(),
             "runtime row persisted for later registry writes"
         );
+    }
+
+    #[tokio::test]
+    async fn dispatch_persists_empty_mode_overrides_without_rewriting_legacy_rows() {
+        let store = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
+        store
+            .create_session(&opencoder_store::SessionMeta {
+                id: "legacy-parent".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let dyn_store: Arc<dyn Store> = store.clone();
+
+        ensure_parent_runtime(&dyn_store, "mode-aware-parent", "act", "m".into())
+            .await
+            .unwrap();
+
+        let conn = store.conn().await.unwrap();
+        let mut rows = conn
+            .query(
+                "SELECT id, model_overrides_json FROM sessions \
+                 WHERE id IN ('legacy-parent', 'mode-aware-parent') ORDER BY id",
+                (),
+            )
+            .await
+            .unwrap();
+        let legacy = rows.next().await.unwrap().unwrap();
+        assert_eq!(legacy.get::<String>(0).unwrap(), "legacy-parent");
+        assert_eq!(legacy.get::<Option<String>>(1).unwrap(), None);
+        let created = rows.next().await.unwrap().unwrap();
+        assert_eq!(created.get::<String>(0).unwrap(), "mode-aware-parent");
+        assert_eq!(
+            created.get::<Option<String>>(1).unwrap().as_deref(),
+            Some("{}")
+        );
+        assert!(rows.next().await.unwrap().is_none());
     }
 
     /// An already-persisted parent runtime is returned untouched — the lazy

@@ -1,4 +1,6 @@
 mod initialization;
+#[cfg(test)]
+mod tests;
 
 use super::agent_how::{
     agent_result, declared_how_append, default_title, transcript_tail, OUTPUT_TAIL_BYTES,
@@ -6,7 +8,7 @@ use super::agent_how::{
 use crate::{journal::Record, operations::native, Worker};
 use anyhow::{bail, Result};
 use opencoder_core::{fleet::*, Config};
-use opencoder_store::SessionMeta;
+use opencoder_store::{SessionMeta, SessionModelOverrides};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
@@ -46,7 +48,12 @@ pub(crate) async fn create_session(
         task_type: None,
         requirement: None,
     };
-    worker.inner.state.store.create_session(&meta).await
+    worker
+        .inner
+        .state
+        .store
+        .create_session_with_model_overrides(&meta, Some(&SessionModelOverrides::default()))
+        .await
 }
 
 pub(super) async fn run(

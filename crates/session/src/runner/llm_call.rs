@@ -19,6 +19,8 @@ pub(super) struct LlmTurn {
     pub tool_calls: Vec<CompletedToolCall>,
     pub usage: Option<Usage>,
     pub provider_state: Option<opencoder_core::ProviderState>,
+    pub model: String,
+    pub interleaved_thinking: Option<bool>,
 }
 
 pub(super) async fn run_one_llm_call(
@@ -88,10 +90,13 @@ pub(super) async fn run_one_llm_call(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     let tool_schemas = schema_for(&allowed, hide_build);
+    let effective = session.effective_config();
+    let cache_salt = (effective.cache_salt == Some(true))
+        .then(|| format!("{}:{}", session.agent.name, session.id));
 
     let req = ChatRequest {
         purpose: opencoder_llm::RequestPurpose::Conversation,
-        model: session.config.model.clone(),
+        model: effective.model.clone(),
         messages: to_send,
         tools: tool_schemas,
         tool_choice: if allowed.is_empty() {
@@ -100,9 +105,9 @@ pub(super) async fn run_one_llm_call(
             Some("auto".into())
         },
         temperature: None,
-        max_tokens: session.config.max_tokens,
-        reasoning_effort: session.config.reasoning_effort.clone(),
-        cache_salt: crate::cache_salt_for(session),
+        max_tokens: effective.max_tokens,
+        reasoning_effort: effective.reasoning_effort.clone(),
+        cache_salt,
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut completed: Option<(String, Vec<CompletedToolCall>, Option<Usage>)> = None;
@@ -186,6 +191,8 @@ pub(super) async fn run_one_llm_call(
         tool_calls,
         usage,
         provider_state,
+        model: effective.model_id().to_string(),
+        interleaved_thinking: effective.interleaved_thinking,
     })
 }
 

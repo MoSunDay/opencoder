@@ -52,24 +52,27 @@ impl TeamDispatcher for LocalTeamDispatcher {
         let excerpt: String = prompt.chars().take(200).collect();
         self.deps
             .store
-            .create_session(&SessionMeta {
-                kind: Some("project".into()),
-                id: session_id.clone(),
-                title: Some(format!("项目团队 / {}", self.title)),
-                agent: Some(node_id.to_string()),
-                model: Some(self.config.model.clone()),
-                workdir_hash: None,
-                created_at: now,
-                updated_at: now,
-                summary: None,
-                summary_seq: None,
-                summary_images: Vec::new(),
-                handoff_seq: None,
-                handoff_plan: None,
-                skill: None,
-                task_type: Some(TASK_TYPE_PROJECT.into()),
-                requirement: Some(excerpt),
-            })
+            .create_session_with_model_overrides(
+                &SessionMeta {
+                    kind: Some("project".into()),
+                    id: session_id.clone(),
+                    title: Some(format!("项目团队 / {}", self.title)),
+                    agent: Some(node_id.to_string()),
+                    model: Some(self.config.model.clone()),
+                    workdir_hash: None,
+                    created_at: now,
+                    updated_at: now,
+                    summary: None,
+                    summary_seq: None,
+                    summary_images: Vec::new(),
+                    handoff_seq: None,
+                    handoff_plan: None,
+                    skill: None,
+                    task_type: Some(TASK_TYPE_PROJECT.into()),
+                    requirement: Some(excerpt),
+                },
+                Some(&opencoder_store::SessionModelOverrides::default()),
+            )
             .await
             .context("create team member session")?;
         let mut session = opencoder_session::SessionState::new(

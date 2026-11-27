@@ -8,6 +8,7 @@ pub mod project_executor_spec;
 pub mod project_types;
 pub mod reporting;
 pub mod schedule_types;
+mod session_models;
 pub mod session_store;
 pub mod store;
 pub mod team_types;
@@ -37,6 +38,7 @@ pub use schedule_types::{
     ScheduleDefRecord, ScheduleRunRecord, SCHEDULE_RUN_ERROR, SCHEDULE_RUN_FIRED,
     SCHEDULE_RUN_MISSED,
 };
+pub use session_models::SessionModelOverrides;
 pub use session_store::SessionStore;
 pub use store::errors::{is_foreign_key_violation, is_storage_corruption};
 pub use store::Store;

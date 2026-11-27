@@ -1,6 +1,6 @@
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, kind, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, kind, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, model_overrides_json)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn harness_runtime(
     conn: &Connection,
@@ -40,6 +40,18 @@ pub async fn set_harness_runtime(
 
 /// Insert the session row inside a caller-owned transaction.
 pub(super) async fn create_in_tx(conn: &Connection, meta: &SessionMeta) -> Result<()> {
+    create_in_tx_with_model_overrides(conn, meta, None).await
+}
+
+pub(super) async fn create_in_tx_with_model_overrides(
+    conn: &Connection,
+    meta: &SessionMeta,
+    overrides: Option<&crate::SessionModelOverrides>,
+) -> Result<()> {
+    let overrides_json = overrides
+        .map(serde_json::to_string)
+        .transpose()
+        .context("serialize session model overrides")?;
     conn.execute(
         INSERT_SESSION,
         params![
@@ -62,6 +74,7 @@ pub(super) async fn create_in_tx(conn: &Connection, meta: &SessionMeta) -> Resul
             meta.skill.as_deref(),
             meta.task_type.as_deref().unwrap_or("parent"),
             meta.requirement.as_deref(),
+            overrides_json.as_deref(),
         ],
     )
     .await
@@ -71,6 +84,57 @@ pub(super) async fn create_in_tx(conn: &Connection, meta: &SessionMeta) -> Resul
 
 pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || create_in_tx(conn, meta)).await
+}
+
+pub async fn create_with_model_overrides(
+    conn: &Connection,
+    meta: &SessionMeta,
+    overrides: Option<&crate::SessionModelOverrides>,
+) -> Result<()> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || {
+        create_in_tx_with_model_overrides(conn, meta, overrides)
+    })
+    .await
+}
+
+pub async fn get_model_overrides(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<crate::SessionModelOverrides>> {
+    let mut rows = conn
+        .query(
+            "SELECT model_overrides_json FROM sessions WHERE id = ?",
+            params![id],
+        )
+        .await?;
+    let raw = match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0)?,
+        None => None,
+    };
+    raw.map(|json| serde_json::from_str(&json).context("invalid stored session model overrides"))
+        .transpose()
+}
+
+pub async fn set_model_overrides(
+    conn: &Connection,
+    id: &str,
+    overrides: Option<&crate::SessionModelOverrides>,
+) -> Result<()> {
+    let json = overrides
+        .map(serde_json::to_string)
+        .transpose()
+        .context("serialize session model overrides")?;
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+        let count = conn
+            .execute(
+                "UPDATE sessions SET model_overrides_json = ? WHERE id = ?",
+                params![json.as_deref(), id],
+            )
+            .await?;
+        anyhow::ensure!(count == 1, "session missing while saving model overrides");
+        Ok(())
+    })
+    .await
 }
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {

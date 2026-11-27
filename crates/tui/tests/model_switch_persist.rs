@@ -16,7 +16,7 @@ use opencoder_core::{resolve_agent, Config, ProviderConfig};
 use opencoder_llm::MockChatClient;
 use opencoder_session::{resume, SessionEvent, SessionState};
 use opencoder_store::{SessionMeta, Store, TursoStore};
-use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
+use opencoder_tui::worker::{process_cmd, ConfigReloadScope, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
 async fn mem_store() -> Arc<dyn Store> {
@@ -60,7 +60,11 @@ async fn reload_config_persists_model_and_emits_model_switch_event() {
     assert_eq!(sess.model, "gpt-4o-mini", "precondition: default model");
 
     let broke = process_cmd(
-        UiCmd::ReloadConfig(Box::new(switched_config())),
+        UiCmd::ReloadConfig {
+            config: Box::new(switched_config()),
+            scope: ConfigReloadScope::Full,
+            ack: None,
+        },
         &mut sess,
         &tx,
         0,
@@ -118,7 +122,11 @@ async fn model_switch_survives_resume() {
     .with_store(store.clone());
 
     process_cmd(
-        UiCmd::ReloadConfig(Box::new(switched_config())),
+        UiCmd::ReloadConfig {
+            config: Box::new(switched_config()),
+            scope: ConfigReloadScope::Full,
+            ack: None,
+        },
         &mut sess,
         &tx,
         0,

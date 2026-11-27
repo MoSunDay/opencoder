@@ -238,7 +238,8 @@ pub(crate) async fn run_loop(
                         // fresh-start turn. Only fail when the request is
                         // guaranteed to exceed the hard limit (nothing to
                         // summarize AND nothing left to ship).
-                        if compaction::estimated_tokens(session) < session.config.context_limit() {
+                        if compaction::estimated_tokens(session) < session.effective_context_limit()
+                        {
                             tracing::warn!(
                                 "compaction found nothing to summarize; transcript fits under the hard context limit, proceeding uncompacted"
                             );
@@ -273,6 +274,7 @@ pub(crate) async fn run_loop(
             bash_timeout_first = None;
         }
 
+        session.sync_request_model(on_event);
         on_event(SessionEvent::LlmRoundStart {
             started_at_ms: now_ms(),
         });
@@ -313,6 +315,8 @@ pub(crate) async fn run_loop(
             tool_calls,
             usage,
             provider_state,
+            model,
+            interleaved_thinking,
         } = turn;
         // Streamline the completed assistant text before it is persisted and
         // re-sent as context. The live TextDelta stream already delivered the
@@ -330,7 +334,7 @@ pub(crate) async fn run_loop(
         // message so it's sent back on subsequent requests. Only needed on
         // tool-call turns (DeepSeek-V4 requires this and returns 400 if
         // omitted; non-tool reasoning is ignored by the API anyway).
-        let it_on = session.config.interleaved_thinking.unwrap_or(true);
+        let it_on = interleaved_thinking.unwrap_or(true);
         if !reasoning.is_empty() && (provider_state.is_some() || (it_on && !tool_calls.is_empty()))
         {
             blocks.push(ContentBlock::Reasoning { text: reasoning });
@@ -346,7 +350,7 @@ pub(crate) async fn run_loop(
             });
         }
         let mut assistant = Message::assistant(new_id());
-        assistant.model = Some(session.model.clone());
+        assistant.model = Some(model);
         assistant.agent = Some(session.agent.name.clone());
         assistant.blocks = blocks;
         assistant.provider_state = provider_state;

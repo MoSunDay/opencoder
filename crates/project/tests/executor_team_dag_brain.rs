@@ -200,6 +200,10 @@ async fn dag_executor_runs_inline_spec_and_writes_artifacts() {
     assert!(output.contains("run"), "output_md {output:?}");
     // 宿主 session 以 run id 落库（DAG 事件挂在它名下）。
     assert!(h.store.get_session(&run_id).await.unwrap().is_some());
+    assert_eq!(
+        h.store.get_session_model_overrides(&run_id).await.unwrap(),
+        Some(opencoder_store::SessionModelOverrides::default())
+    );
     // 工件：<workflow_root>/<run_id>/run/{output.txt, meta.json}
     let step_dir = PathBuf::from(&out_ref).join("run");
     assert!(step_dir.join("output.txt").exists(), "{step_dir:?}");

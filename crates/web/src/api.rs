@@ -19,7 +19,9 @@ use tracing::warn;
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::SessionEvent;
-use opencoder_store::{Delivery, EventKind, SessionFilter, SessionMeta, SessionPatch};
+use opencoder_store::{
+    Delivery, EventKind, SessionFilter, SessionMeta, SessionModelOverrides, SessionPatch,
+};
 
 use crate::handle::{admit_and_drain_guarded, AdmissionError, SseEvt};
 use crate::AppState;
@@ -70,7 +72,11 @@ pub async fn create_session(
         task_type: None,
         requirement: None,
     };
-    if let Err(e) = state.store.create_session(&meta).await {
+    if let Err(e) = state
+        .store
+        .create_session_with_model_overrides(&meta, Some(&SessionModelOverrides::default()))
+        .await
+    {
         return error_500(format!("create_session: {e:#}"));
     }
     let selection = body.as_ref().and_then(|b| b.harness);
@@ -280,7 +286,7 @@ pub async fn post_prompt(
         if let Some(agent) = &body.agent {
             match state.store.get_session(&id).await {
                 Ok(Some(meta)) if meta.agent.as_ref() != Some(agent) => {
-                    return error_409("Codex agent is fixed when the session starts")
+                    return error_409("Codex agent is fixed when the session starts");
                 }
                 Err(e) => return error_500(format!("session: {e:#}")),
                 _ => {}
@@ -321,7 +327,7 @@ pub async fn post_prompt(
             None => {
                 return error_400(format!(
                     "invalid delivery {s:?}: expected \"steer\" or \"queue\""
-                ))
+                ));
             }
         },
     };
@@ -372,26 +378,29 @@ async fn ensure_session_row(
     let now = opencoder_core::message::now_ms();
     state
         .store
-        .create_session(&SessionMeta {
-            kind: None,
-            id: id.to_string(),
-            title: Some(prompt.chars().take(80).collect()),
-            agent: Some(config.agent.default.clone()),
-            model: Some(config.model.clone()),
+        .create_session_with_model_overrides(
+            &SessionMeta {
+                kind: None,
+                id: id.to_string(),
+                title: Some(prompt.chars().take(80).collect()),
+                agent: Some(config.agent.default.clone()),
+                model: Some(config.model.clone()),
 
-            // Same stamping as create_session: `?workdir=` filters match.
-            workdir_hash: Some(opencoder_core::workdir_hash(&state.workdir)),
-            created_at: now,
-            updated_at: now,
-            summary: None,
-            summary_seq: None,
-            summary_images: vec![],
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: None,
-            requirement: None,
-        })
+                // Same stamping as create_session: `?workdir=` filters match.
+                workdir_hash: Some(opencoder_core::workdir_hash(&state.workdir)),
+                created_at: now,
+                updated_at: now,
+                summary: None,
+                summary_seq: None,
+                summary_images: vec![],
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: None,
+                requirement: None,
+            },
+            Some(&SessionModelOverrides::default()),
+        )
         .await
         .map_err(|e| format!("create_session: {e:#}"))
 }

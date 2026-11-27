@@ -111,24 +111,27 @@ async fn create_host_session(
         .take(200)
         .collect();
     deps.store
-        .create_session(&SessionMeta {
-            kind: Some("project".into()),
-            id: run_id.to_string(),
-            title: Some(format!("项目DAG / {}", todo.title)),
-            agent: Some("act".into()),
-            model: Some(config.model.clone()),
-            workdir_hash: None,
-            created_at: now,
-            updated_at: now,
-            summary: None,
-            summary_seq: None,
-            summary_images: Vec::new(),
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: Some(TASK_TYPE_PROJECT.into()),
-            requirement: Some(excerpt),
-        })
+        .create_session_with_model_overrides(
+            &SessionMeta {
+                kind: Some("project".into()),
+                id: run_id.to_string(),
+                title: Some(format!("项目DAG / {}", todo.title)),
+                agent: Some("act".into()),
+                model: Some(config.model.clone()),
+                workdir_hash: None,
+                created_at: now,
+                updated_at: now,
+                summary: None,
+                summary_seq: None,
+                summary_images: Vec::new(),
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: Some(TASK_TYPE_PROJECT.into()),
+                requirement: Some(excerpt),
+            },
+            Some(&opencoder_store::SessionModelOverrides::default()),
+        )
         .await
         .context("create dag host session")
 }

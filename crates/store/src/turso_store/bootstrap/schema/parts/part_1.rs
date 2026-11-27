@@ -1,6 +1,6 @@
 // Scheduler tables bootstrap additively. Project v33 removes result caches;
 // the release data-format gate excludes older Servers before this migration.
-pub(crate) const SCHEMA_VERSION: i64 = 41;
+pub(crate) const SCHEMA_VERSION: i64 = 42;
 
 // FULL durability is supported by Turso; NORMAL is not.
 const PRAGMAS: &[&str] = &[

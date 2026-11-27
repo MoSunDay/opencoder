@@ -25,6 +25,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/agent", "新建本地任务，或选择 Server 的 Agent / Operator"),
     ("/fork", "从已有会话复制上下文创建新任务 (fork picker)"),
     ("/model", "切换供应商 / 模型 (provider picker)"),
+    ("/envs", "管理本地配置 Env（创建 / 切换 / 停用 / 删除）"),
+    ("/env", "管理或切换本地配置 Env"),
     ("/mcp", "管理 MCP server 列表 (enable/disable/增删改)"),
     ("/cli", "管理 CLI 注册内容及注入范围 (parent/subagents/all)"),
     (
@@ -62,12 +64,24 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Local Env operation requested by a typed slash command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvCommand {
+    Show,
+    Activate(String),
+    Create(String),
+    Deactivate,
+    Delete(String),
+    Invalid(String),
+}
+
 /// Action produced by dispatching a slash command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashAction {
     Task,
     Fork,
     Model,
+    Env(EnvCommand),
     Config,
     Compact,
     CacheSalt,
@@ -218,11 +232,16 @@ impl CommandMenu {
 pub fn parse(input: &str) -> Option<SlashAction> {
     let t = input.trim();
     let bare = t.strip_prefix('/')?;
+    let mut words = bare.split_whitespace();
+    if words.next() == Some("env") {
+        return Some(SlashAction::Env(parse_env(words.collect())));
+    }
     match bare {
         "" | "t" | "task" | "tasks" => Some(SlashAction::Task),
         "agent" => Some(SlashAction::Agent),
         "fork" | "fk" => Some(SlashAction::Fork),
         "model" | "mdl" => Some(SlashAction::Model),
+        "envs" => Some(SlashAction::Env(EnvCommand::Show)),
         "config" | "cfg" => Some(SlashAction::Config),
         "c" | "compact" => Some(SlashAction::Compact),
         "act" => Some(SlashAction::Act),
@@ -241,12 +260,34 @@ pub fn parse(input: &str) -> Option<SlashAction> {
     }
 }
 
+fn parse_env(arguments: Vec<&str>) -> EnvCommand {
+    const USAGE: &str =
+        "usage: /env [name] | /env use <name> | /env create <name> | /env delete <name> | /env off";
+    match arguments.as_slice() {
+        [] | ["list"] => EnvCommand::Show,
+        ["off" | "none" | "deactivate"] => EnvCommand::Deactivate,
+        [name]
+            if !matches!(
+                *name,
+                "use" | "activate" | "create" | "new" | "delete" | "remove" | "rm"
+            ) =>
+        {
+            EnvCommand::Activate((*name).to_string())
+        }
+        ["use" | "activate", name] => EnvCommand::Activate((*name).to_string()),
+        ["create" | "new", name] => EnvCommand::Create((*name).to_string()),
+        ["delete" | "remove" | "rm", name] => EnvCommand::Delete((*name).to_string()),
+        _ => EnvCommand::Invalid(USAGE.to_string()),
+    }
+}
+
 fn dispatch(name: &str) -> Option<SlashAction> {
     match name {
         "/task" => Some(SlashAction::Task),
         "/agent" => Some(SlashAction::Agent),
         "/fork" => Some(SlashAction::Fork),
         "/model" => Some(SlashAction::Model),
+        "/envs" | "/env" => Some(SlashAction::Env(EnvCommand::Show)),
         "/config" => Some(SlashAction::Config),
         "/compact" => Some(SlashAction::Compact),
         "/act" => Some(SlashAction::Act),
@@ -436,6 +477,9 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: 
 #[cfg(test)]
 #[path = "command/catalog_tests.rs"]
 mod catalog_tests;
+#[cfg(test)]
+#[path = "command/env_tests.rs"]
+mod env_tests;
 #[cfg(test)]
 #[path = "command/key_tests.rs"]
 mod key_tests;

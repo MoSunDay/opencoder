@@ -19,6 +19,13 @@ async fn plan_generates_and_updates_todo() {
     let meta = h.store.get_session(&session_id).await.unwrap().unwrap();
     assert_eq!(meta.task_type.as_deref(), Some(TASK_TYPE_PROJECT));
     assert_eq!(meta.agent.as_deref(), Some("plan"));
+    assert_eq!(
+        h.store
+            .get_session_model_overrides(&session_id)
+            .await
+            .unwrap(),
+        Some(opencoder_store::SessionModelOverrides::default())
+    );
 
     let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
     assert_eq!(todo.plan_md.as_deref(), Some("# 实施计划\n1. 步骤一"));
@@ -90,6 +97,10 @@ async fn execute_runs_and_persists_output_then_rerun_resumes_same_session() {
     assert_eq!(exec1.status, ProjectTodoRunStatus::Done);
     assert_eq!(exec1.output_md.as_deref(), Some("全部完成"));
     let sid1 = exec1.session_id.clone().expect("execute session");
+    assert_eq!(
+        h.store.get_session_model_overrides(&sid1).await.unwrap(),
+        Some(opencoder_store::SessionModelOverrides::default())
+    );
     let todo = h.projects.get_todo(&todo_id).await.unwrap().unwrap();
     assert_eq!(todo.status, ProjectTodoStatus::Done);
     assert_eq!(todo.active_session_id.as_deref(), Some(sid1.as_str()));

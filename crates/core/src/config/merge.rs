@@ -11,6 +11,7 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     if obj.contains_key("project")
         || obj.contains_key("ontology")
         || obj.contains_key("model")
+        || obj.contains_key("modes")
         || obj.contains_key("opencoder_server")
         || obj.contains_key("small_model")
         || obj.contains_key("embedding_model")
@@ -170,6 +171,13 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(model) = obj.get("model").and_then(|v| v.as_str()) {
             cfg.model = model.to_string();
+        }
+        if let Some(value) = obj.get("modes") {
+            if value.is_null() {
+                cfg.modes = Default::default();
+            } else if let Some(parsed) = merge_fields(&cfg.modes, value) {
+                cfg.modes = parsed;
+            }
         }
         if let Some(small) = obj.get("small_model").and_then(|v| v.as_str()) {
             cfg.small_model = Some(small.to_string());

@@ -9,9 +9,10 @@ use super::*;
 
 // ----- SaveSessionOnly (session-only model switch) tests -----
 //
-// The `/model` "save as default? (y/N)" flow: Enter arms the prompt, then
-// n/Enter/Esc triggers `SaveSessionOnly` which hot-swaps the model in memory
-// and dispatches `ReloadConfig` WITHOUT writing opencoder.json.
+// The `/model` save-scope flow: Enter arms the prompt, then n triggers
+// `SaveSessionOnly`, which hot-swaps the model in memory and dispatches an
+// acknowledged `ApplySession` without writing opencoder.json or rebuilding the
+// configured client. y/Enter saves the default; Esc cancels the prompt.
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
@@ -49,6 +50,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
     let mut model_menu = Some(ModelMenu::List(ProviderList::new(&config)));
     let mut client: std::sync::Arc<dyn opencoder_llm::ChatStream> =
         std::sync::Arc::new(MockChatClient::new());
+    let original_client = std::sync::Arc::as_ptr(&client);
     let mut compaction_threshold = config.compaction.context_threshold;
     let mut context_limit = config.context_limit();
     let mut frame_ms = 25u64;
@@ -78,38 +80,59 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         &cmd_tx,
         &mut chat,
         workdir,
+        None,
     )
     .await;
     assert!(model_menu.is_some(), "menu stays open while prompting");
 
     // Step 2: 'n' triggers the session-only switch.
-    let flow = handle_model_outcome(
-        &mut model_menu,
-        n_key,
-        &mut client,
-        &mut config,
-        &mut compaction_threshold,
-        &mut context_limit,
-        &mut frame_ms,
-        &mut frame_ticker,
-        &cmd_tx,
-        &mut chat,
-        workdir,
-    )
-    .await;
+    let (flow, cmd) = tokio::join!(
+        handle_model_outcome(
+            &mut model_menu,
+            n_key,
+            &mut client,
+            &mut config,
+            &mut compaction_threshold,
+            &mut context_limit,
+            &mut frame_ms,
+            &mut frame_ticker,
+            &cmd_tx,
+            &mut chat,
+            workdir,
+            None,
+        ),
+        async {
+            let command = cmd_rx.recv().await.expect("ApplySession must be sent");
+            match &command {
+                UiCmd::ApplySession { ack, .. } => ack.send(Ok(())).unwrap(),
+                other => panic!("unexpected command: {other:?}"),
+            }
+            command
+        }
+    );
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(
         model_menu.is_none(),
         "modal closes after session-only switch"
     );
 
-    // In-memory config updated to the new model.
-    assert_eq!(config.model, "deepseek/deepseek-chat");
+    // The outer raw config and configured client stay unchanged; the Shared
+    // selection lives in chat/session metadata and is used for new-task inheritance.
+    assert_eq!(config.model, "openai/gpt-4o-mini");
+    assert_eq!(chat.shared_model, "deepseek/deepseek-chat");
     assert_eq!(chat.model, "deepseek/deepseek-chat");
+    assert_eq!(std::sync::Arc::as_ptr(&client), original_client);
 
-    // ReloadConfig dispatched (worker persists to session store row).
-    let cmd = cmd_rx.recv().await.expect("ReloadConfig must be sent");
-    assert!(matches!(cmd, UiCmd::ReloadConfig(_)));
+    // The worker persists the session-only Shared model through one
+    // acknowledged operation; pure model selection must not request a reload.
+    assert!(matches!(
+        cmd,
+        UiCmd::ApplySession {
+            selection: Some((opencoder_core::ConfigMode::Shared, ref model)),
+            provider_changed: false,
+            ..
+        } if model == "deepseek/deepseek-chat"
+    ));
 
     // CRITICAL: opencoder.json must NOT exist (session-only = no disk write).
     assert!(

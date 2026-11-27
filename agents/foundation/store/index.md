@@ -24,7 +24,19 @@ Commit: 0abfe0c77
 - [src/ts_registry.rs](../../../crates/store/src/ts_registry.rs) — tmux 会话
   中央注册表
 - [src/types.rs](../../../crates/store/src/types.rs) — `SessionMeta`、
-  `SessionFilter` 等 DTO
+  `SessionFilter` 等 DTO；模式模型覆盖是独立元数据，不并入 `SessionMeta`
+- [src/session_models.rs](../../../crates/store/src/session_models.rs) —
+  `SessionModelOverrides { shared, act, plan }`；schema v42 增加可空
+  `sessions.model_overrides_json`，整体 `NULL` 表示 legacy 单模型行为，`{}`
+  （含缺省字段）表示模式感知且未设置会话选择，字段有值时覆盖对应 per-mode
+  config；其中 Shared 值立即优先于 `modes.shared.model`。`SessionState::new`、Web
+  等正常新建入口显式写入 `Some(default())`，底层 `Store::create_session` 仍保留
+  legacy `NULL` 默认；历史行不被回填，旧 bundle 缺少该字段时反序列化为
+  `None`，导入保留其 legacy `NULL`，已有 bundle 元数据也原样传递。显式模型只把
+  已有模式感知行的 Shared/Act/Plan 清成 `{}`，legacy 行保持 `NULL`；Env reload
+  写入目标 Env 的 Shared 基值并以 `{}` 清空全部临时会话选择。Store 经
+  `create_session_with_model_overrides`、`get_session_model_overrides`、
+  `set_session_model_overrides` 访问
 - [src/schedule_types.rs](../../../crates/store/src/schedule_types.rs)、
   [schedule.rs](../../../crates/store/src/turso_store/execution/schedule.rs) —
   调度台账与定义表
@@ -33,7 +45,7 @@ Commit: 0abfe0c77
   暖打开跳过写锁引导+checkpoint（不等待跨进程写锁），探针同时校验活跃索引
   与 guidance 队列形状，legacy 形状仍走完整 bootstrap；升级链与专项迁移在
   [bootstrap/schema/](../../../crates/store/src/turso_store/bootstrap/schema)
-  （migrations.rs、catalog.rs、access.rs、project_links.rs、session_activity.rs 等；v41 活跃索引换形与坏页探测/回填）
+  （migrations.rs、catalog.rs、access.rs、project_links.rs、session_activity.rs 等；v41 活跃索引换形与坏页探测/回填，v42 增加可空会话模式模型覆盖元数据）
 - [tokens.rs](../../../crates/store/src/turso_store/identity/users/tokens.rs) —
   用户身份与独立 Token；公共身份面另经
   [src/users.rs](../../../crates/store/src/users.rs) 暴露

@@ -22,15 +22,18 @@ pub(crate) async fn create(
     );
     let now = opencoder_core::message::now_ms();
     store
-        .create_session(&SessionMeta {
-            id: id.clone(),
-            kind: Some(format!("tui_remote_{}", remote.capability.kind.prefix())),
-            title: Some(remote.capability.id.clone()),
-            agent: Some(remote.capability.target.clone()),
-            created_at: now,
-            updated_at: now,
-            ..Default::default()
-        })
+        .create_session_with_model_overrides(
+            &SessionMeta {
+                id: id.clone(),
+                kind: Some(format!("tui_remote_{}", remote.capability.kind.prefix())),
+                title: Some(remote.capability.id.clone()),
+                agent: Some(remote.capability.target.clone()),
+                created_at: now,
+                updated_at: now,
+                ..Default::default()
+            },
+            Some(&opencoder_store::SessionModelOverrides::default()),
+        )
         .await?;
     let runtime = HarnessRuntime {
         remote: Some(remote),
@@ -112,4 +115,35 @@ fn shell(
     session.harness = runtime;
     session.harness.literal_mentions = true;
     Ok(session)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::remote::tests::support::Fixture;
+    use opencoder_core::fleet::ExecutionKind;
+
+    #[tokio::test]
+    async fn create_persists_default_model_overrides() {
+        let fixture = Fixture::new().await;
+
+        let session = create(
+            fixture.binding(ExecutionKind::Agent),
+            fixture.config(),
+            fixture.mock.clone(),
+            fixture.store.clone(),
+            fixture.workdir.path(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            fixture
+                .store
+                .get_session_model_overrides(&session.id)
+                .await
+                .unwrap(),
+            Some(opencoder_store::SessionModelOverrides::default())
+        );
+    }
 }

@@ -167,24 +167,27 @@ pub async fn prepare_session(
 ) -> Result<()> {
     let now = now_ms();
     store
-        .create_session(&SessionMeta {
-            kind: Some("todos".into()),
-            id: session_id.into(),
-            title: Some(format!("{} / {}", workflow.name, todo.title)),
-            agent: Some(todo.agent.clone()),
-            model: Some(config.model.clone()),
-            workdir_hash: None,
-            created_at: now,
-            updated_at: now,
-            summary: None,
-            summary_seq: None,
-            summary_images: Vec::new(),
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: Some(TASK_TYPE_TODO.into()),
-            requirement: Some(todo.instructions.clone()),
-        })
+        .create_session_with_model_overrides(
+            &SessionMeta {
+                kind: Some("todos".into()),
+                id: session_id.into(),
+                title: Some(format!("{} / {}", workflow.name, todo.title)),
+                agent: Some(todo.agent.clone()),
+                model: Some(config.model.clone()),
+                workdir_hash: None,
+                created_at: now,
+                updated_at: now,
+                summary: None,
+                summary_seq: None,
+                summary_images: Vec::new(),
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: Some(TASK_TYPE_TODO.into()),
+                requirement: Some(todo.instructions.clone()),
+            },
+            Some(&opencoder_store::SessionModelOverrides::default()),
+        )
         .await
 }
 
@@ -239,6 +242,34 @@ mod tests {
     use super::*;
 
     const BLOCKED_CANDIDATE: &str = r#"{"status":"blocked","summary":"blocked","result":"none","verification":"failed","evidence_refs":[],"recovery_context":{"summary":"retry later","refs":[]}}"#;
+
+    #[tokio::test]
+    async fn prepare_session_persists_default_model_overrides() {
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
+        let todo = required_call_todo();
+        let workflow = WorkflowSpec {
+            schema_version: 1,
+            id: "workflow".into(),
+            name: "workflow".into(),
+            objective: "objective".into(),
+            constraints: vec![],
+            todos: vec![todo.clone()],
+            metadata: serde_json::Value::Null,
+        };
+
+        prepare_session(&store, &workflow, &todo, "todo-session", &Config::default())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .get_session_model_overrides("todo-session")
+                .await
+                .unwrap(),
+            Some(opencoder_store::SessionModelOverrides::default())
+        );
+    }
 
     #[test]
     fn candidate_parser_accepts_raw_and_single_fenced_json() {

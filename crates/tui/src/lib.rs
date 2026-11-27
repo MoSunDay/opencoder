@@ -32,6 +32,7 @@ pub mod markdown;
 pub mod mcp_menu;
 pub mod menu;
 pub mod model_menu;
+pub mod model_scope;
 pub mod model_session_switch;
 pub mod notepad;
 pub mod onboarding;

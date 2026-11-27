@@ -228,15 +228,27 @@ pub(crate) fn compute_display<'a>(
                 // resume) — NOT the outer config default. A resumed session
                 // runs on its persisted `sessions.model`, so the config
                 // fallback showed a name the requests never used.
-                let model = if chat.model.is_empty() {
-                    config.model_id()
+                let (model, reasoning) = if chat.shared_model.is_empty() {
+                    let model = if chat.model.is_empty() {
+                        config.model_id()
+                    } else {
+                        chat.model
+                            .split_once('/')
+                            .map(|(_, m)| m)
+                            .unwrap_or(&chat.model)
+                    };
+                    (model.to_string(), config.reasoning_effort.clone())
                 } else {
-                    chat.model
+                    let effective = crate::model_scope::effective_for_chat(config, chat);
+                    let model = effective
+                        .model
                         .split_once('/')
                         .map(|(_, m)| m)
-                        .unwrap_or(&chat.model)
+                        .unwrap_or(&effective.model)
+                        .to_string();
+                    (model, effective.reasoning_effort)
                 };
-                compose_top_title(workdir, model, config.reasoning_effort.as_deref())
+                compose_top_title(workdir, &model, reasoning.as_deref())
             };
             (
                 chat,

@@ -257,7 +257,13 @@ async fn ensure_run_session(store: &Arc<dyn opencoder_store::Store>, run: &DagCl
         updated_at: now,
         ..Default::default()
     };
-    if let Err(error) = store.create_session(&meta).await {
+    if let Err(error) = store
+        .create_session_with_model_overrides(
+            &meta,
+            Some(&opencoder_store::SessionModelOverrides::default()),
+        )
+        .await
+    {
         warn!(
             run_id = %run.run_id,
             error = %error,
@@ -393,5 +399,37 @@ async fn await_flag(rx: &mut watch::Receiver<bool>) {
         if rx.changed().await.is_err() {
             std::future::pending::<()>().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn run_session_persists_default_model_overrides() {
+        let store: Arc<dyn opencoder_store::Store> =
+            Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
+        let run = DagClaimedRun {
+            run_id: "run-metadata".into(),
+            dag_id: "dag".into(),
+            spec: DagSpec {
+                max_concurrency: 1,
+                name: "run".into(),
+                description: None,
+                steps: vec![],
+            },
+            created_at: 1,
+        };
+
+        ensure_run_session(&store, &run).await;
+
+        assert_eq!(
+            store
+                .get_session_model_overrides("run-metadata")
+                .await
+                .unwrap(),
+            Some(opencoder_store::SessionModelOverrides::default())
+        );
     }
 }

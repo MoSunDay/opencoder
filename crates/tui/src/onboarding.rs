@@ -148,7 +148,7 @@ pub(crate) async fn run(
                                 }
                             }
                         }
-                        ModelOutcome::SaveSessionOnly(_) => {
+                        ModelOutcome::SaveSessionOnly(_) | ModelOutcome::ReloadEnv(_, _) => {
                             form = before;
                             form.error = Some("first setup must be saved globally".into());
                         }
@@ -188,7 +188,7 @@ fn finalize_config(
     Config::save_global(patch).context("save global config")?;
     let mut reloaded = Config::load(workdir).context("reload effective config")?;
     if let Some(model) = cli_model {
-        reloaded.model = model.to_string();
+        reloaded.apply_explicit_model(model);
     }
     let client = build_ready_client(&reloaded)
         .map_err(StartupFailure::into_error)

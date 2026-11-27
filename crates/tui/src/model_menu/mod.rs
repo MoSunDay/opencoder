@@ -13,16 +13,24 @@
 //! caller (`app.rs`) persists it via `Config::save`.
 
 pub mod config_form;
+pub mod env;
+pub mod env_view;
 pub mod headers;
 pub mod list;
+pub mod mode_config_form;
+pub mod mode_config_view;
+pub mod mode_select;
 pub mod patch;
 pub mod provider_form;
 pub mod state;
 pub mod view;
 
 pub use config_form::{ConfigField, ConfigForm, Reasoning};
+pub use env::EnvMenu;
 pub use headers::HeadersEditor;
 pub use list::{ProviderEntry, ProviderList};
+pub use mode_config_form::{ModeConfigForm, ModeField};
+pub use mode_select::{ModeMenuKind, ModeSelection, SaveTargetInfo};
 pub use patch::{ConfigPatch, ProviderPatch};
 pub use provider_form::{ProviderField, ProviderForm};
 pub use state::{handle_model_key, mask_key, ModelMenu, ModelOutcome};

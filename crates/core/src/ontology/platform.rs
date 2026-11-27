@@ -140,7 +140,12 @@ const ENTRIES: &[(&str, &str, &str, &[&str])] = &[
         "读取服务调度指标",
         &["/api/metrics", "/metrics"],
     ),
-    ("tui", "终端能力目录", "查询终端可选能力", &["/api/tui"]),
+    (
+        "tui",
+        "终端交互与配置",
+        "查询终端可选能力；通过 /env、/envs 管理本地配置 Env；/model、/config 配置 Shared/Act/Plan 的模型与生成参数，其中 /model 支持 Provider 新增、编辑、删除的 session-only 选择，Shared 会话选择立即生效并优先于 modes.shared.model，{} 或缺省字段表示继承配置，整体 NULL 保留 legacy 语义；/cli、/skill 通过 EnvAware 保存，有活动 Env 时写入对应 Env 文件，无活动时回退 legacy Auto；任务 Resume/Fork 重应用进程级显式模型，成功后同步外层 config/client/chat，失败保留原运行时",
+        &["/api/tui"],
+    ),
 ];
 
 pub fn platform_capabilities() -> Vec<Capability> {
@@ -154,7 +159,17 @@ pub fn platform_capabilities() -> Vec<Capability> {
             name: (*name).into(),
             description: (*description).into(),
             version: crate::version::VERSION_LONG.into(),
-            cli: if CLI_DOMAINS.contains(id) {
+            cli: if *id == "tui" {
+                vec![
+                    "TUI /env".into(),
+                    "TUI /envs".into(),
+                    "TUI /model".into(),
+                    "TUI /config".into(),
+                    "TUI /cli".into(),
+                    "TUI /skill".into(),
+                    "opencoder-cli raw call METHOD PATH".into(),
+                ]
+            } else if CLI_DOMAINS.contains(id) {
                 vec![format!("opencoder-cli {id} --help")]
             } else {
                 vec!["opencoder-cli raw call METHOD PATH".into()]

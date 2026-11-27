@@ -73,6 +73,7 @@ pub(super) async fn handle_popup_key(
     input: &mut String,
     cursor_idx: &mut usize,
     workdir: &Path,
+    env_model: Option<&str>,
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
     sys_tokens: &mut u64,
@@ -123,6 +124,7 @@ pub(super) async fn handle_popup_key(
             cmd_tx,
             chat,
             workdir,
+            env_model,
         )
         .await;
         return match flow {

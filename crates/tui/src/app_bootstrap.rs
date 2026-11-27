@@ -13,11 +13,20 @@ use opencoder_session::SessionState;
 use opencoder_store::Store;
 use ratatui::backend::CrosstermBackend;
 
-use crate::app_helpers::{open_store, persist_session_model, reapply_session_model, resume_hint};
+use crate::app_helpers::{
+    open_store, preferred_explicit_model, reapply_session_model, resume_hint,
+};
 use crate::copy_wrap::{WrapAwareBackend, WrapPlan};
 use crate::render::Term;
 use crate::terminal::TerminalGuard;
 use crate::TuiOpts;
+
+/// Apply the process-level model before constructing either the client or a
+/// resumed session. Keeping this as a small seam lets bootstrap tests exercise
+/// the same precedence rule without entering a terminal.
+fn apply_cli_model(config: &mut Config, model: Option<&str>) -> bool {
+    model.is_some_and(|model| config.apply_explicit_model(model))
+}
 
 /// Entry point: load config, resume or create a session, enter the terminal,
 /// then drive the event loop via `super::run_app`.
@@ -30,10 +39,10 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     Config::ensure_global_config().context("create ~/.opencoder/config.json")?;
+    let env_model = std::env::var("OPENCODER_MODEL").ok();
+    let explicit_model = preferred_explicit_model(opts.model.as_deref(), env_model.as_deref());
     let mut config = Config::load(&workdir)?;
-    if let Some(m) = &opts.model {
-        config.model = m.clone();
-    }
+    apply_cli_model(&mut config, opts.model.as_deref());
     let store: Arc<dyn Store> = open_store(&workdir).await?;
     let stored = if let Some(id) = &opts.session {
         let effective_id = match store.get_subagent_task(id).await? {
@@ -214,22 +223,24 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     }
     let session_ms = t_session.elapsed().as_millis() as u64;
 
-    // Explicit --model wins over a resumed session's stored model and is
-    // re-persisted so later resumes honor it (headless run-path parity).
+    // Re-apply the same environment/CLI winner after resume restored the stored
+    // model. The session helper persists both fields and propagates failures.
     let local = session.harness.remote.is_none();
-    if let Some(m) = reapply_session_model(
+    reapply_session_model(
         &mut session,
-        &opts
-            .model
+        &explicit_model
             .clone()
             .filter(|_| harness == opencoder_core::harness::Harness::Opencoder && local),
-    ) {
-        persist_session_model(store.as_ref(), &session.id, m).await;
-    }
+    )
+    .await?;
 
     let session_id = session.id.clone();
+    // The resumed SessionState is authoritative: its durable Shared model and
+    // post-startup override config may differ from the pre-resume snapshot.
+    let config = session.config.clone();
+    let client = session.client.clone();
     let compaction_threshold = session.config.compaction.context_threshold;
-    let context_limit = session.config.context_limit();
+    let context_limit = session.effective_context_limit();
 
     // Terminal enter/restore is RAII: `TerminalGuard`'s Drop — and the panic
     // hook it installs — restore raw/alt-screen/mouse/kitty state on ANY exit
@@ -275,6 +286,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
 
     let result = super::run_app(
         opts,
+        &explicit_model,
         &mut active_terminal.terminal,
         session,
         store,
@@ -373,7 +385,40 @@ pub(super) async fn finish(
 
 #[cfg(test)]
 mod tests {
-    use super::finish;
+    use super::{apply_cli_model, finish};
+
+    #[test]
+    fn cli_model_precedes_every_configured_mode() {
+        use opencoder_core::{Config, ConfigMode, ModeConfig, ModesConfig};
+
+        let mut config = Config {
+            model: "cli/override".into(),
+            modes: ModesConfig {
+                shared: ModeConfig {
+                    model: Some("shared/model".into()),
+                    max_tokens: Some(200),
+                    ..Default::default()
+                },
+                act: Some(ModeConfig {
+                    model: Some("act/model".into()),
+                    ..Default::default()
+                }),
+                plan: Some(ModeConfig {
+                    model: Some("plan/model".into()),
+                    ..Default::default()
+                }),
+            },
+            ..Default::default()
+        };
+
+        assert!(apply_cli_model(&mut config, Some("cli/override")));
+        for mode in [ConfigMode::Shared, ConfigMode::Act, ConfigMode::Plan] {
+            assert_eq!(config.effective_for_mode(mode).model, "cli/override");
+        }
+        assert_eq!(config.modes.shared.max_tokens, Some(200));
+        assert!(!apply_cli_model(&mut config, Some("cli/override")));
+        assert!(!apply_cli_model(&mut config, None));
+    }
 
     /// Normal exit path: `finish` disarms the supervisor flag and drops the
     /// command sender so the cooperative worker drains its channel and exits.

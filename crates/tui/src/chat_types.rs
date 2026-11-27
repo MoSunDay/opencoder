@@ -169,6 +169,10 @@ pub struct ChatView {
     /// so the displayed name can never diverge from the model on the wire.
     /// Empty on remote/agent-server views (the title shows `Server · agent`).
     pub model: String,
+    /// Legacy Shared model for this session, including session-only choices.
+    pub shared_model: String,
+    /// Session-only Act/Plan models. None preserves legacy-row inheritance.
+    pub model_overrides: Option<opencoder_store::SessionModelOverrides>,
     /// Start of the currently-running provider/model round. Display-only:
     /// this value never becomes a persisted model message or prompt content.
     /// While `Some`, `[call cost]` counts up live. Cleared on `LlmRoundEnd`

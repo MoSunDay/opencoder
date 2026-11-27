@@ -24,6 +24,33 @@ use crate::worker::{
 };
 use crate::TuiOpts;
 
+/// Runtime and display state produced by a fully prepared task switch.
+///
+/// The caller installs this only after the new worker is ready. In particular,
+/// `config` and `client` come from the same `SessionState`, so later model and
+/// Provider operations cannot accidentally use the previous task's snapshot.
+pub(crate) struct TaskSwitchState {
+    pub config: Config,
+    pub client: Arc<dyn ChatStream>,
+    pub shared_model: String,
+    pub model_overrides: Option<opencoder_store::SessionModelOverrides>,
+    pub model: String,
+    pub compaction_threshold: u64,
+    pub context_limit: u64,
+}
+
+fn task_switch_state(session: &SessionState) -> TaskSwitchState {
+    TaskSwitchState {
+        config: session.config.clone(),
+        client: session.client.clone(),
+        shared_model: crate::model_scope::shared_model(&session.config, session.model_overrides()),
+        model_overrides: session.model_overrides().cloned(),
+        model: session.effective_model(),
+        compaction_threshold: session.config.compaction.context_threshold,
+        context_limit: session.effective_context_limit(),
+    }
+}
+
 /// The `TaskOutcome::Pick(pick)` arm: perform a session switch. Builds a new
 /// `SessionState` (New or Resume), spawns a fresh worker for it, saves the
 /// current session's UI snapshot and restores (or initialises) the target
@@ -38,11 +65,27 @@ use crate::TuiOpts;
 /// Returns `Result` (not `()`) because the body uses `?` to propagate errors
 /// from `resolve_agent` / `resume`; the caller propagates with `?`.
 /// The outer match's post-arm `continue` stays inline in `run_app`.
-/// Carry a session-only model choice into a new task while loading other
-/// settings from disk. Config retains the provider needed for request routing.
-fn new_task_config(mut loaded: Config, active: &Config) -> Config {
-    loaded.model = active.model.clone();
+/// Carry the current session's Shared choice and effective named providers into
+/// a new task while loading other settings from disk. An empty Shared label is
+/// only a compatibility fallback for views created before session metadata was
+/// tracked. The returned config is in-memory; creating a task writes no config.
+fn new_task_config(mut loaded: Config, active: &Config, shared_model: &str) -> Config {
+    loaded.model = if shared_model.is_empty() {
+        active.model.clone()
+    } else {
+        shared_model.to_string()
+    };
+    loaded.providers = active.providers.clone();
     loaded
+}
+
+/// A configured client snapshots its provider routing table. Build the fresh
+/// task's client from the same config as its session instead of cloning the old
+/// task's snapshot. Construction happens before the old task is cancelled.
+fn new_task_client(config: &Config) -> Result<Arc<dyn ChatStream>> {
+    let endpoint = crate::app_helpers::startup_endpoint(config)?;
+    let client = opencoder_llm::ChatClient::from_config(config, &endpoint)?;
+    Ok(Arc::new(client))
 }
 
 /// A new task follows the TUI launch selection. Runtime state such as a Codex
@@ -63,6 +106,7 @@ fn new_task_harness(
 pub(crate) async fn switch_session(
     pick: crate::task::TaskPick,
     opts: &TuiOpts,
+    explicit_model: &Option<String>,
     cmd_tx: &mut mpsc::Sender<UiCmd>,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
     workdir: &Path,
@@ -93,7 +137,7 @@ pub(crate) async fn switch_session(
     // then drains and exits) and replaced by a fresh actor bound to the new
     // session — sidecar history never crosses sessions.
     sidecar_ask: &mut mpsc::Sender<crate::sidecar_ui::SidecarCmd>,
-) -> Result<()> {
+) -> Result<TaskSwitchState> {
     let (new_session, pending_replay) = match &pick {
         crate::task::TaskPick::Remote(remote) => (
             crate::remote::create(
@@ -111,17 +155,20 @@ pub(crate) async fn switch_session(
             let new_config = new_task_config(
                 Config::load(workdir).unwrap_or_else(|_| config.clone()),
                 config,
+                &chat.shared_model,
             );
+            let new_client = new_task_client(&new_config)?;
             let agent_name = crate::fresh_agent_name(opts, &new_config);
             let new_agent = resolve_agent(&agent_name).context("agent")?;
             let mut sess = SessionState::new(
                 new_session_id,
                 new_agent,
                 new_config,
-                client.clone(),
+                new_client,
                 workdir.to_path_buf(),
             )
             .with_store(store.clone());
+            sess.inherit_model_overrides(chat.model_overrides.as_ref());
             sess.harness = new_task_harness(sess.harness.harness, opts);
             sess.harness.literal_mentions = true;
             // Opening a new task is not itself work: the session row stays
@@ -155,16 +202,31 @@ pub(crate) async fn switch_session(
             load_session_for_switch(store, &new_id, new_config, client, workdir).await?
         }
     };
+    let (mut new_session, pending_replay) = (new_session, pending_replay);
+    if matches!(
+        pick,
+        crate::task::TaskPick::Resume(_) | crate::task::TaskPick::Fork(_)
+    ) && new_session.harness.remote.is_none()
+    {
+        // Resume first to learn the durable model, then construct the client
+        // from the restored active mode's effective config. An explicit
+        // process-level selection still wins below. No old-task cancellation
+        // or worker replacement happens until every fallible step succeeds.
+        let mut client_config = new_session.effective_config();
+        if let Some(model) = explicit_model {
+            client_config.apply_explicit_model(model);
+        }
+        let new_client = new_task_client(&client_config)?;
+        crate::app_helpers::reapply_session_model(&mut new_session, explicit_model).await?;
+        new_session.client = new_client;
+    }
+    let switch_state = task_switch_state(&new_session);
     if !chat.remote {
         cancel.cancel();
     }
     let _ = cmd_tx.try_send(UiCmd::Quit);
     let remote = new_session.harness.remote.clone();
     let new_session_id = new_session.id.clone();
-    // The title shows the LIVE session model — the resumed/forked session's
-    // own config (restored from its persisted `sessions.model`), not the
-    // outer default.
-    chat.model = new_session.config.model.clone();
     let new_cancel = CancellationToken::new();
     let new_session = new_session.with_cancel(new_cancel.clone());
     // Mirror `cancel`: the switched session's parent turn-cancel handle must
@@ -266,6 +328,9 @@ pub(crate) async fn switch_session(
         },
     };
     chat.remote = remote.is_some();
+    chat.shared_model = switch_state.shared_model.clone();
+    chat.model_overrides = switch_state.model_overrides.clone();
+    chat.model = switch_state.model.clone();
     if let Some(binding) = &remote {
         chat.agent = binding.label();
     }
@@ -356,7 +421,7 @@ pub(crate) async fn switch_session(
     if let Some(body) = &*active_skill_body {
         *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(body.clone());
     }
-    Ok(())
+    Ok(switch_state)
 }
 
 /// The `TaskOutcome::ClearAll { keep_session_id }` arm: wipe every task

@@ -77,6 +77,13 @@ pub(crate) fn global_opencoder_home() -> Option<PathBuf> {
     config_home_dir().map(|home| home.join(".opencoder"))
 }
 
+pub(crate) fn xdg_opencoder_home(home_override: Option<&Path>) -> Option<PathBuf> {
+    home_override
+        .map(Path::to_path_buf)
+        .or_else(config_xdg_dir)
+        .map(|home| home.join("opencoder"))
+}
+
 /// Canonical global config file owned by this binary.
 ///
 /// Kept here so production and tests share the same home-resolution rules;
@@ -104,9 +111,9 @@ pub(crate) fn env_get(name: &str) -> Option<String> {
     }
 }
 
-/// Candidate chain: project files first, then `~/.opencoder/`, then XDG.
+/// Legacy file-only candidate chain used for explicit non-Env save routing.
 pub(super) fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
-    candidates_with_home(working_dir, None)
+    candidates_for_load(working_dir, None, None)
 }
 
 /// [`config_candidates`] with the global home explicitly redirected: the
@@ -117,10 +124,26 @@ pub(super) fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
 /// isolation (`Config::load_with_home`) uses this to pin a session's global
 /// config view to its frozen snapshot.
 pub fn candidates_with_home(working_dir: &Path, home_override: Option<&Path>) -> Vec<PathBuf> {
-    let mut v = vec![
+    let active_env = home_override
+        .is_none()
+        .then(super::local_env::active_config_env_resolution);
+    candidates_for_load(working_dir, home_override, active_env.as_ref())
+}
+
+/// Candidate chain using the active Env already resolved by the caller.
+pub(super) fn candidates_for_load(
+    working_dir: &Path,
+    home_override: Option<&Path>,
+    active_env: Option<&super::local_env::ConfigEnvResolution>,
+) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(active) = super::local_env::active_info(active_env) {
+        v.push(active.path.join("config.json"));
+    }
+    v.extend([
         working_dir.join(".opencoder").join("config.json"),
         working_dir.join("opencoder.json"),
-    ];
+    ]);
     let home = home_override
         .map(Path::to_path_buf)
         .or_else(config_home_dir);
@@ -144,7 +167,7 @@ pub(super) fn apply_env(cfg: &mut Config) {
     // leave the newly-active entry with a stale base_url.
     if let Some(m) = env_get("OPENCODER_MODEL") {
         if !m.is_empty() {
-            cfg.model = m;
+            cfg.apply_explicit_model(&m);
         }
     }
     if let Some(m) = env_get("OPENCODER_SMALL_MODEL") {

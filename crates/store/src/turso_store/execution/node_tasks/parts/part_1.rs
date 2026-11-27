@@ -18,8 +18,9 @@ pub async fn dispatch(
         if !node_exists(conn, node_id).await? {
             anyhow::bail!("dispatch_node_task: node {node_id} does not exist");
         }
+        let model_overrides = crate::SessionModelOverrides::default();
         // Session first: node_tasks.session_id is an immediate FK into it.
-        super::sessions::create_in_tx(
+        super::sessions::create_in_tx_with_model_overrides(
             conn,
             &SessionMeta {
                 kind: None,
@@ -39,6 +40,7 @@ pub async fn dispatch(
                 task_type: Some(TASK_TYPE_NODE.to_string()),
                 requirement: None,
             },
+            Some(&model_overrides),
         )
         .await?;
         insert_task_row(

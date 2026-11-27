@@ -271,7 +271,6 @@ fn list_d_then_y_deletes() {
 fn provider_form_save_produces_patch() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
     handle_model_key(&mut slot, key('e')); // -> Form
-                                           // Set focus to Save explicitly and press Enter
     {
         let f = match slot.as_mut() {
             Some(ModelMenu::Form(f)) => f,
@@ -279,7 +278,11 @@ fn provider_form_save_produces_patch() {
         };
         f.focus = ProviderField::Save;
     }
-    match handle_model_key(&mut slot, enter()) {
+    assert!(matches!(
+        handle_model_key(&mut slot, enter()),
+        ModelOutcome::Idle
+    ));
+    match handle_model_key(&mut slot, key('y')) {
         ModelOutcome::Save(json) => {
             assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
             assert_eq!(
@@ -505,10 +508,8 @@ fn list_enter_opens_form_when_model_id_unset() {
         _ => panic!("expected Form after Enter on unset provider, got a non-Form variant"),
     }
 }
-
-/// When `confirm_save_default` is armed, a centered confirmation dialog with the
-/// model name and the y/global + n/session-only + Esc/cancel hints is rendered
-/// into the buffer (regression guard: previously only the title bar changed).
+/// The armed confirmation renders the selected scope, save target, model name,
+/// and save/session-only/cancel hints in a centered dialog.
 #[test]
 fn save_default_confirm_renders_visible_dialog() {
     let cfg = provider_cfg();
@@ -536,10 +537,14 @@ fn save_default_confirm_renders_visible_dialog() {
         all.push('\n');
     }
     assert!(
-        all.contains("Save as default"),
+        all.contains("Save model default?"),
         "confirm title missing:\n{all}"
     );
-    assert!(all.contains("global"), "global hint missing:\n{all}");
+    assert!(all.contains("Shared default?"), "scope missing:\n{all}");
+    assert!(
+        all.contains("Legacy automatic save target"),
+        "save target missing:\n{all}"
+    );
     assert!(
         all.contains("session-only"),
         "session-only hint missing:\n{all}"
@@ -793,5 +798,3 @@ fn provider_form_cursor_inside_headers_value() {
     // (5 spaces + 20-char name + " = "); "eu-west" has 7 chars → cx = 4+1+28+7 = 40
     terminal.backend_mut().assert_cursor_position((40, 17));
 }
-
-// ── provider form cursor editing (Left/Right, insert/delete at cursor) ───

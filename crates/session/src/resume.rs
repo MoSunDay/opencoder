@@ -33,6 +33,7 @@ pub async fn resume(
         .await?
         .ok_or_else(|| anyhow!("session not found: {id}"))?;
 
+    let model_overrides = store.get_session_model_overrides(id).await?;
     let stored_harness = store.harness_runtime(id).await?;
     let mut harness = stored_harness.clone().unwrap_or_default();
     if stored_harness.is_none() && store.last_message_seq(id).await? == 0 {
@@ -200,7 +201,9 @@ pub async fn resume(
     }
 
     let n = messages.len();
-    let model = config.model_id().to_string();
+    let effective = crate::model::effective_config_for(&config, &agent, model_overrides.as_ref());
+    let model = effective.model_id().to_string();
+    let active_model = effective.model.clone();
     // Agent pool snapshots follow the agent the persisted session names
     // (meta.agent, config default, then act fallback) — a resumed file-agent
     // session gets its tool dirs and skill roots back.
@@ -236,6 +239,8 @@ pub async fn resume(
         messages,
         agent,
         model,
+        model_overrides,
+        active_model,
         working_dir,
         config,
         client,

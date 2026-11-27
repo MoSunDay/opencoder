@@ -14,7 +14,12 @@ use super::state::ModelMenu;
 /// Dispatch to the correct renderer based on the modal variant.
 pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &ModelMenu) {
     match menu {
+        ModelMenu::Env(menu) => super::env_view::render(f, area, composer_top, menu),
+        ModelMenu::ModeSelect(selection) => {
+            super::mode_select::render(f, area, composer_top, selection)
+        }
         ModelMenu::Config(form) => render_config_form(f, area, composer_top, form),
+        ModelMenu::ModeConfig(form) => super::mode_config_view::render(f, area, composer_top, form),
         ModelMenu::List(list) => render_provider_list(f, area, composer_top, list),
         ModelMenu::Form(form) => render_provider_form(f, area, composer_top, form),
     }
@@ -54,7 +59,7 @@ fn field_line(label: &str, value: &str, focused: bool, hint: &str) -> Line<'stat
 // ── /config form ──────────────────────────────────────────────────────────
 
 fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &ConfigForm) {
-    let want_h = 15u16;
+    let want_h = if form.save_target.is_some() { 17 } else { 15 };
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -91,7 +96,7 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
         form.max_tokens_input.clone()
     };
 
-    let lines = vec![
+    let mut lines = vec![
         field_line(
             "thinking:",
             &reasoning_val,
@@ -154,6 +159,10 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
         button_line_cfg(form),
         Line::raw(""),
     ];
+    if let Some(target) = &form.save_target {
+        lines.push(Line::raw(format!(" Active Env: {}", target.env_label())));
+        lines.push(Line::raw(format!(" Save target: {}", target.path)));
+    }
 
     f.render_widget(
         Paragraph::new(lines)
@@ -244,10 +253,10 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
     f.render_widget(Clear, popup);
 
     let title = if list.confirm_save_default.is_some() {
-        " /model \u{2014} SAVE AS DEFAULT? y/Enter=global, n=session-only ".to_string()
+        " /model — SAVE AS DEFAULT? y/Enter=save, n=session-only ".to_string()
     } else {
         match &list.confirm_delete {
-            Some(_) => " /model \u{2014} CONFIRM DELETE? y=delete, n/Esc=cancel ".to_string(),
+            Some(_) => " /model \u{2014} DELETE PROVIDER? y/Enter=save, n=session-only, Esc=cancel ".to_string(),
             None => " /model \u{2014} \u{2191}/\u{2193} select, Enter=switch, e=edit, n=new, d=delete, Esc cancel ".to_string(),
         }
     };
@@ -321,7 +330,7 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
 /// the provider-list popup so the prompt is unmistakable.
 fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
     let w = 62u16.min(area.width.saturating_sub(4));
-    let h = 5u16;
+    let h = 8u16;
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let popup = Rect::new(x, y, w, h);
@@ -342,17 +351,32 @@ fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
         })
         .unwrap_or(("?", "?"));
 
-    let title = " Save as default? ".to_string();
+    let title = " Save model default? ".to_string();
+    let target = list
+        .save_target
+        .as_ref()
+        .map(|target| format!(" Env: {} · {}", target.env_label(), target.path))
+        .unwrap_or_else(|| " Legacy automatic save target".to_string());
     let lines = vec![
         Line::styled(
-            format!(" Set {}/{} as global default? ", name, model),
+            format!(
+                " Set {}/{} as {} default? ",
+                name,
+                model,
+                crate::model_scope::mode_name(list.mode)
+            ),
             Style::default()
                 .fg(crate::theme::warn_color())
                 .add_modifier(Modifier::BOLD),
         ),
+        Line::raw(target),
+        Line::raw(format!(
+            " Current: {} · inherited: {}",
+            list.current_model, list.inherited_model
+        )),
         Line::raw(""),
         Line::styled(
-            " [y]/Enter global    [n] session-only    Esc cancel ",
+            " [y]/Enter save    [n] session-only    Esc cancel ",
             Style::default().fg(crate::theme::accent()),
         ),
     ];
@@ -568,6 +592,59 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
             f.set_cursor_position((cx, cy));
         }
     }
+    if form.confirm_save_default.is_some() {
+        render_provider_save_confirm(f, area, form);
+    }
+}
+
+fn render_provider_save_confirm(f: &mut Frame, area: Rect, form: &ProviderForm) {
+    let w = 62u16.min(area.width.saturating_sub(4));
+    let h = 7u16;
+    let popup = Rect::new(
+        area.x + (area.width.saturating_sub(w)) / 2,
+        area.y + (area.height.saturating_sub(h)) / 2,
+        w,
+        h,
+    );
+    f.render_widget(Clear, popup);
+    let target = form
+        .return_scope
+        .as_ref()
+        .map(|source| {
+            let target = &source.save_target;
+            format!(" Env: {} · {}", target.env_label(), target.path)
+        })
+        .unwrap_or_else(|| " Legacy automatic save target".to_string());
+    let lines = vec![
+        Line::styled(
+            format!(
+                " Apply Provider {}/{} to {}? ",
+                form.name,
+                form.model_id,
+                crate::model_scope::mode_name(form.mode)
+            ),
+            Style::default()
+                .fg(crate::theme::warn_color())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(target),
+        Line::raw(" Includes endpoint, API key and header edits"),
+        Line::raw(""),
+        Line::styled(
+            " [y]/Enter save    [n] session-only    Esc cancel ",
+            Style::default().fg(crate::theme::accent()),
+        ),
+    ];
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(
+                crate::theme::rounded_block_plain()
+                    .title(" Save Provider default? ")
+                    .border_style(Style::default().fg(crate::theme::warn_color())),
+            )
+            .alignment(Alignment::Left),
+        popup,
+    );
 }
 
 /// Row index in the provider-form `lines` vec for text-edit fields (0-based).

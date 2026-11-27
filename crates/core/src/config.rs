@@ -4,27 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Persist a config save to `target` (body already pretty-printed).
-pub(crate) fn write_config_save(target: &Path, body: &str) -> std::io::Result<()> {
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    use std::io::Write;
-    let temporary = target.with_extension(format!("tmp-{}", ulid::Ulid::new()));
-    let result = (|| {
-        let mut file = crate::platform::fs::create_private_file(&temporary)?;
-        file.write_all(body.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        crate::platform::fs::replace(&temporary, target)?;
-        crate::platform::fs::sync_directory(target.parent().unwrap_or_else(|| Path::new(".")))
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
-}
-
 #[path = "config/runtime/agent.rs"]
 mod agent;
 #[path = "config/runtime/cli.rs"]
@@ -36,11 +15,14 @@ mod dag;
 mod domain;
 pub(crate) mod env;
 mod keymap;
+pub mod local_env;
 #[path = "config/runtime/mcp.rs"]
 mod mcp;
 #[path = "config/runtime/mcp_guard.rs"]
 pub(crate) mod mcp_guard;
 mod merge;
+#[path = "config/runtime/mode.rs"]
+mod mode;
 mod model_guard;
 #[path = "config/runtime/ontology.rs"]
 mod ontology;
@@ -50,9 +32,11 @@ mod persistence;
 mod project;
 mod provider;
 pub mod redact;
+mod save_io;
 mod schedule;
 #[path = "config/runtime/skill.rs"]
 mod skill;
+mod snapshot;
 
 pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 
@@ -66,9 +50,11 @@ pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
+pub use mode::{ConfigMode, ModeConfig, ModesConfig};
 pub use model_guard::is_suspicious_model;
 pub use ontology::{OntologyConfig, OntologyNfsConfig};
 pub use operator::{LinuxIdentityMode, OperatorAccessMode, OperatorConfig};
+pub use persistence::{ConfigSaveRoute, ConfigSaveTarget};
 pub use project::{ProjectConfig, TodoNfsConfig, TodoStorageConfig};
 pub use provider::{Endpoint, HttpHeader, ProviderConfig};
 pub use schedule::{
@@ -78,6 +64,7 @@ pub use schedule::{
 pub use skill::SkillConfig;
 
 use model_guard::warn_if_suspicious_model;
+pub(crate) use save_io::write_config_save;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -128,6 +115,9 @@ pub struct Config {
     pub project: ProjectConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    /// Shared model-generation defaults with optional Act/Plan overlays.
+    #[serde(default, skip_serializing_if = "ModesConfig::is_empty")]
+    pub modes: ModesConfig,
     /// Per-message assistant-output streamlining (deterministic, meaning-
     /// preserving). See [`OutputStreamlineConfig`].
     #[serde(default)]
@@ -329,6 +319,7 @@ impl Default for Config {
             ontology: OntologyConfig::default(),
             project: ProjectConfig::default(),
             compaction: CompactionConfig::default(),
+            modes: ModesConfig::default(),
             output_streamline: OutputStreamlineConfig::default(),
             context_limit: None,
             max_tokens: None,
@@ -490,9 +481,10 @@ impl Config {
     }
 
     /// Current effective domain value for `key` as seen from `working_dir`
-    /// (project file first, else the global one). Used by the node's
-    /// operator-plane bootstrap to carry the live domain view into the
-    /// operator config directory exactly once.
+    /// (project file first, else the global one). This legacy standalone
+    /// lookup retains its existing routing; callers that also load Config or
+    /// multiple domains should use [`Config::load_with_domain_values`] to
+    /// share one strict active-Env resolution.
     pub fn effective_domain_value(working_dir: &Path, key: &str) -> Option<serde_json::Value> {
         domain::read_effective_with_home(working_dir, key, None)
     }
@@ -507,55 +499,16 @@ impl Config {
         home: Option<&Path>,
         apply_environment: bool,
     ) -> Result<Config> {
-        let mut cfg = Config::default();
-        // Merge ALL existing candidates, least-specific first so project files
-        // override the global base (matches opencoder). This lets ~/.opencoder
-        // provide the provider+key while a project opencoder.json overrides only
-        // the model — `opencoder` then runs directly from any directory.
-        let mut candidates = env::candidates_with_home(working_dir, home);
-        candidates.reverse(); // global first, project last (wins)
-        for p in candidates {
-            if p.exists() {
-                let raw = std::fs::read_to_string(&p)?;
-                let parsed: serde_json::Value = serde_json::from_str(&raw)?;
-                crate::provider::validate_protocol_patch(&parsed)?;
-                agent::validate_private_settings(&parsed)?;
-                project::validate(&parsed)?;
-                if !parsed.is_object() {
-                    // A valid-JSON-but-not-object file (e.g. `[1,2]` or
-                    // `"foo"`) falls through `merge_into` silently. Warn so the
-                    // misconfiguration is visible instead of dropped.
-                    let kind = match &parsed {
-                        serde_json::Value::Null => "null",
-                        serde_json::Value::Bool(_) => "bool",
-                        serde_json::Value::Number(_) => "number",
-                        serde_json::Value::String(_) => "string",
-                        serde_json::Value::Array(_) => "array",
-                        serde_json::Value::Object(_) => "object",
-                    };
-                    tracing::warn!(
-                        "config file {} is valid JSON but not an object (got \
-                         {}); ignoring",
-                        p.display(),
-                        kind
-                    );
-                }
-                merge::merge_into(&mut cfg, parsed);
-            }
-        }
-        // Domain files (mcp.json / cli.json / skills.json / schedules.json):
-        // `mcp_servers` / `cli` / `skills` / `schedules` are hard-cut from
-        // config.json and load from exactly one file — the project one when
-        // it exists, else the global one (project shadows global entirely;
-        // no per-key merge across files).
-        for (key, _) in domain::DOMAIN_FILES {
-            if let Some(v) = domain::read_effective_with_home(working_dir, key, home) {
-                domain::apply_domain(&mut cfg, key, &v);
-            }
-        }
-        agent::validate_private_settings(&serde_json::json!({"agent": &cfg.agent}))?;
-        Self::finalize(cfg, apply_environment)
+        // One strict resolution is the complete operation's Env snapshot.
+        // Explicit-home and frozen loads deliberately do not inspect it.
+        let active_env = if apply_environment && home.is_none() {
+            Some(local_env::resolve_active_config_env()?)
+        } else {
+            None
+        };
+        Self::load_with_resolved_env(working_dir, home, apply_environment, active_env.as_ref())
     }
+
     pub fn model_id(&self) -> &str {
         self.model
             .split_once('/')

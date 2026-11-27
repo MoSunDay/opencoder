@@ -4,16 +4,16 @@
 //! The three map-shaped domains (`mcp_servers`, `cli`, `skills`) plus the
 //! object-shaped `schedules` domain are hard-cut from `config.json`: they load
 //! from — and save to — a dedicated domain file.
-//! Lookup walks project first and a single effective file wins (it shadows
-//! the others entirely — no per-key merge across files, unlike
-//! `config.json` candidates):
+//! Lookup uses one effective file per domain (it shadows the others entirely —
+//! no per-key merge across files, unlike `config.json` candidates):
 //!
-//! - project: `<working_dir>/.opencoder/<domain>.json`
-//! - env: `<global_opencoder_home>/envs/<name>/<domain>.json` (active env only)
-//! - global: `<global_opencoder_home>/<domain>.json` (the home behind
-//!   [`super::env::primary_global_config_path`], so the `scoped_config_home`
-//!   override applies; XDG dirs are NOT consulted for domain files).
+//! - `cli` / `skills`: active Env, project, global, then XDG.
+//! - `mcp` / `schedules`: project, then global (their legacy routing).
+//!
+//! Explicit scoped-home and frozen loaders skip the interactive active Env;
+//! operator loading reads only its own explicit directory.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::Config;
@@ -25,6 +25,11 @@ pub(crate) const DOMAIN_FILES: [(&str, &str); 4] = [
     ("skills", "skills.json"),
     ("schedules", "schedules.json"),
 ];
+
+/// Only these domains participate in interactive local-Env routing and XDG
+/// fallback. MCP and schedules retain their original project/global behavior.
+pub(crate) const ENV_DOMAIN_FILES: [(&str, &str); 2] =
+    [("cli", "cli.json"), ("skills", "skills.json")];
 
 /// Placeholder path piece for a non-domain key: never matches a real file, so
 /// callers treat the result as "no domain file".
@@ -39,6 +44,34 @@ fn domain_entry(key: &str) -> Option<(&'static str, &'static str)> {
 /// `config.json`.
 pub(crate) fn is_domain_key(key: &str) -> bool {
     domain_entry(key).is_some()
+}
+
+pub(crate) fn supports_active_env(key: &str) -> bool {
+    ENV_DOMAIN_FILES
+        .iter()
+        .any(|(candidate, _)| *candidate == key)
+}
+
+/// Strictly decode one Env domain file before activation. Normal interactive
+/// loading remains tolerant; activation never switches to a malformed view.
+pub(crate) fn validate_value(key: &str, value: &serde_json::Value) -> crate::Result<()> {
+    fn decode<T: serde::de::DeserializeOwned>(
+        key: &str,
+        value: &serde_json::Value,
+    ) -> crate::Result<()> {
+        serde_json::from_value::<T>(value.clone())
+            .map(|_| ())
+            .map_err(|error| crate::CoreError::Config(format!("invalid {key} domain: {error}")))
+    }
+    match key {
+        "mcp_servers" => decode::<HashMap<String, super::McpServerConfig>>(key, value),
+        "cli" => decode::<HashMap<String, super::CliConfig>>(key, value),
+        "skills" => decode::<HashMap<String, super::SkillConfig>>(key, value),
+        "schedules" => decode::<super::SchedulesConfig>(key, value),
+        _ => Err(crate::CoreError::Config(format!(
+            "unknown config domain `{key}`"
+        ))),
+    }
 }
 
 /// The domain file name for `key` (`mcp_servers` -> `mcp.json`), or `None`.
@@ -91,25 +124,49 @@ pub(crate) fn effective_path(working_dir: &Path, key: &str) -> Option<PathBuf> {
 }
 
 /// [`effective_path`] with the global home redirected (see
-/// [`global_domain_path_with_home`]).
+/// [`global_domain_path_with_home`]). Explicit homes exclude the interactive
+/// active Env; the legacy standalone view resolves it at most once.
 pub(crate) fn effective_path_with_home(
     working_dir: &Path,
     key: &str,
     home: Option<&Path>,
 ) -> Option<PathBuf> {
+    let active_env = (home.is_none() && supports_active_env(key))
+        .then(super::local_env::active_config_env_resolution);
+    effective_path_for_load(working_dir, key, home, active_env.as_ref())
+}
+
+pub(crate) fn effective_path_for_load(
+    working_dir: &Path,
+    key: &str,
+    home: Option<&Path>,
+    active_env: Option<&super::local_env::ConfigEnvResolution>,
+) -> Option<PathBuf> {
     if !is_domain_key(key) {
         return None;
+    }
+    if supports_active_env(key) {
+        if let Some(active) = super::local_env::active_info(active_env) {
+            let path = active.path.join(domain_file_name(key)?);
+            if path.exists() {
+                return Some(path);
+            }
+        }
     }
     let project = project_domain_path(working_dir, key);
     if project.exists() {
         return Some(project);
     }
-    let global = global_domain_path_with_home(key, home)?;
-    if global.exists() {
-        Some(global)
-    } else {
-        None
+    if let Some(global) = global_domain_path_with_home(key, home) {
+        if global.exists() {
+            return Some(global);
+        }
     }
+    if !supports_active_env(key) {
+        return None;
+    }
+    let xdg = super::env::xdg_opencoder_home(home)?.join(domain_file_name(key)?);
+    xdg.exists().then_some(xdg)
 }
 
 /// Write target for a domain patch: the project file if it already exists,
@@ -173,6 +230,16 @@ pub(crate) fn read_effective_with_home(
     read_effective_from(&path)
 }
 
+pub(crate) fn read_effective_for_load(
+    working_dir: &Path,
+    key: &str,
+    home: Option<&Path>,
+    active_env: Option<&super::local_env::ConfigEnvResolution>,
+) -> Option<serde_json::Value> {
+    let path = effective_path_for_load(working_dir, key, home, active_env)?;
+    read_effective_from(&path)
+}
+
 fn json_kind(v: &serde_json::Value) -> &'static str {
     match v {
         serde_json::Value::Null => "null",
@@ -220,6 +287,14 @@ pub(crate) fn save_domain(
 ) -> anyhow::Result<PathBuf> {
     let target = write_target(working_dir, key)
         .ok_or_else(|| anyhow::anyhow!("no write target for domain key `{key}`"))?;
+    save_domain_to(target, key, patch)
+}
+
+pub(crate) fn save_domain_to(
+    target: PathBuf,
+    key: &str,
+    patch: &serde_json::Value,
+) -> anyhow::Result<PathBuf> {
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -250,7 +325,7 @@ pub(crate) fn save_domain(
         }
     }
     let pretty = serde_json::to_string_pretty(&root)?;
-    super::write_config_save(&target, &pretty)?;
+    super::write_config_save(&target, pretty.as_bytes())?;
     Ok(target)
 }
 

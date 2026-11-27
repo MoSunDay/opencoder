@@ -30,19 +30,24 @@ pub(crate) fn apply_model_override(
         if is_suspicious_model(m) {
             return Err(invalid_model_error(m));
         }
-        if config.model != *m {
-            config.model = m.clone();
-            return Ok(true);
-        }
+        return Ok(config.apply_explicit_model(m));
     }
     Ok(false)
 }
 
-/// Re-apply an explicit `--model` to a resumed session. `resume()` restores
-/// the stored model into the session, so an explicit `--model` must win here.
-/// `Err` on a malformed value (never silently applied); `Ok(Some(new_model))`
-/// when the session changed (caller persists it), else `Ok(None)`.
-pub(crate) fn reapply_resume_model(
+/// Select the single process-level model that must survive session resume.
+/// Config loading already applied the environment value; applying the CLI value
+/// afterwards establishes the same priority for endpoint construction. Keeping
+/// only the winner here prevents a later environment reapply from undoing CLI.
+pub(crate) fn preferred_explicit_model(cli: Option<&str>, env: Option<&str>) -> Option<String> {
+    cli.or_else(|| env.filter(|model| !model.is_empty()))
+        .map(str::to_string)
+}
+
+/// Re-apply the winning process-level model after resume. Existing rows persist
+/// both `sessions.model` and their legacy/mode-aware metadata before this
+/// returns; fresh rows remain lazy. `Err` on malformed values or storage errors.
+pub(crate) async fn reapply_resume_model(
     session: &mut SessionState,
     model: &Option<String>,
 ) -> std::result::Result<Option<String>, String> {
@@ -53,12 +58,11 @@ pub(crate) fn reapply_resume_model(
     if is_suspicious_model(m) {
         return Err(invalid_model_error(m));
     }
-    if session.config.model == *m {
-        return Ok(None);
-    }
-    session.config.model = m.clone();
-    session.model = session.config.model_id().to_string();
-    Ok(Some(m.clone()))
+    let changed = session
+        .apply_explicit_model_and_persist(m)
+        .await
+        .map_err(|error| format!("failed to persist explicit model: {error:#}"))?;
+    Ok(changed.then(|| m.clone()))
 }
 
 #[cfg(test)]
@@ -81,6 +85,39 @@ mod tests {
     }
 
     #[test]
+    fn apply_model_override_clears_configured_mode_models() {
+        use opencoder_core::{ConfigMode, ModeConfig, ModesConfig};
+
+        let model = "anthropic/claude-3";
+        let mut cfg = Config {
+            model: model.into(),
+            modes: ModesConfig {
+                shared: ModeConfig {
+                    model: Some("shared/model".into()),
+                    max_tokens: Some(200),
+                    ..Default::default()
+                },
+                act: Some(ModeConfig {
+                    model: Some("act/model".into()),
+                    ..Default::default()
+                }),
+                plan: Some(ModeConfig {
+                    model: Some("plan/model".into()),
+                    ..Default::default()
+                }),
+            },
+            ..Default::default()
+        };
+
+        assert!(apply_model_override(&mut cfg, &Some(model.into())).unwrap());
+        for mode in [ConfigMode::Shared, ConfigMode::Act, ConfigMode::Plan] {
+            assert_eq!(cfg.effective_for_mode(mode).model, model);
+        }
+        assert_eq!(cfg.modes.shared.max_tokens, Some(200));
+        assert!(!apply_model_override(&mut cfg, &Some(model.into())).unwrap());
+    }
+
+    #[test]
     fn apply_model_override_rejects_malformed_values() {
         for bad in ["", "x", "ab/c"] {
             let mut cfg = Config::default();
@@ -99,6 +136,24 @@ mod tests {
         assert_eq!(cfg.model, "prov/model");
     }
 
+    #[test]
+    fn process_model_selection_prefers_cli_and_ignores_empty_environment() {
+        assert_eq!(
+            preferred_explicit_model(Some("cli/model"), Some("env/model")).as_deref(),
+            Some("cli/model")
+        );
+        assert_eq!(
+            preferred_explicit_model(None, Some("env/model")).as_deref(),
+            Some("env/model")
+        );
+        assert_eq!(preferred_explicit_model(None, Some("")), None);
+        assert_eq!(
+            preferred_explicit_model(Some(""), Some("env/model")).as_deref(),
+            Some(""),
+            "an explicitly malformed CLI value must reach existing validation"
+        );
+    }
+
     fn session_with_model(model: &str) -> SessionState {
         use opencoder_llm::{ChatStream, MockChatClient};
         use std::{path::PathBuf, sync::Arc};
@@ -114,22 +169,128 @@ mod tests {
         )
     }
 
-    #[test]
-    fn reapply_resume_model_overrides_stored_model() {
+    #[tokio::test]
+    async fn resume_reapplies_environment_or_cli_winner() {
+        use opencoder_core::{ModeConfig, ModesConfig};
+        use opencoder_llm::{ChatStream, MockChatClient};
+        use opencoder_store::{SessionMeta, SessionModelOverrides, Store, TursoStore};
+        use std::sync::Arc;
+
+        let store = Arc::new(TursoStore::open_memory().await.unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let base = Config {
+            model: "provider/file".into(),
+            modes: ModesConfig {
+                act: Some(ModeConfig {
+                    model: Some("provider/act".into()),
+                    reasoning_effort: Some("high".into()),
+                    max_tokens: Some(200),
+                    context_limit: Some(6_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for (id, cli, expected) in [
+            ("local-env", None, "env/model"),
+            ("local-cli", Some("cli/model"), "cli/model"),
+        ] {
+            store
+                .create_session_with_model_overrides(
+                    &SessionMeta {
+                        id: id.into(),
+                        agent: Some("act".into()),
+                        model: Some("provider/stored".into()),
+                        created_at: 1,
+                        updated_at: 1,
+                        ..Default::default()
+                    },
+                    Some(&SessionModelOverrides {
+                        shared: None,
+                        act: Some("provider/menu-act".into()),
+                        plan: Some("provider/menu-plan".into()),
+                    }),
+                )
+                .await
+                .unwrap();
+            let mut startup = base.clone();
+            startup.apply_explicit_model("env/model");
+            apply_model_override(&mut startup, &cli.map(str::to_string)).unwrap();
+            let explicit = preferred_explicit_model(cli, Some("env/model"));
+            let client = Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>;
+            let mut session = opencoder_session::resume(
+                store.clone(),
+                id,
+                startup,
+                client,
+                dir.path().to_path_buf(),
+            )
+            .await
+            .unwrap();
+            reapply_resume_model(&mut session, &explicit).await.unwrap();
+            assert_eq!(session.effective_model(), expected);
+            assert_eq!(
+                session.effective_config().reasoning_effort.as_deref(),
+                Some("high")
+            );
+            assert_eq!(session.effective_config().max_tokens, Some(200));
+            assert_eq!(session.effective_context_limit(), 6_000);
+            assert_eq!(
+                store.get_session_model_overrides(id).await.unwrap(),
+                Some(SessionModelOverrides::default())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fresh_preapplied_cli_model_does_not_write_or_materialize_a_row() {
+        use opencoder_llm::{ChatStream, MockChatClient};
+        use opencoder_store::{Store, TursoStore};
+        use std::sync::Arc;
+
+        let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.apply_explicit_model("env/model");
+        apply_model_override(&mut config, &Some("cli/model".into())).unwrap();
+        let client = Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>;
+        let mut session = SessionState::new(
+            "local-lazy",
+            opencoder_core::resolve_agent("act").unwrap(),
+            config,
+            client,
+            dir.path().to_path_buf(),
+        )
+        .with_store(store.clone());
+        let explicit = preferred_explicit_model(Some("cli/model"), Some("env/model"));
+        assert_eq!(
+            reapply_resume_model(&mut session, &explicit).await.unwrap(),
+            None
+        );
+        assert_eq!(session.effective_model(), "cli/model");
+        assert!(store.get_session("local-lazy").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn reapply_resume_model_overrides_stored_model() {
         let mut s = session_with_model("openai/gpt-4o-mini");
-        let changed = reapply_resume_model(&mut s, &Some("anthropic/claude-3".into())).unwrap();
+        let changed = reapply_resume_model(&mut s, &Some("anthropic/claude-3".into()))
+            .await
+            .unwrap();
         assert_eq!(changed.as_deref(), Some("anthropic/claude-3"));
         assert_eq!(s.model, "claude-3");
         assert_eq!(s.config.provider_id(), "anthropic");
         // no override -> no change, Ok(None)
-        assert_eq!(reapply_resume_model(&mut s, &None).unwrap(), None);
+        assert_eq!(reapply_resume_model(&mut s, &None).await.unwrap(), None);
     }
 
-    #[test]
-    fn reapply_resume_model_rejects_malformed_values() {
+    #[tokio::test]
+    async fn reapply_resume_model_rejects_malformed_values() {
         for bad in ["", "x", "ab/c"] {
             let mut s = session_with_model("openai/gpt-4o-mini");
             let err = reapply_resume_model(&mut s, &Some(bad.into()))
+                .await
                 .expect_err("malformed --model must never be silently applied");
             assert!(
                 err.contains("malformed") && err.contains(bad),
@@ -144,6 +305,7 @@ mod tests {
         let mut s = session_with_model("openai/gpt-4o-mini");
         assert_eq!(
             reapply_resume_model(&mut s, &Some("prov/model".into()))
+                .await
                 .unwrap()
                 .as_deref(),
             Some("prov/model")

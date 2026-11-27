@@ -3,13 +3,22 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::config_form::ConfigForm;
+use super::env::EnvMenu;
 use super::list::ProviderList;
+use super::mode_config_form::ModeConfigForm;
+use super::mode_select::ModeSelection;
 use super::provider_form::ProviderForm;
 
 /// The active modal variant. `app.rs` holds `Option<ModelMenu>`.
 pub enum ModelMenu {
-    /// `/config` — generation-parameter form.
+    /// `/envs` — local configuration Env lifecycle manager.
+    Env(EnvMenu),
+    /// Shared/Act/Plan entry point for `/model` and `/config`.
+    ModeSelect(Box<ModeSelection>),
+    /// `/config` — Shared generation and application settings.
     Config(ConfigForm),
+    /// `/config` — Act/Plan generation overrides.
+    ModeConfig(ModeConfigForm),
     /// `/model` — provider list (select / edit / add / delete).
     List(ProviderList),
     /// `/model` — provider add/edit form.
@@ -21,9 +30,10 @@ pub enum ModelOutcome {
     Idle,
     /// Save with a pre-built JSON merge-patch for `Config::save`.
     Save(serde_json::Value),
-    /// Apply the merge-patch to the in-memory config **without** persisting
-    /// to disk (session-only model switch).
+    /// Apply a model selection without persisting it to disk.
     SaveSessionOnly(serde_json::Value),
+    /// Reload a newly activated local Env without redelivering a one-shot Skill.
+    ReloadEnv(Box<opencoder_core::Config>, String),
     Cancel,
     Quit,
 }
@@ -33,9 +43,11 @@ impl ModelMenu {
     /// `List` has no text fields and ignores paste.
     pub fn paste(&mut self, text: &str) {
         match self {
+            ModelMenu::Env(menu) => menu.paste_into(text),
             ModelMenu::Config(form) => form.paste_into(text),
-            ModelMenu::Form(form) => form.paste_into(text),
-            ModelMenu::List(_) => {}
+            ModelMenu::ModeConfig(form) => form.paste_into(text),
+            ModelMenu::Form(form) if form.confirm_save_default.is_none() => form.paste_into(text),
+            ModelMenu::Form(_) | ModelMenu::ModeSelect(_) | ModelMenu::List(_) => {}
         }
     }
 }
@@ -70,7 +82,10 @@ pub fn handle_model_key(slot: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
         None => return ModelOutcome::Idle,
     };
     let (outcome, next) = match menu {
+        ModelMenu::Env(menu) => super::env::handle_key(menu, k),
+        ModelMenu::ModeSelect(selection) => super::mode_select::handle_key(*selection, k),
         ModelMenu::Config(form) => super::config_form::handle_key(form, k),
+        ModelMenu::ModeConfig(form) => super::mode_config_form::handle_key(form, k),
         ModelMenu::List(list) => super::list::handle_key(list, k),
         ModelMenu::Form(form) => super::provider_form::handle_key(form, k),
     };

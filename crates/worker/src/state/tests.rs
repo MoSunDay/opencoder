@@ -51,6 +51,13 @@ fn options(root: &std::path::Path) -> WorkerOptions {
     }
 }
 
+fn write_json(path: &std::path::Path, value: serde_json::Value) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(path, value.to_string()).unwrap();
+}
+
 #[tokio::test]
 async fn stopping_scheduler_releases_node_ownership_while_admission_is_held() {
     let root = tempfile::tempdir().unwrap();
@@ -324,5 +331,248 @@ async fn configuration_cache_reuses_the_load_until_input_files_change() {
     assert!(!Arc::ptr_eq(&first, &third));
     assert_eq!(third.model, "probe/cache-invalidation");
     assert_eq!(third.model, worker.configuration().unwrap().model);
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn configuration_cache_tracks_active_env_transitions_and_files() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let _home = opencoder_core::config::scoped_config_home(home.clone());
+    let global = home.join(".opencoder");
+    write_json(
+        &global.join("config.json"),
+        serde_json::json!({"model": "base/base-model"}),
+    );
+    write_json(
+        &global.join("cli.json"),
+        serde_json::json!({"base-cli": {"enabled": true, "content": "base"}}),
+    );
+    write_json(
+        &global.join("skills.json"),
+        serde_json::json!({"base-skill": {"enabled": true}}),
+    );
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    let inactive = configuration_shared(&worker).unwrap();
+    assert_eq!(inactive.model, "base/base-model");
+
+    let env_a = opencoder_core::create_config_env("a").unwrap();
+    let env_b = opencoder_core::create_config_env("b").unwrap();
+    for (env, model, cli, skill) in [
+        (&env_a, "env/a-one", "a-cli", "a-skill"),
+        (&env_b, "env/b-one", "b-cli", "b-skill"),
+    ] {
+        write_json(
+            &env.path.join("config.json"),
+            serde_json::json!({"model": model}),
+        );
+        write_json(
+            &env.path.join("cli.json"),
+            serde_json::json!({(cli): {"enabled": true, "content": "before"}}),
+        );
+        write_json(
+            &env.path.join("skills.json"),
+            serde_json::json!({skill: {"enabled": true}}),
+        );
+    }
+
+    opencoder_core::activate_config_env("a").unwrap();
+    let first_a = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&inactive, &first_a));
+    assert_eq!(first_a.model, "env/a-one");
+    assert!(Arc::ptr_eq(
+        &first_a,
+        &configuration_shared(&worker).unwrap()
+    ));
+
+    opencoder_core::activate_config_env("b").unwrap();
+    let first_b = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&first_a, &first_b));
+    assert_eq!(first_b.model, "env/b-one");
+    assert_eq!(first_b.enabled_cli()[0].0, "b-cli");
+    assert!(first_b.skills.contains_key("b-skill"));
+
+    opencoder_core::activate_config_env("a").unwrap();
+    let second_a = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&first_b, &second_a));
+    assert_eq!(second_a.model, "env/a-one");
+    assert_eq!(second_a.enabled_cli()[0].0, "a-cli");
+    assert!(second_a.skills.contains_key("a-skill"));
+
+    // Keep each rewrite the same byte length so invalidation exercises mtime,
+    // not just file-size changes.
+    std::thread::sleep(Duration::from_millis(5));
+    write_json(
+        &env_a.path.join("config.json"),
+        serde_json::json!({"model": "env/a-two"}),
+    );
+    let edited_config = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&second_a, &edited_config));
+    assert_eq!(edited_config.model, "env/a-two");
+
+    std::thread::sleep(Duration::from_millis(5));
+    write_json(
+        &env_a.path.join("cli.json"),
+        serde_json::json!({"a-cli": {"enabled": true, "content": "after!"}}),
+    );
+    let edited_cli = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&edited_config, &edited_cli));
+    assert_eq!(edited_cli.enabled_cli()[0].1.content, "after!");
+
+    std::thread::sleep(Duration::from_millis(5));
+    write_json(
+        &env_a.path.join("skills.json"),
+        serde_json::json!({"b-skill": {"enabled": true}}),
+    );
+    let edited_skills = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&edited_cli, &edited_skills));
+    assert!(!edited_skills.skills.contains_key("a-skill"));
+    assert!(edited_skills.skills.contains_key("b-skill"));
+
+    std::fs::remove_file(env_a.path.join("cli.json")).unwrap();
+    let removed_cli = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&edited_skills, &removed_cli));
+    assert_eq!(removed_cli.enabled_cli()[0].0, "base-cli");
+
+    std::fs::remove_file(env_a.path.join("skills.json")).unwrap();
+    let removed_skills = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&removed_cli, &removed_skills));
+    assert!(removed_skills.skills.contains_key("base-skill"));
+
+    std::fs::remove_file(env_a.path.join("config.json")).unwrap();
+    let removed_config = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&removed_skills, &removed_config));
+    assert_eq!(removed_config.model, "base/base-model");
+
+    opencoder_core::deactivate_config_env().unwrap();
+    let deactivated = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&removed_config, &deactivated));
+    assert_eq!(deactivated.model, "base/base-model");
+
+    opencoder_core::activate_config_env("a").unwrap();
+    let reactivated = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&deactivated, &reactivated));
+    let marker = opencoder_core::config_env_status().unwrap().marker_path;
+    std::fs::write(&marker, "missing\n").unwrap();
+    let stale = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&reactivated, &stale));
+    assert!(opencoder_core::config_env_status().unwrap().stale_marker);
+    assert_eq!(stale.model, "base/base-model");
+
+    opencoder_core::deactivate_config_env().unwrap();
+    let stale_removed = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&stale, &stale_removed));
+    assert_eq!(stale_removed.model, "base/base-model");
+
+    // Even an exact cache-key match must not hide a marker read error. A
+    // directory gives a deterministic non-NotFound error on every platform.
+    std::fs::create_dir(&marker).unwrap();
+    assert!(configuration_shared(&worker).is_err());
+    std::fs::remove_dir(&marker).unwrap();
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn configuration_cache_missing_to_directory_forces_a_real_load() {
+    let root = tempfile::tempdir().unwrap();
+    let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    let cached = configuration_shared(&worker).unwrap();
+    assert!(Arc::ptr_eq(
+        &cached,
+        &configuration_shared(&worker).unwrap()
+    ));
+
+    // A directory was previously omitted from the fingerprint just like a
+    // missing file. It must invalidate the key and reach Config::load, which
+    // reports the read error instead of returning the stale cached value.
+    let config = root.path().join("work/opencoder.json");
+    std::fs::create_dir(&config).unwrap();
+    assert!(configuration_shared(&worker).is_err());
+
+    std::fs::remove_dir(&config).unwrap();
+    let recovered = configuration_shared(&worker).unwrap();
+    assert!(Arc::ptr_eq(&cached, &recovered));
+    worker.shutdown().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn configuration_cache_propagates_metadata_errors_instead_of_reusing_stale_config() {
+    let root = tempfile::tempdir().unwrap();
+    let _home = opencoder_core::config::scoped_config_home(root.path().join("home"));
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    let cached = configuration_shared(&worker).unwrap();
+
+    // A self-referential symlink makes stat fail with ELOOP without relying
+    // on permission behavior (tests may run as a privileged user).
+    let config = root.path().join("work/opencoder.json");
+    std::os::unix::fs::symlink("opencoder.json", &config).unwrap();
+    assert!(configuration_shared(&worker).is_err());
+
+    std::fs::remove_file(&config).unwrap();
+    let recovered = configuration_shared(&worker).unwrap();
+    assert!(Arc::ptr_eq(&cached, &recovered));
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn configuration_cache_tracks_xdg_cli_and_skill_creation_edits_and_removals() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let _home = opencoder_core::config::scoped_config_home(home.clone());
+    let xdg = home.join("opencoder");
+    write_json(
+        &xdg.join("config.json"),
+        serde_json::json!({"model": "xdg/base-model"}),
+    );
+    let worker = Worker::open(options(root.path()), None).await.unwrap();
+    let base = configuration_shared(&worker).unwrap();
+    assert!(base.cli.is_empty());
+    assert!(base.skills.is_empty());
+
+    let cli = xdg.join("cli.json");
+    let skills = xdg.join("skills.json");
+    write_json(
+        &cli,
+        serde_json::json!({"xdg-cli": {"enabled": true, "content": "one"}}),
+    );
+    let added_cli = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&base, &added_cli));
+    assert_eq!(added_cli.enabled_cli()[0].0, "xdg-cli");
+
+    write_json(&skills, serde_json::json!({"old-skill": {"enabled": true}}));
+    let added_skills = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&added_cli, &added_skills));
+    assert!(added_skills.skills.contains_key("old-skill"));
+
+    // Same-length rewrites prove these cases exercise metadata invalidation,
+    // not only a change in file size.
+    std::thread::sleep(Duration::from_millis(5));
+    write_json(
+        &cli,
+        serde_json::json!({"xdg-cli": {"enabled": true, "content": "two"}}),
+    );
+    let edited_cli = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&added_skills, &edited_cli));
+    assert_eq!(edited_cli.enabled_cli()[0].1.content, "two");
+
+    std::thread::sleep(Duration::from_millis(5));
+    write_json(&skills, serde_json::json!({"new-skill": {"enabled": true}}));
+    let edited_skills = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&edited_cli, &edited_skills));
+    assert!(!edited_skills.skills.contains_key("old-skill"));
+    assert!(edited_skills.skills.contains_key("new-skill"));
+
+    std::fs::remove_file(&cli).unwrap();
+    let removed_cli = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&edited_skills, &removed_cli));
+    assert!(removed_cli.cli.is_empty());
+    assert!(removed_cli.skills.contains_key("new-skill"));
+
+    std::fs::remove_file(&skills).unwrap();
+    let removed_skills = configuration_shared(&worker).unwrap();
+    assert!(!Arc::ptr_eq(&removed_cli, &removed_skills));
+    assert!(removed_skills.skills.is_empty());
     worker.shutdown().await.unwrap();
 }

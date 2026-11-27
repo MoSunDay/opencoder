@@ -1,25 +1,31 @@
-//! Persistence and live-reload handling for the `/skill` modal (clone of
-//! `app_loop_cli.rs`): the toggle patch never changes the LLM endpoint, so
-//! like `/cli` and `/mcp` it only persists, reloads and notifies the worker.
+//! `/skill` outcome handling extracted from `app_loop.rs`.
 
 use std::path::Path;
 
 use crossterm::event::KeyEvent;
-use opencoder_core::Config;
+use opencoder_core::{Config, ConfigSaveRoute};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 
 use crate::chat::ChatView;
 use crate::skill_menu::{handle_skill_key, SkillMenu, SkillOutcome};
-use crate::worker::UiCmd;
+use crate::worker::{acknowledged_config_reload, ConfigReloadScope, UiCmd};
 
 use super::LoopFlow;
 
-/// Handle one keystroke while the `/skill` modal is open. On `Save(json)`
-/// persists the merge-patch, reloads config, sends `ReloadConfig` so the
-/// session picks up the new default-injection set, and posts a marker.
-/// Save/reload failure posts a red error marker. Always `Proceed`.
+fn saved_reload_error(chat: &mut ChatView, path: &Path, detail: &str) {
+    chat.push_marker(Line::from(Span::styled(
+        format!(
+            "[/skill] saved \u{2192} {}, but {detail}; disk changes were saved, live config was not refreshed",
+            path.display()
+        ),
+        Style::default().fg(crate::theme::err_color()),
+    )));
+}
+
+/// Persist a Skill-domain edit, then reload only that domain in the worker.
+/// Provider/model/mode runtime state and the ChatView/client stay untouched.
 pub(crate) async fn handle_skill_outcome(
     menu: &mut Option<SkillMenu>,
     key: KeyEvent,
@@ -29,19 +35,53 @@ pub(crate) async fn handle_skill_outcome(
     workdir: &Path,
 ) -> LoopFlow {
     if let SkillOutcome::Save(json) = handle_skill_key(menu, key) {
-        match Config::save(workdir, &json)
-            .and_then(|path| Config::load(workdir).map(|cfg| (path, cfg)))
-        {
-            Ok((path, reloaded)) => {
-                *config = reloaded.clone();
-                let _ = cmd_tx.send(UiCmd::ReloadConfig(Box::new(reloaded))).await;
-                chat.push_marker(Line::from(format!("[/skill] saved → {}", path.display())));
+        let path = match Config::save_with_route(workdir, &json, ConfigSaveRoute::EnvAware) {
+            Ok(path) => path,
+            Err(error) => {
+                chat.push_marker(Line::from(Span::styled(
+                    format!("[/skill] save failed: {error:#}"),
+                    Style::default().fg(crate::theme::err_color()),
+                )));
+                return LoopFlow::Proceed;
             }
-            Err(error) => chat.push_marker(Line::from(Span::styled(
-                format!("[/skill] save/reload failed: {error:#}"),
-                Style::default().fg(crate::theme::err_color()),
-            ))),
+        };
+        let reloaded = match Config::load(workdir) {
+            Ok(config) => config,
+            Err(error) => {
+                saved_reload_error(chat, &path, &format!("config reload failed: {error:#}"));
+                return LoopFlow::Proceed;
+            }
+        };
+        let mut candidate = config.clone();
+        candidate.skills = reloaded.skills.clone();
+        let (command, mut completion) =
+            acknowledged_config_reload(candidate, ConfigReloadScope::Skills);
+        if let Err(error) = cmd_tx.send(command).await {
+            saved_reload_error(chat, &path, &format!("reload dispatch failed: {error}"));
+            return LoopFlow::Proceed;
         }
+        match completion.recv().await {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
+                saved_reload_error(chat, &path, &format!("runtime reload failed: {error}"));
+                return LoopFlow::Proceed;
+            }
+            None => {
+                chat.push_marker(Line::from(Span::styled(
+                    format!(
+                        "[/skill] saved \u{2192} {}, but runtime reload ended without confirmation; disk changes were saved, outer live config was not refreshed and worker state is unconfirmed",
+                        path.display()
+                    ),
+                    Style::default().fg(crate::theme::err_color()),
+                )));
+                return LoopFlow::Proceed;
+            }
+        }
+        config.skills = reloaded.skills;
+        chat.push_marker(Line::from(format!(
+            "[/skill] saved \u{2192} {}",
+            path.display()
+        )));
     }
     LoopFlow::Proceed
 }

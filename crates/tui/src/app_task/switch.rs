@@ -5,8 +5,9 @@ async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_rem
     let dir = tempfile::tempdir().unwrap();
     let _scope = opencoder_core::scoped_config_home(dir.path().join("config-home"));
     let store: Arc<dyn Store> = Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
-    let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+    let mut client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
     let mut config = Config::default();
+    config.provider.api_key = Some("test-key".into());
     config.opencoder_server.enabled = true;
     config.opencoder_server.url = "http://127.0.0.1:1".into();
     std::fs::write(
@@ -41,6 +42,13 @@ async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_rem
         remote: true,
         ..Default::default()
     };
+    let inherited_models = opencoder_store::SessionModelOverrides {
+        act: Some("provider-a/session-act".into()),
+        plan: Some("provider-b/session-plan".into()),
+        ..Default::default()
+    };
+    chat.shared_model = config.model.clone();
+    chat.model_overrides = Some(inherited_models.clone());
     chat.push_marker(Line::from("remote-only content"));
     chat.tokens_total = 999;
     let (mut cmd_tx, mut old_commands) = mpsc::channel(8);
@@ -65,9 +73,10 @@ async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_rem
     let mut input = "remote draft".into();
     let mut cursor = 12;
     let mut hist_idx = Some(0);
-    switch_session(
+    let new_state = switch_session(
         crate::task::TaskPick::New,
         &TuiOpts::default(),
+        &None,
         &mut cmd_tx,
         &mut evt_rx,
         dir.path(),
@@ -98,6 +107,12 @@ async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_rem
     )
     .await
     .unwrap();
+    assert_eq!(new_state.shared_model, chat.shared_model);
+    assert_eq!(new_state.model, chat.model);
+    assert_eq!(new_state.model_overrides, chat.model_overrides);
+    assert!(!Arc::ptr_eq(&new_state.client, &client));
+    config = new_state.config;
+    client = new_state.client;
     assert!(
         !old_cancel.is_cancelled(),
         "detaching must not interrupt Server"
@@ -110,6 +125,9 @@ async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_rem
     assert!(history.is_empty());
     assert!(input.is_empty());
     assert!(!running);
+    assert_eq!(chat.shared_model, config.model);
+    assert_eq!(chat.model_overrides, Some(inherited_models));
+    assert_eq!(chat.model, "provider-a/session-act");
     assert!(
         store.get_session(&session_id).await.unwrap().is_none(),
         "switching to a new task must not persist a row before its first input"
@@ -120,9 +138,10 @@ async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_rem
     );
     chat.push_marker(Line::from("self-only content"));
     history.push("local history".into());
-    switch_session(
+    let resumed_state = switch_session(
         crate::task::TaskPick::Resume(remote_id.clone()),
         &TuiOpts::default(),
+        &None,
         &mut cmd_tx,
         &mut evt_rx,
         dir.path(),
@@ -153,10 +172,18 @@ async fn agent_self_detaches_remote_into_a_lazy_local_task_then_resumes_only_rem
     )
     .await
     .unwrap();
+    assert_eq!(resumed_state.shared_model, chat.shared_model);
+    assert_eq!(resumed_state.model, chat.model);
+    assert_eq!(resumed_state.model_overrides, chat.model_overrides);
+    assert!(Arc::ptr_eq(&resumed_state.client, &client));
+    config = resumed_state.config;
+    client = resumed_state.client;
     assert_eq!(session_id, remote_id);
     assert!(chat.remote);
     assert_eq!(chat.agent, "operator:ops");
     assert_eq!(history, vec!["remote history"]);
+    assert_eq!(config.model, chat.shared_model);
+    assert_eq!(client.backend(), "chat");
     assert!(
         chat.blocks.is_empty(),
         "Server transcript is loaded by remote worker, no local blocks"

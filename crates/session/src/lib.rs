@@ -9,6 +9,7 @@ pub mod handoff;
 pub mod harness;
 pub mod mcp;
 pub mod mention_resolve;
+pub mod model;
 pub mod process;
 pub mod prompt;
 pub mod resume;
@@ -140,7 +141,12 @@ pub struct SessionState {
     pub(crate) session_kind: Option<String>,
     pub messages: Vec<Message>,
     pub agent: Agent,
+    /// Last request/display model id (provider prefix stripped).
     pub model: String,
+    /// Per-mode session-only selections. `None` preserves legacy single-model rows.
+    pub(crate) model_overrides: Option<opencoder_store::SessionModelOverrides>,
+    /// Full effective model used by the previous request, including provider.
+    pub(crate) active_model: String,
     pub working_dir: PathBuf,
     pub config: Config,
     pub client: Arc<dyn ChatStream>,
@@ -256,7 +262,11 @@ impl SessionState {
         client: Arc<dyn ChatStream>,
         working_dir: PathBuf,
     ) -> Self {
-        let model = config.model_id().to_string();
+        let model_overrides = Some(opencoder_store::SessionModelOverrides::default());
+        let effective =
+            crate::model::effective_config_for(&config, &agent, model_overrides.as_ref());
+        let model = effective.model_id().to_string();
+        let active_model = effective.model.clone();
         let mut harness = opencoder_core::harness::HarnessRuntime {
             harness: opencoder_core::agent::scope::with_root_sync(
                 config.agent.agents_dir.clone(),
@@ -281,6 +291,8 @@ impl SessionState {
             messages: Vec::new(),
             agent,
             model,
+            model_overrides,
+            active_model,
             working_dir,
             config,
             client,
@@ -415,8 +427,9 @@ impl SessionState {
     /// `agent.tools_scope`, move the agents root, or change the pools on disk.
     pub fn apply_config_reload(&mut self, new_cfg: Config, new_client: Arc<dyn ChatStream>) {
         self.client = new_client;
-        self.model = new_cfg.model_id().to_string();
         self.config = new_cfg;
+        self.reset_effective_model_label();
+        self.active_model = self.effective_model();
         crate::harness::resources::invalidate_native(self);
         crate::agent_pools::refresh(self);
     }
@@ -428,8 +441,9 @@ impl SessionState {
     /// next successful reload. Refreshes the agent pool snapshots all the
     /// same (see [`Self::apply_config_reload`]).
     pub fn apply_config_reload_keep_client(&mut self, new_cfg: Config) {
-        self.model = new_cfg.model_id().to_string();
         self.config = new_cfg;
+        self.reset_effective_model_label();
+        self.active_model = self.effective_model();
         crate::harness::resources::invalidate_native(self);
         crate::agent_pools::refresh(self);
     }
@@ -488,12 +502,10 @@ impl SessionState {
         Ok(())
     }
 
-    /// Create the durable session row (`INSERT OR IGNORE`: an existing row
-    /// keeps its stored metadata) and mark the session created so later
-    /// persists skip straight to the append.
-    async fn create_session_row(&mut self, store: &Arc<dyn Store>) -> Result<()> {
+    /// Build metadata for the durable row without changing session state.
+    fn session_meta(&self) -> SessionMeta {
         let now = now_ms();
-        let meta = SessionMeta {
+        SessionMeta {
             kind: self.session_kind.clone(),
             id: self.id.clone(),
             title: first_user_text(self.messages.as_slice()),
@@ -518,14 +530,35 @@ impl SessionState {
             skill: self.skill_prompt_cloned(),
             task_type: None,
             requirement: self.requirement.clone(),
-        };
-        store.create_session(&meta).await?;
+        }
+    }
+
+    async fn write_session_row(
+        &self,
+        store: &Arc<dyn Store>,
+        meta: &SessionMeta,
+        overrides: Option<&opencoder_store::SessionModelOverrides>,
+    ) -> Result<()> {
+        store
+            .create_session_with_model_overrides(meta, overrides)
+            .await?;
         if self.harness.harness == opencoder_core::harness::Harness::Codex
             || self.harness.resource_root.is_some()
             || !self.harness.envs.is_empty()
         {
             store.set_harness_runtime(&self.id, &self.harness).await?;
         }
+        Ok(())
+    }
+
+    /// Create the durable session row (`INSERT OR IGNORE`: an existing row
+    /// keeps its stored metadata) and mark the session created so later
+    /// persists skip straight to the append.
+    async fn create_session_row(&mut self, store: &Arc<dyn Store>) -> Result<()> {
+        let meta = self.session_meta();
+        let overrides = self.model_overrides.clone();
+        self.write_session_row(store, &meta, overrides.as_ref())
+            .await?;
         self.session_created = true;
         Ok(())
     }

@@ -2,6 +2,11 @@
 use super::*;
 
 pub(super) async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 42 {
+        // v42: nullable per-session Shared/Act/Plan model selections. NULL
+        // retains legacy behavior; a JSON object opts into mode overlays.
+        add_column_if_absent(conn, "sessions", "model_overrides_json", "TEXT").await?;
+    }
     if from < 41 {
         // v41: replace the derived expression index `idx_sessions_activity`
         // (`MAX(updated_at, created_at)`) with a plain `(updated_at, id)`

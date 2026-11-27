@@ -7,6 +7,7 @@ Web 导航提供独立 Ontology 分类：图谱、实体、实体类型、关系
 ## 操作与权限
 
 - `opencoder-cli ontology` 提供数据操作、能力查询及同步命令，见 [CLI 用法](../../../rules/09-ontology-capabilities.md)，可复用 [opencoder-ontology skill](../../../skills/opencoder-ontology/SKILL.md)。平台能力目录包含全部平台功能入口和六类原生可执行能力，图谱通过明确依赖组织能力。Web 在实体页通过实体类型筛选和搜索定位能力实体，图谱可选择同名切面。
+- `platform:tui` 复用稳定的终端实体登记六个 TUI 命令：`/env`、`/envs` 管理本地配置 Env，`/model`、`/config` 配置 Shared/Act/Plan 模型与生成参数，`/cli`、`/skill` 管理对应本地能力。`/model` 的 Provider 新增、编辑、删除可选择 session-only；Shared 会话选择立即生效并优先于 `modes.shared.model`，`{}`/缺省字段表示继承配置，整体 `NULL` 保留 legacy 语义。任务 Resume/Fork 重应用进程级显式模型，成功后同步外层 config/client/chat，失败保留原运行时。`/cli`、`/skill` 使用 `EnvAware` 保存，有活动 Env 时写入对应 Env 文件，无活动时回退 legacy `Auto`。除既有 `/api/tui` 能力查询外不新增 HTTP 入口；`cli` 字段中以 `TUI` 开头的是交互式斜杠命令，不是新增公共 CLI 域，也不另建重复实体。
 - CLI 支持类型、属性、Action、实体、关系、切面、目录与数据空间的创建、查询、更新和软删除；实体详情、关联关系和图谱范围可单独查询。新实体通过 `directory_id` 归入实体目录，已有实体通过目录归属关系挂载或解除，子目录通过 `directories move` 调整父目录。
 - Server 启动与能力修改后自动同步，另每 30 秒检查补漏。同步状态、失败原因和最后成功时间可查询，失败保留上次成功内容并继续重试；调用方也可主动检查或补同步。
 - 托管发布中只允许当前版本的当前 Server 实例同步写入；候选预热只允许检查差异，切换和回滚准备期间暂停同步写入。被拒绝的同步不改变共享目录或状态。发布记录缺失时同样拒绝写入，独立 Server 不依赖该记录。

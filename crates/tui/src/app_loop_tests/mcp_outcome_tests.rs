@@ -79,7 +79,7 @@ async fn handle_mcp_outcome_success_saves_and_reloads() {
     );
 
     let cmd = cmd_rx.recv().await.expect("ReloadConfig should be sent");
-    assert!(matches!(cmd, UiCmd::ReloadConfig(_)));
+    assert!(matches!(cmd, UiCmd::ReloadConfig { .. }));
 
     // The reloaded config should now carry the saved server.
     assert!(config.mcp_servers.contains_key("mysrv"));

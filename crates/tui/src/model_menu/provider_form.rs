@@ -64,7 +64,12 @@ pub struct ProviderForm {
     /// When true, keys route to the headers editor instead of form navigation.
     pub headers_active: bool,
     pub focus: ProviderField,
+    /// A validated Provider patch waiting for the same save-scope choice as
+    /// model selection: y/Enter persists, n/N applies only to this session.
+    pub confirm_save_default: Option<serde_json::Value>,
     pub error: Option<String>,
+    pub mode: opencoder_core::ConfigMode,
+    pub return_scope: Option<Box<super::mode_select::ModeSelection>>,
 }
 
 impl ProviderForm {
@@ -92,7 +97,10 @@ impl ProviderForm {
             headers: HeadersEditor::new(headers),
             headers_active: false,
             focus: ProviderField::ModelId,
+            confirm_save_default: None,
             error: None,
+            mode: opencoder_core::ConfigMode::Shared,
+            return_scope: None,
         }
     }
 
@@ -115,7 +123,10 @@ impl ProviderForm {
             headers: HeadersEditor::new(Vec::new()),
             headers_active: false,
             focus: ProviderField::Name,
+            confirm_save_default: None,
             error: None,
+            mode: opencoder_core::ConfigMode::Shared,
+            return_scope: None,
         }
     }
 
@@ -150,7 +161,10 @@ impl ProviderForm {
             ),
             headers_active: false,
             focus: ProviderField::ApiKey,
+            confirm_save_default: None,
             error: None,
+            mode: opencoder_core::ConfigMode::Shared,
+            return_scope: None,
         }
     }
 
@@ -258,8 +272,40 @@ impl ProviderForm {
     }
 }
 
+fn leave_form(form: ProviderForm) -> (ModelOutcome, Option<ModelMenu>) {
+    match form.return_scope {
+        Some(source) => {
+            let mode = form.mode;
+            (
+                ModelOutcome::Idle,
+                Some(ModelMenu::List(super::list::ProviderList::for_mode(
+                    *source, mode,
+                ))),
+            )
+        }
+        None => (ModelOutcome::Cancel, None),
+    }
+}
+
 /// Handle a key in provider-form mode.
 pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<ModelMenu>) {
+    // Save-scope confirmation takes priority over every form editing mode.
+    // Keeping the patch in the form makes add/edit/API-key/header changes all
+    // reach the identical session-only path through real key dispatch.
+    if let Some(patch) = form.confirm_save_default.take() {
+        return match k.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                (ModelOutcome::Save(patch), None)
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') => (ModelOutcome::SaveSessionOnly(patch), None),
+            KeyCode::Esc => (ModelOutcome::Cancel, None),
+            _ => {
+                form.confirm_save_default = Some(patch);
+                (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
+            }
+        };
+    }
+
     // When headers sub-mode is active, route there first (Ctrl+L/U clear the
     // active header name/value inside HeadersEditor).
     if form.headers_active && form.focus == ProviderField::Headers {
@@ -308,7 +354,7 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
         return (ModelOutcome::Idle, Some(ModelMenu::Form(form)));
     }
     match k.code {
-        KeyCode::Esc => return (ModelOutcome::Cancel, None),
+        KeyCode::Esc => return leave_form(form),
         KeyCode::Tab => form.focus = form.focus.next(),
         KeyCode::BackTab => form.focus = form.focus.prev(),
         KeyCode::Up => form.focus = form.focus.prev(),
@@ -324,10 +370,11 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
                     form.error = Some(e);
                     return (ModelOutcome::Idle, Some(ModelMenu::Form(form)));
                 }
-                let json = form.build_patch().to_json();
-                return (ModelOutcome::Save(json), None);
+                let json = form.build_patch().to_json_for_mode(form.mode);
+                form.confirm_save_default = Some(json);
+                return (ModelOutcome::Idle, Some(ModelMenu::Form(form)));
             }
-            ProviderField::Cancel => return (ModelOutcome::Cancel, None),
+            ProviderField::Cancel => return leave_form(form),
             _ => form.focus = form.focus.next(),
         },
         KeyCode::Backspace => match form.focus {

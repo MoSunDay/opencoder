@@ -488,13 +488,12 @@ impl ExecutionTasks {
     }
 }
 
-/// Effective node config as a shared value, cached on the stat fingerprint
-/// of the config input files (`config_cache`). Snapshot/report and inventory
-/// paths call this every cycle; the daemon environment is fixed for the
-/// process lifetime, so file mtime/size is a sufficient invalidation signal.
-/// Calls inside a harness task-local scope bypass the cache (core folds
-/// those call-site overrides into the loaded config), and load errors are
-/// never cached so every cycle keeps surfacing them.
+/// Effective node config as a shared value, cached on the per-file stat
+/// fingerprint of the config inputs and the interactive active-Env selection
+/// (`config_cache`). Snapshot/report and inventory paths call this every cycle;
+/// unchanged files keep reusing the config. Calls inside a harness task-local
+/// scope bypass the cache (core folds those call-site overrides into the loaded
+/// config), and load errors are never cached so every cycle keeps surfacing them.
 pub(crate) fn configuration_shared(worker: &Worker) -> Result<Arc<Config>> {
     if opencoder_core::harness::scope::current().is_some()
         || opencoder_core::harness::scope::current_runtime().is_some()
@@ -502,7 +501,7 @@ pub(crate) fn configuration_shared(worker: &Worker) -> Result<Arc<Config>> {
         return Ok(Arc::new(load_node_config(worker)?));
     }
     let workdir = crate::brain::workdir::node_workdir(worker);
-    let key = config_cache::config_key(&workdir);
+    let key = config_cache::config_key(&workdir)?;
     let mut cache = worker
         .inner
         .config_cache

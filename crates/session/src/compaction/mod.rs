@@ -27,7 +27,7 @@ pub fn should_compact(session: &SessionState) -> bool {
     if !cfg.auto {
         return false;
     }
-    let context_limit = session.config.context_limit();
+    let context_limit = session.effective_context_limit();
     let reserved = cfg.reserved.min(context_limit.saturating_sub(1));
     let usable_input = context_limit.saturating_sub(reserved);
     let budget = cfg.context_threshold.min(usable_input);
@@ -57,7 +57,7 @@ pub const MANUAL_COMPACT_HINT: &str =
 /// `should_compact` this is not a threshold preference — it is a physical
 /// limit of the configured model.
 pub fn exceeds_hard_limit(session: &SessionState) -> bool {
-    let context_limit = session.config.context_limit();
+    let context_limit = session.effective_context_limit();
     estimated_tokens(session) >= context_limit || {
         let reported = reported_tokens(session);
         reported != 0 && reported >= context_limit

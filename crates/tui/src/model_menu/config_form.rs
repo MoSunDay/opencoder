@@ -150,6 +150,8 @@ pub struct ConfigForm {
     pub subagent: bool,
     pub focus: ConfigField,
     pub error: Option<String>,
+    pub save_target: Option<super::mode_select::SaveTargetInfo>,
+    pub return_scope: Option<Box<super::mode_select::ModeSelection>>,
 }
 
 impl ConfigForm {
@@ -175,6 +177,8 @@ impl ConfigForm {
             subagent: config.subagent_enabled(),
             focus: ConfigField::Reasoning,
             error: None,
+            save_target: None,
+            return_scope: None,
         }
     }
 
@@ -291,7 +295,12 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
         return (ModelOutcome::Idle, Some(ModelMenu::Config(form)));
     }
     match k.code {
-        KeyCode::Esc => return (ModelOutcome::Cancel, None),
+        KeyCode::Esc => {
+            if let Some(scope) = form.return_scope {
+                return (ModelOutcome::Idle, Some(ModelMenu::ModeSelect(scope)));
+            }
+            return (ModelOutcome::Cancel, None);
+        }
         KeyCode::Tab => form.focus = form.focus.next(),
         KeyCode::BackTab => form.focus = form.focus.prev(),
         KeyCode::Up => form.focus = form.focus.prev(),
@@ -333,7 +342,12 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 let json = form.build_patch().to_json();
                 return (ModelOutcome::Save(json), None);
             }
-            ConfigField::Cancel => return (ModelOutcome::Cancel, None),
+            ConfigField::Cancel => {
+                if let Some(scope) = form.return_scope {
+                    return (ModelOutcome::Idle, Some(ModelMenu::ModeSelect(scope)));
+                }
+                return (ModelOutcome::Cancel, None);
+            }
             _ => form.focus = form.focus.next(),
         },
         KeyCode::Backspace => form.edit_numeric(|text, cur| {

@@ -15,7 +15,9 @@ use crate::Cli;
 
 pub(crate) use crate::run_image::load_image_data_uris;
 
-pub(crate) use crate::model_override::{apply_model_override, reapply_resume_model};
+pub(crate) use crate::model_override::{
+    apply_model_override, preferred_explicit_model, reapply_resume_model,
+};
 
 pub(crate) use crate::agent_override::{apply_agent_override, reapply_resume_agent};
 
@@ -55,6 +57,8 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         anyhow::bail!("--fork requires --session <id> or --continue");
     }
     let workdir = resolve_workdir(cli)?;
+    let env_model = std::env::var("OPENCODER_MODEL").ok();
+    let explicit_model = preferred_explicit_model(cli.model.as_deref(), env_model.as_deref());
     let mut config = Config::load(&workdir)?;
     apply_agent_override(&mut config, &cli.agent);
     let store: Option<Arc<dyn Store>> =
@@ -167,29 +171,17 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             .map(|(k, v)| (k.clone(), v.clone())),
     );
 
-    // resume() restored the session's stored model; an explicit --model wins
-    // over it and is re-persisted so subsequent resumes honor the new choice.
-    if let Some(new_model) = reapply_resume_model(
+    // Config::load applied OPENCODER_MODEL before the optional CLI override and
+    // client construction. Resume restores the stored model, so re-apply only
+    // the same winner and persist it with its mode metadata before running.
+    reapply_resume_model(
         &mut session,
-        &cli.model
+        &explicit_model
             .clone()
             .filter(|_| selected == opencoder_core::harness::Harness::Opencoder),
     )
-    .map_err(anyhow::Error::msg)?
-    {
-        if let Some(st) = &store {
-            let _ = st
-                .update_session(
-                    &session.id,
-                    &SessionPatch {
-                        model: Some(new_model),
-                        updated_at: Some(opencoder_core::message::now_ms()),
-                        ..Default::default()
-                    },
-                )
-                .await;
-        }
-    }
+    .await
+    .map_err(anyhow::Error::msg)?;
 
     // Likewise, an explicit --agent wins over the resumed session's stored
     // agent and is re-persisted so subsequent resumes honor the new choice.

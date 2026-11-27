@@ -41,7 +41,30 @@ macro_rules! store_contract_0 {
     fn backend_name(&self) -> &'static str;
 
     async fn create_session(&self, meta: &SessionMeta) -> Result<()>;
+    /// Create a row with optional per-mode (Shared/Act/Plan) model metadata.
+    /// Stores without mode-metadata support retain their legacy creation behavior.
+    async fn create_session_with_model_overrides(
+        &self,
+        meta: &SessionMeta,
+        _overrides: Option<&crate::SessionModelOverrides>,
+    ) -> Result<()> {
+        self.create_session(meta).await
+    }
     async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>>;
+    /// `None` means a legacy row (or a store without mode metadata).
+    async fn get_session_model_overrides(
+        &self,
+        _id: &str,
+    ) -> Result<Option<crate::SessionModelOverrides>> {
+        Ok(None)
+    }
+    async fn set_session_model_overrides(
+        &self,
+        _id: &str,
+        _overrides: Option<&crate::SessionModelOverrides>,
+    ) -> Result<()> {
+        anyhow::bail!("session model metadata is unsupported by this store")
+    }
     /// Private harness state, deliberately separate from public session metadata.
     async fn harness_runtime(
         &self,

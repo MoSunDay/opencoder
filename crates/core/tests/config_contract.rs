@@ -4,7 +4,7 @@
 use std::fs;
 use std::sync::Mutex;
 
-use opencoder_core::Config;
+use opencoder_core::{Config, ConfigMode};
 
 // Env mutation is process-global; serialize tests that touch the environment.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -51,7 +51,16 @@ fn env_overrides_project_file() {
     let (_home_guard, dir) = isolated_home();
     fs::write(
         dir.path().join("opencoder.json"),
-        r#"{"model":"file/model","small_model":"file/sm","context_limit":1000}"#,
+        r#"{
+            "model":"file/model",
+            "small_model":"file/sm",
+            "context_limit":1000,
+            "modes":{
+                "shared":{"model":"shared/model","max_tokens":200},
+                "act":{"model":"act/model"},
+                "plan":{"model":"plan/model"}
+            }
+        }"#,
     )
     .unwrap();
     let cfg = Config::load(dir.path()).unwrap();
@@ -65,6 +74,17 @@ fn env_overrides_project_file() {
         cfg.model, "env/model-from-env",
         "OPENCODER_MODEL wins over file"
     );
+    for mode in [ConfigMode::Shared, ConfigMode::Act, ConfigMode::Plan] {
+        assert_eq!(
+            cfg.effective_for_mode(mode).model,
+            "env/model-from-env",
+            "OPENCODER_MODEL wins over every configured mode"
+        );
+    }
+    assert_eq!(cfg.modes.shared.max_tokens, Some(200));
+    assert!(cfg.modes.shared.model.is_none());
+    assert!(cfg.modes.act.as_ref().unwrap().model.is_none());
+    assert!(cfg.modes.plan.as_ref().unwrap().model.is_none());
     assert_eq!(cfg.small_model.as_deref(), Some("env/small"));
     assert_eq!(
         cfg.embedding_model_id(),

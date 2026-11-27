@@ -95,24 +95,27 @@ pub(crate) async fn create_session_meta(
     let id = ulid::Ulid::new().to_string();
     let now = now_ms();
     deps.store
-        .create_session(&SessionMeta {
-            kind: Some("dag".into()),
-            id: id.clone(),
-            title: Some(format!("dag/{}/{}", run_id, step.name)),
-            agent: agent.or_else(|| Some("act".into())),
-            model: Some(deps.config.model.clone()),
-            workdir_hash: Some(opencoder_core::workdir_hash(&deps.workdir)),
-            created_at: now,
-            updated_at: now,
-            summary: None,
-            summary_seq: None,
-            summary_images: vec![],
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: Some(TASK_TYPE_AGENT_STEP.into()),
-            requirement: None,
-        })
+        .create_session_with_model_overrides(
+            &SessionMeta {
+                kind: Some("dag".into()),
+                id: id.clone(),
+                title: Some(format!("dag/{}/{}", run_id, step.name)),
+                agent: agent.or_else(|| Some("act".into())),
+                model: Some(deps.config.model.clone()),
+                workdir_hash: Some(opencoder_core::workdir_hash(&deps.workdir)),
+                created_at: now,
+                updated_at: now,
+                summary: None,
+                summary_seq: None,
+                summary_images: vec![],
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: Some(TASK_TYPE_AGENT_STEP.into()),
+                requirement: None,
+            },
+            Some(&opencoder_store::SessionModelOverrides::default()),
+        )
         .await?;
     Ok(id)
 }
@@ -124,6 +127,38 @@ pub use opencoder_session::harness::output::extract_output_json_from;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencoder_store::Store;
+
+    #[tokio::test]
+    async fn agent_step_session_persists_default_model_overrides() {
+        let store = std::sync::Arc::new(opencoder_store::TursoStore::open_memory().await.unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let deps = ExecDeps {
+            store: store.clone(),
+            workdir: dir.path().to_path_buf(),
+            config: opencoder_core::Config::default(),
+        };
+        let step = StepSpec {
+            name: "agent".into(),
+            depends_on: vec![],
+            trigger_rule: Default::default(),
+            kind: StepKind::Agent {
+                prompt: "prompt".into(),
+                agent: None,
+                model: None,
+                how_append: None,
+            },
+            timeout_secs: None,
+            recovery_policy: Default::default(),
+        };
+
+        let id = create_session_meta(&deps, &step, "run").await.unwrap();
+
+        assert_eq!(
+            store.get_session_model_overrides(&id).await.unwrap(),
+            Some(opencoder_store::SessionModelOverrides::default())
+        );
+    }
 
     /// The json-fence scanner: last fence wins, prose around it is ignored,
     /// a bare JSON text still parses, garbage stays `None`.

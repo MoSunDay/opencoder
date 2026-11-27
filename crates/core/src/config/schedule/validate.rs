@@ -99,7 +99,7 @@ pub(super) fn validate_brain_params(job: &ScheduleJob) -> Result<(), String> {
             return Err(format!(
                 "schedule {}: brain params need a non-empty string `objective`",
                 job.id
-            ))
+            ));
         }
     }
     if let Some(mode) = job.params.get("mode") {

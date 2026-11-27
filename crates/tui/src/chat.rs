@@ -382,8 +382,9 @@ impl ChatView {
                 // carried message list in place, giving the child the SAME
                 // shape the parent installs — `[Compaction, retained tail,
                 // continued run]`, one summary block at the transcript head.
-                // The parent's own reset never reaches this arm (the app loop
-                // intercepts it for the store-aware off-loop rebuild).
+                // The parent's own reset never reaches this arm: the app loop
+                // intercepts a local one for the store-aware off-loop rebuild
+                // and replays a remote one inline.
                 crate::session_ui::rebuild_view_from_messages(self, msgs);
             }
             SessionEvent::QueueConsumed { .. } => {}

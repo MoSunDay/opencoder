@@ -566,7 +566,7 @@ pub fn rebuild_view_from_messages(chat: &mut ChatView, msgs: &[Message]) {
     chat.tokens_total = chat.tokens_total.max(saved_tokens_total);
     chat.annotation_text = saved_annotation_text;
     chat.submitted = saved_submitted;
-    chat.first_prompt = saved_first_prompt.or(chat.first_prompt.take());
+    chat.first_prompt = saved_first_prompt;
     chat.pending_turn_echo = if compacting { None } else { saved_turn_echo };
     chat.subagents_running = saved_running;
     chat.subagents_total = saved_total;

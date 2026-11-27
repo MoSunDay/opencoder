@@ -197,14 +197,16 @@ fn child_live_reset_folds_the_nested_view_like_the_parent() {
 }
 
 /// Cross-reset carry-over of the store-free rebuild: lifetime tokens are
-/// floored, grandchild counters survive, and a compacting rebuild drops the
-/// in-flight echo exactly like the parent's off-loop rebuild.
+/// floored, the first prompt and grandchild counters survive, and a
+/// compacting rebuild drops the in-flight echo exactly like the parent's
+/// off-loop rebuild.
 #[test]
 fn store_free_rebuild_carries_lifetime_state_but_drops_compacting_echo() {
     let mut view = ChatView {
         tokens_total: 500,
         subagents_running: 2,
         subagents_total: 3,
+        first_prompt: Some("original task".into()),
         pending_turn_echo: Some("in-flight prompt".into()),
         ..Default::default()
     };
@@ -231,5 +233,8 @@ fn store_free_rebuild_keeps_echo_when_reset_is_not_a_compaction() {
     super::rebuild_view_from_messages(&mut view, &[Message::user("u1", "retained tail")]);
     assert!(compaction_blocks(&view).is_empty(), "no summary, no block");
     assert_eq!(view.pending_turn_echo.as_deref(), Some("in-flight prompt"));
+    // Same rule as the parent: the saved (unset) first prompt wins — the
+    // retained tail prompt is never promoted to `first_prompt`.
+    assert_eq!(view.first_prompt, None);
     assert_eq!(view.turn_block_start, view.blocks.len());
 }

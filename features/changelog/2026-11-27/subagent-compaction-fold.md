@@ -25,7 +25,7 @@
 - `crates/tui/src/session_ui/replay.rs`：新增 `rebuild_view_from_messages(chat, msgs)`——
   `rebuild_after_reset` 的 store-free 镜像：`[摘要, 尾段, 续跑]` 同序折叠；结转
   `tokens_total`（取 max，`[tok cost]` 不回退）、`annotation_text` / `submitted` /
-  `first_prompt`（保留旧值，缺省回退回放值）、`subagents_running` / `subagents_total`
+  `first_prompt`（保留旧值，与父路径同规则）、`subagents_running` / `subagents_total`
   （孙代理计数；其块不经记录重建）；`pending_turn_echo` 与父视图同规则——压缩重建丢弃、
   clear-context 重建保留；`turn_block_start` 推到重建后的块尾（可靠补写不得命中 reset 前的块）。
 - `crates/tui/src/chat.rs`：`SessionEvent::TranscriptReset(msgs)` 分支由空操作改为调用上述
@@ -58,9 +58,19 @@
   复跑 `--lib subagent_compaction`（5）、`--lib compaction`（30）、`--lib subagent`（79）、
   `--lib transcript_reset`（9）、`--lib tok_cost`（22）全部通过，`cargo fmt --check` 无差异，
   clippy 零警告——提交内容自身可独立构建、不依赖未提交的他人改动。
+- 收尾记录（评审后）：`first_prompt` 结转由「旧值缺省回退回放值」改为与父路径完全同规则
+  （直接保留旧值；无 store 回放下兜底值只会是保留尾段里的 prompt，并非首条 prompt，且嵌套
+  视图无 `first_prompt` 消费方）；`store_free_rebuild_carries_lifetime_state_but_drops_compacting_echo`
+  改为携带 `Some` 首条 prompt 断言，`store_free_rebuild_keeps_echo_when_reset_is_not_a_compaction`
+  增加「尾段 prompt 不被提升为 first_prompt」断言；`chat.rs` 分支注释补上 remote 父路径为 app loop
+  内联回放。复跑 `--lib subagent_compaction`（5）、`--lib transcript_reset`（9）、`--lib tok_cost`（22）、
+  `--lib sidecar`（50，含 `SidecarChild` 路由进同一分支）、`--lib first_prompt`（3）；clippy 零警告、fmt 无差异。
 - 测试范围：本次修改及其直接影响链路；未运行全量 Rust / SPA 测试与浏览器验收。
 
 ## Impact Surface
 
 - TUI：进入 subagent 视角时，压缩后的子转录以 `Compaction` 摘要块开头，压缩前历史与历次
   旧摘要不再显示；父视图、Web、CLI/API、依赖与 Ontology 目录均未改变。
+- 已知局限（P2，后续迭代）：嵌套 reset 走纯消息回放（`apply` 内无 store），子视图压缩后其孙代理
+  `Subagent` 卡片不再重建（改动前为原样保留）；`subagents_running/total` 计数结转保留，嵌套侧无
+  渲染消费方，后续 `SubagentDone` 饱和递减、`Done` 归零仍自洽。父视图离线重建有 store，无此问题。

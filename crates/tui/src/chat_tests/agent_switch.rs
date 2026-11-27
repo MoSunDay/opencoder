@@ -31,28 +31,49 @@ fn agent_switch_finalizes_pending_assistant() {
     );
 }
 
-/// Issue #1: the `[model]` chat marker must show the bare model id (no
-/// `provider/` prefix), matching the status bar — both when the event carries
-/// the full string (defensive strip) and the bare id (worker now emits bare).
+/// A model switch finalizes the pending assistant text and syncs the
+/// live-session model the title/status bar render, but adds NO transcript
+/// marker: the `[/model] ... switched` confirmation already covers the
+/// switch, and a second `[model] <id>` line only duplicated it (it also
+/// resurfaced on remote event replay). The model keeps whatever id the event
+/// carries — the title strips a `provider/` prefix itself.
 #[test]
-fn model_switch_marker_strips_provider_prefix() {
+fn model_switch_updates_model_without_marker() {
     let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("mid-stream".into()));
 
-    // Full "provider/model" string -> rendered as bare id.
+    // Full "provider/model" string -> model synced verbatim, no marker.
     v.apply(&SessionEvent::ModelSwitch("bigmodel/glm-5.2".into()));
-    let text = block_text(&v);
-    assert!(text.contains("[model]"), "marker prefix present");
-    assert!(text.contains("glm-5.2"), "bare model id present");
+    assert_eq!(
+        v.model, "bigmodel/glm-5.2",
+        "live model synced for the title"
+    );
     assert!(
-        !text.contains('/'),
-        "marker must not leak the provider slash: {text:?}"
+        !v.blocks.iter().any(|b| matches!(b, ChatBlock::Marker(_))),
+        "ModelSwitch must not add a transcript marker; blocks: {:?}",
+        v.blocks
+    );
+    let pending = v
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::Assistant { done, .. } => Some(*done),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        pending.iter().all(|d| *d),
+        "assistant block must be finalized on ModelSwitch"
     );
 
-    // Bare id (what the worker now emits) -> unchanged, no slash.
+    // Bare id (what the worker emits) -> same contract.
     v.apply(&SessionEvent::ModelSwitch("glm-5.2".into()));
-    let text2 = block_text(&v);
-    assert!(text2.contains("glm-5.2"));
-    assert!(!text2.contains('/'));
+    assert_eq!(v.model, "glm-5.2");
+    assert!(
+        !v.blocks.iter().any(|b| matches!(b, ChatBlock::Marker(_))),
+        "still no marker after a second switch"
+    );
+    assert!(!block_text(&v).contains("[model]"));
 }
 
 // ---------------------------------------------------------------------------

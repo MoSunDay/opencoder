@@ -240,6 +240,28 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
     }
 }
 
+/// Gate for the worker-acknowledged config menus (`/model`, `/config`,
+/// `/env`). Their outcomes (`ApplySession` / `ReloadConfig` / `ReloadEnv`)
+/// are acknowledged by the worker, which only drains commands between turns
+/// — the whole LLM turn runs inside one `process_cmd`. Opening or applying
+/// one while busy would park the single UI event loop on the ack until the
+/// turn ends, and deadlock outright once the event forwarder's bounded queue
+/// fills (the parked UI is its only drainer). Refuse with the busy flash;
+/// the user retries when idle — the same contract as `gate_switch`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConfigMenuGate {
+    Run,
+    SkipRunning,
+}
+
+pub fn gate_config_menu(busy: bool) -> ConfigMenuGate {
+    if busy {
+        ConfigMenuGate::SkipRunning
+    } else {
+        ConfigMenuGate::Run
+    }
+}
+
 /// Gate for control-command dispatch (`/act`, `/plan`,
 /// `/act_clear_context` — and Shift+Tab, which arms the countdown guard from
 /// plan mode and switches straight back to plan from act mode).

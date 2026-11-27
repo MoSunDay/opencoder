@@ -12,7 +12,10 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 
 use crate::chat::ChatView;
-use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
+use crate::command::SlashAction;
+use crate::model_menu::{
+    handle_model_key, EnvMenu, ModeMenuKind, ModeSelection, ModelMenu, ModelOutcome,
+};
 use crate::model_session_switch::switch_session;
 use crate::theme;
 use crate::worker::{acknowledged_config_reload, ConfigReloadScope, UiCmd};
@@ -36,6 +39,11 @@ fn saved_reload_error(chat: &mut ChatView, path: &Path, detail: &str) {
 /// nothing. `Quit` sends `UiCmd::Quit` and was a `break`. Returns
 /// [`LoopFlow::Quit`] for the `Quit` arm, otherwise [`LoopFlow::Proceed`] (the
 /// caller keeps the post-match `continue` inline).
+///
+/// `running` is the safety net behind `gate_config_menu`: the three
+/// worker-acknowledged outcomes are refused with a busy marker while a turn
+/// runs (see [`worker_outcome_label`]) — the worker only acks between turns,
+/// so awaiting it here would freeze the UI loop.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_model_outcome(
     model_menu: &mut Option<ModelMenu>,
@@ -50,6 +58,7 @@ pub(crate) async fn handle_model_outcome(
     chat: &mut ChatView,
     workdir: &Path,
     env_model: Option<&str>,
+    running: bool,
 ) -> LoopFlow {
     let save_route = match model_menu.as_ref() {
         Some(ModelMenu::ModeConfig(form)) if form.mode == ConfigMode::Shared => {
@@ -60,7 +69,23 @@ pub(crate) async fn handle_model_outcome(
         }
         _ => ConfigSaveRoute::Auto,
     };
-    match handle_model_key(model_menu, k) {
+    // An Env menu's pending command executes (disk mutation) inside the key
+    // handler before any outcome exists — refuse before `handle_model_key`
+    // consumes it, so the command stays pending for the idle drain.
+    if running && matches!(model_menu, Some(ModelMenu::Env(menu)) if menu.has_pending()) {
+        chat.push_marker(busy_marker("/env"));
+        return LoopFlow::Proceed;
+    }
+    let outcome = handle_model_key(model_menu, k);
+    if running {
+        // Refuse, never park on the ack: the worker is inside `run_session`
+        // and only drains commands (and acks) once the turn ends.
+        if let Some(label) = worker_outcome_label(&outcome) {
+            chat.push_marker(busy_marker(label));
+            return LoopFlow::Proceed;
+        }
+    }
+    match outcome {
         ModelOutcome::Save(json) => {
             let path = match Config::save_with_route(workdir, &json, save_route) {
                 Ok(path) => path,
@@ -227,6 +252,56 @@ pub(crate) async fn handle_model_outcome(
     LoopFlow::Proceed
 }
 
+/// Busy-turn refusal marker for a worker-acknowledged config command.
+fn busy_marker(label: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        format!("[{label}] busy \u{2014} change not applied, retry when idle"),
+        Style::default().fg(theme::warn_color()),
+    ))
+}
+
+/// Label of the slash command owning a worker-acknowledged outcome; `None`
+/// for the outcomes that never talk to the worker (idle / cancel / quit) and
+/// therefore stay available while a turn runs. Pure.
+pub(crate) fn worker_outcome_label(outcome: &ModelOutcome) -> Option<&'static str> {
+    match outcome {
+        ModelOutcome::Save(_) => Some("/config"),
+        ModelOutcome::SaveSessionOnly(_) => Some("/model"),
+        ModelOutcome::ReloadEnv(..) => Some("/env"),
+        ModelOutcome::Idle | ModelOutcome::Cancel | ModelOutcome::Quit => None,
+    }
+}
+
+/// Open one of the worker-acknowledged config menus — the idle branch of the
+/// `SlashAction::Model | Env | Config` dispatch (see `gate_config_menu`).
+/// Pure menu construction: nothing reaches the worker until an outcome fires.
+pub(crate) fn open_config_menu(
+    action: SlashAction,
+    model_menu: &mut Option<ModelMenu>,
+    config: &Config,
+    chat: &ChatView,
+    agent_name: &str,
+    workdir: &Path,
+) {
+    let mode_select = |kind: ModeMenuKind| {
+        Some(ModelMenu::ModeSelect(Box::new(ModeSelection::new(
+            crate::model_scope::menu_config(config, chat),
+            crate::model_scope::mode_for_agent(agent_name),
+            kind,
+            workdir,
+            chat.model_overrides.clone(),
+        ))))
+    };
+    match action {
+        SlashAction::Model => *model_menu = mode_select(ModeMenuKind::Model),
+        SlashAction::Config => *model_menu = mode_select(ModeMenuKind::Config),
+        SlashAction::Env(command) => {
+            *model_menu = Some(ModelMenu::Env(EnvMenu::with_command(workdir, command)))
+        }
+        _ => {}
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drain_pending_env(
     model_menu: &mut Option<ModelMenu>,
@@ -240,9 +315,12 @@ pub(crate) async fn drain_pending_env(
     chat: &mut ChatView,
     workdir: &Path,
     env_model: Option<&str>,
+    running: bool,
 ) -> LoopFlow {
     let pending = matches!(model_menu, Some(ModelMenu::Env(menu)) if menu.has_pending());
-    if !pending {
+    // While a turn runs the Env reload stays pending (silently — it is not a
+    // keystroke) and drains at the first idle loop iteration.
+    if !pending || running {
         return LoopFlow::Proceed;
     }
     handle_model_outcome(
@@ -261,6 +339,7 @@ pub(crate) async fn drain_pending_env(
         chat,
         workdir,
         env_model,
+        running,
     )
     .await
 }

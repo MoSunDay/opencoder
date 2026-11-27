@@ -71,6 +71,7 @@ async fn assert_failed_activation(
                 &mut chat,
                 workdir,
                 None,
+                false,
             ),
             async {
                 let command = cmd_rx.recv().await.expect("ReloadEnv command");
@@ -98,6 +99,7 @@ async fn assert_failed_activation(
             &mut chat,
             workdir,
             None,
+            false,
         )
         .await
     };

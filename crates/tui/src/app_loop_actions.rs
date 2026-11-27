@@ -27,8 +27,10 @@ use opencoder_store::Store;
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::command::SlashAction;
 use crate::local_cmd;
-use crate::model_menu::{EnvMenu, ModeMenuKind, ModeSelection, ModelMenu};
-use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd};
+use crate::model_menu::ModelMenu;
+use crate::worker::{
+    gate_compact, gate_config_menu, gate_switch, CompactGate, ConfigMenuGate, SwitchGate, UiCmd,
+};
 
 /// Which agent-switch command triggered the dispatch. Parameterizes the
 /// control-command prompt text submitted to the runner. The clear-context
@@ -192,26 +194,19 @@ pub(crate) async fn dispatch_slash_action(
                 session_id.to_string(),
             ));
         }
-        SlashAction::Model => {
-            *model_menu = Some(ModelMenu::ModeSelect(Box::new(ModeSelection::new(
-                crate::model_scope::menu_config(config, chat),
-                crate::model_scope::mode_for_agent(agent_name),
-                ModeMenuKind::Model,
-                workdir,
-                chat.model_overrides.clone(),
-            ))));
-        }
-        SlashAction::Env(command) => {
-            *model_menu = Some(ModelMenu::Env(EnvMenu::with_command(workdir, command)));
-        }
-        SlashAction::Config => {
-            *model_menu = Some(ModelMenu::ModeSelect(Box::new(ModeSelection::new(
-                crate::model_scope::menu_config(config, chat),
-                crate::model_scope::mode_for_agent(agent_name),
-                ModeMenuKind::Config,
-                workdir,
-                chat.model_overrides.clone(),
-            ))));
+        SlashAction::Model | SlashAction::Env(_) | SlashAction::Config => {
+            match gate_config_menu(*running) {
+                ConfigMenuGate::Run => {
+                    super::app_loop_model::open_config_menu(
+                        action, model_menu, config, chat, agent_name, workdir,
+                    );
+                }
+                ConfigMenuGate::SkipRunning => {
+                    // Refuse, don't park: every outcome of these menus awaits a
+                    // worker ack that only arrives between turns.
+                    *mode_flash = Some(crate::app_helpers::config_menu_busy_flash(anim_tick));
+                }
+            }
         }
         SlashAction::Mcp => {
             *mcp_menu = Some(crate::mcp_menu::McpMenu::List(

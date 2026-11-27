@@ -100,7 +100,13 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   结束或 Store/client 错误保留原 UI 运行时。普通 `ReloadConfig` 也按确认后提交：
   Shared 模型先持久化，worker 确认运行时应用后 UI 才提交外层 config/client；失败不发
   成功 `ModelSwitch`。`/cli`、`/skill` 投递失败不提交 live config，明确报告磁盘已保存
-  但 reload 投递失败
+  但 reload 投递失败。`ModelSwitch` 事件只同步 `chat.model`、不插入 `[model] …` 转录行。
+  worker 只在 turn 之间 ack 这些命令，UI 同步等待 ack 会冻结事件循环（转发器有界队列满后
+  死锁），因此任务运行中 `/model`、`/config`、`/env` 由 `gate_config_menu`
+  （`worker.rs`）在派发层拒绝并显示 `config_menu_busy_flash`；菜单已打开后 turn 才开始时，
+  `handle_model_outcome(.., running)` / `drain_pending_env(.., running)` 再兜底一次；Env 菜单的
+  pending 命令在 `handle_model_key` 执行前即被拒绝、保持 pending（见
+  [changelog](../../../features/changelog/2026-11-27/tui-model-switch-marker-and-busy-gate.md)）
 - [app_display.rs](../../../crates/tui/src/app_display.rs) — `compute_display`
   展示标题优先取会话内当前模型（`chat.model`），空态才回退配置默认
 - [agent_menu.rs](../../../crates/tui/src/agent_menu.rs)、

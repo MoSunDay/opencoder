@@ -87,6 +87,7 @@ async fn scoped_model_save_routes_to_active_env_without_touching_project_file() 
         &mut chat,
         &workdir,
         None,
+        false,
     )
     .await;
     let save = crossterm::event::KeyEvent::new(
@@ -106,6 +107,7 @@ async fn scoped_model_save_routes_to_active_env_without_touching_project_file() 
         &mut chat,
         &workdir,
         None,
+        false,
     )
     .await;
 
@@ -200,6 +202,7 @@ async fn typed_env_activation_drains_through_runtime_and_refreshes_effective_vie
             &mut chat,
             &workdir,
             None,
+            false,
         ),
         async {
             let command = cmd_rx.recv().await.expect("ReloadEnv command");
@@ -275,6 +278,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut chat,
         &workdir,
         None,
+        false,
     )
     .await;
     let Some(ModelMenu::ModeConfig(form)) = menu.as_mut() else {
@@ -295,6 +299,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut chat,
         &workdir,
         None,
+        false,
     )
     .await;
 
@@ -327,6 +332,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut chat,
         &workdir,
         None,
+        false,
     )
     .await;
     let Some(ModelMenu::Config(form)) = menu.as_mut() else {
@@ -347,6 +353,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut chat,
         &workdir,
         None,
+        false,
     )
     .await;
 

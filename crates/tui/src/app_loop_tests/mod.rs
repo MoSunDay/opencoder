@@ -43,6 +43,7 @@ mod mcp_outcome_tests;
 mod model_outcome_tests;
 mod skill_outcome_tests;
 
+mod config_busy_gate_tests;
 mod done_error_mirror_tests;
 mod env_model_failure_tests;
 mod env_model_tests;

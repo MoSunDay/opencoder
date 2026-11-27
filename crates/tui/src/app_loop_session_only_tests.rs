@@ -81,6 +81,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         &mut chat,
         workdir,
         None,
+        false,
     )
     .await;
     assert!(model_menu.is_some(), "menu stays open while prompting");
@@ -100,6 +101,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
             &mut chat,
             workdir,
             None,
+            false,
         ),
         async {
             let command = cmd_rx.recv().await.expect("ApplySession must be sent");

@@ -696,9 +696,9 @@ mod render_prompt_tests;
 #[path = "app_loop_model.rs"]
 mod app_loop_model;
 
-#[cfg(test)]
-pub(crate) use app_loop_model::env_model_override;
 pub(crate) use app_loop_model::{drain_pending_env, handle_model_outcome};
+#[cfg(test)]
+pub(crate) use app_loop_model::{env_model_override, worker_outcome_label};
 
 #[path = "app_loop_mcp.rs"]
 mod app_loop_mcp;

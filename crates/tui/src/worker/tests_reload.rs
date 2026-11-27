@@ -39,8 +39,8 @@ async fn reload_config_success_swaps_model() {
     assert_eq!(sess.model, "test-model", "model must be swapped on success");
 }
 
-/// Config saves that keep the model unchanged land here: no `[model]`
-/// marker and no store rewrite may fire for them.
+/// Config saves that keep the model unchanged land here: no `ModelSwitch`
+/// event and no store rewrite may fire for them.
 #[tokio::test]
 async fn reload_config_same_model_emits_no_model_switch() {
     use opencoder_core::{resolve_agent, Config, ProviderConfig};

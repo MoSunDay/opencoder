@@ -29,7 +29,7 @@ pub const SUBTLE: Color = Color::Gray;
 /// Primary text colour.
 pub const TEXT: Color = Color::White;
 /// Local / non-context information shown to the user that never enters the
-/// model context (e.g. `/ps` / `/stop` echoes). Mirrors the `[model]` marker.
+/// model context (e.g. `/ps` / `/stop` echoes). Mirrors the `[/model] ... switched` marker.
 pub const LOCAL: Color = Color::Magenta;
 /// Pink — dedicated to the Thinking (reasoning) block header so it stays
 /// visually distinct from the cyan-accented bash tool header.

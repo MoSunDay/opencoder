@@ -584,6 +584,16 @@ pub(crate) fn mode_switch_busy_flash(anim_tick: u32) -> (String, u32) {
     ("\u{26a0} 任务运行中不可切换状态".to_string(), anim_tick)
 }
 
+/// Busy hint for `/model`, `/config` and `/env` while a turn runs: their
+/// changes are acknowledged by the worker between turns, so the menu is
+/// refused outright instead of parking the UI loop on that ack.
+pub(crate) fn config_menu_busy_flash(anim_tick: u32) -> (String, u32) {
+    (
+        "\u{26a0} 任务运行中不可切换模型/配置，请在任务结束后重试".to_string(),
+        anim_tick,
+    )
+}
+
 pub(crate) fn push_history(history: &mut Vec<String>, hist_idx: &mut Option<usize>, text: &str) {
     history.push(text.to_string());
     *hist_idx = None;

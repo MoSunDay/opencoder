@@ -263,19 +263,11 @@ impl ChatView {
                 // provider-truth context semantically, but the value is
                 // kept (display-only) until the new model's first round
                 // reports usage — there is no estimate fallback anymore.
-                // Strip a provider prefix defensively so the marker shows the
-                // bare model id even if a stale/persisted event carries the
-                // full "provider/model" string (issue #1).
-                let bare = m.split_once('/').map(|(_, id)| id).unwrap_or(m);
-                // Keep the live-session model the title renders in sync with
-                // the switch the worker just applied (full id when carried,
+                // No transcript marker: the switch is already confirmed by the
+                // `[/model] ... switched` marker and by the title/status bar,
+                // which read this live-session model (full id when carried,
                 // bare otherwise — the title strips the prefix anyway).
                 self.model = m.clone();
-                self.blocks
-                    .push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                        format!("[model] {}", sanitize_single_line(bare)),
-                        Style::default().fg(theme::local_color()),
-                    ))]));
             }
             SessionEvent::Compaction(c) => {
                 // The transcript was rewritten down to the summary. The

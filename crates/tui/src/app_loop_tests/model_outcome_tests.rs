@@ -108,6 +108,7 @@ async fn run_shared_save(reply: WorkerReply, shared_override: Option<&str>) -> S
             &mut chat,
             &workdir,
             None,
+            false,
         )
         .await;
         None
@@ -126,6 +127,7 @@ async fn run_shared_save(reply: WorkerReply, shared_override: Option<&str>) -> S
                 &mut chat,
                 &workdir,
                 None,
+                false,
             ),
             async {
                 let command = cmd_rx.recv().await.expect("full reload command");
@@ -281,6 +283,7 @@ async fn run_client_build_failure(disk: serde_json::Value, expected_error: &str)
         &mut chat,
         workdir,
         None,
+        false,
     )
     .await;
 
@@ -385,6 +388,7 @@ async fn shared_mode_config_save_uses_auto_with_active_env() {
         &mut chat,
         &workdir,
         None,
+        false,
     )
     .await;
 

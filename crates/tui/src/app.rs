@@ -175,7 +175,7 @@ pub(super) async fn run_app(
     }
     let startup_env_model = explicit_model.as_deref().filter(|_| opts.model.is_none());
     loop {
-        if app_loop::drain_pending_env(
+        let flow = app_loop::drain_pending_env(
             &mut model_menu,
             &mut client,
             &mut config,
@@ -187,10 +187,10 @@ pub(super) async fn run_app(
             &mut chat,
             &workdir,
             startup_env_model,
+            running,
         )
-        .await
-            == app_loop::LoopFlow::Quit
-        {
+        .await;
+        if flow == app_loop::LoopFlow::Quit {
             break;
         }
         let (changed, pick) =

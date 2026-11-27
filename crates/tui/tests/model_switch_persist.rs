@@ -89,9 +89,9 @@ async fn reload_config_persists_model_and_emits_model_switch_event() {
     let ev = rx.recv().await.expect("a ModelSwitch event was forwarded");
     match ev {
         UiEvent::Session(SessionEvent::ModelSwitch(m)) => {
-            // The display marker carries the bare model id (no provider
-            // prefix) so it matches the status bar (issue #1). The store
-            // column above keeps the full provider/id form for resume.
+            // The event carries the bare model id (no provider prefix) so the
+            // title/status bar match the applied selection. The store column
+            // above keeps the full provider/id form for resume.
             assert_eq!(m, "test-model", "ModelSwitch carries the bare model id");
         }
         _ => panic!("expected ModelSwitch event, got a different UiEvent variant"),

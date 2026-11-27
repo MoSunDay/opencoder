@@ -23,6 +23,18 @@ fn gate_compact_rejects_when_running() {
 }
 
 #[test]
+fn gate_config_menu_runs_when_idle() {
+    // Idle: the worker acks ApplySession/ReloadConfig/ReloadEnv right away.
+    assert_eq!(gate_config_menu(false), ConfigMenuGate::Run);
+}
+
+#[test]
+fn gate_config_menu_rejects_when_running() {
+    // Mid-turn the worker cannot ack; the menu is refused, never parked on.
+    assert_eq!(gate_config_menu(true), ConfigMenuGate::SkipRunning);
+}
+
+#[test]
 fn gate_clear_all_runs_when_idle() {
     // Idle == all subagents returned → clear is allowed.
     assert_eq!(gate_clear_all(false), ClearAllGate::Run);

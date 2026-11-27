@@ -125,6 +125,7 @@ pub(super) async fn handle_popup_key(
             chat,
             workdir,
             env_model,
+            *running,
         )
         .await;
         return match flow {

@@ -82,6 +82,23 @@
   `transcript_reset`（9）、`tok_cost`（22）、`sidecar`（50）、`replay`（44）、`reset_rebuild`（2）、
   `first_prompt`（3）；`--test compaction_summary_replay`（7）、`resume_context_used`（7）、
   `tok_cost_replay`（8）；均 0 failed；clippy 零警告、fmt 无差异。
+- 收尾记录（P3 假设核实，仅读码确认、无代码改动）：
+  1. sidecar 面板不会随嵌套 reset 丢失。`rebuild_view_from_messages` 的 `*chat =` 只作用于嵌套视图，而
+     `sidecar_focus` 置 true 仅三处：`chat_sidecar.rs` 的 Start 分支（门禁要求它已为 true，不会把 false 翻成
+     true）、`app.rs` 的 `SidecarAsk` 与 `sidecar_ui::enter_panel`（二者由 app loop / slash 派发传入顶层
+     `chat`）。嵌套视图的 `sidecar_focus` 恒为 false、`sidecar` 恒为 `None`：`SidecarStart` 在
+     `fold_sidecar` 的 Start 门禁处被吞掉，`SidecarChild` 查不到同 id 面板也被吞掉；渲染
+     （`app_display.rs` 的 `sidecar::focused`）与鼠标折叠（`collapse_view`）同样只读顶层视图。sidecar 面板
+     自身的嵌套视图虽经 `SidecarChild` 进入同一重建分支，但面板状态（`done/ok/answer/total_tokens/
+     rounds/elapsed_ms`）与焦点都在外层 `SidecarPanel` / 顶层视图上，不受 `*chat =` 影响。
+  2. 压缩不会留下「`ToolResult` 在尾段、派生它的 `task` `ToolUse` 消息被折叠」。`compact` 的切点来自
+     `compaction_split`：尾段非空时经 `boundary::tool_safe_split` 回溯，接受切点的条件是每个 tool_use
+     要么整体落在尾段（`start >= split`），要么其 tool_result 严格落在被摘要的头部（`end < split`）；
+     未应答的 `task` tool_use 因此必然连同派生消息一起留在尾段（卡片走重挂，而非 orphan 追加）。
+     `tail_turns == 0` 时尾段为空，整对随头部一起折叠；clear-context 的 reset 把消息列表折成单条边界
+     标记（`fold_to_continuity_seed`），同样不会残留 ToolResult。前提是 tool_use id 在转录内唯一——
+     `tool_safe_split` 对重复 id 取最后一次出现，属既有边界逻辑，本次未改。
+  本轮仅文档改动，只核对了内容与引用路径；未重跑测试（上一轮隔离树结果见上）。
 - 测试范围：本次修改及其直接影响链路；未运行全量 Rust / SPA 测试与浏览器验收。
 
 ## Impact Surface

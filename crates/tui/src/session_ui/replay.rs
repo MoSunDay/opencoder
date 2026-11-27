@@ -541,6 +541,40 @@ pub async fn rebuild_after_reset(
     chat.turn_block_start = chat.blocks.len();
 }
 
+/// Store-free mirror of [`rebuild_after_reset`] for NESTED views (subagent
+/// child, sidecar): their reset reaches them as an event inside
+/// `ChatView::apply`, where no store handle exists to rebuild subagent
+/// records or prefetch images. Same fold and the same cross-reset carry-over
+/// as the parent's off-loop rebuild — `[Compaction, retained tail,
+/// continued run]` — so a compacted child renders ONE collapsed summary block
+/// at the head of its transcript instead of its whole pre-compaction history
+/// plus every summary it ever produced. `pending_turn_echo` follows the same
+/// rule as the parent: dropped on a compacting rebuild, kept otherwise.
+/// Grandchild counters are carried over (their blocks are not rebuilt from
+/// records here); lifetime tokens are floored so `[tok cost]` never regresses.
+pub fn rebuild_view_from_messages(chat: &mut ChatView, msgs: &[Message]) {
+    let agent = chat.agent.clone();
+    let saved_annotation_text = chat.annotation_text.clone();
+    let saved_submitted = chat.submitted;
+    let saved_first_prompt = chat.first_prompt.clone();
+    let saved_tokens_total = chat.tokens_total;
+    let saved_turn_echo = chat.pending_turn_echo.clone();
+    let saved_running = chat.subagents_running;
+    let saved_total = chat.subagents_total;
+    let compacting = has_compaction_summary(msgs);
+    *chat = replay_messages(&agent, msgs);
+    chat.tokens_total = chat.tokens_total.max(saved_tokens_total);
+    chat.annotation_text = saved_annotation_text;
+    chat.submitted = saved_submitted;
+    chat.first_prompt = saved_first_prompt.or(chat.first_prompt.take());
+    chat.pending_turn_echo = if compacting { None } else { saved_turn_echo };
+    chat.subagents_running = saved_running;
+    chat.subagents_total = saved_total;
+    // A compaction rebuild owns the whole transcript: reliable completion
+    // repair must never target pre-reset blocks.
+    chat.turn_block_start = chat.blocks.len();
+}
+
 /// Reconstruct a `ChatBlock::Subagent` from a persisted `SubagentTaskRecord`,
 /// including rebuilding the child `ChatView` from stored events.
 pub(super) async fn build_subagent_block(

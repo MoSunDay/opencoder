@@ -70,7 +70,12 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   `compaction_block.rs` 的 `finalize_compaction` 对回放孪生块幂等去重。
   mid-run 压缩重建会丢弃在途 prompt 的 `User` 回显（保留尾部副本与
   `pending_turn_echo` 均不再重放），视图直接从 `Compaction` 摘要块继续；
-  转录未记录该 prompt 的 clear-context 重建仍补回显边界；resume 回放不变
+  转录未记录该 prompt 的 clear-context 重建仍补回显边界；resume 回放不变。
+  嵌套子视图（subagent）同契约：`ChatView::apply(TranscriptReset(msgs))` 调用
+  `rebuild_view_from_messages`（`rebuild_after_reset` 的 store-free 镜像）就地折叠，
+  实时 `SubagentChild` 路由与 `reconstruct_child_view` 事件回放共用——子转录压缩后
+  `[Compaction, 保留尾段, 续跑]` 同序、一个摘要块恒在头部，连续压缩只留最新摘要
+  （见 [changelog](../../../features/changelog/2026-11-27/subagent-compaction-fold.md)）
 - [src/model_menu/](../../../crates/tui/src/model_menu/mod.rs) — `/model` 与
   `/config` 先选择 Shared/Act/Plan；Shared 沿用顶层配置，Act/Plan 分别编辑
   `modes.act`/`modes.plan`，生成参数表单的 `i`/Delete 以显式 `null` 恢复继承。

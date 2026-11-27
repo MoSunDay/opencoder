@@ -133,13 +133,22 @@ fn real_context_survives_compaction_transcript_reset_and_model_switch() {
         "compaction keeps the last real value until the next round reports"
     );
 
+    // An in-place `TranscriptReset` (nested subagent child view) IS a replay
+    // rebuild now: provider truth comes from the surviving messages' usage,
+    // never from the pre-reset view — an empty reset carries none.
     let mut r = v.clone();
     r.apply(&SessionEvent::TranscriptReset(Vec::new()));
     assert_eq!(
-        r.real_context_tokens,
-        Some(500),
-        "in-place reset keeps the stale value; rebuilds go through replay"
+        r.real_context_tokens, None,
+        "reset rebuilds through replay instead of keeping the stale value"
     );
+
+    // A reset whose surviving tail carries usage reconstructs that truth.
+    let mut tail = opencoder_core::Message::assistant("a-tail");
+    tail.usage.total_tokens = 120;
+    let mut r2 = v.clone();
+    r2.apply(&SessionEvent::TranscriptReset(vec![tail]));
+    assert_eq!(r2.real_context_tokens, Some(120));
 
     let mut m = v.clone();
     m.apply(&SessionEvent::ModelSwitch("openai/gpt-4o".into()));

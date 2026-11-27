@@ -6,6 +6,7 @@ use crate::chat::ChatView;
 
 mod replay;
 pub use replay::rebuild_after_reset;
+pub use replay::rebuild_view_from_messages;
 pub use replay::replay_into_chat;
 pub use replay::replay_messages;
 
@@ -623,3 +624,7 @@ mod handoff_card_tests;
 #[cfg(test)]
 #[path = "session_ui/compaction_replay_tests.rs"]
 mod compaction_replay_tests;
+
+#[cfg(test)]
+#[path = "session_ui/subagent_compaction_tests.rs"]
+mod subagent_compaction_tests;

@@ -14,12 +14,12 @@ use std::sync::Arc;
 /// (empty by default → reconstructed child `ChatView` is empty) and no
 /// message rows. Everything else panics — the block builder only reads the
 /// child's transcript.
-struct EmptyChildStore {
-    events: Vec<opencoder_store::SessionEventRecord>,
+pub(super) struct EmptyChildStore {
+    pub(super) events: Vec<opencoder_store::SessionEventRecord>,
 }
 
 impl EmptyChildStore {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self { events: Vec::new() }
     }
 
@@ -27,7 +27,7 @@ impl EmptyChildStore {
     /// the shape `reconstruct_child_view` replays via `events_after`.
     /// `kind` is display-only for replay (payload is the source of truth);
     /// a coarse mapping keeps the stub honest without a full event taxonomy.
-    fn with_events(evs: Vec<opencoder_session::SessionEvent>) -> Self {
+    pub(super) fn with_events(evs: Vec<opencoder_session::SessionEvent>) -> Self {
         fn coarse_kind(ev: &opencoder_session::SessionEvent) -> opencoder_store::EventKind {
             use opencoder_session::SessionEvent;
             match ev {
@@ -177,7 +177,7 @@ impl opencoder_store::Store for EmptyChildStore {
     }
 }
 
-fn task_record(
+pub(super) fn task_record(
     status: SubagentStatus,
     result: Option<&str>,
     ok: Option<bool>,

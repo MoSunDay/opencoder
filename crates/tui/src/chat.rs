@@ -376,10 +376,15 @@ impl ChatView {
             // Legacy persisted `plan_handoff` SSE events parse to `None` and
             // never reach the display layer; the surviving handoff card comes
             // from replaying `meta.handoff_plan` (see session_ui::replay).
-            SessionEvent::TranscriptReset(_) => {
-                // The view is rebuilt from the new message list via the
-                // replay path, which reconstructs provider truth from the
-                // persisted usage of the surviving messages.
+            SessionEvent::TranscriptReset(msgs) => {
+                // Nested views (a subagent's child view) receive the reset as
+                // an event and have no off-loop rebuild actor: fold the
+                // carried message list in place, giving the child the SAME
+                // shape the parent installs — `[Compaction, retained tail,
+                // continued run]`, one summary block at the transcript head.
+                // The parent's own reset never reaches this arm (the app loop
+                // intercepts it for the store-aware off-loop rebuild).
+                crate::session_ui::rebuild_view_from_messages(self, msgs);
             }
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { seq, text } => {

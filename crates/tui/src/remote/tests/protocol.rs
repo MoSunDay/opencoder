@@ -187,6 +187,69 @@ fn compacted_transcript_uses_display_hides_internal_context_and_preserves_usage(
     assert_eq!(chat.tokens_total, 456);
 }
 
+/// Cost-only sidecar accounting on the remote replay path: the persisted SSE
+/// kind `sidecar_usage` must decode through `from_sse` and fold exactly like
+/// the native path — the child's spend joins `tokens_total`, while the parent's
+/// latest-round ctx (`real_context_tokens`) stays on its own `llm_usage`.
+#[test]
+fn remote_replay_sidecar_usage_adds_cost_without_moving_ctx() {
+    let user = Message::user("u", "prompt");
+    let events = vec![
+        frame(
+            1,
+            SessionEvent::QueueConsumed {
+                seq: 1,
+                text: "prompt".into(),
+            },
+        ),
+        frame(
+            2,
+            SessionEvent::LlmUsage {
+                total_tokens: 1_000,
+                input_tokens: 900,
+                output_tokens: 100,
+            },
+        ),
+        // Hand-written wire shape (not `frame()`): pins the persisted kind and
+        // the payload fields the store actually carries.
+        json!({"seq":3,"kind":"sidecar_usage","data":{"id":"sidecar-1","input_tokens":8900,"output_tokens":100,"total_tokens":9000},"ts":30}),
+    ];
+    let chat = transcript::replay("agent:act", std::slice::from_ref(&user), &events);
+    assert_eq!(
+        chat.tokens_total, 10_000,
+        "sidecar cost lands on the main task"
+    );
+    assert_eq!(
+        chat.real_context_tokens,
+        Some(1_000),
+        "status-bar ctx must stay on the parent's latest round"
+    );
+    assert!(
+        chat.sidecar.is_none(),
+        "a cost frame must not open a sidecar panel"
+    );
+}
+
+/// Edge: an old `sidecar_usage` row without the split `input_tokens` /
+/// `output_tokens` fields (serde defaults) still folds its cost on replay.
+#[test]
+fn remote_replay_sidecar_usage_without_split_fields_still_adds_cost() {
+    let user = Message::user("u", "prompt");
+    let events = vec![
+        frame(
+            1,
+            SessionEvent::QueueConsumed {
+                seq: 1,
+                text: "prompt".into(),
+            },
+        ),
+        json!({"seq":2,"kind":"sidecar_usage","data":{"id":"sidecar-1","total_tokens":9000},"ts":20}),
+    ];
+    let chat = transcript::replay("agent:act", std::slice::from_ref(&user), &events);
+    assert_eq!(chat.tokens_total, 9_000, "legacy payload cost still lands");
+    assert_eq!(chat.real_context_tokens, None, "ctx stays unknown");
+}
+
 #[test]
 fn snapshot_echo_uses_event_boundary_and_does_not_duplicate_a_later_admission() {
     let mut first = Message::user("first", "model preamble");

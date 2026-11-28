@@ -75,6 +75,12 @@ fn from_sse_roundtrips_all_variants() {
             total_tokens: 1234,
             rounds: 1,
         },
+        SessionEvent::SidecarUsage {
+            id: "sidecar-1".into(),
+            total_tokens: 1234,
+            input_tokens: 1000,
+            output_tokens: 234,
+        },
         SessionEvent::TranscriptReset(vec![Message::assistant("m1")]),
         SessionEvent::QueueConsumed {
             seq: 7,
@@ -92,8 +98,8 @@ fn from_sse_roundtrips_all_variants() {
     kinds.dedup();
     assert_eq!(
         kinds.len(),
-        24,
-        "expected all 24 unique kinds, got {kinds:?}"
+        25,
+        "expected all 25 unique kinds, got {kinds:?}"
     );
 
     for ev in &cases {
@@ -112,6 +118,35 @@ fn from_sse_roundtrips_all_variants() {
             );
         }
     }
+}
+
+/// Backward compatibility: a persisted `sidecar_usage` payload that only
+/// carries `id` + `total_tokens` still deserializes (split fields default to
+/// 0), keeps its own wire kind and coarse `Step` class, and is NOT a
+/// persistence-gated sidecar frame.
+#[test]
+fn sidecar_usage_old_payload_defaults_split_fields_to_zero() {
+    let ev = SessionEvent::from_sse(
+        "sidecar_usage",
+        serde_json::json!({ "id": "sc", "total_tokens": 42 }),
+    )
+    .expect("sidecar_usage must be a known kind");
+    match &ev {
+        SessionEvent::SidecarUsage {
+            id,
+            total_tokens,
+            input_tokens,
+            output_tokens,
+        } => {
+            assert_eq!(id, "sc");
+            assert_eq!(*total_tokens, 42);
+            assert_eq!((*input_tokens, *output_tokens), (0, 0));
+        }
+        other => panic!("expected SidecarUsage, got {other:?}"),
+    }
+    assert_eq!(ev.sse_kind(), "sidecar_usage");
+    assert_eq!(ev.coarse_kind(), EventKind::Step);
+    assert!(!ev.is_sidecar_frame(), "cost channel must stay persistable");
 }
 
 #[test]
@@ -272,9 +307,9 @@ fn tool_end_without_images_field_is_backward_compatible() {
     }
 }
 
-/// Exactly the three Sidecar* frames are persistence-gated; the bare
-/// `LlmUsage` (the sidecar's cost-accounting channel) and every
-/// Subagent* frame must stay persistable.
+/// Exactly the three Sidecar* content frames are persistence-gated; the
+/// tagged `SidecarUsage` (the sidecar's cost-accounting channel), a bare
+/// `LlmUsage` and every Subagent* frame must stay persistable.
 #[test]
 fn is_sidecar_frame_marks_exactly_the_sidecar_variants() {
     let sidecar: Vec<SessionEvent> = vec![
@@ -298,6 +333,12 @@ fn is_sidecar_frame_marks_exactly_the_sidecar_variants() {
     assert!(sidecar.iter().all(|e| e.is_sidecar_frame()));
     let keep: Vec<SessionEvent> = vec![
         SessionEvent::LlmUsage {
+            total_tokens: 10,
+            input_tokens: 7,
+            output_tokens: 3,
+        },
+        SessionEvent::SidecarUsage {
+            id: "sc".into(),
             total_tokens: 10,
             input_tokens: 7,
             output_tokens: 3,

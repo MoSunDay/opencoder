@@ -5,9 +5,11 @@
 //!    transcript and follow-up turns see prior Q/A (no store round-trip);
 //! 2. **zero persistence**: no sidecar session row, no message rows, no
 //!    sidecar event rows anywhere in the store;
-//! 3. **cost lands on the main task**: each sidecar LLM round reaches the
-//!    parent event stream as a *bare* `LlmUsage` (persistable), while sidecar
-//!    content frames are filtered out by the `EventSink::push` gate.
+//! 3. **cost lands on the main task, context does not**: each sidecar LLM
+//!    round reaches the parent event stream as a tagged `SidecarUsage`
+//!    (persistable, cost-only — never a bare `LlmUsage` that a parent view
+//!    would mistake for its own latest-round context), while sidecar content
+//!    frames are filtered out by the `EventSink::push` gate.
 
 use std::sync::{Arc, Mutex};
 
@@ -151,20 +153,32 @@ async fn sidecar_turn_answers_without_persisting() {
     );
 
     let evs = events.lock().unwrap().clone();
-    // Bare LlmUsage: exactly one, at top level (parent-task accounting).
-    let bare_usage = evs
+    // Tagged SidecarUsage: exactly one, at top level, carrying the sidecar
+    // id (parent-task cost accounting) ...
+    let tagged_usage = evs
         .iter()
         .filter(|e| {
             matches!(
                 e,
-                SessionEvent::LlmUsage {
+                SessionEvent::SidecarUsage {
+                    id,
                     total_tokens: 1234,
                     ..
-                }
+                } if id == &conv.id
             )
         })
         .count();
-    assert_eq!(bare_usage, 1, "exactly one bare LlmUsage, got {bare_usage}");
+    assert_eq!(
+        tagged_usage, 1,
+        "exactly one SidecarUsage, got {tagged_usage}"
+    );
+    // ... and never a bare LlmUsage: the parent must be able to tell the
+    // child's spend apart from its own context size.
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, SessionEvent::LlmUsage { .. })),
+        "sidecar usage must be tagged, never a bare LlmUsage"
+    );
     // Content frames are wrapped in SidecarChild...
     assert!(
         evs.iter()
@@ -177,7 +191,10 @@ async fn sidecar_turn_answers_without_persisting() {
             assert!(
                 !matches!(
                     inner.as_ref(),
-                    SessionEvent::LlmUsage { .. } | SessionEvent::Done | SessionEvent::Error(_)
+                    SessionEvent::LlmUsage { .. }
+                        | SessionEvent::SidecarUsage { .. }
+                        | SessionEvent::Done
+                        | SessionEvent::Error(_)
                 ),
                 "SidecarChild must not wrap {inner:?}"
             );
@@ -244,6 +261,91 @@ async fn sidecar_followup_sees_prior_turn() {
     )));
 }
 
+/// A multi-round turn (tool call → tool result → answer) forwards ONE tagged
+/// `SidecarUsage` per LLM round, every one carrying the sidecar id, and the
+/// turn summary's `total_tokens` is exactly their sum — the parent accumulates
+/// the same cost whether it folds the frames or trusts the summary.
+#[tokio::test]
+async fn sidecar_multi_round_turn_tags_every_round_and_sums() {
+    let (parent, _store, mock) = parent_session().await;
+    // Round 1 asks for a tool the sidecar does not offer: the read-only guard
+    // answers it with an error tool_result (nothing executes) and the loop
+    // continues to round 2 — two usage events, one per round.
+    mock.queue_script(vec![LlmEvent::Completed {
+        text: String::new(),
+        tool_calls: vec![CompletedToolCall {
+            id: "tu0".into(),
+            name: "__sidecar_probe__".into(),
+            input: serde_json::json!({}),
+        }],
+        usage: Some(Usage {
+            total_tokens: 300,
+            input_tokens: 250,
+            output_tokens: 50,
+            ..Default::default()
+        }),
+    }]);
+    mock.queue_script(vec![done("final answer", 200, 150, 50)]);
+
+    let mut conv = new_conv(&parent).await.unwrap();
+    let (events, cb) = collector();
+    let mut cb = cb;
+    let turn = run_sidecar_turn(&mut conv, "multi-round question", &mut cb)
+        .await
+        .unwrap();
+
+    assert!(turn.ok, "sidecar turn failed: {}", turn.answer);
+    assert_eq!(mock.call_count(), 2, "two LLM rounds ran");
+    let second = serde_json::to_string(&mock.requests()[1].messages).unwrap();
+    assert!(
+        second.contains(r#""tool_use_id":"tu0""#),
+        "round 2 must answer round 1's tool call: {second}"
+    );
+    assert_eq!(turn.rounds, 2, "one usage event per round");
+    assert_eq!(turn.total_tokens, 500, "summary sums every round's usage");
+
+    let evs = events.lock().unwrap().clone();
+    let tagged: Vec<u64> = evs
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::SidecarUsage {
+                id, total_tokens, ..
+            } if id == &conv.id => Some(*total_tokens),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        tagged,
+        vec![300, 200],
+        "one tagged usage per round, in order"
+    );
+    assert_eq!(tagged.iter().sum::<u64>(), turn.total_tokens);
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, SessionEvent::LlmUsage { .. })),
+        "sidecar usage must be tagged, never a bare LlmUsage"
+    );
+    for ev in &evs {
+        if let SessionEvent::SidecarChild { ev: inner, .. } = ev {
+            assert!(
+                !matches!(
+                    inner.as_ref(),
+                    SessionEvent::LlmUsage { .. } | SessionEvent::SidecarUsage { .. }
+                ),
+                "SidecarChild must not wrap usage: {inner:?}"
+            );
+        }
+    }
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            SessionEvent::SidecarChild { ev, .. }
+                if matches!(ev.as_ref(), SessionEvent::ToolEnd { .. })
+        )),
+        "the tool round's frames still reach the panel as wrapped content"
+    );
+}
+
 /// A control command is navigation for the parent session, never a sidecar
 /// question: refused without a single LLM call.
 #[tokio::test]
@@ -268,8 +370,8 @@ async fn sidecar_rejects_control_question() {
         .any(|e| matches!(e, SessionEvent::SidecarTurn { ok: false, .. })));
 }
 
-/// The `EventSink::push` gate drops sidecar frames entirely while the bare
-/// `LlmUsage` (cost accounting) still persists.
+/// The `EventSink::push` gate drops sidecar content frames entirely while
+/// the tagged `SidecarUsage` (cost accounting) still persists.
 #[tokio::test]
 async fn event_sink_filters_sidecar_frames() {
     // Real parent row first: append_events carries an FK on sessions, and the
@@ -296,7 +398,8 @@ async fn event_sink_filters_sidecar_frames() {
         rounds: 1,
     });
     // The accounting channel is NOT a sidecar frame: it must persist.
-    let _ = sink.push(&SessionEvent::LlmUsage {
+    let _ = sink.push(&SessionEvent::SidecarUsage {
+        id: "sidecar-x".into(),
         total_tokens: 1234,
         input_tokens: 1000,
         output_tokens: 234,
@@ -306,8 +409,8 @@ async fn event_sink_filters_sidecar_frames() {
     flusher.await.unwrap();
 
     let evs = store.events_after(PARENT, 0).await.unwrap();
-    assert_eq!(evs.len(), 1, "only the bare LlmUsage may persist: {evs:?}");
-    assert_eq!(evs[0].sse_kind.as_deref(), Some("llm_usage"));
+    assert_eq!(evs.len(), 1, "only the SidecarUsage may persist: {evs:?}");
+    assert_eq!(evs[0].sse_kind.as_deref(), Some("sidecar_usage"));
 }
 
 /// A provider failure inside the sidecar stays inside: no bare `Error` on the

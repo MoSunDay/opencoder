@@ -1,7 +1,7 @@
 //! Integration tests for the TUI-sidecar actor (`sidecar_ui::spawn_actor`):
-//! lazy conversation build, follow-up continuity, zero sidecar persistence,
-//! bare-`LlmUsage` cost accounting to the main session and the destroy
-//! semantics of [`SidecarCmd::Reset`] (idle + in-flight abort).
+//! lazy conversation build, follow-up continuity, zero sidecar content
+//! persistence, tagged-`SidecarUsage` cost accounting to the main session and
+//! the destroy semantics of [`SidecarCmd::Reset`] (idle + in-flight abort).
 
 use std::sync::{Arc, Mutex};
 
@@ -120,31 +120,32 @@ fn actor(
     (ask, seen)
 }
 
-/// Poll until the main session carries `expected` persisted llm_usage rows
-/// (the actor persists after emitting the Turn frame, so a plain read can
-/// race the write).
+/// Poll until the main session carries `expected` persisted `sidecar_usage`
+/// rows (the actor persists after emitting the Turn frame, so a plain read
+/// can race the write).
 async fn wait_for_usage_rows(store: &Arc<dyn Store>, expected: usize) {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        if llm_usage_row_count(store).await >= expected {
+        if sidecar_usage_row_count(store).await >= expected {
             return;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "timeout waiting for {expected} llm_usage rows"
+            "timeout waiting for {expected} sidecar_usage rows"
         );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
-/// Persisted llm_usage row count on the main session.
-async fn llm_usage_row_count(store: &Arc<dyn Store>) -> usize {
+/// Persisted `sidecar_usage` row count on the main session (the sidecar's
+/// tagged cost channel; a bare `llm_usage` row would mean a main-task round).
+async fn sidecar_usage_row_count(store: &Arc<dyn Store>) -> usize {
     store
         .events_after(SID, 0)
         .await
         .unwrap_or_default()
         .iter()
-        .filter(|r| r.sse_kind.as_deref() == Some("llm_usage"))
+        .filter(|r| r.sse_kind.as_deref() == Some("sidecar_usage"))
         .count()
 }
 
@@ -216,22 +217,19 @@ async fn sidecar_actor_answers_follow_ups_without_persisting_content() {
     let msgs = store.load_messages(SID).await.unwrap();
     assert_eq!(msgs.len(), 2, "sidecar Q/A must never write message rows");
 
-    // Cost accounting: exactly the two bare LlmUsage events persist; none of
-    // the Sidecar* display frames do.
+    // Cost accounting: exactly the two tagged SidecarUsage events persist;
+    // none of the Sidecar* content frames do, and no bare `llm_usage` row is
+    // ever written for a sidecar round (that kind means a main-task round).
     wait_for_usage_rows(&store, 2).await;
     let rows = store.events_after(SID, 0).await.unwrap();
     let kinds: Vec<&str> = rows
         .iter()
         .map(|r| r.sse_kind.as_deref().unwrap_or(""))
         .collect();
-    assert_eq!(
-        kinds.iter().filter(|k| **k == "llm_usage").count(),
-        2,
-        "both turns' usage lands on the main session, got {kinds:?}"
-    );
+    assert_eq!(kinds.len(), 2, "only usage rows land, got {kinds:?}");
     assert!(
-        !kinds.iter().any(|k| k.starts_with("sidecar_")),
-        "sidecar display frames never persist, got {kinds:?}"
+        kinds.iter().all(|k| *k == "sidecar_usage"),
+        "both turns' tagged usage lands on the main session, got {kinds:?}"
     );
 }
 
@@ -313,7 +311,7 @@ async fn sidecar_reset_aborts_inflight_turn_no_content_frames() {
         "aborted turn must not emit a SidecarTurn frame"
     );
     assert_eq!(
-        llm_usage_row_count(&store).await,
+        sidecar_usage_row_count(&store).await,
         0,
         "aborted turn produced no usage: nothing to persist"
     );
@@ -386,7 +384,7 @@ async fn sidecar_reset_discards_backlogged_follow_ups() {
         "neither the aborted nor the discarded question may emit a Turn frame"
     );
     assert_eq!(
-        llm_usage_row_count(&store).await,
+        sidecar_usage_row_count(&store).await,
         0,
         "destroyed panel must not accrue any usage"
     );

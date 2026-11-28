@@ -147,6 +147,58 @@ mod resolve_ctx_used {
     }
 }
 
+/// Regression: a `/sidecar` question used to reach the parent view as a bare
+/// `LlmUsage` and overwrote `real_context_tokens`, so the status bar's ctx
+/// meter jumped to the sidecar's window (snapshot + Q/A) after the question.
+/// The tagged `SidecarUsage` only joins the lifetime cost; the meter keeps
+/// showing the parent's own latest round.
+#[test]
+fn sidecar_usage_does_not_move_the_status_bar_ctx() {
+    let mut chat = ChatView::default();
+    chat.apply(&SessionEvent::LlmUsage {
+        total_tokens: 4000,
+        input_tokens: 3800,
+        output_tokens: 200,
+    });
+    chat.apply(&SessionEvent::SidecarUsage {
+        id: "sc-1".into(),
+        total_tokens: 9000,
+        input_tokens: 8900,
+        output_tokens: 100,
+    });
+    assert_eq!(chat.tokens_total, 13_000, "cost includes the sidecar round");
+
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_status(
+                f,
+                f.area(),
+                "act",
+                false,
+                false,
+                "",
+                0,
+                resolve_ctx_used(chat.real_context_tokens),
+                80000,
+                200000,
+                0,
+            );
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    assert!(
+        row.contains("4k"),
+        "ctx meter must show the parent's own round, got: {row}"
+    );
+    assert!(
+        !row.contains("9k"),
+        "sidecar window must not leak into the ctx meter, got: {row}"
+    );
+}
+
 /// Before the first usage-carrying round (fresh session), the status bar
 /// shows `—` for the ctx used count and 0% for the threshold meter — never
 /// a local chars/4 estimate.

@@ -100,16 +100,16 @@ pub enum SessionEvent {
     /// the TUI can route it into the sidecar's foldable view. Like
     /// `SubagentChild`, but the payload is **never** persisted: sidecar
     /// content stays in memory, and its token cost reaches the durable layer
-    /// through the bare forwarded `LlmUsage` instead.
+    /// through the tagged [`SessionEvent::SidecarUsage`] frames instead.
     SidecarChild {
         id: String,
         ev: Box<SessionEvent>,
     },
     /// One sidecar question finished. `rounds` is the number of LLM rounds
     /// the sidecar ran for this question and `total_tokens` the usage it
-    /// consumed (already accounted to the main task via the bare forwarded
-    /// `LlmUsage` frames). `answer` is the final assistant text (empty on
-    /// failure). Display-only — never persisted.
+    /// consumed (already accounted to the main task via the
+    /// [`SessionEvent::SidecarUsage`] frames). `answer` is the final
+    /// assistant text (empty on failure). Display-only — never persisted.
     SidecarTurn {
         id: String,
         ok: bool,
@@ -117,6 +117,26 @@ pub enum SessionEvent {
         elapsed_ms: u64,
         total_tokens: u64,
         rounds: usize,
+    },
+    /// Real token usage of one completed sidecar LLM round — the sidecar's
+    /// cost-accounting channel to the main task. Tagged with the sidecar id
+    /// so a parent view can tell it apart from its OWN
+    /// [`SessionEvent::LlmUsage`]: the spend folds into the session-lifetime
+    /// cost, but it must never be taken as the parent's latest-round context
+    /// size (the child runs on a borrowed snapshot in its own window;
+    /// nothing it sees belongs to the parent's next request). Unlike the
+    /// three `Sidecar*` content frames this variant is **persistable** — it
+    /// is deliberately not covered by [`SessionEvent::is_sidecar_frame`] —
+    /// and keeps its own `sidecar_usage` SSE kind so a replaying client can
+    /// apply the same cost-only rule. Old payloads predate the split fields
+    /// and deserialize them to `0` (`#[serde(default)]`).
+    SidecarUsage {
+        id: String,
+        total_tokens: u64,
+        #[serde(default)]
+        input_tokens: u64,
+        #[serde(default)]
+        output_tokens: u64,
     },
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
@@ -177,6 +197,7 @@ impl SessionEvent {
             SessionEvent::SidecarStart { .. } => "sidecar_start",
             SessionEvent::SidecarChild { .. } => "sidecar_child",
             SessionEvent::SidecarTurn { .. } => "sidecar_turn",
+            SessionEvent::SidecarUsage { .. } => "sidecar_usage",
             SessionEvent::TranscriptReset(_) => "transcript_reset",
             SessionEvent::QueueConsumed { .. } => "queue_consumed",
             SessionEvent::SteerConsumed { .. } => "steer_consumed",
@@ -257,6 +278,15 @@ impl SessionEvent {
             } => serde_json::json!({
                 "id": id, "ok": ok, "answer": answer, "elapsed_ms": elapsed_ms,
                 "total_tokens": total_tokens, "rounds": rounds
+            }),
+            SessionEvent::SidecarUsage {
+                id,
+                total_tokens,
+                input_tokens,
+                output_tokens,
+            } => serde_json::json!({
+                "id": id, "total_tokens": total_tokens,
+                "input_tokens": input_tokens, "output_tokens": output_tokens
             }),
             SessionEvent::TranscriptReset(_) => serde_json::json!({}),
             SessionEvent::QueueConsumed { seq, text } => {
@@ -361,6 +391,19 @@ impl SessionEvent {
                 total_tokens: data.get("total_tokens")?.as_u64().unwrap_or(0),
                 rounds: data.get("rounds").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
             },
+            "sidecar_usage" => SessionEvent::SidecarUsage {
+                id: data.get("id")?.as_str()?.to_string(),
+                total_tokens: data.get("total_tokens")?.as_u64()?,
+                // Cost-only payloads only need the total; the split defaults to 0.
+                input_tokens: data
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_default(),
+                output_tokens: data
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_default(),
+            },
             "transcript_reset" => {
                 // Wire payload is `{}`; the rebuilt message list is intentionally
                 // empty (see method doc). Callers re-fetch /messages if needed.
@@ -412,6 +455,7 @@ impl SessionEvent {
             | SessionEvent::SidecarStart { .. }
             | SessionEvent::SidecarChild { .. }
             | SessionEvent::SidecarTurn { .. }
+            | SessionEvent::SidecarUsage { .. }
             | SessionEvent::QueueConsumed { .. }
             | SessionEvent::SteerConsumed { .. } => EventKind::Step,
             SessionEvent::TranscriptReset(_) => EventKind::Compaction,
@@ -421,9 +465,10 @@ impl SessionEvent {
     /// Sidecar content frames: display-only, **never persisted**. The
     /// persistence gate (`EventSink::push`) drops them at the door, while
     /// each sidecar LLM round is still accounted to the main task through
-    /// the bare forwarded `LlmUsage` event. Keeping this predicate in one
-    /// place lets every future persistence surface (session sink, TUI
-    /// mirror) derive the same rule instead of re-deriving it per site.
+    /// the persistable `SidecarUsage` frame (deliberately NOT matched here).
+    /// Keeping this predicate in one place lets every future persistence
+    /// surface (session sink, TUI mirror) derive the same rule instead of
+    /// re-deriving it per site.
     pub fn is_sidecar_frame(&self) -> bool {
         matches!(
             self,

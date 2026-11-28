@@ -1,6 +1,6 @@
 //! Sidecar persistence-gate tests for `persist_event`: the three
-//! `Sidecar*` display frames must never land in the store, while the bare
-//! `LlmUsage` the sidecar actor forwards MUST (cost accounting).
+//! `Sidecar*` display frames must never land in the store, while the tagged
+//! `SidecarUsage` the sidecar actor forwards MUST (cost accounting).
 
 use super::*;
 
@@ -64,16 +64,18 @@ async fn sidecar_frames_are_never_persisted() {
     );
 }
 
-/// The actor's bare `LlmUsage` forward persists like any main-task round:
-/// this is how sidecar cost reaches the durable layer (web replay).
+/// The actor's tagged `SidecarUsage` forward is NOT gated: it persists onto
+/// the main session under its own kind (never `llm_usage`), so a replaying
+/// client can keep the sidecar's spend out of the main task's ctx.
 #[tokio::test]
-async fn bare_sidecar_llm_usage_is_persisted() {
+async fn sidecar_usage_is_persisted_under_its_own_kind() {
     let sid = "sidecar-cost";
     let store = memory_store(sid).await;
     persist_event(
         &Some(store.clone()),
         sid,
-        &SessionEvent::LlmUsage {
+        &SessionEvent::SidecarUsage {
+            id: "sidecar-x".into(),
             total_tokens: 321,
             input_tokens: 300,
             output_tokens: 21,
@@ -83,8 +85,8 @@ async fn bare_sidecar_llm_usage_is_persisted() {
     let kinds = stored_sse_kinds(&store, sid).await;
     assert_eq!(
         kinds,
-        vec!["llm_usage".to_string()],
-        "exactly the bare usage row lands"
+        vec!["sidecar_usage".to_string()],
+        "exactly the tagged usage row lands"
     );
 }
 

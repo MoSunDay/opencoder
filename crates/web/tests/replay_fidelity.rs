@@ -61,6 +61,15 @@ fn all_variants() -> Vec<SessionEvent> {
             id: "s1".into(),
             ev: Box::new(SessionEvent::TextDelta("child text".into())),
         },
+        // Sidecar cost channel: persisted on the main session and replayed
+        // under its own kind so clients never mistake it for the main task's
+        // latest-round usage.
+        SessionEvent::SidecarUsage {
+            id: "sidecar-1".into(),
+            total_tokens: 7,
+            input_tokens: 5,
+            output_tokens: 2,
+        },
         SessionEvent::TranscriptReset(vec![]),
         SessionEvent::QueueConsumed {
             seq: 42,
@@ -107,8 +116,8 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
     let variants = all_variants();
     assert_eq!(
         variants.len(),
-        20,
-        "expected exactly 20 SessionEvent variants — if you added one, extend \
+        21,
+        "expected exactly 21 SessionEvent variants — if you added one, extend \
          all_variants() so the replay-fidelity round-trip covers it"
     );
 

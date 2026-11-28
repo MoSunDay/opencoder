@@ -14,6 +14,10 @@ Commit: 0abfe0c77
   `SessionState::new` 以 `Some(default())` 初始化模式元数据；Web 新建同样显式写入
   该值，历史数据库行和 bundle 中的整体 `NULL` 不改写为模式感知状态
 - [src/runner/](../../../crates/session/src/runner) — drain/执行/sidecar/steer；
+  [sidecar.rs](../../../crates/session/src/runner/sidecar.rs) `/sidecar` 子循环：零持久化，
+  每轮 usage 以带标签的 `SidecarUsage`（成本通道、可落库，不属于 `is_sidecar_frame`）
+  记入主任务 `[tok cost]`，但不写主任务 `real_context_tokens`（ctx 表保持主任务自己的
+  最近一轮，见 [changelog](../../../features/changelog/2026-11-28/tui-sidecar-usage-cost-only.md)）；
   [subagent.rs](../../../crates/session/src/runner/subagent.rs) 子代理
   （`subagent` 配置开关默认开启，关闭后隐藏 `task` 工具并拒绝派发、跳过
   恢复重放）、

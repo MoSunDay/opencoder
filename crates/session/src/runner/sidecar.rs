@@ -9,9 +9,12 @@
 //!   `record`/`persist` are no-ops - no session row, no message rows. Sidecar
 //!   content frames (`Sidecar*` events) are display-only and dropped by
 //!   `EventSink::push` (`SessionEvent::is_sidecar_frame`).
-//! - **Cost lands on the main task**: every child `LlmUsage` is forwarded as
-//!   a *bare* event (not wrapped in `SidecarChild`) so downstream surfaces
-//!   accumulate and persist it exactly like a main-task round.
+//! - **Cost lands on the main task, context does not**: every child
+//!   `LlmUsage` is re-emitted as a tagged [`SessionEvent::SidecarUsage`]
+//!   (never wrapped in `SidecarChild`) so downstream surfaces accumulate and
+//!   persist the spend — while a parent view keeps its own context meter
+//!   untouched, because the child's window (borrowed snapshot + Q/A) never
+//!   enters the parent's next request.
 //!
 //! Free functions + plain structs only; conversation state is carried
 //! explicitly in [`SidecarConv`].
@@ -56,8 +59,8 @@ pub struct SidecarTurn {
     /// the loop failed and produced no text).
     pub answer: String,
     pub elapsed_ms: u64,
-    /// Token cost of this turn (already forwarded bare to the parent's
-    /// event stream for main-task accounting).
+    /// Token cost of this turn (already forwarded to the parent's event
+    /// stream as tagged `SidecarUsage` frames for main-task accounting).
     pub total_tokens: u64,
     /// LLM rounds consumed by this turn (usage-event count).
     pub rounds: usize,
@@ -154,7 +157,8 @@ pub async fn new_conv_from(
 /// + all prior Q/A) continues, so the model sees the earlier turns.
 ///
 /// Events reaching `on_event`:
-/// - `LlmUsage` - forwarded **bare** (parent-task cost accounting);
+/// - `SidecarUsage` - the child's `LlmUsage`, re-tagged with the sidecar id
+///   (parent-task cost accounting only; never the parent's context size);
 /// - `SidecarChild` - every other child frame (deltas, tool calls, status);
 /// - `SidecarTurn` - this turn's summary frame;
 /// - child `Done`/`Error` - swallowed: the turn boundary and the failure are
@@ -218,13 +222,15 @@ pub async fn run_sidecar_turn(
                     a.total_tokens += total_tokens;
                     a.rounds += 1;
                 }
-                // Bare forward: downstream accumulates + persists this exactly
-                // like a main-task round. Never wrapped - inside a
-                // SidecarChild it would be dropped by the persistence gate
-                // and the cost would vanish.
+                // Tagged forward: downstream accumulates + persists the spend
+                // like a main-task round, but the tag keeps a parent view
+                // from mistaking the child's window for its own context size.
+                // Never wrapped - inside a SidecarChild it would be dropped
+                // by the persistence gate and the cost would vanish.
                 emit(
                     &turn_sink,
-                    SessionEvent::LlmUsage {
+                    SessionEvent::SidecarUsage {
+                        id: id.clone(),
                         total_tokens,
                         input_tokens,
                         output_tokens,

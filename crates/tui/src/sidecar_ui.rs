@@ -13,10 +13,11 @@
 //!   follow-up backlog, so every fresh question rebuilds the conversation
 //!   from a FRESH store snapshot (no stale context) and the main transcript
 //!   keeps zero sidecar trace.
-//! - Zero sidecar persistence: `SidecarStart`/`Child`/`Turn` frames are
-//!   display-only. The child's bare `LlmUsage` events ARE persisted to the
-//!   main session after each turn — full or aborted-partial (cost accounting
-//!   for web replay), matching `worker::persist_event`'s shape.
+//! - Zero sidecar content persistence: `SidecarStart`/`Child`/`Turn` frames
+//!   are display-only. The child's tagged `SidecarUsage` events ARE persisted
+//!   to the main session after each turn — full or aborted-partial (cost
+//!   accounting, never the main task's ctx) — matching `worker::persist_event`'s
+//!   shape.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -141,7 +142,7 @@ pub(crate) fn spawn_actor(
             let mut handle = tokio::spawn(async move {
                 let mut active = active;
                 let mut on_event = move |ev: SessionEvent| {
-                    if let SessionEvent::LlmUsage { .. } = &ev {
+                    if let SessionEvent::SidecarUsage { .. } = &ev {
                         if let Ok(mut g) = usage_for_cb.lock() {
                             g.push(ev.clone());
                         }
@@ -217,9 +218,9 @@ pub(crate) fn spawn_actor(
                     }
                 }
             }
-            // Cost accounting: persist the turn's bare LlmUsage records onto
-            // the MAIN session — never the sidecar's own frames. An aborted
-            // turn keeps whatever usage it already produced.
+            // Cost accounting: persist the turn's tagged SidecarUsage records
+            // onto the MAIN session — never the sidecar's content frames. An
+            // aborted turn keeps whatever usage it already produced.
             let collected: Vec<SessionEvent> = usage
                 .lock()
                 .map(|mut g| g.drain(..).collect())

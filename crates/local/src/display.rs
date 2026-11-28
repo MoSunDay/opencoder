@@ -8,7 +8,8 @@ pub(crate) fn print_event(ev: &SessionEvent) {
         SessionEvent::LlmAttemptReset => eprintln!("\n[retry: incomplete response discarded]"),
         SessionEvent::LlmRoundStart { .. }
         | SessionEvent::LlmRoundEnd
-        | SessionEvent::LlmUsage { .. } => {}
+        | SessionEvent::LlmUsage { .. }
+        | SessionEvent::SidecarUsage { .. } => {}
         SessionEvent::TextDelta(t) => {
             print!("{t}");
             use std::io::Write;

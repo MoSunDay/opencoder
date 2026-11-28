@@ -73,8 +73,8 @@ impl EventSink {
         // temporary session, so its content (`SidecarStart`/`SidecarChild`/
         // `SidecarTurn`) must never reach the DB - zero session row, zero
         // message rows, zero event rows. Its token cost still lands on the
-        // main task through the *bare* forwarded `LlmUsage` events, which are
-        // NOT sidecar frames and persist normally.
+        // main task through the tagged `SidecarUsage` frames, which are NOT
+        // sidecar frames and persist normally.
         if sev.is_sidecar_frame() {
             return Ok(());
         }

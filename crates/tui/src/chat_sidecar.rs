@@ -8,11 +8,12 @@
 //! merge, finalize) and contributes ZERO lines to the flat main transcript
 //! (the bypass Q/A leaves no trace there; [`purge`] clears the field).
 //!
-//! Persistence contract (mirrors the session-side gate): sidecar frames are
-//! display-only. The child's `LlmUsage` arrives **bare** (never wrapped in
-//! `SidecarChild`), so the parent arm accumulates it into `tokens_total`
-//! exactly like a main-task round — this module deliberately skips `LlmUsage`
-//! inner frames to avoid double counting.
+//! Persistence contract (mirrors the session-side gate): sidecar content
+//! frames are display-only. The child's usage arrives as a tagged
+//! `SidecarUsage` (never wrapped in `SidecarChild`), so the parent arm
+//! accumulates it into `tokens_total` WITHOUT touching
+//! `real_context_tokens` — this module deliberately skips usage inner frames
+//! to avoid double counting.
 
 use opencoder_session::SessionEvent;
 
@@ -81,9 +82,13 @@ pub(crate) fn fold_sidecar(chat: &mut ChatView, sev: &SessionEvent) -> bool {
             chat.sidecar_focus = true;
         }
         SessionEvent::SidecarChild { id, ev } => {
-            // A bare child `LlmUsage` never arrives wrapped; if one ever does,
-            // drop it here so the token is not counted twice in the parent.
-            if matches!(ev.as_ref(), SessionEvent::LlmUsage { .. }) {
+            // Usage never arrives wrapped (it travels as `SidecarUsage`); if
+            // one ever does, drop it here so the token is not counted twice
+            // in the parent — and never let it move the nested ctx either.
+            if matches!(
+                ev.as_ref(),
+                SessionEvent::LlmUsage { .. } | SessionEvent::SidecarUsage { .. }
+            ) {
                 return true;
             }
             if let Some(panel) = chat.sidecar.as_mut().filter(|p| p.id == *id) {

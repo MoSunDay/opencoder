@@ -220,6 +220,23 @@ describe('reduceFrame', () => {
     expect(s.error).toBe('boom');
   });
 
+  it('sidecar_usage is cost-only: it never replaces the footer usage (TUI chat.rs parity)', () => {
+    // The sidecar's spend travels tagged (`sidecar_usage`) so the footer — the
+    // parent's latest-round usage plus its context % — is not hijacked by the
+    // child's borrowed window (a bare llm_usage frame would overwrite it).
+    const parent = { event: 'llm_usage', data: { input_tokens: 600, output_tokens: 100, total_tokens: 700, context_window: 200000 } };
+    let s = reduceFrame(emptyStream(), parent, 0);
+    const sidecar = { event: 'sidecar_usage', data: { id: 'sidecar-1', input_tokens: 9000, output_tokens: 100, total_tokens: 9100 } };
+    const after = reduceFrame(s, sidecar, 1);
+    expect(after).toBe(s);
+    expect(after.usage).toEqual({ input: 600, output: 100, total: 700, contextWindow: 200000 });
+    // Edge: before any parent round the footer stays absent (null → no empty
+    // chip), the sidecar's window must not conjure one.
+    const fresh = emptyStream();
+    expect(reduceFrame(fresh, sidecar, 0)).toBe(fresh);
+    expect(fresh.usage).toBeNull();
+  });
+
   it('treats a lag-marked error as a re-sync signal, not a terminal failure', () => {
     // api.rs map_broadcast_result synthesizes {error, lag} when a consumer
     // falls behind; sse.js reconnects and the run usually keeps producing.
@@ -372,6 +389,8 @@ describe('nestedEventOf', () => {
   it('converts serde externally-tagged variants to SSE form', () => {
     expect(nestedEventOf({ TextDelta: 'abc' })).toEqual({ event: 'text_delta', data: { text: 'abc' } });
     expect(nestedEventOf({ LlmUsage: { total_tokens: 5 } })).toEqual({ event: 'llm_usage', data: { total_tokens: 5 } });
+    // Tagged sidecar cost frame maps to its own kind (never `llm_usage`).
+    expect(nestedEventOf({ SidecarUsage: { id: 's', total_tokens: 5 } })).toEqual({ event: 'sidecar_usage', data: { id: 's', total_tokens: 5 } });
     expect(nestedEventOf({ Status: 'retry 1/3' })).toEqual({ event: 'status', data: { status: 'retry 1/3' } });
     expect(nestedEventOf({})).toBe(null);
     expect(nestedEventOf('nope')).toBe(null);

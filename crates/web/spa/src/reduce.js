@@ -528,6 +528,14 @@ function foldFrame(state, frame, nowMs) {
     }
     case 'llm_usage':
       return { ...state, usage: usageOf(data) };
+    // Sidecar cost channel (session runner/sidecar.rs): the child's spend is
+    // tagged `sidecar_usage` precisely so it never lands on the footer — that
+    // footer is the parent's latest-round usage and its context % would show
+    // the sidecar's borrowed window (TUI chat.rs parity: cost-only, ctx
+    // untouched). The web footer is a per-round snapshot, not a lifetime
+    // accumulator, so there is nothing to add it to here: explicit no-op.
+    case 'sidecar_usage':
+      return state;
     case 'queue_consumed':
     case 'steer_consumed': {
       const text = typeof data.text === 'string' ? data.text : '';

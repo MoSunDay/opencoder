@@ -142,8 +142,9 @@ pub enum ChatBlock {
 /// `ChatView::sidecar`). It is ephemeral display state, not a transcript
 /// block: it must never perturb the streaming invariants on `blocks`
 /// (reasoning/text delta tail-merging, tool-group tail merge, finalize).
-/// Display-only — sidecar frames are never persisted; the conversation's
-/// cost reaches the durable layer via bare `LlmUsage`. The panel renders
+/// Display-only — sidecar content frames are never persisted; the
+/// conversation's cost reaches the parent and the durable layer via tagged
+/// `SidecarUsage` (cost only, never the parent's ctx). The panel renders
 /// ZERO lines in the flat transcript (the focused body is swapped in by
 /// `compute_display`; `chat::sidecar::purge` clears the field on exit).
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -197,9 +198,11 @@ pub struct ChatView {
     /// assistant message that carried usage) plus replayed message usage.
     /// INCLUDES subagent consumption: live rounds arrive wrapped in
     /// `SubagentChild` and are added here as well as into the child view;
-    /// replay adds each reconstructed child view's total. Focused child
-    /// views still show only their own spend. Display-only: drives the
-    /// bottom-left `[tok cost]` corner label.
+    /// replay adds each reconstructed child view's total. INCLUDES sidecar
+    /// spend: the child's rounds arrive as tagged `SidecarUsage` frames
+    /// (cost only — see `real_context_tokens`). Focused child views still
+    /// show only their own spend. Display-only: drives the bottom-left
+    /// `[tok cost]` corner label.
     pub tokens_total: u64,
     /// Provider-truth context size of the most recent completed LLM round
     /// (`total_tokens` from the latest `LlmUsage`, verbatim). When `Some`,
@@ -208,7 +211,8 @@ pub struct ChatView {
     /// renders `—` and 0%. Kept stale across `ModelSwitch` / `Compaction`
     /// / `TranscriptReset` until the next round reports fresh usage; resume
     /// rebuilds it from persisted message usage. Never set from subagent
-    /// rounds: a child's context is not part of this view's window.
+    /// rounds or sidecar usage: a child's context (and the sidecar's
+    /// borrowed snapshot + Q/A) is not part of this view's window.
     pub real_context_tokens: Option<u64>,
     /// First block belonging to the currently admitted top-level turn. A
     /// reliable completed-text event uses this floor to repair any parent

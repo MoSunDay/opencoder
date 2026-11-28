@@ -156,8 +156,8 @@ fn sidecar_child_for_unknown_id_is_swallowed() {
 }
 
 /// The child's `LlmUsage` arrives **wrapped** in `SidecarChild` — the parent
-/// arm must skip it so the token is not counted twice (the bare forward
-/// already accumulated it).
+/// arm must skip it so the token is not counted twice (the tagged
+/// `SidecarUsage` forward already accumulated it).
 #[test]
 fn sidecar_child_llm_usage_is_not_double_counted() {
     let (mut v, _tx) = open_panel();
@@ -182,18 +182,86 @@ fn sidecar_child_llm_usage_is_not_double_counted() {
     );
 }
 
-/// The bare (unwrapped) `LlmUsage` the actor forwards IS a parent event:
-/// it accumulates `tokens_total` — that is the cost-accounting contract.
+/// The tagged `SidecarUsage` the actor forwards IS a parent event, but a
+/// cost-only one: it accumulates `tokens_total` and leaves the parent's
+/// `real_context_tokens` (status-bar ctx) exactly where the parent's own
+/// last round put it — the sidecar's window (snapshot + Q/A) is not the
+/// main task's context.
 #[test]
-fn bare_llm_usage_accounts_sidecar_cost_to_the_parent() {
+fn sidecar_usage_accounts_cost_without_moving_the_parent_ctx() {
     let (mut v, _tx) = open_panel();
     v.apply(&sc_start("sc-1", "q"));
+    // The parent's own latest round: ctx = 1_000 (provider truth).
     v.apply(&SessionEvent::LlmUsage {
-        total_tokens: 500,
-        input_tokens: 400,
+        total_tokens: 1_000,
+        input_tokens: 900,
         output_tokens: 100,
     });
-    assert_eq!(v.tokens_total, 500, "sidecar cost lands on the main task");
+    assert_eq!(v.real_context_tokens, Some(1_000));
+    assert_eq!(v.tokens_total, 1_000);
+
+    // Sidecar round on a snapshot: a bigger window, but NOT the parent's.
+    v.apply(&SessionEvent::SidecarUsage {
+        id: "sc-1".into(),
+        total_tokens: 9_000,
+        input_tokens: 8_900,
+        output_tokens: 100,
+    });
+    assert_eq!(
+        v.tokens_total, 10_000,
+        "sidecar cost lands on the main task"
+    );
+    assert_eq!(
+        v.real_context_tokens,
+        Some(1_000),
+        "sidecar usage must not move the main task's ctx"
+    );
+}
+
+/// A `SidecarUsage` arriving **wrapped** in `SidecarChild` (the runner never
+/// emits it that way, but the fold must be total) is dropped at the same gate
+/// as the wrapped `LlmUsage`: no double count on the parent, and the nested
+/// view's own cost/ctx meters are not moved either.
+#[test]
+fn sidecar_child_wrapped_sidecar_usage_is_dropped() {
+    let (mut v, _tx) = open_panel();
+    v.apply(&sc_start("sc-1", "q"));
+    let (parent_cost, parent_ctx) = (v.tokens_total, v.real_context_tokens);
+    let nested = v.sidecar.as_ref().expect("panel present").view.as_ref();
+    let (nested_cost, nested_ctx) = (nested.tokens_total, nested.real_context_tokens);
+    v.apply(&sc_child(
+        "sc-1",
+        SessionEvent::SidecarUsage {
+            id: "sc-1".into(),
+            total_tokens: 9_000,
+            input_tokens: 8_900,
+            output_tokens: 100,
+        },
+    ));
+    assert_eq!(v.tokens_total, parent_cost, "no parent double count");
+    assert_eq!(v.real_context_tokens, parent_ctx, "parent ctx untouched");
+    let panel = v.sidecar.as_ref().expect("panel still present");
+    assert_eq!(panel.view.tokens_total, nested_cost, "no nested cost");
+    assert_eq!(panel.view.real_context_tokens, nested_ctx, "no nested ctx");
+    assert!(
+        panel.view.blocks.is_empty(),
+        "nothing folded into the nested view"
+    );
+}
+
+/// Without any parent round yet, a sidecar round still leaves ctx `None`
+/// (status bar renders `—`), never the sidecar's window size.
+#[test]
+fn sidecar_usage_before_any_parent_round_keeps_ctx_unknown() {
+    let (mut v, _tx) = open_panel();
+    v.apply(&SessionEvent::SidecarUsage {
+        id: "sc-1".into(),
+        total_tokens: 9_000,
+        input_tokens: 8_900,
+        output_tokens: 100,
+    });
+    assert_eq!(v.tokens_total, 9_000, "cost still lands on the main task");
+    assert_eq!(v.real_context_tokens, None, "ctx stays unknown");
 }
 
 /// `SidecarTurn` finalizes the panel: status, answer summary, and the

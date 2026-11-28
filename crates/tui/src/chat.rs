@@ -131,6 +131,13 @@ impl ChatView {
                 // reports fresh usage.
                 self.real_context_tokens = Some(*total_tokens);
             }
+            // Sidecar cost channel (tagged, so it is recognizable): the
+            // child's spend joins the session-lifetime cost, but its window
+            // is a borrowed snapshot + Q/A that never enters this view's
+            // next request — `real_context_tokens` must stay untouched.
+            SessionEvent::SidecarUsage { total_tokens, .. } => {
+                self.tokens_total = self.tokens_total.saturating_add(*total_tokens);
+            }
             SessionEvent::TextDelta(t) => {
                 self.recover_round_anchor_if_missing();
                 self.append_text_delta(&sanitize_multiline(t));
@@ -458,9 +465,8 @@ impl ChatView {
             // Sidecar frames fold into the panel field `chat.sidecar` (see
             // `sidecar::fold_sidecar`): Start claims/creates the panel,
             // Child routes into the panel's nested view, Turn finalizes it.
-            // Bare `LlmUsage` is NOT a sidecar frame — it already took the
-            // parent arm above, which is exactly how the sidecar's cost is
-            // accounted to the main task (tokens_total).
+            // `SidecarUsage` is NOT one of the three display frames — it
+            // took the cost-only arm above (`tokens_total` +=, ctx untouched).
             SessionEvent::SidecarStart { .. }
             | SessionEvent::SidecarChild { .. }
             | SessionEvent::SidecarTurn { .. } => {

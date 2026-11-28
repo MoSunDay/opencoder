@@ -341,16 +341,19 @@ fn send_completed_assistant(
 /// forget) so the event is durable before the worker proceeds — no loss on
 /// immediate exit. Used by non-run arms where no flusher
 /// is active. `pub(crate)` so the sidecar actor (`sidecar_ui`) reuses the
-/// exact same persistence shape for the bare `LlmUsage` records it forwards.
+/// exact same persistence shape for the tagged `SidecarUsage` records it
+/// forwards.
 pub(crate) async fn persist_event(
     store: &Option<Arc<dyn Store>>,
     session_id: &str,
     sev: &SessionEvent,
 ) {
-    // Sidecar frames are display-only: the sidecar conversation has no
-    // session/message rows and its content must never land in the main
+    // Sidecar content frames are display-only: the sidecar conversation has
+    // no session/message rows and its content must never land in the main
     // session's event log. Its cost is accounted to the main task through
-    // the *bare* `LlmUsage` events the child forwards, which DO persist.
+    // the tagged `SidecarUsage` events the child forwards, which DO persist
+    // (under their own kind, so a replaying client never mistakes them for
+    // the main task's latest-round usage).
     if sev.is_sidecar_frame() {
         return;
     }

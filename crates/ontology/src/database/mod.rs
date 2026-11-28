@@ -16,6 +16,7 @@ pub(crate) use store::Store;
 pub(crate) use values::validate_structured_value;
 
 use crate::error::AppError;
+use opencoder_database::ConnectionLease;
 use std::{
     path::Path,
     sync::{
@@ -24,15 +25,14 @@ use std::{
     },
 };
 use tokio::sync::Notify;
-use turso::Connection;
 
-tokio::task_local! { pub(crate) static REQUEST_CONNECTION: Connection; }
+tokio::task_local! { pub(crate) static REQUEST_CONNECTION: ConnectionLease; }
 
 #[derive(Clone)]
 pub(crate) struct Database {
     pub db: opencoder_database::Database,
     #[cfg(test)]
-    fallback: Connection,
+    fallback: ConnectionLease,
     pub active: Arc<AtomicUsize>,
     pub changed: Arc<Notify>,
 }

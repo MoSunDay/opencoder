@@ -15,14 +15,19 @@ Commit: 0abfe0c77
 - [src/store/errors.rs](../../../crates/store/src/store/errors.rs) — 存储错误分类：
   FK 违例 / `SQLITE_CORRUPT` / worker panic；session 持久化重建与列表坏行降级共用，
   crate 根导出 `is_foreign_key_violation`、`is_storage_corruption`
-- [src/turso_store/](../../../crates/store/src/turso_store) — Turso 实现（WAL）；池打开即挂载周期 PASSIVE checkpoint（`opencoder-database/src/checkpoint.rs`：60s/1MiB 门限、独立诊断连接、busy 即跳过；PASSIVE 只回填已提交帧不截断文件，TRUNCATE 仍 CLI-only）；全部写路径经 `opencoder-database::busy`（BEGIN IMMEDIATE 有界 Busy 重试）取跨进程写锁，`tx.rs` 为其 re-export 垫片
+- [src/turso_store/](../../../crates/store/src/turso_store) — Turso 实现（WAL）；`open_reader` 只读打开（巡检命令用，不取写者锁、不 bootstrap/迁移）；写者池打开即挂载周期 PASSIVE checkpoint（仅写者锁持有者执行）（`opencoder-database/src/checkpoint.rs`：60s/1MiB 门限、独立诊断连接、busy 即跳过；PASSIVE 只回填已提交帧不截断文件，TRUNCATE 仍 CLI-only）；全部写路径经 `opencoder-database::busy`（BEGIN IMMEDIATE 有界 Busy 重试）取跨进程写锁，`tx.rs` 为其 re-export 垫片
 - [src/jsonl.rs](../../../crates/store/src/jsonl.rs) — `JsonlStore`
 - [src/project.rs](../../../crates/store/src/project.rs) — `ProjectStore`
   项目目录与执行持久化
 - [src/session_store.rs](../../../crates/store/src/session_store.rs) —
   `SessionStore`
 - [src/ts_registry.rs](../../../crates/store/src/ts_registry.rs) — tmux 会话
-  中央注册表
+  中央注册表；`TsRegistry::open` 是多写者 WAL 下的普通写者（池持共享维护租约，事务经
+  `BEGIN IMMEDIATE` 有界重试串行化），`open_reader` 只读（TUI 镜像常驻持有）；ts 命令与 TUI 镜像
+  都只在一次变更期间打开写者，无人长期持有 `ts.db` 写者
+- [src/bundle.rs](../../../crates/store/src/bundle.rs) — 会话二进制 bundle 导出/导入；导出只读：
+  输入 = pending 行 + `Store::orphan_inputs`（已 promote 未 record 的行以 pending 形态导出），不在
+  导出路径就地修复，reader 与写者对同一行导出相同结果
 - [src/types.rs](../../../crates/store/src/types.rs) — `SessionMeta`、
   `SessionFilter` 等 DTO；模式模型覆盖是独立元数据，不并入 `SessionMeta`
 - [src/session_models.rs](../../../crates/store/src/session_models.rs) —
@@ -80,9 +85,24 @@ Commit: 0abfe0c77
 - [brain_layered/](../../../crates/store/src/turso_store/execution/brain_layered)
   — 分层画布投影（含 schema.rs）
 - [database](../../../crates/database/src/lib.rs) — 统一执行 Store、Fleet、
-  TsRegistry、Ontology 的数据库操作；maintenance serve-bridge（
+  TsRegistry、Ontology 的数据库操作；turso `0.9.0-pre.2` 多进程 WAL（`<db>-wal` + 协调文件
+  `<db>-tshm`），任意进程都是写者，事务由引擎 WAL 写锁 + `busy::run_tx` 的 `BEGIN IMMEDIATE`
+  有界重试串行化；`Intent::{Writer, Reader}` 显式打开意图：写者（`Database::open`，默认）经
+  [engine.rs](../../../crates/database/src/engine.rs) `open_writer` 打开——`<db>-tshm` 缺失即首次
+  打开，在 `<db>.maintenance.lock` 的**独占**租约下初始化后降级为**共享**租约并持有到池释放，
+  其他在同一时刻打开的写者对共享租约等待（`MaintenanceActive`，120s 预算），协调文件仍在初始化
+  的打开在 10s 内重试（[maintenance_lock.rs](../../../crates/database/src/maintenance_lock.rs)：
+  `acquire_shared` / `try_acquire_exclusive`、`WritersActive` = "writers still active"）；
+  reader（`Database::open_reader` / `open_with(.., Intent::Reader)`，store 侧为 `TursoStore::open_reader`）
+  不取租约、引擎只读、连接 `query_only`、不建 marker、不注册也不跑 checkpoint，`write` 被拒；
+  checkpoint 句柄经 `Weak` 绑定到发布它的池，周期循环（`periodic_pass`）每轮剔除池已释放的失效
+  句柄，每个写者进程各跑 PASSIVE、引擎 checkpointer 锁仲裁；`run_once` 复用存活池的句柄或在
+  自己的共享租约下开私有引擎；TRUNCATE 与可写 bridge 取**独占**租约，写者存活时快速失败
+  `WritersActive`；引擎从不删除 `-wal`/`-tshm`，不要在进程打开着库时手工删除它们；
+  maintenance serve-bridge（
   [bridge.rs](../../../crates/database/src/maintenance/bridge.rs)）将 stdin
-  空闲超 30s 的写事务回滚
+  空闲超 30s 的写事务回滚，只在非只读时取独占租约（见
+  [changelog](../../../features/changelog/2026-11-28/database-multi-writer-wal-and-maintenance-lease.md)）
 - [session_index](../../../scripts/maintenance/session_index/README.md) —
   历史会话排序索引维护
 - [brain_cleanup](../../../scripts/maintenance/brain_cleanup/__main__.py) —
@@ -90,7 +110,22 @@ Commit: 0abfe0c77
 - [db_repair](../../../scripts/maintenance/db_repair/README.md) — Turso 库损坏
   （`IdxDelete`/`FOREIGN KEY`/坏页）时 `.dump` + 页级 carve 重建新库
 - [concurrency.rs](../../../crates/database/tests/concurrency.rs)、
-  [processes.rs](../../../crates/database/tests/processes.rs)、
+  [processes.rs](../../../crates/database/tests/processes.rs)（多写者子进程 + reader）、
+  [maintenance_lock.rs](../../../crates/database/tests/maintenance_lock.rs)（子进程写者：共享/独占
+  租约互斥、`WritersActive` / `MaintenanceActive`）、
+  [first_open_race.rs](../../../crates/database/tests/first_open_race.rs)（多子进程同时首次打开）、
+  [busy_contention.rs](../../../crates/database/tests/busy_contention.rs)（`run_tx` 有界重试）、
+  [checkpoint_binding.rs](../../../crates/database/tests/checkpoint_binding.rs) /
+  [checkpoint.rs](../../../crates/database/tests/checkpoint.rs)（句柄绑定池、多池、缺库/`:memory:` 拒绝）、
+  [multi_writer_soak.rs](../../../crates/database/tests/multi_writer_soak.rs)（`#[ignore]` 多写者压测：
+  杀掉一个写者后其余推进、独占租约可得、TRUNCATE 后 WAL 为空）、
+  [database_paths.rs](../../../crates/database/tests/database_paths.rs)（符号链接路径统一）、
+  [maintenance.rs](../../../crates/database/tests/maintenance.rs)（TRUNCATE 独占租约规则）、
+  [schema_bootstrap_race.rs](../../../crates/store/tests/schema_bootstrap_race.rs)（多子进程同时对
+  全新文件 bootstrap），
+  [reader_open.rs](../../../crates/store/tests/reader_open.rs)（store reader 与存活写者并存）、
+  [store_integration/bundle.rs](../../../crates/store/tests/store_integration/bundle.rs)
+  （reader 导出携带 orphan 输入）、
   [storage_mixed.rs](../../../crates/store/examples/storage_mixed.rs) — 并发、
   多进程与混合负载回归
 

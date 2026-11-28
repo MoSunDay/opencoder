@@ -243,21 +243,21 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 
 ### 🗄️ 存储
 
-两者**底层都是 SQLite**，落盘均为标准 `.db` + `.db-wal` + `.db-shm`（WAL 模式），差异在驱动层与表模型：
+两者**底层都是 SQLite**，落盘均为标准 `.db` + `.db-wal`（WAL 模式；共享内存索引文件 opencode 为 `.db-shm`，opencoder/Turso 为 `.db-tshm`），差异在驱动层与表模型：
 
 | 维度 | opencode `1.17.8` | opencoder `0.1.1` |
 | --- | --- | --- |
-| 数据库 | SQLite（bun 内嵌） | Turso `0.8.3`（纯 Rust SQLite 兼容引擎） |
+| 数据库 | SQLite（bun 内嵌） | Turso `0.9.0-pre.2`（纯 Rust SQLite 兼容引擎） |
 | 访问层 | Drizzle ORM（JS，运行时迁移 `migration` 表） | 手写 SQL + `Store` trait（`crates/store/src/store.rs`） |
 | 驱动语言 | JS/V8 ↔ SQLite C ABI | 纯 Rust 进程内执行（无 C ABI、无 FFI） |
-| WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL`（同样的并发模型） |
+| WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL`（多进程共享 WAL：任意多个 opencoder 进程可同时写同一个库） |
 | 表（核心） | `session` / `message` / `step` / `agent` / `tool_use` / `snapshot` / `checkpoint` / `event` / `subagent` | `sessions` / `messages` / `session_inputs` / `session_events` / `subagent_tasks` / `schema_version` |
 | 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | `schema_version` 单值 + `CREATE TABLE IF NOT EXISTS` 幂等建表 |
 | 库文件命名 | `opencode.db`（按 channel 可变，如 `opencode-dev.db`） | 由 workdir 决定（每 workdir 一个库） |
 
 > Ontology 使用独立的 SQLite 后端（`ontology.db`，内嵌 turso 引擎），与主存储库文件分开。
 >
-> 两者的 WAL 并发模型等价（多读一写、读不阻塞写），存储吞吐差异主要来自驱动层 —— opencode 经 Drizzle ORM + V8 跨语言，opencoder 在进程内直接运行纯 Rust 数据库引擎且无 ORM 转换层。
+> 两者的读侧 WAL 并发等价（读不阻塞写、写不阻塞读）；写侧 opencode 为多读一写，opencoder 允许多个进程同时写同一个库 —— 写事务由引擎的 WAL 写锁串行化，`BEGIN IMMEDIATE` 冲突时 busy 重试。只有两类操作会短暂独占库文件：库文件的首次打开（期间到达的其他写者等待其完成），以及离线维护 —— `storage checkpoint --writers-stopped`（TRUNCATE）与 `storage serve --writable`，它们通过 `<db>.maintenance.lock` 租约与写者互斥，仍有写者时立即报 "writers still active"。存储吞吐差异主要来自驱动层 —— opencode 经 Drizzle ORM + V8 跨语言，opencoder 在进程内直接运行纯 Rust 数据库引擎且无 ORM 转换层。
 
 > 说明：端到端任务表现受 LLM 主导（首轮 token 延迟为 provider RTT），同一模型下两者任务能力等价；**差异集中在运行时基线** —— 内存占用、启动延迟、分发体积。对受约束环境（CI runner、容器、弱机）与多实例部署（按进程计的 RSS 直接决定并发密度），opencoder 的低开销优势可被直接摊销。
 

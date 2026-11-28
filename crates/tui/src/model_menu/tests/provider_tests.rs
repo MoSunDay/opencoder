@@ -1,156 +1,16 @@
-//! Tests for ProviderPatch, ProviderList CRUD, ProviderForm, and headers.
+//! `ProviderList` tests: construction, Enter/y/n flows, transitions to the
+//! form, `model_id` fallback for providers without a model, and the
+//! save-default confirmation dialog.
 
-use super::common::{ctrl, enter, esc, key, provider_cfg};
+use super::common::{enter, esc, key, provider_cfg};
 use crate::model_menu::list::ProviderList;
-use crate::model_menu::provider_form::{ProviderField, ProviderForm};
+use crate::model_menu::provider_form::ProviderField;
 use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
 use ratatui::backend::TestBackend;
-use ratatui::layout::Rect;
 use ratatui::Terminal;
 
-// ── ProviderPatch ─────────────────────────────────────────────────────────
-
-#[test]
-fn provider_patch_wraps_env_var_name_in_braces() {
-    let p = crate::model_menu::patch::ProviderPatch {
-        protocol: "chat_completions".into(),
-        name: "deepseek".into(),
-        model_id: "chat".into(),
-        base_url: "u".into(),
-        api_key: Some("MY_KEY".into()),
-        headers: vec![],
-    };
-    let v = p.to_json();
-    assert_eq!(v["model"], serde_json::json!("deepseek/chat"));
-    assert_eq!(
-        v["providers"]["deepseek"]["api_key"],
-        serde_json::json!("{MY_KEY}")
-    );
-    // model_id must be persisted per-provider so ProviderList can recover it
-    // on reopen (regression: was lost, causing wrong model after /model switch).
-    assert_eq!(
-        v["providers"]["deepseek"]["model"],
-        serde_json::json!("chat")
-    );
-}
-
-#[test]
-fn provider_patch_omits_api_key_when_untouched() {
-    let p = crate::model_menu::patch::ProviderPatch {
-        protocol: "chat_completions".into(),
-        name: "deepseek".into(),
-        model_id: "chat".into(),
-        base_url: "u".into(),
-        api_key: None,
-        headers: vec![],
-    };
-    let v = p.to_json();
-    let has_key = v["providers"]["deepseek"]
-        .as_object()
-        .unwrap()
-        .contains_key("api_key");
-    assert!(!has_key, "untouched api_key must be absent from patch");
-}
-
-#[test]
-fn provider_patch_clears_api_key_when_empty() {
-    let p = crate::model_menu::patch::ProviderPatch {
-        protocol: "chat_completions".into(),
-        name: "deepseek".into(),
-        model_id: "chat".into(),
-        base_url: "u".into(),
-        api_key: Some("".into()),
-        headers: vec![],
-    };
-    let v = p.to_json();
-    assert_eq!(
-        v["providers"]["deepseek"]["api_key"],
-        serde_json::Value::Null
-    );
-}
-
-#[test]
-fn provider_patch_serializes_headers() {
-    let p = crate::model_menu::patch::ProviderPatch {
-        protocol: "chat_completions".into(),
-        name: "svc".into(),
-        model_id: "m".into(),
-        base_url: "u".into(),
-        api_key: Some("k".into()),
-        headers: vec![
-            ("X-Tenant".into(), "42".into()),
-            ("X-Trace".into(), "abc".into()),
-        ],
-    };
-    let v = p.to_json();
-    let hdrs = v["providers"]["svc"]["headers"].as_array().unwrap();
-    assert_eq!(hdrs.len(), 2);
-    assert_eq!(hdrs[0]["name"], serde_json::json!("X-Tenant"));
-    assert_eq!(hdrs[0]["value"], serde_json::json!("42"));
-}
-
-#[test]
-fn delete_and_switch_patches() {
-    let d = crate::model_menu::patch::delete_provider_json("foo");
-    assert_eq!(d["providers"]["foo"], serde_json::Value::Null);
-    let s = crate::model_menu::patch::switch_provider_json("foo", "bar");
-    assert_eq!(s["model"], serde_json::json!("foo/bar"));
-}
-
 // ── ProviderList ──────────────────────────────────────────────────────────
-
-/// End-to-end regression: a provider created via the menu (ProviderForm →
-/// ProviderPatch → to_json → Config::save → Config::load) must retain its
-/// model_id in the provider entry. Previously `to_json` omitted the per-
-/// provider `model` field, so reopening `/model` lost the model_id and fell
-/// back to the active model's id — switching then wrote the wrong model.
-#[test]
-fn provider_patch_model_survives_save_load_cycle() {
-    use opencoder_core::Config;
-
-    let dir = tempfile::tempdir().unwrap();
-    // Isolate config discovery to this tempdir on this thread only (no
-    // process-env mutation → no `set_var` UB). The thread-local override also
-    // disables env overlays (`OPENCODER_MODEL` etc.) so `Config::load`'s
-    // `apply_env` can't clobber the saved model with a host env var.
-    let _home = super::common::lock_home(dir.path());
-    // Simulate adding a provider while a *different* model is active.
-    let patch = crate::model_menu::patch::ProviderPatch {
-        protocol: "chat_completions".into(),
-        name: "qwen3".into(),
-        model_id: "qwen-max".into(),
-        base_url: "https://api.qwen.com/v1".into(),
-        api_key: Some("sk-test".into()),
-        headers: vec![],
-    };
-    let json = patch.to_json();
-    assert_eq!(
-        json["providers"]["qwen3"]["model"],
-        serde_json::json!("qwen-max"),
-        "to_json must persist model per-provider"
-    );
-
-    Config::save(dir.path(), &json).unwrap();
-    let cfg = Config::load(dir.path()).unwrap();
-    // Active model is qwen3/qwen-max, not glm — so the fallback in
-    // ProviderList would NOT produce qwen-max unless the provider carries it.
-    assert_eq!(cfg.model_id(), "qwen-max");
-
-    // Now switch active model to something else and reopen the menu:
-    // the qwen3 entry must still show qwen-max, not the active model.
-    let switch = crate::model_menu::patch::switch_provider_json("other", "other-model");
-    Config::save(dir.path(), &switch).unwrap();
-    let cfg = Config::load(dir.path()).unwrap();
-    assert_eq!(cfg.model_id(), "other-model", "active model changed");
-
-    let list = ProviderList::new(&cfg);
-    let entry = list.entries.iter().find(|e| e.name == "qwen3").unwrap();
-    assert_eq!(
-        entry.model_id, "qwen-max",
-        "ProviderList must read the persisted per-provider model, not the active model"
-    );
-}
 
 #[test]
 fn provider_list_builds_from_config() {
@@ -180,7 +40,11 @@ fn list_enter_then_y_saves_as_default() {
     handle_model_key(&mut slot, enter());
     match handle_model_key(&mut slot, key('y')) {
         ModelOutcome::Save(json) => {
-            assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
+            assert_eq!(
+                json["modes"]["act"]["model"],
+                serde_json::json!("deepseek/deepseek-chat")
+            );
+            assert!(json["model"].is_null(), "no Shared default written");
         }
         _ => panic!("y should Save (persist default)"),
     }
@@ -193,7 +57,11 @@ fn list_enter_then_n_is_session_only() {
     handle_model_key(&mut slot, enter());
     match handle_model_key(&mut slot, key('n')) {
         ModelOutcome::SaveSessionOnly(json) => {
-            assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
+            assert_eq!(
+                json["modes"]["act"]["model"],
+                serde_json::json!("deepseek/deepseek-chat")
+            );
+            assert!(json["model"].is_null(), "no Shared default written");
         }
         _ => panic!("n should be SaveSessionOnly"),
     }
@@ -206,7 +74,10 @@ fn list_enter_then_enter_saves_as_default() {
     handle_model_key(&mut slot, enter());
     match handle_model_key(&mut slot, enter()) {
         ModelOutcome::Save(json) => {
-            assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
+            assert_eq!(
+                json["modes"]["act"]["model"],
+                serde_json::json!("deepseek/deepseek-chat")
+            );
         }
         _ => panic!("second Enter should Save (persist as global default)"),
     }
@@ -263,147 +134,6 @@ fn list_d_then_y_deletes() {
         }
         _ => panic!("y should delete (Save)"),
     }
-}
-
-// ── ProviderForm ──────────────────────────────────────────────────────────
-
-#[test]
-fn provider_form_save_produces_patch() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
-    handle_model_key(&mut slot, key('e')); // -> Form
-    {
-        let f = match slot.as_mut() {
-            Some(ModelMenu::Form(f)) => f,
-            _ => unreachable!(),
-        };
-        f.focus = ProviderField::Save;
-    }
-    assert!(matches!(
-        handle_model_key(&mut slot, enter()),
-        ModelOutcome::Idle
-    ));
-    match handle_model_key(&mut slot, key('y')) {
-        ModelOutcome::Save(json) => {
-            assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
-            assert_eq!(
-                json["providers"]["deepseek"]["base_url"],
-                serde_json::json!("https://api.deepseek.com/v1")
-            );
-            let hdrs = json["providers"]["deepseek"]["headers"].as_array().unwrap();
-            assert_eq!(hdrs.len(), 1);
-        }
-        _ => panic!("Save should produce Save outcome"),
-    }
-}
-
-#[test]
-fn provider_form_api_key_editing() {
-    let mut form = ProviderForm::from_existing("svc", "u", "m", "orig-key-12345", vec![]);
-    form.focus = ProviderField::ApiKey;
-    assert_eq!(form.api_key_display(), "or****2345");
-    form.api_key_input.push('n');
-    form.api_key_edited = true;
-    assert_eq!(form.api_key_display(), "*");
-    assert_eq!(form.resolve_api_key(), Some("n".into()));
-}
-
-// ── Cancel ────────────────────────────────────────────────────────────────
-
-#[test]
-fn esc_cancels_any_mode() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(
-        crate::model_menu::config_form::ConfigForm::new(&super::common::cfg()),
-    ));
-    assert!(matches!(
-        handle_model_key(&mut slot, esc()),
-        ModelOutcome::Cancel
-    ));
-    assert!(slot.is_none());
-
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
-    assert!(matches!(
-        handle_model_key(&mut slot, esc()),
-        ModelOutcome::Cancel
-    ));
-    assert!(slot.is_none());
-}
-
-// ── paste routing (ProviderForm / ModelMenu::Form) ────────────────────────
-
-#[test]
-fn provider_form_paste_into_api_key() {
-    let mut form = ProviderForm::from_existing("svc", "u", "m", "orig-key-12345", vec![]);
-    form.focus = ProviderField::ApiKey;
-    form.paste_into("sk-pasted-secret");
-    assert_eq!(form.api_key_input, "sk-pasted-secret");
-    assert!(
-        form.api_key_edited,
-        "paste should mark the api key as edited"
-    );
-    assert_eq!(form.resolve_api_key(), Some("sk-pasted-secret".into()));
-}
-
-#[test]
-fn provider_form_paste_appends_to_model_id() {
-    let mut form = ProviderForm::from_existing("svc", "u", "m", "orig", vec![]);
-    form.focus = ProviderField::ModelId;
-    form.paste_into("-preview");
-    assert_eq!(form.model_id, "m-preview");
-}
-
-#[test]
-fn provider_form_paste_skips_readonly_name() {
-    let mut form = ProviderForm::from_existing("svc", "u", "m", "orig", vec![]);
-    // from_existing marks the name read-only.
-    form.focus = ProviderField::Name;
-    form.paste_into("ignored");
-    assert_eq!(form.name, "svc", "a read-only name must not accept paste");
-}
-
-#[test]
-fn provider_form_paste_into_base_url() {
-    let mut form = ProviderForm::new_blank(&provider_cfg());
-    form.focus = ProviderField::BaseUrl;
-    let before = form.base_url.clone();
-    form.paste_into("/v2");
-    assert_eq!(form.base_url, format!("{}/v2", before));
-}
-
-#[test]
-fn model_menu_paste_routes_to_provider_form_field() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
-        "svc",
-        "u",
-        "m",
-        "orig",
-        vec![],
-    )));
-    {
-        let f = match slot.as_mut() {
-            Some(ModelMenu::Form(f)) => f,
-            _ => unreachable!(),
-        };
-        f.focus = ProviderField::BaseUrl;
-    }
-    if let Some(menu) = slot.as_mut() {
-        menu.paste("https://example.com/v1");
-    }
-    let f = match slot.as_ref().unwrap() {
-        ModelMenu::Form(f) => f,
-        _ => unreachable!(),
-    };
-    assert_eq!(f.base_url, "uhttps://example.com/v1");
-}
-
-#[test]
-fn model_menu_paste_is_a_noop_in_list() {
-    // The List variant has no text fields; paste must not panic and must leave
-    // the menu unchanged.
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
-    if let Some(menu) = slot.as_mut() {
-        menu.paste("anything");
-    }
-    assert!(matches!(slot, Some(ModelMenu::List(_))));
 }
 
 // ── model_id fallback for unset provider model ────────────────────────────
@@ -540,7 +270,7 @@ fn save_default_confirm_renders_visible_dialog() {
         all.contains("Save model default?"),
         "confirm title missing:\n{all}"
     );
-    assert!(all.contains("Shared default?"), "scope missing:\n{all}");
+    assert!(all.contains("Act default?"), "scope missing:\n{all}");
     assert!(
         all.contains("Legacy automatic save target"),
         "save target missing:\n{all}"
@@ -550,251 +280,4 @@ fn save_default_confirm_renders_visible_dialog() {
         "session-only hint missing:\n{all}"
     );
     assert!(all.contains("deepseek-chat"), "model name missing:\n{all}");
-}
-
-// ── Ctrl+L / Ctrl+U clear focused field ───────────────────────────────────
-
-#[test]
-fn ctrl_clear_empties_model_id_and_base_url() {
-    let mut slot: Option<ModelMenu> =
-        Some(ModelMenu::Form(ProviderForm::new_blank(&provider_cfg())));
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Form(f) => f,
-            _ => unreachable!(),
-        };
-        f.focus = ProviderField::ModelId;
-        f.model_id = "glm-5.2".into();
-    }
-    handle_model_key(&mut slot, ctrl('u'));
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Form(f) => f,
-            _ => unreachable!(),
-        };
-        assert!(f.model_id.is_empty(), "Ctrl+U must clear model_id");
-        f.focus = ProviderField::BaseUrl;
-        f.base_url = "https://open.bigmodel.cn/v4".into();
-    }
-    handle_model_key(&mut slot, ctrl('l'));
-    let f = match slot.as_ref().unwrap() {
-        ModelMenu::Form(f) => f,
-        _ => unreachable!(),
-    };
-    assert!(f.base_url.is_empty(), "Ctrl+L must clear base_url");
-    assert_eq!(f.focus, ProviderField::BaseUrl, "focus must stay");
-}
-
-#[test]
-fn ctrl_clear_editable_name_but_readonly_name_is_noop() {
-    // New provider: editable name clears.
-    let mut slot: Option<ModelMenu> =
-        Some(ModelMenu::Form(ProviderForm::new_blank(&provider_cfg())));
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Form(f) => f,
-            _ => unreachable!(),
-        };
-        f.name = "acme".into();
-    }
-    handle_model_key(&mut slot, ctrl('u'));
-    let f = match slot.as_ref().unwrap() {
-        ModelMenu::Form(f) => f,
-        _ => unreachable!(),
-    };
-    assert!(f.name.is_empty(), "Ctrl+U must clear editable name");
-
-    // Editing an existing provider: name is read-only → no-op.
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
-        "acme",
-        "u",
-        "m",
-        "k",
-        vec![],
-    )));
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Form(f) => f,
-            _ => unreachable!(),
-        };
-        f.focus = ProviderField::Name;
-    }
-    handle_model_key(&mut slot, ctrl('l'));
-    let f = match slot.as_ref().unwrap() {
-        ModelMenu::Form(f) => f,
-        _ => unreachable!(),
-    };
-    assert_eq!(f.name, "acme", "read-only name must survive Ctrl+L");
-}
-
-#[test]
-fn ctrl_clear_api_key_marks_edited() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
-        "svc",
-        "u",
-        "m",
-        "orig-key-12345",
-        vec![],
-    )));
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Form(f) => f,
-            _ => unreachable!(),
-        };
-        f.focus = ProviderField::ApiKey;
-    }
-    assert!(!slot_edited(&slot));
-    handle_model_key(&mut slot, ctrl('u'));
-    let f = match slot.as_ref().unwrap() {
-        ModelMenu::Form(f) => f,
-        _ => unreachable!(),
-    };
-    assert!(
-        f.api_key_edited,
-        "Ctrl+U on api_key must mark it edited (persist the clear)"
-    );
-    assert!(
-        f.api_key_input.is_empty(),
-        "api_key raw buffer must be empty after clear"
-    );
-}
-
-fn slot_edited(slot: &Option<ModelMenu>) -> bool {
-    match slot {
-        Some(ModelMenu::Form(f)) => f.api_key_edited,
-        _ => false,
-    }
-}
-
-#[test]
-fn ctrl_d_still_quits_in_provider_form() {
-    let mut slot: Option<ModelMenu> =
-        Some(ModelMenu::Form(ProviderForm::new_blank(&provider_cfg())));
-    let out = handle_model_key(&mut slot, ctrl('d'));
-    assert!(matches!(out, ModelOutcome::Quit), "Ctrl+D must quit modal");
-    assert!(slot.is_none());
-}
-
-// ── provider form cursor placement ────────────────────────────────────────
-
-#[test]
-fn provider_form_cursor_on_model_id() {
-    let mut form = ProviderForm::new_blank(&provider_cfg());
-    form.focus = ProviderField::ModelId;
-    form.model_id = "glm-5.2".into();
-    form.model_id_cursor = form.model_id.chars().count(); // end
-    let menu = ModelMenu::Form(form);
-
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
-        })
-        .unwrap();
-
-    // popup: x=4, y=10 (want_h = 12 + max(1 header row) = 13); model_id is
-    // row 1; "glm-5.2" has 7 chars → cx = 4+1+15+7 = 27, cy = 10+1+1 = 12
-    terminal.backend_mut().assert_cursor_position((27, 12));
-}
-
-#[test]
-fn provider_form_cursor_on_api_key_uses_raw_buffer() {
-    let mut form = ProviderForm::from_existing("svc", "u", "m", "orig-key-12345", vec![]);
-    form.focus = ProviderField::ApiKey;
-    form.api_key_edited = true;
-    form.api_key_input = "n".into();
-    form.api_key_cursor = form.api_key_input.chars().count(); // end
-    let menu = ModelMenu::Form(form);
-
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
-        })
-        .unwrap();
-
-    // api_key is row 3; raw buffer "n" (1 char) → cx = 4+1+15+1 = 21,
-    // cy = 10+1+3 = 14
-    terminal.backend_mut().assert_cursor_position((21, 14));
-}
-
-#[test]
-fn provider_form_cursor_hidden_on_save_and_readonly_name() {
-    // Save button: no text field → no cursor.
-    let mut form = ProviderForm::new_blank(&provider_cfg());
-    form.focus = ProviderField::Save;
-    let menu = ModelMenu::Form(form);
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
-        })
-        .unwrap();
-    terminal.backend_mut().assert_cursor_position((0, 0));
-
-    // Read-only name in edit mode: no cursor either.
-    let mut form = ProviderForm::from_existing("svc", "u", "m", "k", vec![]);
-    form.focus = ProviderField::Name;
-    let menu = ModelMenu::Form(form);
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
-        })
-        .unwrap();
-    terminal.backend_mut().assert_cursor_position((0, 0));
-}
-
-#[test]
-fn provider_form_cursor_inside_headers_cell() {
-    let mut form = ProviderForm::new_blank(&provider_cfg());
-    form.focus = ProviderField::Headers;
-    form.headers_active = true;
-    form.headers = crate::model_menu::headers::HeadersEditor::new(vec![
-        ("X-Region".into(), "eu".into()),
-        ("X-Env".into(), "prod".into()),
-    ]);
-    form.headers.selected = 1;
-    form.headers.editing_value = false; // editing name of pair 1
-    let menu = ModelMenu::Form(form);
-
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
-        })
-        .unwrap();
-
-    // 2 headers → want_h = 13 → popup y = 23-13 = 10; pair rows start at
-    // popup line 5; pair 1 (index 1) → cy = 10+1+5+1 = 17.
-    // name column starts at popup col 5; "X-Env" has 5 chars → cx = 4+1+5+5 = 15
-    terminal.backend_mut().assert_cursor_position((15, 17));
-}
-
-#[test]
-fn provider_form_cursor_inside_headers_value() {
-    let mut form = ProviderForm::new_blank(&provider_cfg());
-    form.focus = ProviderField::Headers;
-    form.headers_active = true;
-    form.headers =
-        crate::model_menu::headers::HeadersEditor::new(vec![("X-Region".into(), "eu-west".into())]);
-    form.headers.editing_value = true; // editing value of pair 0
-    let menu = ModelMenu::Form(form);
-
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
-        })
-        .unwrap();
-
-    // pair 0 → cy = 11+1+5+0 = 17. value column starts at popup col 28
-    // (5 spaces + 20-char name + " = "); "eu-west" has 7 chars → cx = 4+1+28+7 = 40
-    terminal.backend_mut().assert_cursor_position((40, 17));
 }

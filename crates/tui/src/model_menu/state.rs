@@ -13,7 +13,7 @@ use super::provider_form::ProviderForm;
 pub enum ModelMenu {
     /// `/envs` — local configuration Env lifecycle manager.
     Env(EnvMenu),
-    /// Shared/Act/Plan entry point for `/model` and `/config`.
+    /// Act/Plan entry point for `/model`; Shared/Act/Plan for `/config`.
     ModeSelect(Box<ModeSelection>),
     /// `/config` — Shared generation and application settings.
     Config(ConfigForm),

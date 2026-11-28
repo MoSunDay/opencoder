@@ -40,6 +40,16 @@ fn from_sse_roundtrips_all_variants() {
         },
         SessionEvent::AgentSwitch("plan".into()),
         SessionEvent::ModelSwitch("openai/gpt-4o".into()),
+        SessionEvent::ModelOverrideApplied {
+            mode: "act".into(),
+            model: "openai/gpt-4o".into(),
+            error: None,
+        },
+        SessionEvent::ModelOverrideApplied {
+            mode: "plan".into(),
+            model: "openai/o3".into(),
+            error: Some("session model update failed".into()),
+        },
         SessionEvent::Compaction("summary".into()),
         SessionEvent::CompactionDelta("cdelta".into()),
         SessionEvent::Status("running".into()),
@@ -98,8 +108,8 @@ fn from_sse_roundtrips_all_variants() {
     kinds.dedup();
     assert_eq!(
         kinds.len(),
-        25,
-        "expected all 25 unique kinds, got {kinds:?}"
+        26,
+        "expected all 26 unique kinds, got {kinds:?}"
     );
 
     for ev in &cases {
@@ -350,4 +360,42 @@ fn is_sidecar_frame_marks_exactly_the_sidecar_variants() {
         SessionEvent::Done,
     ];
     assert!(keep.iter().all(|e| !e.is_sidecar_frame()));
+}
+
+/// The persistence gate is the ephemeral predicate: the sidecar content frames
+/// plus the mid-turn model pick notification are dropped, while `ModelSwitch`
+/// (the transcript-visible model identity) and `SidecarUsage` stay recordable.
+#[test]
+fn is_ephemeral_frame_gates_sidecar_content_and_model_pick_notifications() {
+    let dropped: Vec<SessionEvent> = vec![
+        SessionEvent::SidecarStart {
+            id: "sc".into(),
+            question: "q".into(),
+        },
+        SessionEvent::ModelOverrideApplied {
+            mode: "act".into(),
+            model: "p/m".into(),
+            error: None,
+        },
+        SessionEvent::ModelOverrideApplied {
+            mode: "plan".into(),
+            model: "p/m".into(),
+            error: Some("store refused".into()),
+        },
+    ];
+    assert!(dropped.iter().all(|e| e.is_ephemeral_frame()));
+    assert!(
+        !dropped[1].is_sidecar_frame(),
+        "a model pick is not a sidecar frame"
+    );
+    let kept: Vec<SessionEvent> = vec![
+        SessionEvent::ModelSwitch("p/m".into()),
+        SessionEvent::SidecarUsage {
+            id: "sc".into(),
+            total_tokens: 10,
+            input_tokens: 7,
+            output_tokens: 3,
+        },
+    ];
+    assert!(kept.iter().all(|e| !e.is_ephemeral_frame()));
 }

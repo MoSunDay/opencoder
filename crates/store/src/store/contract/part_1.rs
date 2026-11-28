@@ -199,6 +199,16 @@ macro_rules! store_contract_0 {
     async fn recover_orphan_inputs(&self, _session_id: &str) -> Result<u64> {
         Ok(0)
     }
+    /// Read the orphaned inputs (promoted but never recorded) of a session
+    /// without changing them: the read-only counterpart of
+    /// [`recover_orphan_inputs`], for callers that must not write — a store
+    /// opened read-only refuses recovery, and a bundle built from
+    /// `pending_inputs` alone would then omit the rows. Default empty so test
+    /// fakes keep compiling: a backend without the promote/record lifecycle
+    /// has no orphan rows.
+    async fn orphan_inputs(&self, _session_id: &str) -> Result<Vec<SessionInput>> {
+        Ok(Vec::new())
+    }
     /// Delete a pending input by its row id. Used by the TUI queue panel
     /// to let users remove a queued/steered prompt before it's consumed.
     async fn delete_input(&self, input_id: i64) -> Result<()>;

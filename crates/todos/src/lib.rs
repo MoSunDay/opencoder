@@ -5,6 +5,8 @@ pub mod domain;
 #[cfg(feature = "runtime")]
 pub mod execution;
 #[cfg(feature = "runtime")]
+pub mod interrupt_intent;
+#[cfg(feature = "runtime")]
 mod json_output;
 #[cfg(feature = "runtime")]
 pub mod parent;

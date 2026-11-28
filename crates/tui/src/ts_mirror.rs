@@ -9,12 +9,21 @@
 //!
 //! All mirror writes are best-effort — failures only log a warning and never
 //! propagate into the session flow (same semantics as `SessionState::persist`).
+//!
+//! Writer discipline: the TUI never holds `ts.db` writable. It keeps a
+//! read-only registry handle for its whole life and opens a short-lived
+//! writer for the duration of one mirror mutation, dropped once it completes.
+//! Every process may write the registry: a mutation running beside an
+//! `opencoder ts` command or another TUI's mutation waits inside the
+//! engine's transaction retry rather than being refused or deferred, and an
+//! idle TUI holds no writer at all.
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use opencoder_core::{Message, Role};
 use opencoder_store::{
@@ -29,7 +38,12 @@ const PREVIEW_MAX_CHARS: usize = 80;
 /// `Store` wrapper that mirrors ts sessions into the global registry.
 pub(crate) struct TsMirrorStore {
     inner: Arc<dyn Store>,
+    /// Read-only view of the registry, held for the TUI's whole life. The
+    /// TUI never holds `ts.db` writable, so an idle TUI blocks nobody.
     registry: TsRegistry,
+    /// Registry file: every mutation opens a short-lived writer on it for
+    /// that mutation only, dropped again once it completes.
+    ts_db: PathBuf,
     /// Workdir the TUI was launched in; the registry row's durable workdir.
     workdir: PathBuf,
     /// Sessions created through this instance (fast path: no registry query
@@ -43,7 +57,9 @@ pub(crate) async fn maybe_wrap(inner: Arc<dyn Store>, workdir: &Path) -> Arc<dyn
     maybe_wrap_at(inner, workdir, opencoder_core::data_root().join("ts.db")).await
 }
 
-/// Testable seam: wrap only when `ts_db` exists and opens cleanly.
+/// Testable seam: wrap only when `ts_db` exists and opens read-only. A reader
+/// takes no writer, so a ts command (or another mirror) writing the file at
+/// startup does not disable the mirror.
 pub(crate) async fn maybe_wrap_at(
     inner: Arc<dyn Store>,
     workdir: &Path,
@@ -52,21 +68,52 @@ pub(crate) async fn maybe_wrap_at(
     if !ts_db.is_file() {
         return inner;
     }
-    match TsRegistry::open(&ts_db).await {
-        Ok(registry) => Arc::new(TsMirrorStore {
-            inner,
-            registry,
-            workdir: workdir.to_path_buf(),
-            known: Mutex::new(HashSet::new()),
-        }),
+    match TsRegistry::open_reader(&ts_db).await {
+        Ok(registry) => Arc::new(TsMirrorStore::new(inner, registry, ts_db, workdir)),
         Err(error) => {
-            tracing::warn!(path = %ts_db.display(), %error, "ts mirror: cannot open registry, continuing without mirror");
+            tracing::warn!(path = %ts_db.display(), %error, "ts mirror: cannot open registry read-only, continuing without mirror");
             inner
         }
     }
 }
 
 impl TsMirrorStore {
+    fn new(inner: Arc<dyn Store>, registry: TsRegistry, ts_db: PathBuf, workdir: &Path) -> Self {
+        Self {
+            inner,
+            registry,
+            ts_db,
+            workdir: workdir.to_path_buf(),
+            known: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// One mirror mutation against a writer opened for this call only and
+    /// dropped once it completes. A concurrent writer (a ts command, another
+    /// TUI) makes the mutation wait inside the transaction retry; it is never
+    /// refused, and the TUI holds no writer between mutations.
+    async fn mutate<T, F, Fut>(&self, mutation: F) -> Result<T>
+    where
+        F: FnOnce(TsRegistry) -> Fut,
+        Fut: Future<Output = Result<T>>,
+    {
+        let writer = TsRegistry::open(&self.ts_db)
+            .await
+            .with_context(|| format!("open ts registry {} for writing", self.ts_db.display()))?;
+        mutation(writer).await
+    }
+
+    /// Current registry row through the life-long read-only handle.
+    async fn read(&self, id: &str) -> Option<TsRecord> {
+        self.registry.get(id).await.ok().flatten()
+    }
+
+    /// Mirror updates are best-effort: a failure is reported as a skipped
+    /// update (never retried, never surfaced into the session flow).
+    fn skipped(what: &str, error: &anyhow::Error) {
+        tracing::warn!(%error, "ts mirror: {what} skipped (best-effort, not retried)");
+    }
+
     /// Intercept: a first persisted row with `model: None` is the durable
     /// `ts_origin` marker — register it (idempotent upsert) and remember it.
     async fn note_ts_session(&self, meta: &SessionMeta) {
@@ -92,8 +139,11 @@ impl TsMirrorStore {
             title: meta.title.clone(),
             preview: String::new(),
         };
-        if let Err(error) = self.registry.upsert(&record).await {
-            tracing::warn!(session_id = %meta.id, %error, "ts mirror: cannot register session");
+        if let Err(error) = self
+            .mutate(|writer| async move { writer.upsert(&record).await })
+            .await
+        {
+            Self::skipped("register session", &error);
         }
     }
 
@@ -107,7 +157,7 @@ impl TsMirrorStore {
         if !self.known.lock().await.contains(session_id) {
             return;
         }
-        let Ok(Some(mut record)) = self.registry.get(session_id).await else {
+        let Some(mut record) = self.read(session_id).await else {
             return;
         };
         if !record.preview.is_empty() {
@@ -119,21 +169,27 @@ impl TsMirrorStore {
         }
         record.preview = text.chars().take(PREVIEW_MAX_CHARS).collect();
         record.updated_at = opencoder_core::message::now_ms();
-        if let Err(error) = self.registry.upsert(&record).await {
-            tracing::warn!(session_id, %error, "ts mirror: cannot write preview");
+        if let Err(error) = self
+            .mutate(|writer| async move { writer.upsert(&record).await })
+            .await
+        {
+            Self::skipped("write preview", &error);
         }
     }
 
     /// Intercept: a title patch (resume-time LLM title) mirrors only when a
     /// registry row already exists — plain sessions never gain one here.
     async fn mirror_title(&self, id: &str, title: &str) {
-        let Ok(Some(mut record)) = self.registry.get(id).await else {
+        let Some(mut record) = self.read(id).await else {
             return;
         };
         record.title = Some(title.to_string());
         record.updated_at = opencoder_core::message::now_ms();
-        if let Err(error) = self.registry.upsert(&record).await {
-            tracing::warn!(session_id = id, %error, "ts mirror: cannot write title");
+        if let Err(error) = self
+            .mutate(|writer| async move { writer.upsert(&record).await })
+            .await
+        {
+            Self::skipped("write title", &error);
         }
     }
 }
@@ -224,8 +280,12 @@ impl Store for TsMirrorStore {
     async fn delete_session(&self, id: &str) -> Result<()> {
         self.inner.delete_session(id).await?;
         self.known.lock().await.remove(id);
-        if let Err(error) = self.registry.delete(id).await {
-            tracing::warn!(session_id = id, %error, "ts mirror: cannot unregister session");
+        let id = id.to_owned();
+        if let Err(error) = self
+            .mutate(|writer| async move { writer.delete(&id).await })
+            .await
+        {
+            Self::skipped("unregister session", &error);
         }
         Ok(())
     }
@@ -234,16 +294,28 @@ impl Store for TsMirrorStore {
         let removed = self.inner.clear_other_sessions(keep_session_id).await?;
         self.known.lock().await.retain(|id| id == keep_session_id);
         // The inner store prunes rows via SQL, so per-row delete intercepts
-        // never fire: prune the registry index here instead.
+        // never fire: prune the registry index here instead, in one mutation.
         let Ok(records) = self.registry.list().await else {
             return Ok(removed);
         };
-        for record in records {
-            if record.id != keep_session_id {
-                if let Err(error) = self.registry.delete(&record.id).await {
-                    tracing::warn!(session_id = %record.id, %error, "ts mirror: cannot unregister cleared session");
+        let stale: Vec<String> = records
+            .into_iter()
+            .map(|record| record.id)
+            .filter(|id| id != keep_session_id)
+            .collect();
+        if stale.is_empty() {
+            return Ok(removed);
+        }
+        if let Err(error) = self
+            .mutate(|writer| async move {
+                for id in &stale {
+                    writer.delete(id).await?;
                 }
-            }
+                Ok(())
+            })
+            .await
+        {
+            Self::skipped("unregister cleared sessions", &error);
         }
         Ok(removed)
     }
@@ -314,6 +386,30 @@ impl Store for TsMirrorStore {
         self.inner.claim_next_queue(session_id).await
     }
 
+    // Input lifecycle bookkeeping. The trait defaults are no-op stubs for test
+    // fakes; a production wrapper inheriting them silently drops the runner's
+    // records in the underlying store. A consumed input would stay
+    // promoted-but-unrecorded, so a later `session export` — which reads that
+    // store through its own handle — carries it as an orphan and the import
+    // re-delivers it; an error-recovery unpromote or a run-entry orphan
+    // recovery would be lost the same way. Every lifecycle write and read is
+    // delegated; none of them touches the ts registry.
+    async fn unpromote_inputs(&self, session_id: &str, seqs: &[i64]) -> Result<()> {
+        self.inner.unpromote_inputs(session_id, seqs).await
+    }
+
+    async fn mark_inputs_recorded(&self, session_id: &str, seqs: &[i64]) -> Result<()> {
+        self.inner.mark_inputs_recorded(session_id, seqs).await
+    }
+
+    async fn recover_orphan_inputs(&self, session_id: &str) -> Result<u64> {
+        self.inner.recover_orphan_inputs(session_id).await
+    }
+
+    async fn orphan_inputs(&self, session_id: &str) -> Result<Vec<SessionInput>> {
+        self.inner.orphan_inputs(session_id).await
+    }
+
     async fn delete_input(&self, input_id: i64) -> Result<()> {
         self.inner.delete_input(input_id).await
     }
@@ -376,16 +472,10 @@ mod model_metadata_tests {
         let tmp = tempfile::tempdir().unwrap();
         let workdir = tmp.path().join("project");
         tokio::fs::create_dir_all(&workdir).await.unwrap();
-        let registry = TsRegistry::open(tmp.path().join("ts.db")).await.unwrap();
-        (
-            TsMirrorStore {
-                inner,
-                registry,
-                workdir,
-                known: Mutex::new(HashSet::new()),
-            },
-            tmp,
-        )
+        let ts_db = tmp.path().join("ts.db");
+        TsRegistry::open(&ts_db).await.unwrap();
+        let registry = TsRegistry::open_reader(&ts_db).await.unwrap();
+        (TsMirrorStore::new(inner, registry, ts_db, &workdir), tmp)
     }
 
     fn ts_meta(id: &str) -> SessionMeta {

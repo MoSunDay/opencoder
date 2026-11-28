@@ -12,12 +12,10 @@ use crate::{batch, domain, parent, persistence, transitions, types::*};
 /// plus 2 corrected re-decisions before the invalid decision bails.
 const DISPATCH_CORRECTION_RETRIES: u32 = 2;
 
-/// Bounded retries for `interrupt`'s load→mutate→commit loop: the driving
-/// process bumps the generation on every transition, so a commit taken while
-/// the workflow is actively Running loses the optimistic-concurrency race
-/// with high probability. Reloading and retrying is correct because every
-/// iteration re-derives the terminal-state check from the freshest state.
-const INTERRUPT_COMMIT_RETRIES: u32 = 3;
+/// Cadence of the driver-side interrupt-intent poll. The channel is a file
+/// beside the database, so it is reachable independently of the database
+/// itself.
+const INTENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub struct Runtime {
@@ -81,12 +79,21 @@ impl Runtime {
             .await?
             .with_context(|| format!("todo workflow not found: {workflow_id}"))?;
         domain::validate_spec(&spec)?;
+        // A queued interrupt request is applied by this writer before the
+        // resume commits anything: one published while a (now dead) driver
+        // was running is the takeover path below, one published while the
+        // workflow was parked must not be overtaken by the run it asked to
+        // stop. Either way the resume ends on the parked workflow.
+        if let Some(parked) = self.consume_intent(&state.workflow_id).await? {
+            return Ok(parked);
+        }
         // Bug #16c: a persisted Running status means another runner is
         // driving this workflow (or a previous runner crashed mid-flight and
         // the state never converged). Two drivers would fight over the
         // generation CAS, so resume refuses until an interrupt has parked
         // the workflow — `opencoder todos interrupt <id>` is the takeover
-        // path after a crash.
+        // path after a crash: the command queues the request, this resume
+        // applies it, the next resume drives.
         if state.status == WorkflowStatus::Running {
             anyhow::bail!(
                 "todo workflow {workflow_id} is still running: another runner may be driving it. \
@@ -120,7 +127,16 @@ impl Runtime {
     }
 
     async fn drive(&self, spec: WorkflowSpec, mut state: WorkflowState) -> Result<WorkflowState> {
+        // A request published in the window between the resume's own check
+        // and this first decision is applied here, never overtaken: a resume
+        // must not start work the user already asked to stop.
+        if let Some(parked) = self.consume_intent(&state.workflow_id).await? {
+            return Ok(parked);
+        }
+        let intent_root = crate::interrupt_intent::root(&self.workdir);
+        let watcher = self.spawn_intent_watcher(intent_root, state.workflow_id.clone());
         let result = self.drive_inner(&spec, &mut state).await;
+        watcher.abort();
         if let Err(error) = result {
             // Takeover probe: has an external writer (interrupt / another
             // runner) already parked this workflow? The probe must never
@@ -186,12 +202,14 @@ impl Runtime {
         let parent_runtime = self.parent_runtime();
         for _cycle in 0..1000 {
             if self.cancel.is_cancelled() {
-                // An external writer (e.g. `runner::interrupt` from another
-                // process) may have already moved the persisted generation —
-                // most importantly a Suspended verdict. Adopt that state
-                // instead of committing a local "workflow_interrupted" over
-                // it. A local cancel keeps the store generation in sync with
-                // the in-memory state, so it falls through to the original
+                // An external interrupt — the intent watcher applying a
+                // `todos interrupt` request on this writer, or
+                // `runner::interrupt` from an in-process caller — has
+                // already moved the persisted generation, most importantly
+                // a Suspended verdict. Adopt that state instead of
+                // committing a local "workflow_interrupted" over it. A local
+                // cancel keeps the store generation in sync with the
+                // in-memory state, so it falls through to the original
                 // local-interrupt path below.
                 let external = persistence::load(&self.store, &state.workflow_id)
                     .await
@@ -370,6 +388,108 @@ impl Runtime {
         Ok(())
     }
 
+    /// Look at the intent channel once on the writer this runtime holds and
+    /// apply what a `todos interrupt` command queued. `Some(state)` ends the
+    /// caller's drive: the request was committed now (the workflow is
+    /// parked), or the workflow is already terminal. A stale request, a
+    /// leftover acknowledgement or a failing check never blocks a drive —
+    /// the error is logged and the next poll looks again.
+    async fn consume_intent(&self, workflow_id: &str) -> Result<Option<WorkflowState>> {
+        let root = crate::interrupt_intent::root(&self.workdir);
+        let outcome =
+            match crate::interrupt_intent::consume_pending(&self.store, &root, workflow_id).await {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        error = %format!("{error:#}"),
+                        "todo interrupt intent check failed; continuing"
+                    );
+                    return Ok(None);
+                }
+            };
+        match outcome {
+            crate::interrupt_intent::ConsumeOutcome::Applied(parked) => {
+                self.refresh_after_intent(&parked).await;
+                Ok(Some(parked))
+            }
+            crate::interrupt_intent::ConsumeOutcome::AlreadyApplied(parked) => {
+                self.refresh_after_intent(&parked).await;
+                // Only a still-parked workflow ends the drive here: the
+                // request's commit is the latest transition. A workflow that
+                // moved on since (a later run) is left to the caller.
+                Ok((parked.status == WorkflowStatus::Suspended).then_some(parked))
+            }
+            crate::interrupt_intent::ConsumeOutcome::Terminal(latest) => Ok(Some(latest)),
+            crate::interrupt_intent::ConsumeOutcome::Stale(_)
+            | crate::interrupt_intent::ConsumeOutcome::None => Ok(None),
+        }
+    }
+
+    /// Bring an existing debug projection up to date after the driver, not
+    /// the interrupting command, committed the suspension.
+    async fn refresh_after_intent(&self, state: &WorkflowState) {
+        let debug_root = self
+            .debug_root
+            .clone()
+            .unwrap_or_else(|| opencoder_core::data_dir_for(&self.workdir).join("todos"));
+        let refresh = async {
+            let (spec, _) = persistence::load(&self.store, &state.workflow_id)
+                .await?
+                .with_context(|| format!("todo workflow not found: {}", state.workflow_id))?;
+            persistence::refresh_debug_dump_if_present(&self.store, &spec, state, &debug_root).await
+        };
+        if let Err(error) = refresh.await {
+            tracing::warn!(
+                workflow_id = %state.workflow_id,
+                error = %format!("{error:#}"),
+                "debug dump failed after interrupt; continuing without projection refresh"
+            );
+        }
+    }
+
+    /// Poll the lock-outside intent channel for the lifetime of one drive,
+    /// so a request the interrupt command publishes is applied by the
+    /// writer that owns the workflow's transitions; the file is then
+    /// rewritten with the decision the command waits for.
+    fn spawn_intent_watcher(
+        &self,
+        root: PathBuf,
+        workflow_id: String,
+    ) -> tokio::task::JoinHandle<()> {
+        let runtime = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(INTENT_POLL_INTERVAL).await;
+                if runtime.cancel.is_cancelled() {
+                    return;
+                }
+                match crate::interrupt_intent::consume_pending(&runtime.store, &root, &workflow_id)
+                    .await
+                {
+                    Ok(crate::interrupt_intent::ConsumeOutcome::Applied(parked)) => {
+                        runtime.refresh_after_intent(&parked).await;
+                        runtime.cancel.cancel();
+                        return;
+                    }
+                    Ok(crate::interrupt_intent::ConsumeOutcome::Terminal(_)) => {
+                        runtime.cancel.cancel();
+                        return;
+                    }
+                    // Stale: the command retries against the fresh
+                    // generation. AlreadyApplied: nothing to commit. None:
+                    // keep polling.
+                    Ok(_) => {}
+                    Err(error) => tracing::warn!(
+                        workflow_id = %workflow_id,
+                        error = %format!("{error:#}"),
+                        "todo interrupt intent poll failed; will retry"
+                    ),
+                }
+            }
+        })
+    }
+
     pub(crate) fn parent_runtime(&self) -> parent::DecisionRuntime {
         parent::DecisionRuntime {
             store: self.store.clone(),
@@ -420,52 +540,5 @@ pub async fn interrupt(
     workflow_id: &str,
     reason: &str,
 ) -> Result<WorkflowState> {
-    // Load→mutate→CAS-commit with bounded retries: interrupt is typically
-    // called exactly while another process is driving the workflow, and that
-    // driver bumps the generation on every transition — a single-shot commit
-    // spuriously fails the optimistic-concurrency check. On a generation
-    // conflict, reload the freshest state and retry (the terminal-state
-    // refusal is re-derived on every iteration).
-    let mut retries_left = INTERRUPT_COMMIT_RETRIES;
-    loop {
-        let (spec, state) = persistence::load(store, workflow_id)
-            .await?
-            .with_context(|| format!("todo workflow not found: {workflow_id}"))?;
-        if matches!(
-            state.status,
-            WorkflowStatus::Completed | WorkflowStatus::Failed
-        ) {
-            anyhow::bail!("cannot interrupt terminal workflow {workflow_id}");
-        }
-        let next = transitions::terminal(state, WorkflowStatus::Suspended, reason.into())?;
-        match persistence::commit(
-            store,
-            &spec,
-            &next,
-            "workflow_interrupted",
-            serde_json::json!({"reason":reason}),
-        )
-        .await
-        {
-            Ok(_) => {
-                tracing::info!(
-                    workflow_id = %workflow_id,
-                    reason = %reason,
-                    "todo workflow interrupted"
-                );
-                return Ok(next);
-            }
-            Err(error)
-                if retries_left > 0 && format!("{error:#}").contains("generation conflict") =>
-            {
-                retries_left -= 1;
-                tracing::info!(
-                    workflow_id = %workflow_id,
-                    retries_left,
-                    "interrupt commit lost the generation race; reloading and retrying"
-                );
-            }
-            Err(error) => return Err(error),
-        }
-    }
+    crate::interrupt_intent::commit_interrupt(store, workflow_id, reason, None).await
 }

@@ -6,10 +6,22 @@
 //! All ts commands now read this single index (`<data_root>/ts.db`) instead;
 //! session content stays in the per-workdir stores.
 //!
-//! The registry uses Turso WAL with independent reader connections and a
-//! serialized writer, as does `TursoStore`. Rows are the session index: id, durable
-//! workdir, owning store dir, timestamps, title and preview. A `meta` table
-//! carries the `migrated=1` marker for the one-time legacy import.
+//! The registry uses Turso WAL with independent reader connections, as does
+//! `TursoStore`. Rows are the session index: id, durable workdir, owning
+//! store dir, timestamps, title and preview. A `meta` table carries the
+//! `migrated=1` marker for the one-time legacy import.
+//!
+//! Ownership: every process may write the file at once. A writer pool joins
+//! the shared WAL and holds a shared maintenance lease on
+//! `<db>.maintenance.lock` for its lifetime; its transactions serialize with
+//! every other writer's (here or in another process) through the engine's
+//! WAL writer lock, taken by `BEGIN IMMEDIATE` with the bounded busy retry
+//! of `opencoder_database::busy`. A long-running process (the TUI mirror)
+//! keeps a reader ([`TsRegistry::open_reader`]) and opens a short-lived
+//! writer per mutation through [`TsRegistry::open`]; the CLI takes the
+//! writer for the duration of its mutation. Offline maintenance of the file
+//! (a TRUNCATE checkpoint) is refused while any writer is alive, through
+//! that lease.
 
 use std::path::{Path, PathBuf};
 
@@ -65,6 +77,14 @@ impl TsRegistry {
 
     pub async fn open_memory() -> Result<Self> {
         Self::open(":memory:").await
+    }
+
+    /// Read-only registry for inspection: no writer lock, no schema install
+    /// and no writes; a live TUI owning the registry keeps working beside it.
+    pub async fn open_reader(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            db: Database::open_reader(path).await?,
+        })
     }
 
     /// Idempotent insert-or-replace of one session row.
@@ -315,5 +335,65 @@ mod tests {
         let reopened = TsRegistry::open(&path).await.unwrap();
         assert!(reopened.get("01AAA").await.unwrap().is_some());
         assert!(reopened.is_migrated().await.unwrap());
+    }
+
+    /// A writer pool leases the registry file for its whole lifetime: offline
+    /// maintenance is refused beside it with the lease named as the cause and
+    /// admitted once the writer is dropped. A reader takes no lease, so
+    /// maintenance proceeds beside it while its own writes stay refused.
+    #[tokio::test]
+    async fn a_writer_leases_the_registry_and_a_reader_takes_nothing() {
+        use opencoder_database::maintenance_lock::{self, is_writers_active, Mode};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ts.db");
+        let registry = TsRegistry::open(&path).await.unwrap();
+        registry.upsert(&record("01AAA", None)).await.unwrap();
+        let key = path.canonicalize().unwrap();
+        let refused = maintenance_lock::try_acquire_exclusive(&key).unwrap_err();
+        assert!(is_writers_active(&refused), "{refused:#}");
+        assert!(
+            refused.to_string().contains(&key.display().to_string()),
+            "the refusal names the registry: {refused}"
+        );
+        drop(registry);
+        drop(maintenance_lock::try_acquire_exclusive(&key).unwrap());
+
+        let reader = TsRegistry::open_reader(&path).await.unwrap();
+        let lease = maintenance_lock::try_acquire_exclusive(&key)
+            .expect("a reader holds no lease: maintenance is admitted beside it");
+        assert_eq!(lease.mode(), Mode::Exclusive);
+        assert_eq!(lease.database(), key.as_path());
+        drop(lease);
+        assert!(reader.get("01AAA").await.unwrap().is_some());
+        let refused = reader.upsert(&record("02BBB", None)).await.unwrap_err();
+        assert!(refused.to_string().contains("read-only"), "{refused}");
+        assert!(reader.get("02BBB").await.unwrap().is_none());
+    }
+
+    /// Writers never exclude each other: a second handle opened beside the
+    /// first joins the same WAL, both commit, both read every row and a
+    /// reader opened before either of them follows both commits.
+    #[tokio::test]
+    async fn two_writers_commit_beside_each_other_and_a_reader_follows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ts.db");
+        let first = TsRegistry::open(&path).await.unwrap();
+        let reader = TsRegistry::open_reader(&path).await.unwrap();
+        let second = TsRegistry::open(&path).await.unwrap();
+        first.upsert(&record("01AAA", None)).await.unwrap();
+        second.upsert(&record("02BBB", None)).await.unwrap();
+        assert!(
+            first.get("02BBB").await.unwrap().is_some(),
+            "the first writer sees the second's commit"
+        );
+        assert!(
+            second.get("01AAA").await.unwrap().is_some(),
+            "the second writer sees the first's commit"
+        );
+        assert_eq!(reader.list().await.unwrap().len(), 2);
+        second.delete("01AAA").await.unwrap();
+        assert!(first.get("01AAA").await.unwrap().is_none());
+        assert!(reader.get("01AAA").await.unwrap().is_none());
+        assert_eq!(reader.list().await.unwrap().len(), 1);
     }
 }

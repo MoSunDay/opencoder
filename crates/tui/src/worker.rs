@@ -72,14 +72,6 @@ pub enum UiCmd {
         provider_changed: bool,
         ack: ConfigAck,
     },
-    /// Queue a session-only model selection while a turn runs. The serial
-    /// worker applies it only after the current turn ends and reports the
-    /// outcome through [`UiEvent::ModelCommit`]; there is deliberately no ack
-    /// channel, so the UI never parks its event loop mid-turn.
-    ApplySessionDeferred {
-        config: Box<Config>,
-        selection: Option<(opencoder_core::ConfigMode, String)>,
-    },
     /// Reload a freshly selected local Env and clear durable Act/Plan overrides.
     /// The UI commits its outer state only after this operation acknowledges.
     ReloadEnv {
@@ -126,14 +118,6 @@ pub enum UiEvent {
     /// The `u64` echoes the turn generation from the `ResetCancel` that armed
     /// the turn; the UI drops `TurnDone`s whose generation no longer matches.
     TurnDone(String, u64),
-    /// A deferred session-only selection was applied (or refused) at the turn
-    /// boundary. Ordered after the matching `SessionEvent::ModelSwitch` when
-    /// the effective model actually changed, so the display commit sees the
-    /// same model the next turn will use.
-    ModelCommit {
-        selection: Option<(opencoder_core::ConfigMode, String)>,
-        result: Result<(), String>,
-    },
     /// Background subtask watcher progress. `session` is the parent session whose
     /// registry owns the subtask; delivered on a TUI-internal channel so it
     /// survives session switches (workers are quit on switch).
@@ -171,15 +155,20 @@ pub(crate) fn spawn_task(
     })
 }
 
-/// Session-scoped child runtime registries used by TUI controls while the
-/// worker owns the corresponding [`SessionState`]. These handles must move as
-/// one unit on `/task` switches; retaining any registry from the previous
-/// session makes child steer/cancel actions target stale runners.
+/// Session-scoped handles used by TUI controls while the worker owns the
+/// corresponding [`SessionState`]: child runtime registries plus the mid-turn
+/// model pick queue. These handles must move as one unit on `/task` switches;
+/// retaining any handle from the previous session makes child steer/cancel
+/// actions target stale runners, or lands a `/model` pick on a session that
+/// is no longer running.
 #[derive(Clone)]
 pub struct ChildRuntimeHandles {
     pub cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub turn_cancels: Arc<Mutex<HashMap<String, SharedCancel>>>,
     pub steer_gates: Arc<Mutex<HashMap<String, Arc<SubagentSteerGate>>>>,
+    /// Fed by `/model` while a turn runs; drained by the runner after every
+    /// completed LLM round.
+    pub model_switches: opencoder_session::ModelSwitchQueue,
 }
 
 impl ChildRuntimeHandles {
@@ -188,6 +177,7 @@ impl ChildRuntimeHandles {
             cancels: session.child_cancels.clone(),
             turn_cancels: session.child_turn_cancels.clone(),
             steer_gates: session.child_steer_gates.clone(),
+            model_switches: session.model_switch_queue.clone(),
         }
     }
 }
@@ -264,9 +254,10 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 /// deadlock outright once the event forwarder's bounded queue fills (the
 /// parked UI is its only drainer). Refuse with the busy flash; the user
 /// retries when idle — the same contract as `gate_switch`. `/model` is NOT
-/// gated here: its session-only selection has a deferred, ack-free path
-/// (`UiCmd::ApplySessionDeferred`) that the worker applies at the turn
-/// boundary, while `/config` and `/env` still require the idle ack.
+/// gated here: its session-only selection bypasses the command channel
+/// entirely (the session's `ModelSwitchQueue`, applied by the runner when the
+/// current LLM round completes), while `/config` and `/env` still require
+/// the idle ack.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConfigMenuGate {
     Run,
@@ -353,8 +344,10 @@ pub(crate) async fn persist_event(
     // session's event log. Its cost is accounted to the main task through
     // the tagged `SidecarUsage` events the child forwards, which DO persist
     // (under their own kind, so a replaying client never mistakes them for
-    // the main task's latest-round usage).
-    if sev.is_sidecar_frame() {
+    // the main task's latest-round usage). The mid-turn model pick
+    // notification is ephemeral for the same reason: its durable truth is the
+    // session model metadata.
+    if sev.is_ephemeral_frame() {
         return;
     }
     if let Some(store) = store {
@@ -513,17 +506,6 @@ pub async fn process_cmd(
                 model_commands::apply_session(sess, &ui_tx, *config, selection, provider_changed)
                     .await;
             let _ = ack.send(result);
-            false
-        }
-        UiCmd::ApplySessionDeferred { config, selection } => {
-            // No ack: the UI is streaming a turn and must not be parked on a
-            // completion. `apply_session` already forwarded ModelSwitch when
-            // the effective model changed; the commit event follows it in the
-            // same channel so the fold applies the display in order.
-            let result =
-                model_commands::apply_session(sess, &ui_tx, *config, selection.clone(), false)
-                    .await;
-            let _ = ui_tx.send(UiEvent::ModelCommit { selection, result });
             false
         }
         UiCmd::ReloadEnv { config, ack } => {

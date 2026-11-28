@@ -6,11 +6,19 @@ use std::path::PathBuf;
 #[derive(Debug, Subcommand)]
 pub enum StorageAction {
     /// Serve SQL requests on stdin/stdout using one native connection.
+    /// Read-only by default; writes need `--writable`.
     Serve {
         #[arg(long)]
         database: PathBuf,
+        /// Keep the bridge read-only (the default; accepted for compatibility).
         #[arg(long)]
         read_only: bool,
+        /// Open the database writable. The bridge is then offline
+        /// maintenance: it fails fast with "writers still active" while any
+        /// process has the database open for writing, and keeps new writers
+        /// out until stdin closes. Stop every writer first.
+        #[arg(long, conflicts_with = "read_only")]
+        writable: bool,
     },
     /// Execute a read-only SQL query and return columns and rows as JSON.
     Query {
@@ -43,9 +51,10 @@ pub async fn run(action: &StorageAction) -> Result<i32> {
     let result = match action {
         StorageAction::Serve {
             database,
-            read_only,
+            read_only: _,
+            writable,
         } => {
-            maintenance::serve(database.clone(), *read_only).await?;
+            maintenance::serve(database.clone(), !*writable).await?;
             return Ok(0);
         }
         StorageAction::Query {

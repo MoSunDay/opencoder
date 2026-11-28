@@ -1,4 +1,4 @@
-//! Reusable Shared/Act/Plan selector for `/model` and `/config`.
+//! Act/Plan selector for `/model` and Shared/Act/Plan selector for `/config`.
 
 use std::path::{Path, PathBuf};
 
@@ -20,6 +20,29 @@ use super::state::{ModelMenu, ModelOutcome};
 pub enum ModeMenuKind {
     Model,
     Config,
+}
+
+impl ModeMenuKind {
+    /// `/model` only edits Act/Plan models; Shared remains a config-file
+    /// fallback and is still selectable for `/config` generation settings.
+    pub fn modes(self) -> &'static [ConfigMode] {
+        const MODEL_MODES: [ConfigMode; 2] = [ConfigMode::Act, ConfigMode::Plan];
+        const CONFIG_MODES: [ConfigMode; 3] =
+            [ConfigMode::Shared, ConfigMode::Act, ConfigMode::Plan];
+        match self {
+            Self::Model => &MODEL_MODES,
+            Self::Config => &CONFIG_MODES,
+        }
+    }
+}
+
+fn normalize_mode(kind: ModeMenuKind, mode: ConfigMode) -> ConfigMode {
+    let modes = kind.modes();
+    if modes.contains(&mode) {
+        mode
+    } else {
+        modes[0]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +105,7 @@ impl ModeSelection {
         workdir: &Path,
         session_models: Option<SessionModelOverrides>,
     ) -> Self {
+        let selected = normalize_mode(kind, selected);
         let save_target = SaveTargetInfo::resolve(workdir, save_route(kind, selected));
         Self {
             save_target,
@@ -94,8 +118,25 @@ impl ModeSelection {
     }
 
     fn refresh_save_target(&mut self) {
+        self.selected = normalize_mode(self.kind, self.selected);
         self.save_target =
             SaveTargetInfo::resolve(&self.workdir, save_route(self.kind, self.selected));
+    }
+
+    /// Display value for a scope row. Act/Plan inherit the effective base
+    /// model until the user saves a mode-specific pick, so both rows always
+    /// carry a concrete value in `/model`.
+    pub fn mode_model(&self, mode: ConfigMode) -> String {
+        let model = self.effective(mode).model;
+        if !model.trim().is_empty() {
+            return model;
+        }
+        let base = self.config.model.trim();
+        if base.is_empty() {
+            "(unset)".to_string()
+        } else {
+            base.to_string()
+        }
     }
 
     pub fn effective(&self, mode: ConfigMode) -> Config {
@@ -129,24 +170,14 @@ pub fn handle_key(
     match key.code {
         KeyCode::Esc => (ModelOutcome::Cancel, None),
         KeyCode::Up => {
-            selection.selected = match selection.selected {
-                ConfigMode::Shared => ConfigMode::Plan,
-                ConfigMode::Act => ConfigMode::Shared,
-                ConfigMode::Plan => ConfigMode::Act,
-            };
-            selection.refresh_save_target();
+            cycle_selected(&mut selection, -1);
             (
                 ModelOutcome::Idle,
                 Some(ModelMenu::ModeSelect(Box::new(selection))),
             )
         }
         KeyCode::Down => {
-            selection.selected = match selection.selected {
-                ConfigMode::Shared => ConfigMode::Act,
-                ConfigMode::Act => ConfigMode::Plan,
-                ConfigMode::Plan => ConfigMode::Shared,
-            };
-            selection.refresh_save_target();
+            cycle_selected(&mut selection, 1);
             (
                 ModelOutcome::Idle,
                 Some(ModelMenu::ModeSelect(Box::new(selection))),
@@ -160,8 +191,23 @@ pub fn handle_key(
     }
 }
 
+fn cycle_selected(selection: &mut ModeSelection, delta: isize) {
+    let modes = selection.kind.modes();
+    if modes.is_empty() {
+        return;
+    }
+    let index = modes
+        .iter()
+        .position(|mode| *mode == selection.selected)
+        .unwrap_or(0);
+    let next = (index as isize + delta).rem_euclid(modes.len() as isize) as usize;
+    selection.selected = modes[next];
+    selection.refresh_save_target();
+}
+
 pub(crate) fn render(f: &mut Frame, area: Rect, composer_top: u16, selection: &ModeSelection) {
-    let h = 12u16.min(composer_top.max(1));
+    let modes = selection.kind.modes();
+    let h = (9 + modes.len() as u16).min(composer_top.max(1));
     let w = 76u16.min(area.width.saturating_sub(4));
     let popup = Rect::new(
         area.x + (area.width.saturating_sub(w)) / 2,
@@ -174,28 +220,32 @@ pub(crate) fn render(f: &mut Frame, area: Rect, composer_top: u16, selection: &M
         ModeMenuKind::Model => " Model scope ",
         ModeMenuKind::Config => " Config scope ",
     };
+    let prompt = match selection.kind {
+        ModeMenuKind::Model => "Choose Act or Plan",
+        ModeMenuKind::Config => "Choose Shared, Act, or Plan",
+    };
     let mut lines = vec![Line::styled(
-        "Choose Shared, Act, or Plan",
+        prompt,
         Style::default().add_modifier(Modifier::BOLD),
     )];
-    for mode in [ConfigMode::Shared, ConfigMode::Act, ConfigMode::Plan] {
-        let marker = if selection.selected == mode {
+    for mode in modes {
+        let marker = if selection.selected == *mode {
             "❯"
         } else {
             " "
         };
-        let style = if selection.selected == mode {
+        let style = if selection.selected == *mode {
             Style::default().fg(crate::theme::warn_color())
         } else {
             Style::default().fg(crate::theme::text())
         };
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{marker} {:<7}", crate::model_scope::mode_name(mode)),
+                format!("{marker} {:<7}", crate::model_scope::mode_name(*mode)),
                 style,
             ),
             Span::styled(
-                selection.effective(mode).model,
+                selection.mode_model(*mode),
                 Style::default().fg(crate::theme::subtle()),
             ),
         ]));
@@ -240,6 +290,64 @@ mod tests {
             panic!("selector remains open")
         };
         assert_eq!(next.selected, ConfigMode::Plan);
+        let mut slot = Some(ModelMenu::ModeSelect(next));
+        let outcome = handle_model_key_for_test(&mut slot, KeyCode::Down);
+        assert!(matches!(outcome, ModelOutcome::Idle));
+        let Some(ModelMenu::ModeSelect(next)) = slot else {
+            panic!("selector remains open")
+        };
+        assert_eq!(next.selected, ConfigMode::Act, "wraps without Shared");
+    }
+
+    #[test]
+    fn model_selector_lists_only_act_and_plan() {
+        assert_eq!(
+            ModeMenuKind::Model.modes(),
+            &[ConfigMode::Act, ConfigMode::Plan]
+        );
+        assert_eq!(
+            ModeMenuKind::Config.modes(),
+            &[ConfigMode::Shared, ConfigMode::Act, ConfigMode::Plan]
+        );
+    }
+
+    #[test]
+    fn model_selector_normalizes_shared_to_act() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = ModeSelection::new(
+            Config::default(),
+            ConfigMode::Shared,
+            ModeMenuKind::Model,
+            dir.path(),
+            Some(SessionModelOverrides::default()),
+        );
+        assert_eq!(model.selected, ConfigMode::Act);
+
+        let config = ModeSelection::new(
+            Config::default(),
+            ConfigMode::Shared,
+            ModeMenuKind::Config,
+            dir.path(),
+            Some(SessionModelOverrides::default()),
+        );
+        assert_eq!(config.selected, ConfigMode::Shared);
+    }
+
+    #[test]
+    fn model_rows_have_inherited_values_for_both_modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let selection = ModeSelection::new(
+            Config {
+                model: "openai/base".into(),
+                ..Default::default()
+            },
+            ConfigMode::Act,
+            ModeMenuKind::Model,
+            dir.path(),
+            Some(SessionModelOverrides::default()),
+        );
+        assert_eq!(selection.mode_model(ConfigMode::Act), "openai/base");
+        assert_eq!(selection.mode_model(ConfigMode::Plan), "openai/base");
     }
 
     fn handle_model_key_for_test(slot: &mut Option<ModelMenu>, code: KeyCode) -> ModelOutcome {

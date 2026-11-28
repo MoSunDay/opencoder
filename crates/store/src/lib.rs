@@ -26,6 +26,7 @@ pub use bundle::{
     export_bundle, import_bundle, read_bundle, write_bundle, SessionBundle, SubagentBundle,
 };
 pub use jsonl::JsonlStore;
+pub use opencoder_database::ConnectionLease;
 pub use project::ProjectStore;
 pub use project_types::{
     ProjectExecutorKind, ProjectGoalPatch, ProjectGoalRecord, ProjectGoalStatus,
@@ -40,7 +41,7 @@ pub use schedule_types::{
 };
 pub use session_models::SessionModelOverrides;
 pub use session_store::SessionStore;
-pub use store::errors::{is_foreign_key_violation, is_storage_corruption};
+pub use store::errors::{is_foreign_key_violation, is_storage_corruption, is_unreadable_storage};
 pub use store::Store;
 pub use team_types::{TeamTopicRunRecord, TEAM_RUN_EXECUTING, TEAM_RUN_FINISHED};
 pub use todo_types::{

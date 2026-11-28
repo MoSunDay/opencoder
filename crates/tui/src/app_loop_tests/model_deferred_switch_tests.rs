@@ -1,16 +1,18 @@
-//! Deferred (mid-turn) `/model` selection on the UI side: queueing without
-//! an ack, the `UiEvent::ModelCommit` fold that commits the display, and the
-//! refusal / error markers. The worker half (`ApplySessionDeferred` applied
-//! at the turn boundary, `ModelCommit` emitted after `ModelSwitch`) is
-//! covered in `worker/tests_model_commands.rs` and `worker/tests_failures.rs`.
+//! Mid-turn `/model` selection on the UI side: the ack-free push onto the
+//! session's `ModelSwitchQueue`, the `SessionEvent::ModelOverrideApplied`
+//! fold that commits the display once the runner applied the pick, and the
+//! refusal / error markers. The runner half (apply after the current LLM
+//! round, `ModelSwitch` then `ModelOverrideApplied`) is covered by
+//! `crates/session/tests/model_switch_mid_turn.rs`.
 //!
 //! Contract: while a turn runs the status bar keeps showing the model the
-//! in-flight requests use; only the commit (or its failure) changes it.
+//! in-flight request uses; only the applied pick (or its failure) changes it.
 
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::{Config, ConfigMode};
+use opencoder_session::{ModelSwitchQueue, SessionEvent};
 use opencoder_store::{Store, TursoStore};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -21,7 +23,9 @@ use super::HOME_TEST_LOCK;
 use crate::app::app_loop::*;
 use crate::chat::{ChatBlock, ChatView};
 use crate::model_menu::{ModelMenu, ProviderList};
-use crate::model_session_switch::{commit_session_switch, queue_session_switch};
+use crate::model_session_switch::{
+    commit_model_override, commit_session_switch, queue_session_switch,
+};
 use crate::worker::{UiCmd, UiEvent};
 
 fn markers(chat: &ChatView) -> Vec<String> {
@@ -44,14 +48,15 @@ fn enter() -> KeyEvent {
     KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())
 }
 
-/// Fold one `ModelCommit` through the real `fold_ui_events`, exactly like
-/// the app loop does at the turn boundary. Returns nothing else was drained
-/// or quit: the fold is a pure display commit.
-async fn fold_commit(
+/// Fold one `ModelOverrideApplied` through the real `fold_ui_events`, exactly
+/// like the app loop does when the runner finished an LLM round. Returns
+/// nothing else was drained or quit: the fold is a pure display commit.
+async fn fold_applied(
     chat: &mut ChatView,
     config: &Config,
-    selection: Option<(ConfigMode, String)>,
-    result: Result<(), String>,
+    mode: &str,
+    model: &str,
+    error: Option<&str>,
 ) {
     let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
@@ -59,7 +64,7 @@ async fn fold_commit(
     let mut queue_items = Vec::new();
     let mut plan_skill_active = false;
     let mut admit = crate::queue_admitter::AdmitUiState::default();
-    let mut running = false;
+    let mut running = true;
     let mut cancelled = false;
     let mut drain_pending = false;
     let mut skip_next_render = false;
@@ -72,11 +77,15 @@ async fn fold_commit(
     let mut reset = crate::reset_rebuild::ResetRebuildState::default();
 
     let flow = fold_ui_events(
-        Some(UiEvent::ModelCommit { selection, result }),
+        Some(UiEvent::Session(SessionEvent::ModelOverrideApplied {
+            mode: mode.to_string(),
+            model: model.to_string(),
+            error: error.map(str::to_string),
+        })),
         chat,
         config,
         &store,
-        "deferred-model-session",
+        "mid-turn-model-session",
         &mut queue_items,
         &mut plan_skill_active,
         &mut admit,
@@ -98,8 +107,8 @@ async fn fold_commit(
 
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(
-        !running && !drain_pending,
-        "a commit is not a turn boundary"
+        running && !drain_pending,
+        "an applied pick is not a turn boundary"
     );
     assert!(matches!(evt_rx.try_recv(), Err(TryRecvError::Empty)));
     assert!(
@@ -108,23 +117,26 @@ async fn fold_commit(
     );
 }
 
-/// The full UI round trip for a mid-turn pick: `Enter` arms the prompt,
-/// `n` queues `ApplySessionDeferred` (display untouched, "queued" marker),
-/// and the worker's `ModelCommit` commits the display with a "switched"
-/// marker — same end state as the idle `ApplySession` path.
+/// The full UI round trip for a mid-turn Act pick: `Enter` arms the prompt,
+/// `n` queues the pick on the session queue (no worker command, display
+/// untouched, "queued" marker), and the runner's `ModelOverrideApplied`
+/// commits the display with a "switched" marker — same end state as the idle
+/// `ApplySession` path.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn queued_selection_commits_display_only_after_model_commit() {
+async fn queued_selection_commits_display_only_after_model_override_applied() {
     let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let workdir = tmp.path();
+    let queue = ModelSwitchQueue::default();
     let chat = ChatView {
         agent: "act".into(),
         ..Default::default()
     };
     let list = Some(ModelMenu::List(ProviderList::new(&config())));
 
-    let (flow, menu, _, chat, _, command) = press(true, enter(), list, chat, workdir, false).await;
+    let (flow, menu, _, chat, _, command) =
+        press(true, enter(), list, chat, workdir, false, &queue).await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(menu.is_some(), "arming the prompt is local");
     assert!(command.is_none());
@@ -132,45 +144,53 @@ async fn queued_selection_commits_display_only_after_model_commit() {
 
     let n_key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
     let (flow, menu, outer, mut chat, client_changed, command) =
-        press(true, n_key, menu, chat, workdir, false).await;
+        press(true, n_key, menu, chat, workdir, false, &queue).await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(menu.is_none(), "the consumed prompt closes");
+    assert!(
+        command.is_none(),
+        "the pick travels on the queue, not the worker"
+    );
     assert!(!client_changed, "a model-only pick keeps the client");
-    let Some(UiCmd::ApplySessionDeferred { selection, .. }) = command else {
-        panic!("expected a deferred queue, got {command:?}");
-    };
-    let selection = selection.expect("the prompt carries a model selection");
-    let model = selection.1.clone();
-    assert_eq!(selection.0, ConfigMode::Shared);
+    assert_eq!(
+        opencoder_session::drain_model_switches(&queue),
+        vec![(ConfigMode::Act, "deepseek/deepseek-chat".to_string())]
+    );
     assert!(
         chat.model_overrides.is_none(),
-        "display commits only on ModelCommit"
+        "display commits only on ModelOverrideApplied"
     );
     let queued = markers(&chat).join("\n");
     assert!(queued.contains("queued \u{2192}"), "{queued}");
     assert!(
-        queued.contains("(applies when the current turn ends)"),
+        queued.contains("(applies when the current LLM round ends)"),
         "{queued}"
     );
     assert!(!queued.contains("switched"), "{queued}");
 
-    fold_commit(&mut chat, &outer, Some(selection), Ok(())).await;
+    fold_applied(&mut chat, &outer, "act", "deepseek/deepseek-chat", None).await;
 
     let overrides = chat.model_overrides.as_ref().expect("committed");
-    assert_eq!(overrides.get(ConfigMode::Shared), Some(model.as_str()));
-    assert_eq!(chat.shared_model, model, "Shared follows the commit");
-    // Legacy-row conversion (same rule as `SessionState::update_mode_model`):
-    // the first selection pins the unselected modes to the previous base, so
-    // an Act chat keeps showing that base while Shared moves to the pick.
     assert_eq!(
         overrides.get(ConfigMode::Act),
-        Some(config().model.as_str()),
-        "unselected Act is pinned to the legacy base"
+        Some("deepseek/deepseek-chat"),
+        "the pick lands in the Act slot"
     );
-    assert_eq!(chat.model, config().model, "Act chat keeps the Act model");
+    // Legacy-row conversion (same rule as `SessionState::update_mode_model`):
+    // the first selection pins the other modes to the previous base.
+    assert_eq!(
+        overrides.get(ConfigMode::Plan),
+        Some(config().model.as_str()),
+        "unselected Plan is pinned to the legacy base"
+    );
+    assert_eq!(chat.shared_model, config().model, "Shared is never a pick");
+    assert_eq!(
+        chat.model, "deepseek/deepseek-chat",
+        "Act chat follows the pick"
+    );
     let text = markers(&chat).join("\n");
     assert!(
-        text.contains(&format!(" switched (session only) \u{2192} {model}")),
+        text.contains("[/model] Act switched (session only) \u{2192} deepseek/deepseek-chat"),
         "{text}"
     );
     assert!(
@@ -183,10 +203,27 @@ async fn queued_selection_commits_display_only_after_model_commit() {
     );
 }
 
-/// A failed worker commit keeps every display field on the previous model
-/// and explains that the runtime is unchanged.
+/// A plan pick lands in the Plan slot; an Act chat keeps its own model while
+/// the display copy still records the Plan override.
 #[tokio::test]
-async fn failed_commit_keeps_display_on_previous_model() {
+async fn plan_pick_only_moves_the_plan_slot() {
+    let config = config();
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    fold_applied(&mut chat, &config, "plan", "two/plan", None).await;
+    let overrides = chat.model_overrides.as_ref().expect("committed");
+    assert_eq!(overrides.get(ConfigMode::Plan), Some("two/plan"));
+    assert_eq!(overrides.get(ConfigMode::Act), Some(config.model.as_str()));
+    assert_eq!(chat.model, config.model, "Act chat keeps the Act model");
+    assert_eq!(chat.shared_model, config.model);
+}
+
+/// A refused pick keeps every display field on the previous model and
+/// explains that the runtime is unchanged.
+#[tokio::test]
+async fn refused_pick_keeps_display_on_previous_model() {
     let config = config();
     let mut chat = ChatView {
         agent: "act".into(),
@@ -195,11 +232,12 @@ async fn failed_commit_keeps_display_on_previous_model() {
         ..Default::default()
     };
 
-    fold_commit(
+    fold_applied(
         &mut chat,
         &config,
-        Some((ConfigMode::Act, "two/act".into())),
-        Err("injected override failure".into()),
+        "act",
+        "two/act",
+        Some("injected override failure"),
     )
     .await;
 
@@ -216,78 +254,112 @@ async fn failed_commit_keeps_display_on_previous_model() {
     assert!(!text.contains("switched"), "{text}");
 }
 
+/// `/model` has no Shared scope: a Shared (or unknown) wire key never reaches
+/// the display overrides, it is only reported.
+#[test]
+fn pick_outside_act_and_plan_is_reported_not_committed() {
+    for key in ["shared", "team"] {
+        let config = config();
+        let mut chat = ChatView::default();
+        commit_model_override(&mut chat, &config, key, "two/other", None);
+        assert!(chat.model_overrides.is_none(), "{key} must not commit");
+        let text = markers(&chat).join("\n");
+        assert!(text.contains(&format!("`{key}`")), "{text}");
+        assert!(text.contains("ignored"), "{text}");
+        assert!(!text.contains("switched"), "{text}");
+    }
+}
+
 /// Provider edits rebuild the client and belong to the idle `/model` path:
-/// mid-turn they are refused BEFORE anything reaches the worker.
+/// mid-turn they are refused BEFORE anything reaches the session queue.
 #[tokio::test]
 async fn provider_patch_while_running_is_refused_before_queueing() {
-    let config = config();
     let mut chat = ChatView::default();
-    let (tx, mut rx) = mpsc::channel::<UiCmd>(4);
+    let queue = ModelSwitchQueue::default();
 
     queue_session_switch(
         serde_json::json!({"providers": {"deepseek": null}}),
-        &config,
-        &tx,
+        &queue,
         &mut chat,
     );
 
-    assert!(
-        matches!(rx.try_recv(), Err(TryRecvError::Empty)),
+    assert_eq!(
+        opencoder_session::pending_model_switches(&queue),
+        0,
         "provider edits are never queued mid-turn"
     );
     assert!(chat.model_overrides.is_none());
     let text = markers(&chat).join("\n");
     assert!(text.contains("Provider changes apply when idle"), "{text}");
-    assert!(!text.contains("queued"), "{text}");
 }
 
-/// A patch without a model selection has nothing to queue.
+/// Only an Act/Plan patch carries a session pick: the top-level Shared
+/// default (onboarding / `/config`) is not a `/model` selection.
 #[tokio::test]
-async fn selection_less_patch_is_refused_before_queueing() {
-    let config = config();
-    let mut chat = ChatView::default();
-    let (tx, mut rx) = mpsc::channel::<UiCmd>(4);
-
-    queue_session_switch(serde_json::json!({"modes": {}}), &config, &tx, &mut chat);
-
-    assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
-    assert!(chat.model_overrides.is_none());
-    let text = markers(&chat).join("\n");
-    assert!(text.contains("contained no model selection"), "{text}");
-}
-
-/// The busy path uses `try_send`: a full command channel reports "not
-/// queued" instead of parking the UI loop on a turn it is streaming.
-#[tokio::test]
-async fn full_command_channel_reports_not_queued_instead_of_blocking() {
-    let config = config();
-    let mut chat = ChatView::default();
-    let (tx, _rx) = mpsc::channel::<UiCmd>(1);
-    tx.try_send(UiCmd::Compact).unwrap();
-
-    queue_session_switch(
+async fn patch_without_act_or_plan_model_is_refused() {
+    for json in [
         serde_json::json!({"model": "openai/after"}),
-        &config,
-        &tx,
-        &mut chat,
-    );
-
-    assert!(chat.model_overrides.is_none());
-    let text = markers(&chat).join("\n");
-    assert!(text.contains("not queued"), "{text}");
-    assert!(text.contains("runtime unchanged"), "{text}");
-    assert!(!text.contains("queued \u{2192}"), "{text}");
+        serde_json::json!({"modes": {"shared": {"model": "openai/shared"}}}),
+        serde_json::json!({"fps": 10}),
+    ] {
+        let mut chat = ChatView::default();
+        let queue = ModelSwitchQueue::default();
+        queue_session_switch(json.clone(), &queue, &mut chat);
+        assert_eq!(
+            opencoder_session::pending_model_switches(&queue),
+            0,
+            "{json} must not be queued"
+        );
+        assert!(chat.model_overrides.is_none());
+        let text = markers(&chat).join("\n");
+        assert!(text.contains("no model selection"), "{text}");
+        assert!(!text.contains("queued \u{2192}"), "{text}");
+    }
 }
 
-/// `commit_session_switch` with no selection and success is a silent no-op
-/// (the worker only reports this shape for provider-only patches).
+/// Several picks made during one long request keep their submission order;
+/// the runner applies (and reports) them in that order.
 #[test]
-fn commit_without_selection_is_silent() {
-    let config = config();
+fn queued_picks_keep_submission_order() {
     let mut chat = ChatView::default();
-    commit_session_switch(&mut chat, &config, None, Ok(()));
-    assert!(chat.model_overrides.is_none());
-    assert!(markers(&chat).is_empty());
+    let queue = ModelSwitchQueue::default();
+    let picks = [
+        (
+            serde_json::json!({"modes":{"plan":{"model":"openai/plan"}}}),
+            ConfigMode::Plan,
+            "openai/plan",
+        ),
+        (
+            serde_json::json!({"modes":{"act":{"model":"openai/act"}}}),
+            ConfigMode::Act,
+            "openai/act",
+        ),
+        (
+            serde_json::json!({"modes":{"plan":{"model":"openai/plan-2"}}}),
+            ConfigMode::Plan,
+            "openai/plan-2",
+        ),
+    ];
+    for (json, _, _) in &picks {
+        queue_session_switch(json.clone(), &queue, &mut chat);
+    }
+    let expected: Vec<(ConfigMode, String)> = picks
+        .iter()
+        .map(|(_, mode, model)| (*mode, (*model).to_string()))
+        .collect();
+    assert_eq!(
+        opencoder_session::pending_model_switches(&queue),
+        expected.len(),
+        "nothing is coalesced: the runner drains in order"
+    );
+    assert_eq!(opencoder_session::drain_model_switches(&queue), expected);
+    assert_eq!(opencoder_session::pending_model_switches(&queue), 0);
+    assert_eq!(
+        markers(&chat).len(),
+        expected.len(),
+        "one queued marker per pick"
+    );
+    assert!(chat.model_overrides.is_none(), "queueing never commits");
 }
 
 /// `commit_session_switch` is also the direct display entry point: it needs
@@ -305,7 +377,8 @@ fn commit_display_matches_the_idle_switch_end_state() {
     commit_session_switch(
         &mut chat,
         &config,
-        Some((ConfigMode::Act, "openai/act-pick".into())),
+        ConfigMode::Act,
+        "openai/act-pick",
         Ok(()),
     );
     assert_eq!(

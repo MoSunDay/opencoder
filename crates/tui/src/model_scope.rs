@@ -82,10 +82,10 @@ pub fn context_limit(config: &Config, chat: &ChatView, fallback: u64) -> u64 {
     }
 }
 
+/// `/model` only ever selects Act or Plan: a top-level `model` key (the
+/// Shared default, written by onboarding or `/config`) is deliberately not a
+/// session selection.
 pub fn selection_from_patch(patch: &serde_json::Value) -> Option<(ConfigMode, String)> {
-    if let Some(model) = patch.get("model").and_then(|value| value.as_str()) {
-        return Some((ConfigMode::Shared, model.to_string()));
-    }
     let modes = patch.get("modes")?.as_object()?;
     for (key, mode) in [("act", ConfigMode::Act), ("plan", ConfigMode::Plan)] {
         if let Some(model) = modes
@@ -187,14 +187,27 @@ mod tests {
     }
 
     #[test]
-    fn patch_selection_distinguishes_shared_and_act() {
+    fn patch_selection_reads_only_act_and_plan() {
         assert_eq!(
             selection_from_patch(&serde_json::json!({"model":"p/shared"})),
-            Some((ConfigMode::Shared, "p/shared".into()))
+            None,
+            "the Shared default is never a `/model` session selection"
         );
         assert_eq!(
             selection_from_patch(&serde_json::json!({"modes":{"act":{"model":"p/a"}}})),
             Some((ConfigMode::Act, "p/a".into()))
+        );
+        assert_eq!(
+            selection_from_patch(&serde_json::json!({"modes":{"plan":{"model":"p/p"}}})),
+            Some((ConfigMode::Plan, "p/p".into()))
+        );
+        assert_eq!(
+            selection_from_patch(&serde_json::json!({"modes":{"shared":{"model":"p/s"}}})),
+            None
+        );
+        assert_eq!(
+            selection_from_patch(&serde_json::json!({"providers":{}})),
+            None
         );
         assert!(!needs_client_rebuild(&serde_json::json!({"model":"p/a"})));
     }

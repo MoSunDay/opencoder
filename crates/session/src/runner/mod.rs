@@ -171,7 +171,11 @@ pub(crate) async fn run_loop(
         crate::harness::prepare(session).await?;
         if session.harness.harness == opencoder_core::harness::Harness::Codex {
             reset_turn_cancel(session);
-            if crate::harness::codex::run_turn(session, on_event).await? {
+            let ran = crate::harness::codex::run_turn(session, on_event).await?;
+            // External-harness turns have no in-process LLM boundary; their
+            // completion is the earliest point a queued pick can apply.
+            crate::model_switch::apply_queued_model_switches(session, on_event).await;
+            if ran {
                 drain_mode = true;
                 continue;
             }
@@ -250,6 +254,13 @@ pub(crate) async fn run_loop(
                         ));
                         break;
                     }
+                    Err(e) if compaction::is_persist_failure(&e) => {
+                        // The summary LLM call already succeeded and the write
+                        // was retried with backoff; rerunning summarize cannot
+                        // fix storage.
+                        last_err = Some(e);
+                        break;
+                    }
                     Err(e) => {
                         last_err = Some(e);
                         if attempt < 2 {
@@ -282,10 +293,20 @@ pub(crate) async fn run_loop(
             Ok(t) => t,
             Err(e) => {
                 on_event(SessionEvent::LlmRoundEnd);
+                // A failed request still completed: a model picked during it
+                // applies now so the next request does not repeat it on the
+                // model the user just moved away from.
+                crate::model_switch::apply_queued_model_switches(session, on_event).await;
                 on_event(SessionEvent::Error(format!("{e:#}")));
                 return Err(e);
             }
         };
+        // The request above is complete, so a model picked while this turn
+        // runs takes effect now: the next request (later round or next turn)
+        // is the first to use it, and the display learns it before that
+        // request starts. Never applied before a round: the in-flight request
+        // always runs on the model the status bar shows.
+        crate::model_switch::apply_queued_model_switches(session, on_event).await;
         // Interrupt handling: turn-cancel (subagent steer) → reset + continue;
         // hard-cancel (web /stop) → break without persisting the empty turn
         // ("interrupted" status was already emitted by run_one_llm_call).

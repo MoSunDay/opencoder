@@ -99,7 +99,9 @@ impl ProviderForm {
             focus: ProviderField::ModelId,
             confirm_save_default: None,
             error: None,
-            mode: opencoder_core::ConfigMode::Shared,
+            // `/model` only edits Act/Plan scopes (the list overwrites this
+            // through `scoped_form`).
+            mode: opencoder_core::ConfigMode::Act,
             return_scope: None,
         }
     }
@@ -125,7 +127,7 @@ impl ProviderForm {
             focus: ProviderField::Name,
             confirm_save_default: None,
             error: None,
-            mode: opencoder_core::ConfigMode::Shared,
+            mode: opencoder_core::ConfigMode::Act,
             return_scope: None,
         }
     }
@@ -163,6 +165,8 @@ impl ProviderForm {
             focus: ProviderField::ApiKey,
             confirm_save_default: None,
             error: None,
+            // The only remaining Shared writer: onboarding's `Save` writes the
+            // configuration file's top-level default, not a session pick.
             mode: opencoder_core::ConfigMode::Shared,
             return_scope: None,
         }

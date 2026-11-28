@@ -44,7 +44,10 @@ fn add_form_n_returns_session_only_patch_and_enter_preserves_disk_save() {
             (true, ModelOutcome::Save(patch)) => patch,
             _ => panic!("confirmation must select the requested save scope"),
         };
-        assert_eq!(patch["model"], "temporary/session-model");
+        assert!(
+            patch["model"].is_null() && patch.get("modes").is_none(),
+            "a scoped provider add never selects a model: {patch}"
+        );
         assert_eq!(
             patch["providers"]["temporary"]["base_url"],
             "https://example.invalid/v1"

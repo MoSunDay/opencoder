@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use opencoder_core::{message::now_ms, ContentBlock, Message, Role, ToolArc};
 use opencoder_llm::{estimate_messages, ChatRequest, LlmEvent};
-use opencoder_store::SessionPatch;
+use opencoder_store::{is_unreadable_storage, SessionPatch, Store};
 
 use crate::prompt::{compaction_system_prompt, compaction_user_prompt};
 use crate::runner::{await_cancel, SessionEvent};
@@ -138,7 +140,102 @@ fn reported_tokens(session: &SessionState) -> u64 {
     session.last_usage.input_tokens
 }
 
+/// Backoff before retrying the compaction-metadata write. Every write failure
+/// gets the same bounded retry: the common shape is transient (a page reads as
+/// zero right after a rolled-back statement) and the summary is already in
+/// memory, so retrying the write is far cheaper than rerunning the LLM
+/// summarize call. A deterministic failure only costs this budget once.
+const PERSIST_BACKOFF: [Duration; 2] = [Duration::from_millis(250), Duration::from_secs(1)];
+
+/// The summary was produced but its durable write kept failing.
+///
+/// The summarizer is an LLM call that already succeeded; rerunning it
+/// cannot fix storage, so the runner must not retry `compact` for this
+/// class (the bounded write retry already happened).
+#[derive(Debug, thiserror::Error)]
+#[error("compaction summary was produced but could not be persisted")]
+pub struct PersistFailure {
+    #[source]
+    source: anyhow::Error,
+}
+
+/// Whether `error` is the persistence marker (through anyhow context).
+pub fn is_persist_failure(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<PersistFailure>().is_some())
+}
+
+/// Persist the compaction metadata, retrying every write failure in place
+/// with backoff (at most `PERSIST_BACKOFF.len()` retries). Unreadable storage
+/// is the common transient shape but is not distinguished. A last attempt
+/// that still fails is wrapped in [`PersistFailure`] so the runner can tell
+/// "summary done, storage failed" apart from a summarize failure and must not
+/// rerun the LLM call.
+async fn persist_summary<E>(
+    store: &Arc<dyn Store>,
+    id: &str,
+    patch: &SessionPatch,
+    on_event: &mut E,
+) -> Result<()>
+where
+    E: FnMut(SessionEvent) + Send + ?Sized,
+{
+    let budget = PERSIST_BACKOFF.len() + 1;
+    let mut attempt = 0;
+    loop {
+        match store.update_session(id, patch).await {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt < PERSIST_BACKOFF.len() => {
+                tracing::warn!(
+                    attempt = attempt + 1,
+                    budget,
+                    unreadable = is_unreadable_storage(&error),
+                    error = %error,
+                    "compaction metadata write failed; retrying the write, not the summarizer"
+                );
+                on_event(SessionEvent::Status(format!(
+                    "compaction summary not persisted yet; retrying {}/{}",
+                    attempt + 1,
+                    PERSIST_BACKOFF.len()
+                )));
+                tokio::time::sleep(PERSIST_BACKOFF[attempt]).await;
+                attempt += 1;
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(PersistFailure { source: error })
+                    .context("persist compaction metadata"));
+            }
+        }
+    }
+}
+
+/// Compact the transcript, guarding the status line around the real work.
+///
+/// Thin wrapper over [`compact_inner`]: the inner run raises
+/// `compacting conversation…` before the summarize call and only clears it on
+/// success, so every `Err` leaving it (summarize failure, cancellation, a
+/// persist failure, the harness precondition) is followed here by an empty
+/// status. Without this the frontends keep rendering the stale compacting
+/// status after the runner has already given up. The `nothing to compact yet`
+/// notice is an `Ok(None)` outcome, so it is deliberately left in place.
 pub async fn compact(
+    session: &mut SessionState,
+    registry: &HashMap<String, ToolArc>,
+    on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
+) -> Result<Option<String>> {
+    let outcome = compact_inner(session, registry, on_event).await;
+    if outcome.is_err() {
+        on_event(SessionEvent::Status(String::new()));
+    }
+    outcome
+}
+
+/// The compaction pipeline: split the transcript, summarize the head with the
+/// LLM, replace it with the synthetic summary message and persist the summary
+/// metadata. Emits progress statuses through `on_event`; the caller
+/// ([`compact`]) owns clearing the status on failure.
+async fn compact_inner(
     session: &mut SessionState,
     _registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
@@ -206,7 +303,9 @@ pub async fn compact(
     // Compute the new skip BEFORE calling after_compaction (which clears
     // handoff_seq). Bookkeeping is updated BEFORE the DB write so the in-memory
     // state stays coherent even if persistence fails — the error is propagated
-    // so the caller (run_loop) can retry or surface it.
+    // so the caller (run_loop) can surface it. Every write failure gets a
+    // bounded in-place retry (see `persist_summary`); a persist failure is
+    // tagged so the runner does not rerun the summarize LLM call.
     let prev_skip = session.summary_seq.or(session.handoff_seq).unwrap_or(0);
     let head_store_msgs = if prev_skip > 0 || session.handoff_seq.is_some() {
         split.saturating_sub(1)
@@ -229,12 +328,11 @@ pub async fn compact(
             clear_handoff: true,
             ..Default::default()
         };
-        store
-            .update_session(&session.id, &patch)
-            .await
-            .context("persist compaction metadata")?;
+        persist_summary(store, &session.id, &patch, on_event).await?;
     }
 
+    // Success-path clear. Every `?` above bypasses this line; the matching
+    // failure clear lives in the `compact` wrapper, which observes them all.
     on_event(SessionEvent::Status(String::new()));
     Ok(Some(summary))
 }

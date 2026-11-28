@@ -10,8 +10,6 @@ fn fold(chat: &mut ChatView, event: UiEvent) {
         UiEvent::RemoteSnapshot { chat: restored, .. } => *chat = *restored,
         // No transcript fold: subtask_events folds registry updates elsewhere.
         UiEvent::SubtaskUpdate { .. } => {}
-        // Display-only commit; no transcript block to fold.
-        UiEvent::ModelCommit { .. } => {}
     }
 }
 

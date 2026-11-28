@@ -1,5 +1,11 @@
 # TUI：任务运行中 `/model` 可切换会话模型（排队到当前 turn 结束生效，UI 不阻塞）
 
+> **已被取代**（同日）：本文的 turn 边界排队（`UiCmd::ApplySessionDeferred` → worker 命令通道 →
+> `UiEvent::ModelCommit`）已删除。运行中的选择现在直接 push 到会话的 `ModelSwitchQueue`，runner
+> 在**当前这次 LLM 请求完成后**应用并发 display-only 的 `SessionEvent::ModelOverrideApplied`；
+> `/model` 同时去除了 Shared 语义。现行契约与测试映射见
+> [tui-model-switch-at-llm-boundary.md](tui-model-switch-at-llm-boundary.md)，下文仅作历史记录。
+
 一句话：运行中不再拒绝 `/model`。纯模型选择在当前 turn 结束时由 worker 应用，UI 不同步等
 ack；含 `providers` 的 patch 仍在运行中拒绝，`/config`、`/env` 维持 2026-11-27 的忙时拒绝契约。
 

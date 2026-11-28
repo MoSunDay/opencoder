@@ -1,13 +1,14 @@
 use crate::error::AppError;
+use opencoder_database::ConnectionLease;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use turso::{params, Connection};
+use turso::params;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub(crate) struct Store {
-    pub connection: Connection,
+    pub connection: ConnectionLease,
     pub include_pending: bool,
 }
 

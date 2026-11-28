@@ -66,7 +66,9 @@ def exercise(root, old, candidate):
         digest = hashlib.sha256((backup / 'manifest.json').read_bytes()).hexdigest()
         (backup / 'manifest.sha256').write_text(digest)
         # Lose a process in the middle of DDL: no partial structure may remain.
-        sql = NativeSql(candidate / 'bin/opencoder-cli', data / 'ontology.db', root)
+        # The candidate CLI is the one that accepts `--writable`; the old binary's
+        # connection above must never receive the newer flag.
+        sql = NativeSql(candidate / 'bin/opencoder-cli', data / 'ontology.db', root, writable=True)
         sql.query('BEGIN IMMEDIATE')
         sql.query(ontology_schema.contract()['catalog_entries'])
         sql.query(ontology_schema.contract()['freshness_policies'])

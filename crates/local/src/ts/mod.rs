@@ -30,6 +30,7 @@ mod display;
 mod env;
 mod naming;
 mod registry;
+mod resume;
 mod tmux;
 
 use anyhow::Result;

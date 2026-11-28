@@ -71,3 +71,22 @@ async fn last_store_connection_owner_releases_the_native_database_file() {
     drop(exclusive);
     std::fs::remove_file(&path).unwrap();
 }
+
+#[tokio::test]
+async fn last_store_connection_clone_keeps_the_maintenance_lease_until_it_drops() {
+    use opencoder_database::maintenance_lock::{is_writers_active, try_acquire_exclusive};
+
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("store.db");
+    let store = opencoder_store::TursoStore::open(&path).await.unwrap();
+    let key = path.canonicalize().unwrap();
+    let connection = store.conn().await.unwrap();
+    let clone = connection.clone();
+    drop(store);
+    drop(connection);
+
+    let refused = try_acquire_exclusive(&key).unwrap_err();
+    assert!(is_writers_active(&refused), "{refused:#}");
+    drop(clone);
+    try_acquire_exclusive(&key).unwrap();
+}

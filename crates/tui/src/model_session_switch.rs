@@ -18,8 +18,11 @@ fn display_overrides(chat: &ChatView, config: &Config, mode: ConfigMode) -> Sess
         .clone()
         .unwrap_or_else(|| SessionModelOverrides {
             // Mirror SessionState::update_mode_model: converting a legacy row
-            // pins Shared to the legacy base, while an unselected Act/Plan
-            // mode retains that same base rather than a config mode overlay.
+            // pins the base (Shared slot) to the legacy model, while an
+            // unselected Act/Plan mode retains that same base rather than a
+            // config mode overlay. `/model` never writes the Shared slot
+            // itself; this is only the display copy of the session's own
+            // legacy conversion.
             shared: Some(config.model.clone()),
             act: (mode != ConfigMode::Act).then(|| config.model.clone()),
             plan: (mode != ConfigMode::Plan).then(|| config.model.clone()),
@@ -27,8 +30,9 @@ fn display_overrides(chat: &ChatView, config: &Config, mode: ConfigMode) -> Sess
 }
 
 /// Commit one session-only selection into the display metadata. Shared by the
-/// idle (`ApplySession` ack) and deferred (`ModelCommit`) paths so both end
-/// with the exact same `chat.model` / `shared_model` / menu checkmarks.
+/// idle (`ApplySession` ack) and mid-turn (`ModelOverrideApplied`) paths so
+/// both end with the exact same `chat.model` / `shared_model` / menu
+/// checkmarks.
 fn commit_display(chat: &mut ChatView, config: &Config, mode: ConfigMode, model: &str) {
     let mut overrides = display_overrides(chat, config, mode);
     let _ = overrides.set(mode, Some(model.to_string()));
@@ -37,15 +41,17 @@ fn commit_display(chat: &mut ChatView, config: &Config, mode: ConfigMode, model:
     chat.model = crate::model_scope::effective_for_chat(config, chat).model;
 }
 
-/// Queue a session-only model selection while a turn runs. The serial worker
-/// applies it after the current turn and reports the outcome through
-/// `UiEvent::ModelCommit`; nothing is committed here, so the status bar keeps
-/// showing the model the in-flight requests actually use. Provider edits are
+/// Queue a session-only model selection while a turn runs. The pick goes
+/// straight onto the session's `ModelSwitchQueue` (never the serial worker
+/// command channel, which is only drained between turns): the runner applies
+/// it when the current LLM round completes and announces it through
+/// `SessionEvent::ModelOverrideApplied`, which the UI fold turns into
+/// [`commit_session_switch`]. Nothing is committed here, so the status bar
+/// keeps showing the model the in-flight request uses. Provider edits are
 /// refused (they rebuild the client and belong to the idle `/model` path).
 pub(crate) fn queue_session_switch(
     json: serde_json::Value,
-    config: &Config,
-    cmd_tx: &mpsc::Sender<UiCmd>,
+    queue: &opencoder_session::ModelSwitchQueue,
     chat: &mut ChatView,
 ) {
     if json.get("providers").is_some() {
@@ -65,25 +71,11 @@ pub(crate) fn queue_session_switch(
         );
         return;
     };
-    let command = UiCmd::ApplySessionDeferred {
-        config: Box::new(config.clone()),
-        selection: Some((mode, model.clone())),
-    };
-    // `try_send`: the UI loop is streaming a turn and must never park on a
-    // full command channel. A full/closed channel leaves the runtime on the
-    // old model and says so.
-    if let Err(error) = cmd_tx.try_send(command) {
-        marker(
-            chat,
-            format!("[/model] session-only change not queued: {error}; runtime unchanged"),
-            true,
-        );
-        return;
-    }
+    opencoder_session::queue_model_switch(queue, mode, model.clone());
     marker(
         chat,
         format!(
-            "[/model] {} queued \u{2192} {} (applies when the current turn ends)",
+            "[/model] {} queued \u{2192} {} (applies when the current LLM round ends)",
             crate::model_scope::mode_name(mode),
             model
         ),
@@ -91,18 +83,43 @@ pub(crate) fn queue_session_switch(
     );
 }
 
-/// Fold a deferred selection's worker outcome into the display. Runs at the
-/// turn boundary, after the matching `ModelSwitch` event (when the effective
-/// model changed), so the next turn's requests and the status bar agree.
+/// Fold the runner's pick notification: `mode` is the `act`/`plan` wire key,
+/// `error` a refused pick. `/model` has no Shared scope, so a `shared` (or
+/// unknown) key is reported and never applied.
+pub(crate) fn commit_model_override(
+    chat: &mut ChatView,
+    config: &Config,
+    mode: &str,
+    model: &str,
+    error: Option<String>,
+) {
+    let Some(mode) =
+        opencoder_session::mode_from_key(mode).filter(|mode| *mode != ConfigMode::Shared)
+    else {
+        marker(
+            chat,
+            format!("[/model] ignored a model pick outside Act/Plan (`{mode}`)"),
+            true,
+        );
+        return;
+    };
+    commit_session_switch(chat, config, mode, model, error.map_or(Ok(()), Err));
+}
+
+/// Commit one applied session-only selection into the display metadata: the
+/// same end state as the idle `ApplySession` ack path (`chat.model_overrides`
+/// / `shared_model` / menu checkmarks), so the status bar shows exactly the
+/// model the next request uses. A refused pick keeps every field unchanged.
 pub(crate) fn commit_session_switch(
     chat: &mut ChatView,
     config: &Config,
-    selection: Option<(ConfigMode, String)>,
+    mode: ConfigMode,
+    model: &str,
     result: Result<(), String>,
 ) {
-    match (selection, result) {
-        (Some((mode, model)), Ok(())) => {
-            commit_display(chat, config, mode, &model);
+    match result {
+        Ok(()) => {
+            commit_display(chat, config, mode, model);
             marker(
                 chat,
                 format!(
@@ -113,14 +130,13 @@ pub(crate) fn commit_session_switch(
                 false,
             );
         }
-        (_, Err(error)) => {
+        Err(error) => {
             marker(
                 chat,
                 format!("[/model] session-only change failed: {error}; runtime unchanged"),
                 true,
             );
         }
-        (None, Ok(())) => {}
     }
 }
 

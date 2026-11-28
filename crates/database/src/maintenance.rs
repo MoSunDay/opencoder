@@ -6,17 +6,21 @@ use std::path::{Path, PathBuf};
 mod bridge;
 pub use bridge::serve;
 
+/// Open `path` read-only through the file it resolves to.
+///
+/// The engine derives the WAL and shared-memory companions from the path it
+/// is given, so inspection must open the canonical file: through a symlink it
+/// would otherwise look for a WAL companion that never belonged to the
+/// database and report an empty or stale snapshot.
 async fn reader(path: &Path) -> Result<(turso::Database, turso::Connection)> {
     ensure!(
         path.is_file(),
         "database file does not exist: {}",
         path.display()
     );
-    let database = turso::Builder::new_local(path.to_str().context("database path must be UTF-8")?)
-        .experimental_multiprocess_wal(true)
-        .read_only(true)
-        .build()
-        .await?;
+    let canonical = path.canonicalize()?;
+    let path = canonical.as_path();
+    let database = crate::engine::open(crate::engine::engine_name(path)?, true, path).await?;
     let connection = database.connect()?;
     connection.busy_timeout(std::time::Duration::from_secs(30))?;
     Ok((database, connection))
@@ -74,25 +78,69 @@ fn parameter(value: Value) -> Result<turso::Value> {
 }
 
 /// Called after the deployment controller has stopped every writer.
+///
+/// TRUNCATE rewrites the WAL in place, so it takes the database's exclusive
+/// maintenance lease on `<db>.maintenance.lock` -- the file every live
+/// writer pool holds a shared lease on -- and keeps it until the file is
+/// self-contained, which also keeps new writers out meanwhile. While any
+/// writer is alive the call fails fast with "writers still active" instead of
+/// contending with it; a reader still holding the WAL makes the engine report
+/// busy. The engine opens the canonical path, the one the lease was taken
+/// for, so the WAL it truncates is the WAL that belongs to the leased file
+/// even when `path` is a symlink.
 pub async fn checkpoint(path: PathBuf) -> Result<()> {
     runtime::run(true, async move {
-        ensure!(path.is_file(), "database file does not exist");
-        let database =
-            turso::Builder::new_local(path.to_str().context("database path must be UTF-8")?)
-                .experimental_multiprocess_wal(true)
-                .build()
-                .await?;
+        ensure!(
+            path.is_file(),
+            "database file does not exist: {}",
+            path.display()
+        );
+        let key = path
+            .canonicalize()
+            .with_context(|| format!("resolve database {}", path.display()))?;
+        // Refuse a path the engine cannot open before taking the lease, so a
+        // refused TRUNCATE leaves no lease file behind.
+        let name = crate::engine::engine_name(&key)?;
+        let _lease = crate::maintenance_lock::try_acquire_exclusive(&key)
+            .map_err(|error| writers_still_active(&key, error))?;
+        let database = crate::engine::open(name, false, &key).await?;
         let connection = database.connect()?;
         connection.busy_timeout(std::time::Duration::from_secs(30))?;
         let mut rows = connection
             .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
             .await?;
         while let Some(row) = rows.next().await? {
-            ensure!(row.get::<i64>(0)? == 0, "database checkpoint is busy");
+            ensure!(
+                row.get::<i64>(0)? == 0,
+                "readers/writers still active: the database checkpoint is busy; let every \
+                 reader finish and stop every writer before a TRUNCATE checkpoint"
+            );
         }
         Ok(())
     })
     .await
+}
+
+/// Only a real lease conflict means "writers still active". Every other
+/// failure -- permissions, a missing or unsupported lock, an I/O error --
+/// keeps its own context, so the operator sees the actual cause instead of
+/// stopping writers that were never running.
+fn writers_still_active(database: &Path, error: anyhow::Error) -> anyhow::Error {
+    let conflict = crate::maintenance_lock::is_writers_active(&error)
+        || error
+            .chain()
+            .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+            .any(|cause| cause.kind() == std::io::ErrorKind::WouldBlock);
+    if conflict {
+        // Context keeps the lease conflict in the chain, so a caller can still
+        // branch on `is_writers_active` after the operator-facing message.
+        error.context(format!(
+            "writers still active: stop every writer of {} before a TRUNCATE checkpoint",
+            database.display()
+        ))
+    } else {
+        error
+    }
 }
 
 /// VACUUM INTO owns one database snapshot. Different files are independent copies.
@@ -111,7 +159,7 @@ pub async fn backup(path: PathBuf, output: PathBuf) -> Result<()> {
             .tempdir_in(parent)?;
         let snapshot = temporary.path().join("snapshot.db");
         let (database, connection) = reader(&path).await?;
-        // Turso 0.8.3 does not unescape VACUUM literals. On Linux, address a
+        // Turso does not unescape VACUUM literals. On Linux, address a
         // private staging directory by fd so arbitrary parent names stay safe.
         #[cfg(target_os = "linux")]
         let directory = std::fs::File::open(temporary.path())?;

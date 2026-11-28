@@ -12,7 +12,9 @@
 use std::path::Path;
 
 use opencoder_core::Message;
-use opencoder_store::{SessionFilter, SessionMeta, Store, TursoStore, TASK_TYPE_PARENT};
+use opencoder_store::{
+    SessionFilter, SessionMeta, SessionPatch, Store, TursoStore, TASK_TYPE_PARENT,
+};
 
 fn meta(id: &str, created_at: i64, updated_at: i64) -> SessionMeta {
     SessionMeta {
@@ -65,6 +67,25 @@ async fn index_sql(store: &TursoStore) -> String {
         .expect("activity index exists")
         .get::<String>(0)
         .unwrap()
+}
+
+/// Names of every activity index shape (the listing index and the rebuild
+/// probe), so a test can assert exactly which of them survived a repair.
+async fn activity_index_names(store: &TursoStore) -> Vec<String> {
+    let conn = store.conn().await.unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index'
+               AND name LIKE 'idx_sessions_activity%' ORDER BY name",
+            (),
+        )
+        .await
+        .unwrap();
+    let mut names = Vec::new();
+    while let Some(row) = rows.next().await.unwrap() {
+        names.push(row.get::<String>(0).unwrap());
+    }
+    names
 }
 
 async fn list_ids(store: &TursoStore) -> Vec<String> {
@@ -318,18 +339,16 @@ fn break_row_overflow(path: &Path, table_root: i64, page_size: i64, rowid: u64) 
     panic!("rowid {rowid} not found on the sessions root page");
 }
 
-/// The rebuild cannot fix a `sessions` table with an unreadable row: the
-/// append then lands without the activity touch, and the index the listing
-/// requires survives the failed rebuild (no drop-then-create).
-#[tokio::test]
-async fn append_lands_without_activity_touch_when_the_index_cannot_be_rebuilt() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("unreadable.db");
-
-    // Phase 1: s1 and s2 at 100; s2's 20 KiB title spills into overflow pages
-    // (the row the rebuild will trip over).
+/// Build the "index out of sync + one unreadable row" fixture: s1's table
+/// page is rolled back to activity 100 while `idx_sessions_activity` keeps
+/// 500, and s2's overflow chain is truncated so the rebuild's full-table scan
+/// fails with `SQLITE_CORRUPT`.
+///
+/// s1 and s2 start at 100; s2's 20 KiB title spills into overflow pages (the
+/// row the rebuild will trip over).
+async fn seed_desynced_unreadable(path: &Path) {
     let (snapshot, table_root, page_size) = {
-        let store = TursoStore::open(&path).await.unwrap();
+        let store = TursoStore::open(path).await.unwrap();
         store.create_session(&meta("s1", 100, 100)).await.unwrap();
         let mut bulky = meta("s2", 100, 100);
         bulky.title = Some("x".repeat(20_000));
@@ -351,7 +370,7 @@ async fn append_lands_without_activity_touch_when_the_index_cannot_be_rebuilt() 
                 .unwrap();
             rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
         };
-        let snapshot = std::fs::read(&path).unwrap();
+        let snapshot = std::fs::read(path).unwrap();
         // Phase 2: activity 500 in table and index.
         store.append_message("s1", &msg("m2", 500)).await.unwrap();
         checkpoint_truncate(&conn).await;
@@ -359,8 +378,18 @@ async fn append_lands_without_activity_touch_when_the_index_cannot_be_rebuilt() 
     };
 
     // Phase 3: table page back to 100 (index still at 500) and s2 unreadable.
-    restore_table_page(&path, &snapshot, table_root, page_size).await;
-    break_row_overflow(&path, table_root, page_size, 2);
+    restore_table_page(path, &snapshot, table_root, page_size).await;
+    break_row_overflow(path, table_root, page_size, 2);
+}
+
+/// The rebuild cannot fix a `sessions` table with an unreadable row: the
+/// append then lands without the activity touch, and the index the listing
+/// requires survives the failed rebuild (no drop-then-create).
+#[tokio::test]
+async fn append_lands_without_activity_touch_when_the_index_cannot_be_rebuilt() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("unreadable.db");
+    seed_desynced_unreadable(&path).await;
 
     let store = TursoStore::open(&path).await.unwrap();
     let conn = store.conn().await.unwrap();
@@ -410,5 +439,87 @@ async fn append_lands_without_activity_touch_when_the_index_cannot_be_rebuilt() 
     assert!(
         index_sql(&store).await.contains("idx_sessions_activity"),
         "listing index still required by name"
+    );
+    // The probe is derived data too: the failed rebuild must not leave it
+    // beside the listing index for later writes to maintain as a second one.
+    assert_eq!(
+        activity_index_names(&store).await,
+        vec!["idx_sessions_activity"],
+        "exactly the listing index survives the failed rebuild"
+    );
+    // A later session write still lands on the degraded path, with the same
+    // single activity index.
+    store.append_message("s1", &msg("m4", 700)).await.unwrap();
+    assert_eq!(store.load_messages("s1").await.unwrap().len(), 4);
+    assert_eq!(
+        activity_index_names(&store).await,
+        vec!["idx_sessions_activity"],
+        "the later write leaves no probe behind either"
+    );
+}
+
+/// `update_session` must survive the same double corruption: the summary and
+/// its sequence land even when the activity touch (and its index rebuild)
+/// fail, so compaction metadata is not lost while the index stays stale.
+#[tokio::test]
+async fn update_session_lands_without_activity_touch_when_the_index_cannot_be_rebuilt() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("unreadable-update.db");
+    seed_desynced_unreadable(&path).await;
+
+    let store = TursoStore::open(&path).await.unwrap();
+    let conn = store.conn().await.unwrap();
+    {
+        let read = match conn
+            .query("SELECT title FROM sessions WHERE id = 's2'", ())
+            .await
+        {
+            Ok(mut rows) => rows.next().await.map(|_| ()),
+            Err(error) => Err(error),
+        };
+        assert!(read.is_err(), "fixture: s2 must be unreadable");
+    }
+
+    let patch = SessionPatch {
+        summary: Some("compaction summary".into()),
+        summary_seq: Some(7),
+        updated_at: Some(600),
+        ..Default::default()
+    };
+    store
+        .update_session("s1", &patch)
+        .await
+        .expect("the summary must persist even when the activity touch cannot");
+
+    let mut rows = conn
+        .query(
+            "SELECT summary, summary_seq, updated_at,
+                    (SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'
+                      AND name LIKE 'idx_sessions_activity%')
+             FROM sessions WHERE id = 's1'",
+            (),
+        )
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert_eq!(
+        row.get::<Option<String>>(0).unwrap().as_deref(),
+        Some("compaction summary")
+    );
+    assert_eq!(row.get::<Option<i64>>(1).unwrap(), Some(7));
+    assert_eq!(
+        row.get::<i64>(2).unwrap(),
+        100,
+        "activity touch skipped on the degraded write"
+    );
+    assert_eq!(row.get::<i64>(3).unwrap(), 1, "listing index kept");
+    assert!(
+        index_sql(&store).await.contains("idx_sessions_activity"),
+        "listing index still required by name"
+    );
+    assert_eq!(
+        activity_index_names(&store).await,
+        vec!["idx_sessions_activity"],
+        "exactly the listing index survives the failed rebuild"
     );
 }

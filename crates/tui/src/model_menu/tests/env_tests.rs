@@ -65,7 +65,7 @@ fn env_create_activate_and_active_delete_have_distinct_reload_behavior() {
 
     let selection = ModeSelection::new(
         Config::default(),
-        ConfigMode::Shared,
+        ConfigMode::Act,
         ModeMenuKind::Model,
         &workdir,
         None,
@@ -101,7 +101,7 @@ fn save_target_views_follow_model_and_config_scope_routes() {
 
     let model = ModeSelection::new(
         Config::default(),
-        ConfigMode::Shared,
+        ConfigMode::Act,
         ModeMenuKind::Model,
         &workdir,
         None,

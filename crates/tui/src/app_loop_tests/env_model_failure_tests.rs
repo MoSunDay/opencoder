@@ -56,6 +56,7 @@ async fn assert_failed_activation(
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
     let original_period = ticker.period();
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel(4);
+    let model_switches = Default::default();
 
     let flow = if worker_failure {
         let (flow, ()) = tokio::join!(
@@ -68,6 +69,7 @@ async fn assert_failed_activation(
                 &mut frame_ms,
                 &mut ticker,
                 &cmd_tx,
+                &model_switches,
                 &mut chat,
                 workdir,
                 None,
@@ -96,6 +98,7 @@ async fn assert_failed_activation(
             &mut frame_ms,
             &mut ticker,
             &cmd_tx,
+            &Default::default(),
             &mut chat,
             workdir,
             None,

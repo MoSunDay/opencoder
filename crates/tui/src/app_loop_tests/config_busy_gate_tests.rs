@@ -1,5 +1,5 @@
 //! Busy-turn refusal for the worker-acknowledged config menus (`/config`,
-//! `/env`) and the deferred, ack-free session-only `/model` pick.
+//! `/env`) and the ack-free session-only `/model` pick.
 //!
 //! The local worker runs a whole LLM turn inside one `process_cmd` and only
 //! drains (and acks) config commands between turns. Awaiting that ack from
@@ -9,9 +9,11 @@
 //! while a turn runs (see `slash_action_tests`); `handle_model_outcome(..,
 //! running)` and `drain_pending_env(.., running)` are the safety net for a
 //! turn that started while a menu was already open. `/model` is the
-//! exception: its session-only selection is queued (`ApplySessionDeferred`,
-//! no ack) for the worker's turn boundary and the display commits only on
-//! the resulting `UiEvent::ModelCommit` (see `model_deferred_switch_tests`).
+//! exception: its session-only selection is pushed onto the session's
+//! `ModelSwitchQueue` (never the worker command channel), the runner applies
+//! it after the current LLM round and the display commits only on the
+//! resulting `SessionEvent::ModelOverrideApplied` (see
+//! `model_deferred_switch_tests`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -99,7 +101,8 @@ pub(super) fn config() -> Config {
 /// `expect_command` the worker side is driven concurrently (the command is
 /// acknowledged with `Ok(())` so an idle dispatch completes); otherwise the
 /// command channel is read BEFORE the sender drops, so "nothing was sent" is
-/// distinguishable from "channel closed".
+/// distinguishable from "channel closed". `queue` is the session's model
+/// switch queue the mid-turn path pushes onto.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn press(
     running: bool,
@@ -108,6 +111,7 @@ pub(super) async fn press(
     chat: ChatView,
     workdir: &std::path::Path,
     expect_command: bool,
+    queue: &opencoder_session::ModelSwitchQueue,
 ) -> (
     LoopFlow,
     Option<ModelMenu>,
@@ -137,6 +141,7 @@ pub(super) async fn press(
         &mut frame_ms,
         &mut frame_ticker,
         &cmd_tx,
+        queue,
         &mut chat,
         workdir,
         None,
@@ -180,20 +185,29 @@ pub(super) async fn press(
 }
 
 /// Enter arms the save-scope prompt (a local keystroke — still allowed
-/// mid-turn); the `n` that confirms it no longer waits for the worker: the
-/// session-only pick is queued (`ApplySessionDeferred`, no ack channel),
-/// outer config / client / display selection stay unchanged until the
-/// worker's `ModelCommit`, and the marker says when the switch applies.
+/// mid-turn); the `n` that confirms it never touches the worker command
+/// channel: the session-only pick lands on the `ModelSwitchQueue`, outer
+/// config / client / display selection stay unchanged until the runner's
+/// `ModelOverrideApplied`, and the marker says when the switch applies.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn session_only_switch_while_running_is_queued_without_ack() {
+async fn session_only_switch_while_running_is_queued_without_worker_command() {
     let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let workdir = tmp.path();
+    let queue = opencoder_session::ModelSwitchQueue::default();
     let list = Some(ModelMenu::List(ProviderList::new(&config())));
 
-    let (flow, menu, _, chat, _, command) =
-        press(true, enter(), list, ChatView::default(), workdir, false).await;
+    let (flow, menu, _, chat, _, command) = press(
+        true,
+        enter(),
+        list,
+        ChatView::default(),
+        workdir,
+        false,
+        &queue,
+    )
+    .await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(
         menu.is_some(),
@@ -204,52 +218,66 @@ async fn session_only_switch_while_running_is_queued_without_ack() {
 
     let n_key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
     let (flow, menu, outer, chat, client_changed, command) =
-        press(true, n_key, menu, chat, workdir, false).await;
+        press(true, n_key, menu, chat, workdir, false, &queue).await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(menu.is_none(), "the consumed prompt closes");
     assert!(
-        matches!(
-            &command,
-            Some(UiCmd::ApplySessionDeferred {
-                selection: Some((ConfigMode::Shared, _)),
-                ..
-            })
-        ),
-        "mid-turn the pick is queued for the turn boundary: {command:?}"
+        command.is_none(),
+        "mid-turn nothing reaches the serial worker channel: {command:?}"
+    );
+    assert_eq!(
+        opencoder_session::drain_model_switches(&queue),
+        vec![(ConfigMode::Act, "deepseek/deepseek-chat".to_string())],
+        "the Act pick is queued for the next LLM round boundary"
     );
     assert_eq!(outer.model, "openai/gpt-4o-mini", "outer config untouched");
     assert!(
         chat.model_overrides.is_none(),
-        "the display commits only on ModelCommit"
+        "the display commits only on ModelOverrideApplied"
     );
     assert!(!client_changed, "client untouched");
     let text = markers(&chat).join("\n");
     assert!(text.contains("queued \u{2192}"), "{text}");
     assert!(
-        text.contains("(applies when the current turn ends)"),
+        text.contains("(applies when the current LLM round ends)"),
         "{text}"
     );
-    assert!(text.contains("[/model] Shared"), "{text}");
+    assert!(text.contains("[/model] Act"), "{text}");
+    assert!(!text.contains("Shared"), "{text}");
     assert!(!text.contains("switched"), "{text}");
     assert!(!text.contains("busy"), "{text}");
 
-    // Idle again: the very same keystrokes go through to the worker.
+    // Idle again: the very same keystrokes go through to the worker, and the
+    // queue stays untouched.
     let list = Some(ModelMenu::List(ProviderList::new(&config())));
-    let (flow, menu, _, chat, _, command) = press(false, enter(), list, chat, workdir, false).await;
+    let (flow, menu, _, chat, _, command) =
+        press(false, enter(), list, chat, workdir, false, &queue).await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(menu.is_some(), "idle: arming the prompt");
     assert!(command.is_none());
-    let (flow, menu, _, chat, _, command) = press(false, n_key, menu, chat, workdir, true).await;
+    let (flow, menu, _, chat, _, command) =
+        press(false, n_key, menu, chat, workdir, true, &queue).await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(menu.is_none());
     assert!(
-        matches!(command, Some(UiCmd::ApplySession { .. })),
-        "idle dispatch sends ApplySession: {command:?}"
+        matches!(
+            &command,
+            Some(UiCmd::ApplySession {
+                selection: Some((ConfigMode::Act, model)),
+                ..
+            }) if model == "deepseek/deepseek-chat"
+        ),
+        "idle dispatch sends the Act ApplySession: {command:?}"
+    );
+    assert_eq!(
+        opencoder_session::pending_model_switches(&queue),
+        0,
+        "idle picks never use the queue"
     );
     assert!(
         markers(&chat)
             .iter()
-            .any(|line| line.contains("session only")),
+            .any(|line| line.contains("Act switched (session only)")),
         "idle dispatch reports the switch: {:?}",
         markers(&chat)
     );
@@ -275,8 +303,16 @@ async fn shared_save_while_running_is_refused_before_disk_write() {
     list.confirm_save_default = Some(serde_json::json!({"model": "openai/after"}));
     let menu = Some(ModelMenu::List(list));
 
-    let (flow, menu, outer, chat, client_changed, command) =
-        press(true, enter(), menu, ChatView::default(), &workdir, false).await;
+    let (flow, menu, outer, chat, client_changed, command) = press(
+        true,
+        enter(),
+        menu,
+        ChatView::default(),
+        &workdir,
+        false,
+        &Default::default(),
+    )
+    .await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(menu.is_none(), "the consumed confirm dialog closes");
     assert!(
@@ -327,6 +363,7 @@ async fn drain_pending_env_while_running_keeps_command_pending() {
         &mut frame_ms,
         &mut frame_ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         workdir,
         None,
@@ -363,8 +400,16 @@ async fn env_pending_command_while_running_is_refused_before_execution() {
         EnvCommand::Activate("demo".into()),
     )));
 
-    let (flow, menu, _, chat, _, command) =
-        press(true, enter(), menu, ChatView::default(), workdir, false).await;
+    let (flow, menu, _, chat, _, command) = press(
+        true,
+        enter(),
+        menu,
+        ChatView::default(),
+        workdir,
+        false,
+        &Default::default(),
+    )
+    .await;
 
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(

@@ -36,6 +36,7 @@ async fn manual_confirm_during_subagent_drain_fires_now() {
         cancels: Default::default(),
         turn_cancels: Default::default(),
         steer_gates: Default::default(),
+        model_switches: Default::default(),
     };
     let mut cancelled = false;
     let mut body_pending = false;

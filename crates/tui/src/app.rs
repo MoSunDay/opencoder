@@ -182,6 +182,7 @@ pub(super) async fn run_app(
             &mut frame_ms,
             &mut frame_ticker,
             &cmd_tx,
+            &child_runtime.model_switches,
             &mut chat,
             &workdir,
             startup_env_model,
@@ -419,7 +420,8 @@ pub(super) async fn run_app(
                         // Task picker modal: intercept all keys while open.
                         match app_popups::handle_popup_key(
                             k, &mut task_picker, &mut selection, &mut pending_task_pick,
-                            &cmd_tx, &mut turn_gen, &mut running, &mut chat, &store,
+                            &cmd_tx, &child_runtime.model_switches, &mut turn_gen, &mut running,
+                            &mut chat, &store,
                             &mut model_menu, &mut client, &mut config, &mut compaction_threshold,
                             &mut context_limit, &mut frame_ms, &mut frame_ticker, &mut mcp_menu,
                             &mut cli_menu, &mut skill_toggle_menu, &mut question_menu,

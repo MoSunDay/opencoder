@@ -23,6 +23,7 @@ fn empty_child_runtime() -> crate::worker::ChildRuntimeHandles {
         cancels: Arc::new(Mutex::new(HashMap::new())),
         turn_cancels: Arc::new(Mutex::new(HashMap::new())),
         steer_gates: Arc::new(Mutex::new(HashMap::new())),
+        model_switches: Default::default(),
     }
 }
 

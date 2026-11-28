@@ -1,10 +1,13 @@
 use super::common::{enter, key, lock_home, provider_cfg};
 use crate::model_menu::{
-    handle_model_key, ConfigField, ModeConfigForm, ModeField, ModeMenuKind, ModeSelection,
-    ModelMenu, ModelOutcome, ProviderList,
+    handle_model_key, render_model_popup, ConfigField, ModeConfigForm, ModeField, ModeMenuKind,
+    ModeSelection, ModelMenu, ModelOutcome, ProviderList,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::{Config, ConfigMode, ModeConfig, ModesConfig};
+use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
+use ratatui::Terminal;
 
 fn selection(kind: ModeMenuKind, mode: ConfigMode, config: Config) -> ModeSelection {
     let home = tempfile::tempdir().unwrap();
@@ -18,6 +21,79 @@ fn press(slot: &mut Option<ModelMenu>, event: KeyEvent) -> ModelOutcome {
 
 fn escape() -> KeyEvent {
     KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+}
+
+fn buffer_text(terminal: &Terminal<TestBackend>, width: u16, height: u16) -> String {
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..height {
+        for x in 0..width {
+            if let Some(cell) = buffer.cell((x, y)) {
+                text.push_str(cell.symbol());
+            }
+        }
+        text.push('\n');
+    }
+    text
+}
+
+#[test]
+fn model_scope_renders_only_act_and_plan_with_values() {
+    let home = tempfile::tempdir().unwrap();
+    let _isolation = lock_home(home.path());
+    let config = Config {
+        model: "openai/base".into(),
+        modes: ModesConfig {
+            act: Some(ModeConfig {
+                model: Some("openai/act".into()),
+                ..Default::default()
+            }),
+            plan: Some(ModeConfig {
+                model: Some("openai/plan".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // A mode-aware row (`{}`) resolves each scope through the config overlay.
+    let menu = ModelMenu::ModeSelect(Box::new(ModeSelection::new(
+        config.clone(),
+        ConfigMode::Act,
+        ModeMenuKind::Model,
+        home.path(),
+        Some(opencoder_store::SessionModelOverrides::default()),
+    )));
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    let text = buffer_text(&terminal, 80, 24);
+    assert!(text.contains("Choose Act or Plan"), "{text}");
+    assert!(text.contains("openai/act"), "{text}");
+    assert!(text.contains("openai/plan"), "{text}");
+    assert!(!text.contains("Shared"), "Shared must not appear: {text}");
+
+    // A legacy row (`NULL`) keeps single-model semantics: both scopes show
+    // the legacy base, exactly like the session resolves them.
+    let menu = ModelMenu::ModeSelect(Box::new(selection(
+        ModeMenuKind::Model,
+        ConfigMode::Act,
+        config,
+    )));
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+    let text = buffer_text(&terminal, 80, 24);
+    assert!(text.matches("openai/base").count() >= 2, "{text}");
+    assert!(!text.contains("openai/act"), "{text}");
 }
 
 #[test]

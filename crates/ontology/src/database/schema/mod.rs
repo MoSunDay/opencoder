@@ -1,5 +1,5 @@
 use crate::{database::Store, error::AppError};
-use opencoder_database::busy;
+use opencoder_database::{busy, ConnectionLease};
 use std::{collections::HashMap, path::Path};
 use turso::Connection;
 
@@ -133,7 +133,7 @@ pub(super) async fn ready(
 }
 
 pub(super) async fn bootstrap(
-    connection: &Connection,
+    connection: &ConnectionLease,
     files: &Path,
     policy: SchemaPolicy,
 ) -> Result<(), AppError> {
@@ -146,7 +146,7 @@ pub(super) async fn bootstrap(
 }
 
 async fn apply(
-    connection: &Connection,
+    connection: &ConnectionLease,
     files: &Path,
     policy: SchemaPolicy,
 ) -> Result<(), AppError> {

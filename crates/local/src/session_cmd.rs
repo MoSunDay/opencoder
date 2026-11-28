@@ -102,9 +102,60 @@ pub(crate) fn models_summary(cfg: &Config) -> String {
     s
 }
 
+/// `session list|show|export` only read. They open the store read-only so a
+/// live TUI or `run` owning the same database is never displaced, and they
+/// never create the database just to report that it is empty.
+fn reads_only(sub: &SessionSub) -> bool {
+    matches!(
+        sub,
+        SessionSub::List | SessionSub::Show { .. } | SessionSub::Export { .. }
+    )
+}
+
 pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
     let workdir = current_workdir(cli)?;
+    if reads_only(sub) {
+        let Some(store) = open_reader_store(&workdir).await? else {
+            return match sub {
+                SessionSub::List => {
+                    println!("(no sessions for this workdir)");
+                    Ok(())
+                }
+                SessionSub::Show { id, .. } | SessionSub::Export { id, .. } => {
+                    Err(anyhow!("session not found: {id}"))
+                }
+                _ => unreachable!("only list, show and export open read-only"),
+            };
+        };
+        return inspect(&store, &database_for(&workdir), read_session(&store, sub)).await;
+    }
     let store = open_store(&workdir).await?;
+    match sub {
+        SessionSub::Delete { id } => {
+            store.delete_session(id).await?;
+            println!("deleted {id}");
+            Ok(())
+        }
+        SessionSub::Import { input } => {
+            let mut file = std::fs::File::open(input).with_context(|| "open bundle file")?;
+            let bundle = read_bundle(&mut file)?;
+            let id = import_bundle(&store, &bundle, None).await?;
+            println!(
+                "imported session {id} ({} messages, {} subagents)",
+                bundle.messages.len(),
+                bundle.subagents.len()
+            );
+            println!("continue with: opencoder --session {id}");
+            Ok(())
+        }
+        // `reads_only` returned above, so the reading subcommands never reach
+        // the writable store this match dispatches from.
+        _ => unreachable!("only delete and import open the store for writing"),
+    }
+}
+
+/// The read-only arms of `session`: list, show (text or JSON) and export.
+async fn read_session(store: &TursoStore, sub: &SessionSub) -> Result<()> {
     match sub {
         SessionSub::List => {
             let items = store
@@ -125,7 +176,7 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
         }
         SessionSub::Show { id, json } => {
             if *json {
-                return show_session_json(&store, id).await;
+                return show_session_json(store, id).await;
             }
             // Match the JSON path: a missing session is an error, not an
             // empty (silent) listing.
@@ -137,13 +188,8 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             }
             Ok(())
         }
-        SessionSub::Delete { id } => {
-            store.delete_session(id).await?;
-            println!("deleted {id}");
-            Ok(())
-        }
         SessionSub::Export { id, out } => {
-            let bundle = export_bundle(&store, id).await?;
+            let bundle = export_bundle(store, id).await?;
             let path = out
                 .clone()
                 .unwrap_or_else(|| format!("{id}.opencoder").into());
@@ -154,17 +200,8 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             println!("exported {id} ({sub_count} subagents) → {}", path.display());
             Ok(())
         }
-        SessionSub::Import { input } => {
-            let mut file = std::fs::File::open(input).with_context(|| "open bundle file")?;
-            let bundle = read_bundle(&mut file)?;
-            let id = import_bundle(&store, &bundle, None).await?;
-            println!(
-                "imported session {id} ({} messages, {} subagents)",
-                bundle.messages.len(),
-                bundle.subagents.len()
-            );
-            println!("continue with: opencoder --session {id}");
-            Ok(())
+        SessionSub::Delete { .. } | SessionSub::Import { .. } => {
+            unreachable!("delete and import open the store for writing")
         }
     }
 }
@@ -223,6 +260,69 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<TursoStore> {
     TursoStore::open(data_dir.join("opencoder.db")).await
 }
 
+/// The per-workdir database the `session` and `todos` commands open.
+pub(crate) fn database_for(workdir: &Path) -> PathBuf {
+    opencoder_core::data_dir_for(workdir).join("opencoder.db")
+}
+
+/// Read-only store for the inspecting commands; `None` when the workdir has
+/// no database yet, which for those commands simply means "nothing to show".
+pub(crate) async fn open_reader_store(workdir: &Path) -> Result<Option<TursoStore>> {
+    let database = database_for(workdir);
+    if !database.is_file() {
+        return Ok(None);
+    }
+    TursoStore::open_reader(&database).await.map(Some)
+}
+
+/// Run one read of a read-only command against `store`, the database file at
+/// `database`. A reader never migrates, so a store whose schema predates this
+/// build's queries fails on that read with the engine's raw "no such column"
+/// error; such a failure is reported with the recorded schema version and the
+/// remedy instead. Any other failure (current schema: a missing row, I/O) is
+/// returned unchanged.
+pub(crate) async fn inspect<T, Fut>(store: &TursoStore, database: &Path, read: Fut) -> Result<T>
+where
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    match read.await {
+        Ok(value) => Ok(value),
+        Err(error) => match recorded_schema_version(store).await {
+            Some(version) if version >= opencoder_store::turso_store::schema_watermark() => {
+                Err(error)
+            }
+            found => Err(error.context(older_schema(database, found))),
+        },
+    }
+}
+
+/// The schema version the last writer recorded in `store`; `None` when there
+/// is none to read (no `schema_version` table yet, or the probe itself fails).
+async fn recorded_schema_version(store: &TursoStore) -> Option<i64> {
+    let conn = store.conn().await.ok()?;
+    let mut rows = conn
+        .query("SELECT version FROM schema_version LIMIT 1", ())
+        .await
+        .ok()?;
+    rows.next().await.ok()??.get::<i64>(0).ok()
+}
+
+/// Wording for a read that failed on a store older than this build: what was
+/// found, why a reader cannot fix it, and the command that does.
+fn older_schema(database: &Path, found: Option<i64>) -> String {
+    let recorded = match found {
+        Some(version) => format!("has schema version {version}"),
+        None => "records no schema version".to_string(),
+    };
+    format!(
+        "store {} {recorded}, older than this build reads (v{}); read-only commands never \
+         migrate it. Open it once with a writer of this build (start `opencoder tui` in that \
+         workdir) to migrate it, then retry",
+        database.display(),
+        opencoder_store::turso_store::schema_watermark()
+    )
+}
+
 /// One transcript line for `session show`: role tag plus the message text.
 /// Echo contract: prefer the verbatim `display` (raw user input, `$skill`
 /// tokens included); fall back to the recorded blocks for legacy rows.
@@ -245,6 +345,56 @@ pub(crate) fn config_show_json(cfg: &Config) -> Result<String> {
 mod tests {
     use super::models_summary;
     use opencoder_core::{Config, ContentBlock, Message, Role};
+
+    /// Only the inspecting arms open the store read-only; delete and import
+    /// are writers and keep the default open.
+    #[test]
+    fn only_list_show_and_export_open_the_store_read_only() {
+        use super::SessionSub;
+        let reading = [
+            SessionSub::List,
+            SessionSub::Show {
+                id: "s1".into(),
+                json: true,
+            },
+            SessionSub::Export {
+                id: "s1".into(),
+                out: None,
+            },
+        ];
+        assert!(reading.iter().all(super::reads_only));
+        assert!(!super::reads_only(&SessionSub::Delete { id: "s1".into() }));
+        assert!(!super::reads_only(&SessionSub::Import {
+            input: "bundle.opencoder".into()
+        }));
+    }
+
+    /// A read that fails on an old schema names the store, the version found,
+    /// the one this build reads and the writer command that migrates it; a
+    /// store without a recorded version is described as such, never as v0.
+    #[test]
+    fn older_schema_message_is_actionable() {
+        let path = std::path::Path::new("/data/opencoder.db");
+        let versioned = super::older_schema(path, Some(3));
+        assert!(versioned.contains("/data/opencoder.db"), "{versioned}");
+        assert!(versioned.contains("has schema version 3"), "{versioned}");
+        assert!(
+            versioned.contains(&format!(
+                "v{}",
+                opencoder_store::turso_store::schema_watermark()
+            )),
+            "{versioned}"
+        );
+        assert!(versioned.contains("opencoder tui"), "{versioned}");
+        assert!(versioned.contains("read-only"), "{versioned}");
+
+        let unversioned = super::older_schema(path, None);
+        assert!(
+            unversioned.contains("records no schema version"),
+            "{unversioned}"
+        );
+        assert!(!unversioned.contains("version 0"), "{unversioned}");
+    }
 
     /// Echo contract for the `session show` text view: the verbatim display
     /// text wins; a legacy row without `display` falls back to `text()`.

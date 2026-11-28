@@ -481,3 +481,12 @@ mod explicit_model;
 
 #[path = "restored_active.rs"]
 mod restored_active;
+
+#[path = "load_failure.rs"]
+mod load_failure;
+
+#[path = "fork_failure.rs"]
+mod fork_failure;
+
+#[path = "compacted_switch.rs"]
+mod compacted_switch;

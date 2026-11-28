@@ -74,8 +74,10 @@ impl EventSink {
         // `SidecarTurn`) must never reach the DB - zero session row, zero
         // message rows, zero event rows. Its token cost still lands on the
         // main task through the tagged `SidecarUsage` frames, which are NOT
-        // sidecar frames and persist normally.
-        if sev.is_sidecar_frame() {
+        // sidecar frames and persist normally. The mid-turn model pick
+        // notification is gated the same way: its durable truth is the session
+        // model metadata written by the runner step that emitted it.
+        if sev.is_ephemeral_frame() {
             return Ok(());
         }
         let rec = SessionEventRecord {

@@ -162,42 +162,13 @@ pub async fn list_execution_sessions(
     listing::list(conn, filter, true).await
 }
 
-pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result<()> {
-    // Validate: a field value and the clear flag for the same column are
-    // contradictory — they would emit both `col = ?` and `col = NULL` SET
-    // clauses, producing order-dependent SQL. Reject these combos up front.
-    if patch.summary.is_some() && patch.clear_summary {
-        anyhow::bail!("SessionPatch: summary field and clear_summary are mutually exclusive");
-    }
-    if patch.summary_seq.is_some() && patch.clear_summary {
-        anyhow::bail!("SessionPatch: summary_seq field and clear_summary are mutually exclusive");
-    }
-    if patch.summary_images.is_some() && patch.clear_summary {
-        anyhow::bail!(
-            "SessionPatch: summary_images field and clear_summary are mutually exclusive"
-        );
-    }
-    if patch.handoff_plan.is_some() && patch.clear_handoff {
-        anyhow::bail!("SessionPatch: handoff_plan field and clear_handoff are mutually exclusive");
-    }
-    if patch.handoff_seq.is_some() && patch.clear_handoff {
-        anyhow::bail!("SessionPatch: handoff_seq field and clear_handoff are mutually exclusive");
-    }
-    if patch.skill.is_some() && patch.clear_skill {
-        anyhow::bail!("SessionPatch: skill field and clear_skill are mutually exclusive");
-    }
-    if patch.agent.is_some() && patch.clear_agent {
-        anyhow::bail!("SessionPatch: agent field and clear_agent are mutually exclusive");
-    }
-    if patch.model.is_some() && patch.clear_model {
-        anyhow::bail!("SessionPatch: model field and clear_model are mutually exclusive");
-    }
-    if patch.requirement.is_some() && patch.clear_requirement {
-        anyhow::bail!(
-            "SessionPatch: requirement field and clear_requirement are mutually exclusive"
-        );
-    }
-
+/// SET clauses and bound values for `patch`; `touch` false omits the activity
+/// stamp so the write never depends on `idx_sessions_activity`.
+///
+/// Returns `None` when the patch has nothing left to write (an activity-only
+/// patch in degraded mode): the caller then skips the statement instead of
+/// emitting an empty `UPDATE sessions SET`.
+fn patch_plan(patch: &SessionPatch, id: &str, touch: bool) -> Option<(String, Vec<Value>)> {
     let mut sets: Vec<&str> = Vec::new();
     let mut args: Vec<Value> = Vec::new();
     if let Some(v) = &patch.title {
@@ -258,7 +229,7 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if patch.clear_model {
         sets.push("model = NULL");
     }
-    if let Some(v) = patch.updated_at {
+    if let Some(v) = patch.updated_at.filter(|_| touch) {
         // Never move the activity stamp below creation time (invariant the
         // plain activity index relies on).
         sets.push("updated_at = MAX(?, created_at)");
@@ -272,20 +243,80 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         sets.push("requirement = NULL");
     }
     if sets.is_empty() {
-        return Ok(());
+        return None;
     }
     let sql = format!("UPDATE sessions SET {} WHERE id = ?", sets.join(", "));
     args.push(id.to_string().into());
+    Some((sql, args))
+}
+
+pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result<()> {
+    // Validate: a field value and the clear flag for the same column are
+    // contradictory — they would emit both `col = ?` and `col = NULL` SET
+    // clauses, producing order-dependent SQL. Reject these combos up front.
+    if patch.summary.is_some() && patch.clear_summary {
+        anyhow::bail!("SessionPatch: summary field and clear_summary are mutually exclusive");
+    }
+    if patch.summary_seq.is_some() && patch.clear_summary {
+        anyhow::bail!("SessionPatch: summary_seq field and clear_summary are mutually exclusive");
+    }
+    if patch.summary_images.is_some() && patch.clear_summary {
+        anyhow::bail!(
+            "SessionPatch: summary_images field and clear_summary are mutually exclusive"
+        );
+    }
+    if patch.handoff_plan.is_some() && patch.clear_handoff {
+        anyhow::bail!("SessionPatch: handoff_plan field and clear_handoff are mutually exclusive");
+    }
+    if patch.handoff_seq.is_some() && patch.clear_handoff {
+        anyhow::bail!("SessionPatch: handoff_seq field and clear_handoff are mutually exclusive");
+    }
+    if patch.skill.is_some() && patch.clear_skill {
+        anyhow::bail!("SessionPatch: skill field and clear_skill are mutually exclusive");
+    }
+    if patch.agent.is_some() && patch.clear_agent {
+        anyhow::bail!("SessionPatch: agent field and clear_agent are mutually exclusive");
+    }
+    if patch.model.is_some() && patch.clear_model {
+        anyhow::bail!("SessionPatch: model field and clear_model are mutually exclusive");
+    }
+    if patch.requirement.is_some() && patch.clear_requirement {
+        anyhow::bail!(
+            "SessionPatch: requirement field and clear_requirement are mutually exclusive"
+        );
+    }
+
+    let Some((sql, args)) = patch_plan(patch, id, true) else {
+        return Ok(());
+    };
+    let degraded = patch_plan(patch, id, false);
     // `updated_at` is indexed; if that index desynced (Turso rollback bug),
-    // rebuild it and retry instead of failing the patch forever.
-    activity::repair_and_retry(conn, || {
-        let sql = sql.clone();
-        let args = args.clone();
-        super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
-            conn.execute(&sql, params_from_iter(args)).await?;
-            Ok(())
-        })
-    })
+    // rebuild it and retry instead of failing the patch forever. Until the
+    // database is repaired the rebuild fails on the unreadable row as well:
+    // the patch then lands without the activity touch (the session keeps its
+    // old position in `/task`) rather than not at all — the same degradation
+    // `append_many` already applies.
+    activity::repair_and_retry_or(
+        conn,
+        || {
+            let sql = sql.clone();
+            let args = args.clone();
+            super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+                conn.execute(&sql, params_from_iter(args)).await?;
+                Ok(())
+            })
+        },
+        || async move {
+            let Some((sql, args)) = degraded else {
+                return Ok(());
+            };
+            super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
+                conn.execute(&sql, params_from_iter(args)).await?;
+                Ok(())
+            })
+            .await
+        },
+    )
     .await
 }
 

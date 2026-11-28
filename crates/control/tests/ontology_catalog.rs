@@ -187,6 +187,8 @@ async fn platform_tui_entry_synchronizes_interactive_env_and_mode_model_configur
         "/cli",
         "/skill",
         "Shared/Act/Plan",
+        "/model 仅提供 Act/Plan 模型选择",
+        "两行始终显示有效值",
         "Shared 会话选择立即生效",
         "优先于 modes.shared.model",
         "{} 或缺省字段表示继承配置",
@@ -214,6 +216,48 @@ async fn platform_tui_entry_synchronizes_interactive_env_and_mode_model_configur
         ])
     );
     assert_eq!(capability["api"], json!(["/api/tui"]));
+
+    let (status, check) = f
+        .call(Role::Viewer, "GET", &format!("{sync}/check"), Value::Null)
+        .await;
+    assert_eq!(status, 200, "{check}");
+    assert_eq!(check["in_sync"], true, "{check}");
+}
+
+/// The reworded `storage` entry reaches the synchronized catalog: the
+/// read-only default, the explicit `--writable` opt-in and the
+/// stopped-writers TRUNCATE checkpoint are all queryable, and the sync check
+/// reports no drift between the platform source and the stored documents.
+#[tokio::test]
+async fn platform_storage_entry_synchronizes_read_only_default_and_checkpoint_gate() {
+    let f = Fixture::with_background(false).await;
+    let sync = "/api/ontology/envs/debug/sync";
+    f.ok("POST", sync, Value::Null).await;
+    let listed = f.list().await;
+    let row = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["capability"]["key"] == "platform:storage")
+        .expect("the storage capability must be synchronized");
+    let capability = &row["capability"];
+    assert_eq!(capability["source_id"], "storage");
+    assert_eq!(capability["name"], "本地数据库工具");
+    let description = capability["description"].as_str().unwrap();
+    for text in [
+        "serve 默认只读",
+        "--writable",
+        "与 --read-only 互斥",
+        "写者锁",
+        "query 为只读查询",
+        "backup 复制一致快照",
+        "checkpoint 执行 TRUNCATE 检查点",
+        "--writers-stopped",
+    ] {
+        assert!(description.contains(text), "missing {text}: {description}");
+    }
+    assert_eq!(capability["cli"], json!(["opencoder-cli storage --help"]));
+    assert_eq!(capability["api"], json!([]));
 
     let (status, check) = f
         .call(Role::Viewer, "GET", &format!("{sync}/check"), Value::Null)

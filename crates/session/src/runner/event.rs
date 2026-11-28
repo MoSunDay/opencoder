@@ -61,6 +61,19 @@ pub enum SessionEvent {
     /// `"provider/model_id"` string so display surfaces and resume stay in
     /// sync with the on-disk config.
     ModelSwitch(String),
+    /// A session-only Act/Plan model picked while a turn was running was
+    /// applied right after an LLM round completed: the request that just
+    /// finished used the previous model, every later request uses `model`.
+    /// `mode` is the `act`/`plan` wire key of the pick; `error` is set when it
+    /// could not be persisted, in which case the runtime stays on the previous
+    /// model. Display-only lifecycle data like the sidecar frames: the durable
+    /// truth is the session model metadata, so it is never persisted.
+    ModelOverrideApplied {
+        mode: String,
+        model: String,
+        #[serde(default)]
+        error: Option<String>,
+    },
     Compaction(String),
     CompactionDelta(String),
     Status(String),
@@ -186,6 +199,7 @@ impl SessionEvent {
             SessionEvent::ToolEnd { .. } => "tool_end",
             SessionEvent::AgentSwitch(_) => "agent_switched",
             SessionEvent::ModelSwitch(_) => "model_switched",
+            SessionEvent::ModelOverrideApplied { .. } => "model_override_applied",
             SessionEvent::Compaction(_) => "compaction",
             SessionEvent::CompactionDelta(_) => "compaction_delta",
             SessionEvent::Status(_) => "status",
@@ -238,6 +252,9 @@ impl SessionEvent {
             }
             SessionEvent::AgentSwitch(a) => serde_json::json!({ "agent": a }),
             SessionEvent::ModelSwitch(m) => serde_json::json!({ "model": m }),
+            SessionEvent::ModelOverrideApplied { mode, model, error } => {
+                serde_json::json!({ "mode": mode, "model": model, "error": error })
+            }
             SessionEvent::Compaction(s) => serde_json::json!({ "summary": s }),
             SessionEvent::CompactionDelta(t) => serde_json::json!({ "text": t }),
             SessionEvent::Status(s) => serde_json::json!({ "status": s }),
@@ -348,6 +365,14 @@ impl SessionEvent {
             },
             "agent_switched" => SessionEvent::AgentSwitch(data.get("agent")?.as_str()?.to_string()),
             "model_switched" => SessionEvent::ModelSwitch(data.get("model")?.as_str()?.to_string()),
+            "model_override_applied" => SessionEvent::ModelOverrideApplied {
+                mode: data.get("mode")?.as_str()?.to_string(),
+                model: data.get("model")?.as_str()?.to_string(),
+                error: data
+                    .get("error")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            },
             "compaction" => SessionEvent::Compaction(data.get("summary")?.as_str()?.to_string()),
             "compaction_delta" => {
                 SessionEvent::CompactionDelta(data.get("text")?.as_str()?.to_string())
@@ -444,6 +469,7 @@ impl SessionEvent {
             SessionEvent::ToolEnd { .. } => EventKind::ToolEnd,
             SessionEvent::AgentSwitch(_) => EventKind::AgentSwitched,
             SessionEvent::ModelSwitch(_) => EventKind::ModelSwitched,
+            SessionEvent::ModelOverrideApplied { .. } => EventKind::Step,
             SessionEvent::Compaction(_) => EventKind::Compaction,
             SessionEvent::CompactionDelta(_) => EventKind::Compaction,
             SessionEvent::Status(_) => EventKind::Step,
@@ -476,6 +502,15 @@ impl SessionEvent {
                 | SessionEvent::SidecarChild { .. }
                 | SessionEvent::SidecarTurn { .. }
         )
+    }
+
+    /// Display-only frames that **no persistence surface may record**: the
+    /// sidecar content frames plus the mid-turn model pick notification, whose
+    /// durable truth is the session model metadata written by the same runner
+    /// step. Every persistence gate (`EventSink::push`, TUI mirror, container
+    /// event collectors) derives its rule from this predicate.
+    pub fn is_ephemeral_frame(&self) -> bool {
+        self.is_sidecar_frame() || matches!(self, SessionEvent::ModelOverrideApplied { .. })
     }
 }
 

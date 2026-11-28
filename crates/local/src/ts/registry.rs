@@ -6,6 +6,14 @@
 //! its `model IS NULL` sessions (the old durable ts marker) are imported.
 //! Migration is idempotent (`INSERT OR REPLACE` + a trailing `migrated=1`
 //! meta marker), so a crash mid-way simply restarts on the next command.
+//!
+//! Writers of `ts.db` are multi-process: a ts command is a short-lived writer
+//! beside any live session (a TUI in another process mirrors into the same
+//! registry), and the transactions serialize through the engine's WAL and the
+//! `BEGIN IMMEDIATE` busy retry inside `TsRegistry::open`. Nothing is refused,
+//! deferred or reported as in use. Inspection (`ts -l`, attach-only resume)
+//! opens the registry read-only, and flows that only attach never open a
+//! writer at all.
 
 use std::path::{Path, PathBuf};
 
@@ -18,14 +26,58 @@ const WORKDIR_MARKER: &str = "workdir";
 /// Open the central registry, running the one-time legacy migration when the
 /// `migrated` meta marker is absent.
 pub(crate) async fn open_registry() -> Result<TsRegistry> {
-    let root = opencoder_core::data_root();
+    open_registry_at(&opencoder_core::data_root()).await
+}
+
+/// [`open_registry`] against an explicit data root.
+pub(crate) async fn open_registry_at(root: &Path) -> Result<TsRegistry> {
     let path = root.join("ts.db");
     let registry = TsRegistry::open(&path).await?;
     if !registry.is_migrated().await? {
-        migrate_legacy(&registry, &root).await?;
+        migrate_legacy(&registry, root).await?;
         registry.mark_migrated().await?;
     }
     Ok(registry)
+}
+
+/// Read-only registry against an explicit data root, for the inspecting flows
+/// (`ts -l`, attach-only resume): a reader opens read-only (no migration, no
+/// writes). `None` means no registry exists yet.
+pub(crate) async fn open_registry_reader_at(root: &Path) -> Result<Option<TsRegistry>> {
+    let path = root.join("ts.db");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    TsRegistry::open_reader(&path).await.map(Some)
+}
+
+/// Registry rows through a reader; `None` when no registry exists yet.
+pub(crate) async fn read_records() -> Result<Option<Vec<TsRecord>>> {
+    read_records_at(&opencoder_core::data_root()).await
+}
+
+/// [`read_records`] against an explicit data root.
+pub(crate) async fn read_records_at(root: &Path) -> Result<Option<Vec<TsRecord>>> {
+    match open_registry_reader_at(root).await? {
+        Some(registry) => registry.list().await.map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Rows for a flow that inspects before it mutates: read-only whenever a
+/// registry exists. Without one, the one-time legacy import is the only way a
+/// stopped legacy session can be discovered, so a short-lived writer creates
+/// and migrates the registry first (the handle is dropped before returning).
+pub(crate) async fn records_or_legacy_import() -> Result<Vec<TsRecord>> {
+    records_or_legacy_import_at(&opencoder_core::data_root()).await
+}
+
+/// [`records_or_legacy_import`] against an explicit data root.
+pub(crate) async fn records_or_legacy_import_at(root: &Path) -> Result<Vec<TsRecord>> {
+    match read_records_at(root).await? {
+        Some(records) => Ok(records),
+        None => open_registry_at(root).await?.list().await,
+    }
 }
 
 /// Register (or refresh) one ts session: canonical workdir, its owning store
@@ -74,7 +126,7 @@ async fn migrate_legacy(registry: &TsRegistry, root: &Path) -> Result<()> {
 /// Scan every per-workdir store under `root` for legacy migration. A child
 /// counts as a store only if it is a directory containing `opencoder.db`.
 /// `strict` controls whether an unreadable store aborts the scan (migration
-/// wants strict; the old display path tolerated bad stores).
+/// wants strict; a non-strict pass warns and skips the store).
 async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
     let mut rd = match tokio::fs::read_dir(root).await {
         Ok(rd) => rd,
@@ -90,8 +142,7 @@ async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
         if !store_dir.is_dir() || !db.is_file() {
             continue;
         }
-        let loaded = load_store(&store_dir, &db).await;
-        match loaded {
+        match load_store(&store_dir, &db).await {
             Ok(items) => out.extend(items),
             Err(error) if !strict => {
                 tracing::warn!(path = %db.display(), %error, "ts: skipping unreadable store");
@@ -102,14 +153,26 @@ async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
     Ok(out)
 }
 
+/// Sessions of one per-workdir store, for the legacy migration. Reader first
+/// (no migration, no writes); a store the reader cannot list (a schema older
+/// than its queries) is listed again through `TursoStore::open` -- the
+/// migrating writer open, which bootstraps under `BEGIN IMMEDIATE` with busy
+/// retry and treats a live session holding the store as just another writer.
 async fn load_store(store_dir: &Path, db: &Path) -> Result<Vec<StoredSession>> {
-    let store = TursoStore::open(db)
-        .await
-        .with_context(|| format!("open session store: {}", db.display()))?;
+    let items = match list_through_reader(db).await {
+        Ok(items) => items,
+        Err(error) => {
+            tracing::debug!(path = %db.display(), %error, "ts: store not readable through a reader; listing it through the migrating writer open");
+            let store = TursoStore::open(db)
+                .await
+                .with_context(|| format!("open session store: {}", db.display()))?;
+            list_all_sessions(&store)
+                .await
+                .with_context(|| format!("list sessions: {}", db.display()))?
+        }
+    };
     let workdir = read_workdir(store_dir).await;
-    Ok(list_all_sessions(&store)
-        .await
-        .with_context(|| format!("list sessions: {}", db.display()))?
+    Ok(items
         .into_iter()
         .map(|item| StoredSession {
             store_dir: store_dir.to_path_buf(),
@@ -117,6 +180,16 @@ async fn load_store(store_dir: &Path, db: &Path) -> Result<Vec<StoredSession>> {
             item,
         })
         .collect())
+}
+
+/// Sessions of `db` through a reader: nothing is migrated or written.
+async fn list_through_reader(db: &Path) -> Result<Vec<SessionListItem>> {
+    let store = TursoStore::open_reader(db)
+        .await
+        .with_context(|| format!("open session store reader: {}", db.display()))?;
+    list_all_sessions(&store)
+        .await
+        .with_context(|| format!("list sessions: {}", db.display()))
 }
 
 /// Legacy per-store `workdir` marker reader (migration only; new registrations

@@ -86,6 +86,9 @@ pub(crate) fn print_event(ev: &SessionEvent) {
         SessionEvent::SidecarStart { .. }
         | SessionEvent::SidecarChild { .. }
         | SessionEvent::SidecarTurn { .. } => {}
+        // Session-only pick acknowledgement: the following `ModelSwitch`
+        // already prints the switch, a refusal is reported by the session.
+        SessionEvent::ModelOverrideApplied { .. } => {}
     }
 }
 

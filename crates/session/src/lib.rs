@@ -10,6 +10,7 @@ pub mod harness;
 pub mod mcp;
 pub mod mention_resolve;
 pub mod model;
+pub mod model_switch;
 pub mod process;
 pub mod prompt;
 pub mod resume;
@@ -31,6 +32,10 @@ pub use control_cmd::{
     ControlCmd,
 };
 pub use event_sink::{run_flusher, spawn_checked_event_flusher, spawn_event_flusher, EventSink};
+pub use model_switch::{
+    drain_model_switches, mode_from_key, pending_model_switches, queue_model_switch,
+    ModelSwitchQueue,
+};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, run_with_registry, SessionEvent};
 // Sidecar (TUI `/sidecar`): temporary Q&A loop over a context snapshot.
@@ -252,6 +257,10 @@ pub struct SessionState {
     /// Shared question/answer rendezvous for the `question` tool: an attached
     /// frontend (TUI) resolves; the tool awaits inside the running turn.
     pub question_hub: Arc<QuestionHub>,
+    /// Session-only model picks handed over by a frontend while a turn runs.
+    /// The runner drains it after every completed LLM round (never before the
+    /// turn's first request), so the in-flight request keeps its model.
+    pub model_switch_queue: ModelSwitchQueue,
 }
 
 impl SessionState {
@@ -319,6 +328,7 @@ impl SessionState {
             handoff_plan: None,
             requirement: None,
             question_hub: QuestionHub::new(),
+            model_switch_queue: ModelSwitchQueue::default(),
         }
     }
 

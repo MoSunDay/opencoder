@@ -1,9 +1,8 @@
 //! Independent fleet control database: node catalog, five-column execution index,
 //! and global definitions. It never opens an old session database.
 use anyhow::Result;
-use opencoder_database::Database;
+use opencoder_database::{ConnectionLease, Database};
 use std::path::Path;
-use turso::Connection;
 
 mod brain;
 mod catalog;
@@ -22,7 +21,7 @@ pub struct FleetStore {
 }
 
 struct FleetConnection {
-    conn: Connection,
+    conn: ConnectionLease,
 }
 
 impl FleetStore {

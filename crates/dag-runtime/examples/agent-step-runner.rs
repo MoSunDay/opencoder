@@ -138,7 +138,7 @@ fn run() -> Result<(), i32> {
     let transcript = Arc::new(Mutex::new(String::new()));
     let tail = Arc::clone(&transcript);
     let on_event = move |ev: SessionEvent| {
-        if !ev.is_sidecar_frame() {
+        if !ev.is_ephemeral_frame() {
             let line =
                 serde_json::json!({"kind":ev.sse_kind(),"payload":ev.sse_data()}).to_string();
             if let Err(error) = writeln!(events.lock().unwrap(), "{line}") {

@@ -23,9 +23,12 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   `/task` Resume/Fork 先恢复持久化选择，再按 startup 相同优先级重应用显式胜者，
   并从覆盖后的 effective config 构造 client；只有恢复、client 构造、模型持久化及
   新 worker 准备全部成功后才同步外层 config/client/chat/context，任一失败保留原
-  worker、模型状态、历史与草稿，不提交半切换状态。Resume 失败的错误链带
-  `task switch resume for session <id>`，切换失败处只按 session id + 错误链记 warn
-  （不记录标题 / 提示词 / 消息内容），用户可见提示不变
+  worker、模型状态、历史与草稿，不提交半切换状态。远端探测（`remote::load`）先于
+  本地 resume 执行，其失败带 `task switch remote load for session <id>`；Resume 失败的
+  错误链带 `task switch resume for session <id>`；切换失败处只按 session id + 错误链记
+  warn（不记录标题 / 提示词 / 消息内容），用户可见提示不变；定向回归覆盖切换入口本地 / 远端加载失败的
+  原子性、压缩会话的 OFFSET 尾部恢复与远端绑定任务的 Fork 拒绝（见
+  [changelog](../../../features/changelog/2026-11-28/task-switch-remote-load-context.md)）
 - [worker.rs](../../../crates/tui/src/worker.rs) — 分派 Server 或本地会话 actor，
   桥接 `SessionEvent` 到聊天渲染；turn 代标：`ResetCancel(CancellationToken, gen)`
   重置取消令牌并携带代数、`TurnDone(String, gen)` 回显同代，app 状态逐 turn
@@ -97,13 +100,17 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   连续压缩只留最新摘要；孙代理 `Subagent` 卡片随折叠重挂在派生消息之下（派生消息已
   折叠的按 orphan 追加），计数与可见卡片一致、运行中事件仍可路由
   （见 [changelog](../../../features/changelog/2026-11-27/subagent-compaction-fold.md)）
-- [src/model_menu/](../../../crates/tui/src/model_menu/mod.rs) — `/model` 与
-  `/config` 先选择 Shared/Act/Plan；Shared 沿用顶层配置，Act/Plan 分别编辑
-  `modes.act`/`modes.plan`，生成参数表单的 `i`/Delete 以显式 `null` 恢复继承。
+- [src/model_menu/](../../../crates/tui/src/model_menu/mod.rs) — `/model` 只选择
+  Act/Plan，`/config` 选择 Shared/Act/Plan；Act/Plan 分别编辑
+  `modes.act`/`modes.plan`，两行始终显示有效模型值（未单独覆盖时继承 Shared
+  基值），生成参数表单的 `i`/Delete 以显式 `null` 恢复继承。
   Provider 新增、编辑、删除统一进入保存范围确认：`y`/`Y` 或 Enter 写磁盘，
   `n`/`N` 仅改会话，Esc 取消本次变更且不切换模型；菜单显示 `Active Env` 与
-  解析后的 `Save target`。session-only Shared 选择写入可选 `shared` 元数据并立即
-  成为有效 Shared 模型，优先于 `modes.shared.model`；`{}` 或字段缺省表示继承配置，
+  解析后的 `Save target`。`/model` 没有 Shared 语义：菜单 scope、切换 patch
+  （`modes.act|plan.model`）与会话覆盖写入都只涉及 Act/Plan；顶层 `model`（Shared
+  默认）仅由 onboarding / `/config` 写入，`selection_from_patch` 不把它当作会话选择。
+  会话层保留 legacy Shared 基值：首次 Act/Plan 选择把 Shared 与另一模式钉到 legacy
+  基值（显示副本 `display_overrides` 镜像同一规则）；`{}` 或字段缺省表示继承配置，
   整体 `NULL` 保持 legacy 单模型语义。
   模型菜单与 `/cli`、`/skill` 显式使用 `EnvAware`：有活动 Env 时写入对应 Env 文件，
   无活动时回退 legacy `Auto`；`Auto` 和显式项目/全局路由不会被活动 Env 劫持
@@ -116,7 +123,7 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   的 Shared 基值，避免 resume 恢复旧 Shared；已消费的一次性 Skill body 标记保留
 - [model_session_switch.rs](../../../crates/tui/src/model_session_switch.rs)、
   [worker/model_commands.rs](../../../crates/tui/src/worker/model_commands.rs) —
-  会话级 Shared/Act/Plan 选择持久化到可选模式覆盖元数据，随 resume/fork 保留；
+  会话级 Act/Plan 选择持久化到可选模式覆盖元数据，随 resume/fork 保留；
   完整配置 reload 才更新 legacy Shared 基值 `sessions.model`，不会覆盖独立 Shared
   会话选择。Provider patch 支持新增/编辑/`null` 删除，`api_key: null` 清空 key、headers
   整体替换，只合并进候选内存 `Config`，不写磁盘，也不属于可恢复的模型元数据。
@@ -133,12 +140,16 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   / `drain_pending_env(.., running)` 再兜底一次；Env 菜单的 pending 命令在 `handle_model_key`
   执行前即被拒绝、保持 pending（见
   [changelog](../../../features/changelog/2026-11-27/tui-model-switch-marker-and-busy-gate.md)）。
-  运行中 `/model` 不受此门控：纯模型选择经 `queue_session_switch` 以无 ack 的
-  `UiCmd::ApplySessionDeferred` 投递（`try_send`，UI 永不挂起），worker 在当前 turn 结束时
-  应用并发 `UiEvent::ModelCommit`（排在 `ModelSwitch` 之后、同通道保序），`fold_ui_events`
-  收到后才通过 `commit_session_switch` 提交 `model_overrides` / `shared_model` / `chat.model`
-  显示；含 `providers` 的 patch 运行中仍拒绝（见
-  [changelog](../../../features/changelog/2026-11-28/tui-model-switch-while-running.md)）
+  运行中 `/model` 不受此门控：纯模型选择经 `queue_session_switch` 直接 push 到会话的
+  `ModelSwitchQueue`（`crates/session/src/model_switch.rs`，不经过 worker 命令通道，UI 永不
+  挂起），runner 在**当前这次 LLM 请求完成后**（`run_one_llm_call` 返回处、工具执行前）
+  逐项应用：持久化覆盖 → 有变化发 `ModelSwitch` → 发 display-only 的
+  `SessionEvent::ModelOverrideApplied { mode, model, error }`（`is_ephemeral_frame`，不落盘）。
+  `fold_ui_events` 收到后通过 `commit_model_override` 提交 `model_overrides` /
+  `shared_model` / `chat.model`，与 `ModelSwitch` 同批折叠，左上角模型即下一次请求使用的
+  模型；失败的 pick 携带 error、显示保持旧模型、后续 pick 继续。含 `providers` 的 patch
+  运行中仍拒绝（见
+  [changelog](../../../features/changelog/2026-11-28/tui-model-switch-at-llm-boundary.md)）
 - [app_display.rs](../../../crates/tui/src/app_display.rs) — `compute_display`
   展示标题优先取会话内当前模型（`chat.model`），空态才回退配置默认
 - [agent_menu.rs](../../../crates/tui/src/agent_menu.rs)、
@@ -182,7 +193,13 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复；`TsMirrorStore` 原样委托模式模型元数据的
   创建/读取/更新接口，保留 `NULL`、`{}` 与显式值，metadata-aware 创建仍触发既有
   ts 镜像 hook；`load_messages_after` 显式委托 inner 以保留原生 OFFSET 尾部读取
-  （压缩头部不反序列化，避免被跳过的头部坏行拖垮 Resume）
+  （压缩头部不反序列化，避免被跳过的头部坏行拖垮 Resume）；registry 写者纪律——TUI
+  从不长期持有 `ts.db` 写者：`maybe_wrap_at` 仅在 `ts.db` 已存在且能以只读
+  `TsRegistry::open_reader` 打开时包裹（打不开则跳过镜像并继续），该 reader 常驻整个 TUI
+  生命周期；每次镜像变更经 `TsRegistry::open` 取一个只用一次的写者、完成即释放——多写者 WAL
+  下它与 ts 命令 / 其他 TUI 并存，事务层有界重试而不是被拒绝或推迟；
+  `ts_mirror_tests.rs` 的 `mirror_mutations_commit_beside_a_live_writer`（见
+  [changelog](../../../features/changelog/2026-11-28/database-multi-writer-wal-and-maintenance-lease.md)）
 - [hooks.rs](../../../crates/tui/src/hooks.rs) — `~/.opencoder/hooks.json` TUI 事件命令
 - [clipboard.rs](../../../crates/tui/src/clipboard.rs)、
   [app_loop_paste.rs](../../../crates/tui/src/app_loop_paste.rs) — 剪贴板图片转 PNG 附件

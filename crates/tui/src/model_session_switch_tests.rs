@@ -103,7 +103,7 @@ async fn act_selection_commits_after_ack_without_rebuilding_client() {
 }
 
 #[tokio::test]
-async fn shared_selection_overrides_config_overlay_without_rebuilding_client() {
+async fn plan_selection_keeps_the_shared_overlay_without_rebuilding_client() {
     let mut config = config();
     config.modes.shared = opencoder_core::ModeConfig {
         model: Some("openai/config-shared".into()),
@@ -112,6 +112,7 @@ async fn shared_selection_overrides_config_overlay_without_rebuilding_client() {
     };
     let empty = SessionModelOverrides::default();
     let mut chat = ChatView {
+        agent: "plan".into(),
         shared_model: crate::model_scope::shared_model(&config, Some(&empty)),
         model: "openai/config-shared".into(),
         model_overrides: Some(empty),
@@ -123,7 +124,7 @@ async fn shared_selection_overrides_config_overlay_without_rebuilding_client() {
     let (tx, mut rx) = mpsc::channel(2);
 
     let command = acknowledged_switch(
-        serde_json::json!({"model":"openai/session-shared"}),
+        serde_json::json!({"modes":{"plan":{"model":"openai/session-plan"}}}),
         &mut config,
         &mut client,
         &tx,
@@ -136,26 +137,66 @@ async fn shared_selection_overrides_config_overlay_without_rebuilding_client() {
     assert!(matches!(
         command,
         UiCmd::ApplySession {
-            selection: Some((ConfigMode::Shared, ref model)),
+            selection: Some((ConfigMode::Plan, ref model)),
             provider_changed: false,
             ..
-        } if model == "openai/session-shared"
+        } if model == "openai/session-plan"
     ));
     assert_eq!(Arc::as_ptr(&client), original);
     assert_eq!(config.model, "openai/shared");
-    assert_eq!(chat.shared_model, "openai/session-shared");
-    assert_eq!(chat.model, "openai/session-shared");
+    assert_eq!(
+        chat.shared_model, "openai/config-shared",
+        "a Plan pick never touches the Shared slot"
+    );
+    assert_eq!(chat.model, "openai/session-plan");
     assert_eq!(
         chat.model_overrides,
         Some(SessionModelOverrides {
-            shared: Some("openai/session-shared".into()),
+            plan: Some("openai/session-plan".into()),
             ..Default::default()
         })
     );
     assert_eq!(
         crate::model_scope::effective_for_chat(&config, &chat).max_tokens,
         Some(4_096),
-        "selecting Shared retains generation overlays"
+        "the Plan pick inherits Shared generation overlays"
+    );
+    // The Shared default in a patch is never a session selection.
+    let mut chat = chat.clone();
+    // A bare top-level `model` is the onboarding default, never a session
+    // selection: nothing is sent to the worker and the call returns at once.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        switch_session(
+            serde_json::json!({"model":"openai/not-a-pick"}),
+            &mut config,
+            &mut client,
+            &tx,
+            &mut chat,
+        ),
+    )
+    .await
+    .expect("a patch without a selection returns without waiting for an ack");
+    assert!(matches!(
+        rx.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+    assert_eq!(Arc::as_ptr(&client), original);
+    assert_eq!(chat.model, "openai/session-plan", "display unchanged");
+    let lines = markers(&chat);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("contained neither Provider data nor a model selection")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.contains("switched"))
+            .count(),
+        1,
+        "only the Plan pick above produced a switch marker: {lines:?}"
     );
 }
 
@@ -175,7 +216,7 @@ async fn provider_add_replaces_fields_and_rebuilds_only_after_ack() {
     let original = Arc::as_ptr(&client);
     let (tx, mut rx) = mpsc::channel(2);
     let patch = serde_json::json!({
-        "model": "demo/session-model",
+        "modes": {"act": {"model": "demo/session-model"}},
         "providers": {
             "demo": {
                 "base_url":"https://example.invalid/v2",
@@ -207,11 +248,11 @@ async fn provider_add_replaces_fields_and_rebuilds_only_after_ack() {
     ));
     assert_ne!(Arc::as_ptr(&client), original);
     assert_eq!(config.model, "openai/shared");
-    assert_eq!(chat.shared_model, "demo/session-model");
+    assert_eq!(chat.shared_model, "openai/shared", "Shared is not a pick");
     assert_eq!(
         chat.model_overrides
             .as_ref()
-            .and_then(|items| items.shared.as_deref()),
+            .and_then(|items| items.act.as_deref()),
         Some("demo/session-model")
     );
     assert!(!config.providers.contains_key("old"));
@@ -225,7 +266,7 @@ async fn provider_add_replaces_fields_and_rebuilds_only_after_ack() {
     );
     assert!(markers(&chat)
         .iter()
-        .any(|line| line.contains("Provider + Shared") && line.contains("session only")));
+        .any(|line| line.contains("Provider + Act") && line.contains("session only")));
 }
 
 #[tokio::test]
@@ -281,7 +322,7 @@ async fn send_failure_and_worker_failure_leave_all_outer_state_unchanged() {
         if close_channel {
             drop(rx);
             switch_session(
-                serde_json::json!({"model":"openai/rejected"}),
+                serde_json::json!({"modes":{"act":{"model":"openai/rejected"}}}),
                 &mut config,
                 &mut client,
                 &tx,
@@ -290,7 +331,7 @@ async fn send_failure_and_worker_failure_leave_all_outer_state_unchanged() {
             .await;
         } else {
             acknowledged_switch(
-                serde_json::json!({"model":"openai/rejected"}),
+                serde_json::json!({"modes":{"act":{"model":"openai/rejected"}}}),
                 &mut config,
                 &mut client,
                 &tx,
@@ -319,7 +360,7 @@ async fn out_of_order_completions_do_not_cross_commit_or_rollback() {
             let mut chat = chat(&config);
             let mut client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
             switch_session(
-                serde_json::json!({"model":model}),
+                serde_json::json!({"modes":{"act":{"model":model}}}),
                 &mut config,
                 &mut client,
                 &tx,
@@ -335,7 +376,7 @@ async fn out_of_order_completions_do_not_cross_commit_or_rollback() {
     let b = rx.recv().await.unwrap();
     let selected = |command: &UiCmd| match command {
         UiCmd::ApplySession {
-            selection: Some((ConfigMode::Shared, selected)),
+            selection: Some((ConfigMode::Act, selected)),
             ..
         } => selected.clone(),
         _ => panic!("mis-correlated test command"),
@@ -363,13 +404,18 @@ async fn out_of_order_completions_do_not_cross_commit_or_rollback() {
     assert_eq!(first_config.model, "openai/shared");
     assert_eq!(second_config.model, "openai/shared");
     assert_eq!(first_chat.shared_model, "openai/shared");
-    assert_eq!(second_chat.shared_model, "openai/second");
+    assert_eq!(second_chat.shared_model, "openai/shared");
     assert_eq!(
         second_chat
             .model_overrides
             .as_ref()
-            .and_then(|items| items.shared.as_deref()),
+            .and_then(|items| items.act.as_deref()),
         Some("openai/second")
+    );
+    assert!(
+        first_chat.model_overrides.is_none(),
+        "the failed older pick commits nothing: {:?}",
+        first_chat.model_overrides
     );
     assert!(!markers(&first_chat).join("").contains("switched"));
     assert!(markers(&second_chat).join("").contains("switched"));

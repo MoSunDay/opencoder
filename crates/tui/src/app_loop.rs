@@ -207,6 +207,20 @@ pub(crate) async fn fold_ui_events(
                         return LoopFlow::Proceed;
                     }
                 } else {
+                    if let SessionEvent::ModelOverrideApplied { mode, model, error } = &sev {
+                        // A queued `/model` pick the runner applied after an
+                        // LLM round: commit the display in the same fold as
+                        // the event, so the status bar shows exactly the model
+                        // the next request uses (a refused pick keeps the old
+                        // one and only adds the failure marker).
+                        crate::model_session_switch::commit_model_override(
+                            chat,
+                            config,
+                            mode,
+                            model,
+                            error.clone(),
+                        );
+                    }
                     hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
                         && chat.last_open_thinking_collapsed();
                     chat.apply(&sev);
@@ -401,12 +415,6 @@ pub(crate) async fn fold_ui_events(
             // (workers are quit on every session switch, so the session
             // worker channel cannot carry them across switches).
             UiEvent::SubtaskUpdate { .. } => {}
-            UiEvent::ModelCommit { selection, result } => {
-                // Deferred `/model` pick applied by the worker at the turn
-                // boundary: commit the display only now, so the status bar
-                // never shows a model the in-flight requests were not using.
-                crate::model_session_switch::commit_session_switch(chat, config, selection, result);
-            }
         }
         batch_needs_render |= !hidden_reasoning_append;
         *skip_next_render = !batch_needs_render;

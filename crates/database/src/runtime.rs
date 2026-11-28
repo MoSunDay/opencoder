@@ -34,7 +34,9 @@ where
     let executor = executor(write);
     // Transfer ownership before waiting for executor capacity, including when
     // another database occupies the executor. Cancellation only detaches the
-    // JoinHandle; an already admitted database operation still finishes.
+    // JoinHandle; an already admitted database operation still finishes. Work
+    // must therefore own every resource it needs for its whole lifetime: a
+    // dropped caller never drops resources the detached task still uses.
     executor
         .runtime
         .spawn(async move {

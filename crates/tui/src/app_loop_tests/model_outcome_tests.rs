@@ -83,6 +83,7 @@ async fn run_shared_save(reply: WorkerReply, shared_override: Option<&str>) -> S
     let mut frame_ms = before.tui_frame_ms();
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(4);
+    let model_switches = Default::default();
     let mut chat = ChatView {
         shared_model: shared_override.unwrap_or(&before.model).to_string(),
         model: before.model.clone(),
@@ -105,6 +106,7 @@ async fn run_shared_save(reply: WorkerReply, shared_override: Option<&str>) -> S
             &mut frame_ms,
             &mut ticker,
             &cmd_tx,
+            &Default::default(),
             &mut chat,
             &workdir,
             None,
@@ -124,6 +126,7 @@ async fn run_shared_save(reply: WorkerReply, shared_override: Option<&str>) -> S
                 &mut frame_ms,
                 &mut ticker,
                 &cmd_tx,
+                &model_switches,
                 &mut chat,
                 &workdir,
                 None,
@@ -280,6 +283,7 @@ async fn run_client_build_failure(disk: serde_json::Value, expected_error: &str)
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         workdir,
         None,
@@ -385,6 +389,7 @@ async fn shared_mode_config_save_uses_auto_with_active_env() {
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         &workdir,
         None,

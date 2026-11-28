@@ -12,6 +12,19 @@ pub(super) async fn open_catalog(path: &Path) -> Result<Database> {
     open_with_reporting(path, false).await
 }
 
+/// Read-only open for inspection commands. No writer lock is taken, so a
+/// live writer in another process keeps the database; nothing bootstraps,
+/// migrates or checkpoints, and a file without the current schema fails on
+/// its first query rather than being repaired behind the reader's back.
+pub(super) async fn open_reader(path: &Path) -> Result<Database> {
+    let started = std::time::Instant::now();
+    let db = Database::open_reader(path).await?;
+    tracing::info!(backend = "turso", path = %path.display(),
+        total_ms = started.elapsed().as_millis() as u64,
+        intent = "reader", "store opened");
+    Ok(db)
+}
+
 async fn open_with_reporting(path: &Path, runtime_reporting: bool) -> Result<Database> {
     // Capture pre-open existence: `Database::open` may itself create the
     // file, and the fresh-file checkpoint gate must not depend on that.

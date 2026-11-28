@@ -84,6 +84,7 @@ async fn scoped_model_save_routes_to_active_env_without_touching_project_file() 
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         &workdir,
         None,
@@ -104,6 +105,7 @@ async fn scoped_model_save_routes_to_active_env_without_touching_project_file() 
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         &workdir,
         None,
@@ -188,6 +190,7 @@ async fn typed_env_activation_drains_through_runtime_and_refreshes_effective_vie
     let mut frame_ms = config.tui_frame_ms();
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel(4);
+    let model_switches = Default::default();
 
     let (flow, command) = tokio::join!(
         drain_pending_env(
@@ -199,6 +202,7 @@ async fn typed_env_activation_drains_through_runtime_and_refreshes_effective_vie
             &mut frame_ms,
             &mut ticker,
             &cmd_tx,
+            &model_switches,
             &mut chat,
             &workdir,
             None,
@@ -275,6 +279,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         &workdir,
         None,
@@ -296,6 +301,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         &workdir,
         None,
@@ -329,6 +335,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         &workdir,
         None,
@@ -350,6 +357,7 @@ async fn act_config_uses_env_while_shared_config_stays_on_project() {
         &mut frame_ms,
         &mut ticker,
         &cmd_tx,
+        &Default::default(),
         &mut chat,
         &workdir,
         None,

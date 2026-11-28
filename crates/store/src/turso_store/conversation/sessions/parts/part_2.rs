@@ -114,3 +114,75 @@ fn extract_preview(blocks_json: &Option<String>) -> String {
     }
     String::new()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn activity_patch() -> SessionPatch {
+        SessionPatch {
+            summary: Some("summary".into()),
+            summary_seq: Some(7),
+            updated_at: Some(600),
+            ..Default::default()
+        }
+    }
+
+    fn values(items: &[turso::Value]) -> Vec<turso::Value> {
+        items.to_vec()
+    }
+
+    #[test]
+    fn patch_plan_touches_the_activity_stamp_only_when_requested() {
+        let (sql, args) = patch_plan(&activity_patch(), "s1", true).unwrap();
+        assert!(sql.contains("updated_at = MAX(?, created_at)"));
+        assert_eq!(
+            args,
+            values(&[
+                "summary".into(),
+                7.into(),
+                600.into(),
+                "s1".into()
+            ]),
+            "summary, summary_seq, updated_at, id -- in binding order"
+        );
+
+        let (sql, args) = patch_plan(&activity_patch(), "s1", false).unwrap();
+        assert!(!sql.contains("updated_at"));
+        assert_eq!(
+            args,
+            values(&["summary".into(), 7.into(), "s1".into()]),
+            "the degraded plan drops exactly the stamp and its binding"
+        );
+    }
+
+    #[test]
+    fn patch_plan_without_an_activity_stamp_is_touch_independent() {
+        let patch = SessionPatch {
+            title: Some("title".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            patch_plan(&patch, "s1", true),
+            patch_plan(&patch, "s1", false)
+        );
+    }
+
+    #[test]
+    fn activity_only_patch_has_no_degraded_statement() {
+        let patch = SessionPatch {
+            updated_at: Some(600),
+            ..Default::default()
+        };
+        assert!(patch_plan(&patch, "s1", true).is_some());
+        assert!(
+            patch_plan(&patch, "s1", false).is_none(),
+            "an activity-only patch has nothing to write without the touch"
+        );
+    }
+
+    #[test]
+    fn empty_patch_writes_nothing() {
+        assert!(patch_plan(&SessionPatch::default(), "s1", true).is_none());
+    }
+}

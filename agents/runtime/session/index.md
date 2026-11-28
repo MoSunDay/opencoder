@@ -23,6 +23,13 @@ Commit: 0abfe0c77
   恢复重放）、
   [entry/](../../../crates/session/src/runner/entry/mod.rs) 入口 future、
   [drain.rs](../../../crates/session/src/runner/drain.rs) 队列消费
+- [src/model_switch.rs](../../../crates/session/src/model_switch.rs) — 运行中模型切换队列
+  `ModelSwitchQueue`（`Arc<Mutex<VecDeque<(ConfigMode, String)>>>`，句柄经 `SessionState`
+  clone 给前端）：前端在 LLM 请求进行中 push pick，runner 在 `run_one_llm_call` 返回后
+  （Ok/Err 均调用，Codex harness `run_turn` 后同样）`apply_queued_model_switches` 逐项走
+  `set_mode_model_override` → `take_model_switch` → 发 display-only 的
+  `SessionEvent::ModelOverrideApplied { mode, model, error }`（`is_ephemeral_frame`，持久化
+  门不落盘）；失败的 pick 携带 error、不中断后续 pick。
 - [src/model.rs](../../../crates/session/src/model.rs) — 按请求解析 Shared/Act/Plan
   有效模型与生成参数；只有精确匹配的内置主 `act`/`plan` agent 使用对应覆盖，
   自定义 agent、build/subagent/workflow 与辅助会话使用 Shared。请求保留完整

@@ -77,7 +77,7 @@ fn parse(bytes: &[u8], session: &str) -> Result<(Vec<SessionEventRecord>, usize)
             .context("container event kind missing")?;
         let event = SessionEvent::from_sse(kind, value["payload"].clone())
             .context("unknown container event")?;
-        if !event.is_sidecar_frame() {
+        if !event.is_ephemeral_frame() {
             records.push(SessionEventRecord {
                 session_id: session.into(),
                 kind: event.coarse_kind(),

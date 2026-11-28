@@ -36,7 +36,7 @@ impl AppState {
         tokio::spawn(async move {
             let _active = active;
             let database = state.database.clone();
-            let task = move |connection: turso::Connection| async move {
+            let task = move |connection: opencoder_database::ConnectionLease| async move {
                 if write {
                     busy::begin_with_retry(&connection, "BEGIN IMMEDIATE").await?;
                 }

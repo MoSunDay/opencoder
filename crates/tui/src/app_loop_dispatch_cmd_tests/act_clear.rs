@@ -257,6 +257,7 @@ async fn manual_confirm_while_running_interrupts_and_fires_now() {
         cancels: Default::default(),
         turn_cancels: Default::default(),
         steer_gates: Default::default(),
+        model_switches: Default::default(),
     };
     let mut cancelled = false;
     let mut body_pending = false;
@@ -397,6 +398,7 @@ async fn esc_cancel_drops_countdown_chip() {
         cancels: Default::default(),
         turn_cancels: Default::default(),
         steer_gates: Default::default(),
+        model_switches: Default::default(),
     };
     let mut cancelled = false;
     let mut body_pending = false;
@@ -494,6 +496,7 @@ async fn enter_with_typed_text_fires_merged_rest_now() {
         cancels: Default::default(),
         turn_cancels: Default::default(),
         steer_gates: Default::default(),
+        model_switches: Default::default(),
     };
     let mut cancelled = false;
     let mut body_pending = false;
@@ -615,6 +618,7 @@ async fn retyped_clear_command_supersedes_armed_rest() {
         cancels: Default::default(),
         turn_cancels: Default::default(),
         steer_gates: Default::default(),
+        model_switches: Default::default(),
     };
     let mut cancelled = false;
     let mut body_pending = false;
@@ -729,6 +733,7 @@ async fn shift_tab_repress_fires_armed_guard_now() {
         cancels: Default::default(),
         turn_cancels: Default::default(),
         steer_gates: Default::default(),
+        model_switches: Default::default(),
     };
     let mut cancelled = false;
     let mut body_pending = false;

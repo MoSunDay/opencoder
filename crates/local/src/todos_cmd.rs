@@ -35,30 +35,20 @@ pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
         .clone()
         .map(Ok)
         .unwrap_or_else(std::env::current_dir)?;
+    if reads_only(sub) {
+        return read_only_dispatch(sub, &workdir).await;
+    }
+    if let TodosSub::Interrupt { id } = sub {
+        return crate::todos_interrupt::dispatch(&workdir, id).await;
+    }
     let store: Arc<dyn Store> = Arc::new(crate::session_cmd::open_store(&workdir).await?);
     match sub {
         TodosSub::Validate { .. } => unreachable!("validated before Store initialization"),
-        TodosSub::Show { id, json } => show(&store, id, *json).await,
-        TodosSub::Events { id, after, json } => events(&store, id, *after, *json).await,
-        TodosSub::List { json, limit } => list(&store, *json, *limit).await,
-        TodosSub::Interrupt { id } => {
-            let state = opencoder_todos::interrupt(&store, id, "CLI interrupt requested").await?;
-            let (spec, _) = opencoder_todos::persistence::load(&store, id)
-                .await?
-                .with_context(|| format!("todo workflow not found after interrupt: {id}"))?;
-            let debug_root = opencoder_core::data_dir_for(&workdir).join("todos");
-            opencoder_todos::persistence::refresh_debug_dump_if_present(
-                &store,
-                &spec,
-                &state,
-                &debug_root,
-            )
-            .await?;
-            println!(
-                "{} suspended at generation {}",
-                state.workflow_id, state.generation
-            );
-            Ok(())
+        TodosSub::Show { .. } | TodosSub::Events { .. } | TodosSub::List { .. } => {
+            unreachable!("show, events and list open read-only")
+        }
+        TodosSub::Interrupt { .. } => {
+            unreachable!("interrupt dispatches before Store initialization")
         }
         TodosSub::Run { file, debug, json } => {
             let spec = opencoder_todos::directory::load_bound(file, &share)
@@ -87,6 +77,46 @@ pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
             .await?;
             finish_state(&state, *json)
         }
+    }
+}
+
+/// `todos show|events|list` only read. They open the store read-only so a
+/// live TUI or `run` owning the same database is never displaced, and they
+/// never create the database just to report that it is empty.
+fn reads_only(sub: &TodosSub) -> bool {
+    matches!(
+        sub,
+        TodosSub::Show { .. } | TodosSub::Events { .. } | TodosSub::List { .. }
+    )
+}
+
+/// The read-only arms of `todos`. Without a database there is nothing to
+/// read: `list` reports no workflows, `show`/`events` name the missing one.
+async fn read_only_dispatch(sub: &TodosSub, workdir: &Path) -> Result<()> {
+    let Some(reader) = crate::session_cmd::open_reader_store(workdir).await? else {
+        return match sub {
+            TodosSub::List { json, .. } => print_workflows(&[], *json),
+            TodosSub::Show { id, .. } | TodosSub::Events { id, .. } => {
+                Err(anyhow::anyhow!("todo workflow not found: {id}"))
+            }
+            _ => unreachable!("only show, events and list open read-only"),
+        };
+    };
+    let store: Arc<dyn Store> = Arc::new(reader.clone());
+    let database = crate::session_cmd::database_for(workdir);
+    // A reader never migrates: a read that fails on a store older than this
+    // build is reported with the remedy, not the engine's raw query error.
+    match sub {
+        TodosSub::Show { id, json } => {
+            crate::session_cmd::inspect(&reader, &database, show(&store, id, *json)).await
+        }
+        TodosSub::Events { id, after, json } => {
+            crate::session_cmd::inspect(&reader, &database, events(&store, id, *after, *json)).await
+        }
+        TodosSub::List { json, limit } => {
+            crate::session_cmd::inspect(&reader, &database, list(&store, *json, *limit)).await
+        }
+        _ => unreachable!("only show, events and list open read-only"),
     }
 }
 
@@ -172,6 +202,10 @@ async fn events(store: &Arc<dyn Store>, id: &str, after: i64, json: bool) -> Res
 
 async fn list(store: &Arc<dyn Store>, json: bool, limit: u32) -> Result<()> {
     let workflows = opencoder_todos::persistence::list(store, limit).await?;
+    print_workflows(&workflows, json)
+}
+
+fn print_workflows(workflows: &[opencoder_store::TodoWorkflowSummary], json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&workflows)?);
     } else {

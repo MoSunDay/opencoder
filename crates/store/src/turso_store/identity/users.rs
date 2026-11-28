@@ -191,7 +191,7 @@ pub async fn update_role(conn: &Connection, name: &str, role: Role) -> Result<bo
 mod tests {
     use super::*;
 
-    async fn db() -> Connection {
+    async fn db() -> opencoder_database::ConnectionLease {
         let store = crate::TursoStore::open_memory().await.unwrap();
         store.conn().await.unwrap()
     }

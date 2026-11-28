@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use opencoder_llm::MockChatClient;
-use opencoder_store::{Store, TursoStore};
+use opencoder_store::{ConnectionLease, Store, TursoStore};
 use turso::params;
 
 use node_e2e_support::{collect_until, get_json, open_sse, post_json, wait_for, TOKEN};
@@ -31,7 +31,7 @@ struct Srv {
     base: String,
     store: Arc<dyn Store>,
     /// Second connection into the SAME file-backed database (backfill path).
-    raw: turso::Connection,
+    raw: ConnectionLease,
     shutdown: tokio::sync::watch::Sender<bool>,
     _dir: tempfile::TempDir,
 }

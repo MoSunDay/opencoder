@@ -278,6 +278,7 @@ pub async fn resume(
         handoff_plan: meta.handoff_plan.clone(),
         requirement: meta.requirement.clone(),
         question_hub: crate::QuestionHub::new(),
+        model_switch_queue: crate::ModelSwitchQueue::default(),
     };
     Ok(s)
 }

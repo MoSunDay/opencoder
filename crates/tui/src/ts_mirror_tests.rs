@@ -1,15 +1,21 @@
 //! Tests for `TsMirrorStore` (see `ts_mirror.rs`). Mirrors the `#[path]`
 //! convention used by `app_loop_bugfix_tests.rs` / `composer_delete_tests.rs`.
 
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use opencoder_core::Message;
-use opencoder_store::{SessionMeta, SessionPatch, Store, TsRegistry, TursoStore};
-use tokio::sync::Mutex;
+use opencoder_store::{SessionMeta, SessionPatch, Store, TsRecord, TsRegistry, TursoStore};
 
 use super::{maybe_wrap_at, TsMirrorStore};
+
+/// A registry file the mirror can wrap: created by a short-lived writer
+/// (schema installed, writer dropped) and then opened read-only, exactly the
+/// state `maybe_wrap_at` finds on disk.
+async fn registry_reader(ts_db: &Path) -> TsRegistry {
+    TsRegistry::open(ts_db).await.unwrap();
+    TsRegistry::open_reader(ts_db).await.unwrap()
+}
 
 fn ts_meta(id: &str) -> SessionMeta {
     SessionMeta {
@@ -26,13 +32,9 @@ async fn fixture() -> (TsMirrorStore, tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let workdir = tmp.path().join("project");
     tokio::fs::create_dir_all(&workdir).await.unwrap();
-    let registry = TsRegistry::open(tmp.path().join("ts.db")).await.unwrap();
-    let mirror = TsMirrorStore {
-        inner,
-        registry,
-        workdir: workdir.clone(),
-        known: Mutex::new(HashSet::new()),
-    };
+    let ts_db = tmp.path().join("ts.db");
+    let registry = registry_reader(&ts_db).await;
+    let mirror = TsMirrorStore::new(inner, registry, ts_db, &workdir);
     (mirror, tmp, workdir)
 }
 
@@ -210,6 +212,92 @@ async fn maybe_wrap_gates_on_existing_registry() {
     assert!(registry.get("01AAA").await.unwrap().is_some());
 }
 
+/// Writer discipline: every process may write `ts.db`. A second writable
+/// registry handle stays open for the whole test, standing in for a `ts`
+/// command or another TUI process. The mirror still wraps, each of its
+/// mutations (a short-lived writer that waits inside the transaction retry
+/// instead of being refused or deferred) commits a row an independent reader
+/// sees while that other writer is still alive, and the other writer keeps
+/// writing in turn without anyone being displaced.
+#[tokio::test]
+async fn mirror_mutations_commit_beside_a_live_writer() {
+    let inner: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+    let tmp = tempfile::tempdir().unwrap();
+    let ts_db = tmp.path().join("ts.db");
+    let workdir = tmp.path().join("project");
+    tokio::fs::create_dir_all(&workdir).await.unwrap();
+
+    // Another process's writer is live at TUI startup and stays live for the
+    // whole test: the mirror still wraps instead of silently dropping out.
+    let other = TsRegistry::open(&ts_db).await.unwrap();
+    let wrapped = maybe_wrap_at(inner.clone(), &workdir, ts_db.clone()).await;
+    assert!(
+        !Arc::ptr_eq(&wrapped, &inner),
+        "a live writer must not disable the mirror"
+    );
+    let registry = TsRegistry::open_reader(&ts_db).await.unwrap();
+
+    wrapped.create_session(&ts_meta("01AAA")).await.unwrap();
+    assert_eq!(
+        registry
+            .get("01AAA")
+            .await
+            .unwrap()
+            .expect("committed while the other writer is alive")
+            .title
+            .as_deref(),
+        Some("seed title"),
+        "the mutation was committed by its short-lived writer"
+    );
+
+    // The other writer commits a row of its own in turn; an independent
+    // reader sees it beside the mirror's row.
+    other
+        .upsert(&TsRecord {
+            id: "02CLI".into(),
+            created_at: 1,
+            updated_at: 1,
+            title: Some("written by the other writer".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut ids: Vec<String> = registry
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["01AAA".to_string(), "02CLI".to_string()]);
+
+    // Later mutations are each a short-lived writer again; the independent
+    // reader sees what each committed while the other writer is still alive.
+    let patch = SessionPatch {
+        title: Some("after startup".into()),
+        ..Default::default()
+    };
+    wrapped.update_session("01AAA", &patch).await.unwrap();
+    assert_eq!(
+        registry
+            .get("01AAA")
+            .await
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("after startup")
+    );
+    wrapped.delete_session("01AAA").await.unwrap();
+    assert!(registry.get("01AAA").await.unwrap().is_none());
+
+    // The mirror never displaced the other writer: it still writes afterwards.
+    other.delete("02CLI").await.unwrap();
+    assert!(registry.get("02CLI").await.unwrap().is_none());
+    assert!(registry.list().await.unwrap().is_empty());
+}
+
 /// Resume on a compacted session reads only the tail after the soft-deleted
 /// head. Inheriting the `Store` trait default would turn that tail load into
 /// a full load plus in-memory drain, so one damaged head row would fail the
@@ -257,13 +345,9 @@ async fn load_messages_after_keeps_the_offset_tail_path() {
     .await
     .unwrap();
 
-    let registry = TsRegistry::open(tmp.path().join("ts.db")).await.unwrap();
-    let mirror = TsMirrorStore {
-        inner: store.clone(),
-        registry,
-        workdir: tmp.path().join("project"),
-        known: Mutex::new(HashSet::new()),
-    };
+    let ts_db = tmp.path().join("ts.db");
+    let registry = registry_reader(&ts_db).await;
+    let mirror = TsMirrorStore::new(store.clone(), registry, ts_db, &tmp.path().join("project"));
 
     // Tail-only load through the mirror: the damaged head is skipped by
     // OFFSET, so only the healthy tail row is decoded and returned.
@@ -292,3 +376,9 @@ async fn load_messages_after_keeps_the_offset_tail_path() {
 /// Compile-time guarantee that the mirror still implements the full `Store`
 /// trait surface (delegation must not silently drop a method).
 fn _assert_store(_s: &dyn Store) {}
+
+/// Input lifecycle forwarding (consume / unpromote / orphan recovery and
+/// read), kept in its own file so this one stays under the test-file size
+/// limit; it reuses the fixtures above through `super::*`.
+#[path = "ts_mirror_tests/input_lifecycle.rs"]
+mod input_lifecycle;

@@ -249,6 +249,5 @@ fn variant_name(ev: &UiEvent) -> &'static str {
         UiEvent::TurnDone(..) => "TurnDone",
         UiEvent::RemoteSnapshot { .. } => "RemoteSnapshot",
         UiEvent::SubtaskUpdate { .. } => "SubtaskUpdate",
-        UiEvent::ModelCommit { .. } => "ModelCommit",
     }
 }

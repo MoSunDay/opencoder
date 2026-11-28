@@ -20,7 +20,15 @@ const ENTRIES: &[(&str, &str, &str, &[&str])] = &[
         "查询可用技能的操作入口",
         &["/api/skills"],
     ),
-    ("storage", "本地数据库工具", "只读查询与数据库备份", &[]),
+    (
+        "storage",
+        "本地数据库工具",
+        "本地数据库的 SQL 桥与维护：serve 默认只读（不取写者锁，另一进程持有数据库时仍可检查），\
+写入需显式 --writable（与 --read-only 互斥，桥在 stdin 关闭前持有数据库写者锁，已有写者时立即失败）；\
+query 为只读查询，backup 复制一致快照；checkpoint 执行 TRUNCATE 检查点，\
+须先停止全部写者并以 --writers-stopped 确认，写者仍活动时拒绝",
+        &[],
+    ),
     (
         "health",
         "服务健康",
@@ -143,7 +151,7 @@ const ENTRIES: &[(&str, &str, &str, &[&str])] = &[
     (
         "tui",
         "终端交互与配置",
-        "查询终端可选能力；通过 /env、/envs 管理本地配置 Env；/model、/config 配置 Shared/Act/Plan 的模型与生成参数，其中 /model 支持 Provider 新增、编辑、删除的 session-only 选择，Shared 会话选择立即生效并优先于 modes.shared.model，{} 或缺省字段表示继承配置，整体 NULL 保留 legacy 语义；/cli、/skill 通过 EnvAware 保存，有活动 Env 时写入对应 Env 文件，无活动时回退 legacy Auto；任务 Resume/Fork 重应用进程级显式模型，成功后同步外层 config/client/chat，失败保留原运行时",
+        "查询终端可选能力；通过 /env、/envs 管理本地配置 Env；/model、/config 配置 Shared/Act/Plan 的模型与生成参数，其中 /model 仅提供 Act/Plan 模型选择且两行始终显示有效值（未覆盖时继承 Shared 基值），支持 Provider 新增、编辑、删除的 session-only 选择，Shared 会话选择立即生效并优先于 modes.shared.model，{} 或缺省字段表示继承配置，整体 NULL 保留 legacy 语义；/cli、/skill 通过 EnvAware 保存，有活动 Env 时写入对应 Env 文件，无活动时回退 legacy Auto；任务 Resume/Fork 重应用进程级显式模型，成功后同步外层 config/client/chat，失败保留原运行时",
         &["/api/tui"],
     ),
 ];
@@ -225,5 +233,43 @@ mod tests {
         assert!(entries
             .iter()
             .all(|entry| !entry.name.is_empty() && !entry.description.is_empty()));
+    }
+
+    /// The `storage` entry documents the writer/reader split of its CLI: the
+    /// bridge is read-only unless a caller opts into writes, and the TRUNCATE
+    /// checkpoint stays gated on stopped writers. Its entrypoints stay
+    /// CLI-only (no HTTP API) and its identity is unchanged by the rewording.
+    #[test]
+    fn storage_entry_documents_read_only_default_and_stopped_writer_checkpoint() {
+        let entries = platform_capabilities();
+        let storage = entries
+            .iter()
+            .find(|entry| entry.key == "platform:storage")
+            .expect("storage is a registered platform capability");
+        assert_eq!(storage.source_id, "storage");
+        assert_eq!(storage.name, "本地数据库工具");
+        for text in [
+            "serve 默认只读",
+            "--writable",
+            "与 --read-only 互斥",
+            "写者锁",
+            "query 为只读查询",
+            "backup 复制一致快照",
+            "checkpoint 执行 TRUNCATE 检查点",
+            "--writers-stopped",
+            "写者仍活动时拒绝",
+        ] {
+            assert!(
+                storage.description.contains(text),
+                "missing {text}: {}",
+                storage.description
+            );
+        }
+        assert_eq!(
+            storage.cli,
+            vec!["opencoder-cli storage --help".to_string()],
+            "the CLI domain stays the entrypoint of the reworded entry"
+        );
+        assert!(storage.api.is_empty(), "storage has no HTTP API");
     }
 }

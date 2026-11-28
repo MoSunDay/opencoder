@@ -22,3 +22,6 @@ base64.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Tests only: hold the database's exclusive maintenance lease to prove a
+# command never opens a writer (a writer open would wait on that lease).
+opencoder-database.workspace = true

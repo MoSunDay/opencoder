@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-use turso::Connection;
 
 #[path = "execution/brain.rs"]
 mod brain;
@@ -79,6 +78,15 @@ impl TursoStore {
         Self::open(":memory:").await
     }
 
+    /// Read-only store for inspection: takes no writer lock, so it works
+    /// while another process owns the database. Writes through this handle
+    /// are rejected; it never bootstraps or migrates the schema.
+    pub async fn open_reader(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            db: connection::open_reader(path.as_ref()).await?,
+        })
+    }
+
     /// Shared Server definitions do not own Runtime inventory or report outboxes.
     /// Avoid installing those schemas while older Server connections are live.
     pub async fn open_catalog(path: impl AsRef<Path>) -> Result<Self> {
@@ -87,8 +95,8 @@ impl TursoStore {
         })
     }
 
-    /// Independent diagnostic connection; normal operations use the bounded pool.
-    pub async fn conn(&self) -> Result<Connection> {
+    /// Independent diagnostic connection; its clones keep the originating pool alive.
+    pub async fn conn(&self) -> Result<opencoder_database::ConnectionLease> {
         self.db.connect().await
     }
 }

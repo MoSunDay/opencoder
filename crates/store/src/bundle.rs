@@ -49,15 +49,7 @@ pub async fn export_bundle(store: &dyn Store, session_id: &str) -> Result<Sessio
     let messages = store.load_messages(session_id).await?;
     let model_overrides = store.get_session_model_overrides(session_id).await?;
     let events = store.events_after(session_id, 0).await?;
-    // Orphaned (promoted-but-unrecorded) rows are invisible to
-    // `pending_inputs`; recover first so the bundle exports them instead of
-    // silently dropping them. Best-effort — an export of a live session may
-    // race an active drain either way.
-    let _ = store.recover_orphan_inputs(session_id).await;
-    let steer_inputs = store.pending_inputs(session_id, Delivery::Steer).await?;
-    let queue_inputs = store.pending_inputs(session_id, Delivery::Queue).await?;
-    let mut inputs = steer_inputs;
-    inputs.extend(queue_inputs);
+    let inputs = exported_inputs(store, session_id).await?;
 
     let tasks = store.list_subagent_tasks(session_id).await?;
     let mut subagents = Vec::with_capacity(tasks.len());
@@ -82,6 +74,42 @@ pub async fn export_bundle(store: &dyn Store, session_id: &str) -> Result<Sessio
         model_overrides,
         subagents,
     })
+}
+
+/// Drain order of a session's inputs as a bundle carries them: steer first,
+/// then queue, each by `admitted_seq`.
+fn delivery_rank(delivery: Delivery) -> u8 {
+    match delivery {
+        Delivery::Steer => 0,
+        Delivery::Queue => 1,
+    }
+}
+
+/// The inputs a bundle carries: every pending row plus the orphaned
+/// (promoted-but-unrecorded) rows `pending_inputs` cannot see.
+///
+/// Export only reads, for writers as well as readers: recovering the orphans
+/// in place needs a write, which a store opened read-only beside a live writer
+/// refuses — and ignoring that refusal silently dropped the rows from the
+/// bundle. Recovery of the stored rows stays with the runner's run-entry path;
+/// each orphan is exported as pending (the state recovery leaves it in), so a
+/// reader and a writer produce the same bundle for the same rows. Consumed
+/// rows (`recorded`) are never exported.
+async fn exported_inputs(store: &dyn Store, session_id: &str) -> Result<Vec<SessionInput>> {
+    let mut inputs = store.pending_inputs(session_id, Delivery::Steer).await?;
+    inputs.extend(store.pending_inputs(session_id, Delivery::Queue).await?);
+    inputs.extend(
+        store
+            .orphan_inputs(session_id)
+            .await?
+            .into_iter()
+            .map(|mut input| {
+                input.promoted_seq = None;
+                input
+            }),
+    );
+    inputs.sort_by_key(|input| (delivery_rank(input.delivery), input.admitted_seq));
+    Ok(inputs)
 }
 
 /// Write a bundle to a writer in opencoder binary format.

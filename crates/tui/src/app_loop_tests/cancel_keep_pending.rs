@@ -84,6 +84,7 @@ async fn cancel_running_turn_keeps_pending_rows_in_store_and_mirrors() {
         cancels: std::sync::Arc::new(std::sync::Mutex::new(c)),
         turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(t)),
         steer_gates: std::sync::Arc::new(std::sync::Mutex::new(g)),
+        model_switches: Default::default(),
     };
     let mut running = true;
     let mut cancelled = false;

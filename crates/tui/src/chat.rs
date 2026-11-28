@@ -467,6 +467,10 @@ impl ChatView {
             // Child routes into the panel's nested view, Turn finalizes it.
             // `SidecarUsage` is NOT one of the three display frames — it
             // took the cost-only arm above (`tokens_total` +=, ctx untouched).
+            // The app-loop fold commits a mid-turn `/model` pick through
+            // `commit_model_override` before reaching `apply`; the frame
+            // itself carries no transcript block.
+            SessionEvent::ModelOverrideApplied { .. } => {}
             SessionEvent::SidecarStart { .. }
             | SessionEvent::SidecarChild { .. }
             | SessionEvent::SidecarTurn { .. } => {

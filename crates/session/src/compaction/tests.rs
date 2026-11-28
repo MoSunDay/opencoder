@@ -47,6 +47,27 @@ fn est_session(name: &str) -> SessionState {
     )
 }
 
+/// Every `Status` payload in emission order -- the status line exactly as a
+/// frontend would replay it.
+fn statuses(events: &[SessionEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|ev| match ev {
+            SessionEvent::Status(msg) => Some(msg.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Two real turns so `compaction_split` yields a head and the summarizer LLM
+/// call is actually reached (a single message is a `nothing to compact` no-op).
+fn push_two_turns(s: &mut SessionState) {
+    s.messages.push(Message::user("u1", "first turn"));
+    s.messages.push(Message::assistant("a1"));
+    s.messages.push(Message::user("u2", "second turn"));
+    s.messages.push(Message::assistant("a2"));
+}
+
 /// F1 regression: the armed skill's body ships as a one-shot undelivered
 /// payload message (never persisted to `session.messages`), so the token
 /// estimate must count it while the delivery gate is still unspent. Without
@@ -303,7 +324,8 @@ async fn compact_default_keeps_only_summary() {
     s.messages.push(Message::user("u2", "second turn"));
     s.messages.push(Message::assistant("a2"));
 
-    let outcome = compact(&mut s, &HashMap::new(), &mut |_| {}).await;
+    let mut events: Vec<SessionEvent> = Vec::new();
+    let outcome = compact(&mut s, &HashMap::new(), &mut |ev| events.push(ev)).await;
 
     let summary = outcome.expect("default compaction must summarize");
     assert_eq!(summary.as_deref(), Some("SUMMARY"));
@@ -322,6 +344,9 @@ async fn compact_default_keeps_only_summary() {
         Some(4),
         "the full head (4 messages) is soft-deleted in summary_seq"
     );
+    // The success path is unchanged: the compacting status is raised once and
+    // cleared exactly once by the pipeline itself (the guard adds nothing).
+    assert_eq!(statuses(&events), vec!["compacting conversation…", ""]);
 }
 
 /// Issue #3 (root cause A): the compaction-summary LLM stream must honor
@@ -389,6 +414,74 @@ async fn compact_honors_cancel_and_leaves_messages_intact() {
     assert!(events
         .iter()
         .any(|ev| matches!(ev, SessionEvent::Status(msg) if msg == "interrupted")));
+    // Cancellation is an error path like any other: the status guard clears
+    // the line afterwards so no stale compacting status survives the abort.
+    assert_eq!(
+        statuses(&events).last().copied(),
+        Some(""),
+        "the status must be cleared after a cancelled compaction, got: {:?}",
+        events
+    );
+}
+
+/// A failing summarizer stream must not strand the status line: `compact`
+/// propagates the error AND clears the `compacting conversation…` status it
+/// raised, because the frontend keeps rendering the last status it saw and
+/// the runner emits no further status before giving up on a final failure.
+#[tokio::test]
+async fn compact_clears_the_compacting_status_when_the_summarizer_fails() {
+    let mock = Arc::new(
+        opencoder_llm::MockChatClient::new()
+            .with_default(vec![opencoder_llm::LlmEvent::Error("rate limited".into())]),
+    );
+    let mut s = SessionState::new(
+        "compact-summarize-failure",
+        opencoder_core::resolve_agent("act").expect("act agent"),
+        opencoder_core::Config::default(),
+        mock.clone(),
+        std::env::temp_dir(),
+    );
+    push_two_turns(&mut s);
+    let before = s.messages.len();
+
+    let mut events: Vec<SessionEvent> = Vec::new();
+    let outcome = compact(&mut s, &HashMap::new(), &mut |ev| events.push(ev)).await;
+
+    let error = outcome.expect_err("a failing summarizer must surface as Err");
+    assert!(
+        format!("{error:#}").contains("rate limited"),
+        "the summarizer error must stay reachable, got: {error:#}"
+    );
+    assert_eq!(
+        s.messages.len(),
+        before,
+        "the transcript must stay untouched when the summary fails"
+    );
+    assert_eq!(mock.call_count(), 1, "compact itself never retries");
+    assert_eq!(
+        statuses(&events),
+        vec!["compacting conversation…", ""],
+        "the compacting status must be raised and then cleared, got: {:?}",
+        events
+    );
+}
+
+/// `nothing to compact yet` is a successful no-op (`Ok(None)`), not an error:
+/// the status guard must leave the notice on screen instead of blanking it.
+#[tokio::test]
+async fn compact_keeps_the_nothing_to_compact_notice() {
+    let mut s = est_session("act");
+    // A single message has no summarizable head.
+    s.messages.push(Message::user("u1", "big paste"));
+
+    let mut events: Vec<SessionEvent> = Vec::new();
+    let outcome = compact(&mut s, &HashMap::new(), &mut |ev| events.push(ev)).await;
+
+    assert_eq!(
+        outcome.expect("nothing to compact is a successful no-op"),
+        None
+    );
+    assert_eq!(statuses(&events), vec!["nothing to compact yet"]);
 }
 
 /// Transcript collapses (handoff / clear-context / compaction) must reset the
@@ -456,4 +549,28 @@ fn exceeds_hard_limit_stays_false_with_headroom() {
     // Default model window with an (almost) empty transcript: plenty of
     // headroom, no manual-compaction abort.
     assert!(!super::exceeds_hard_limit(&session));
+}
+
+/// The persistence marker must survive the `.context(...)` wrapper: the
+/// runner's compaction retry loop branches on `is_persist_failure` through
+/// the full anyhow chain, so the marker layer has to stay reachable there.
+#[test]
+fn persist_failure_is_detected_through_anyhow_context() {
+    let error = anyhow::Error::new(PersistFailure {
+        source: anyhow::anyhow!("Invalid page type: 0"),
+    })
+    .context("persist compaction metadata");
+    assert!(
+        is_persist_failure(&error),
+        "marker must be found through the context layer"
+    );
+    assert!(
+        error.to_string().contains("persist compaction metadata"),
+        "outermost message must stay the context tag: {error}"
+    );
+    let plain = anyhow::anyhow!("stream ended without completion");
+    assert!(
+        !is_persist_failure(&plain),
+        "an unrelated anyhow error must not match the marker"
+    );
 }

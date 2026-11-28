@@ -70,7 +70,9 @@ impl ProviderList {
             confirm_delete: None,
             confirm_save_default: None,
             default_base_url: config.base_url_for(config.provider_id()),
-            mode: opencoder_core::ConfigMode::Shared,
+            // `/model` has no Shared scope: a bare list selects Act until
+            // `for_mode` installs the scope the user picked in the menu.
+            mode: opencoder_core::ConfigMode::Act,
             source: None,
             save_target: None,
             current_model: config.model.clone(),
@@ -249,7 +251,7 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
                 focus: super::provider_form::ProviderField::Name,
                 confirm_save_default: None,
                 error: None,
-                mode: opencoder_core::ConfigMode::Shared,
+                mode: list.mode,
                 return_scope: None,
             };
             (

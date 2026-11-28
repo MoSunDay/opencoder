@@ -38,7 +38,7 @@ pub(crate) async fn transaction(
     let task = tokio::spawn(async move {
         let _active = active;
         let database = state.database.clone();
-        let work = move |connection: turso::Connection| async move {
+        let work = move |connection: opencoder_database::ConnectionLease| async move {
             if write {
                 busy::begin_with_retry(&connection, "BEGIN IMMEDIATE").await?;
             }

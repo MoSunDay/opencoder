@@ -56,7 +56,11 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
     let mut frame_ms = 25u64;
     let mut frame_ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
-    let mut chat = crate::chat::ChatView::default();
+    let model_switches = opencoder_session::ModelSwitchQueue::default();
+    let mut chat = crate::chat::ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
 
     let enter = crossterm::event::KeyEvent::new(
         crossterm::event::KeyCode::Enter,
@@ -78,6 +82,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         &mut frame_ms,
         &mut frame_ticker,
         &cmd_tx,
+        &model_switches,
         &mut chat,
         workdir,
         None,
@@ -98,6 +103,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
             &mut frame_ms,
             &mut frame_ticker,
             &cmd_tx,
+            &model_switches,
             &mut chat,
             workdir,
             None,
@@ -118,19 +124,31 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         "modal closes after session-only switch"
     );
 
-    // The outer raw config and configured client stay unchanged; the Shared
-    // selection lives in chat/session metadata and is used for new-task inheritance.
+    // The outer raw config and configured client stay unchanged; the Act
+    // selection lives in chat/session metadata (`/model` never writes the
+    // Shared slot), and the idle path never touches the mid-turn queue.
     assert_eq!(config.model, "openai/gpt-4o-mini");
-    assert_eq!(chat.shared_model, "deepseek/deepseek-chat");
-    assert_eq!(chat.model, "deepseek/deepseek-chat");
+    assert_eq!(chat.shared_model, "openai/gpt-4o-mini", "Shared untouched");
+    assert_eq!(
+        chat.model_overrides.as_ref().and_then(|o| o.act.as_deref()),
+        Some("deepseek/deepseek-chat")
+    );
+    assert_eq!(
+        chat.model, "deepseek/deepseek-chat",
+        "Act chat follows the pick"
+    );
     assert_eq!(std::sync::Arc::as_ptr(&client), original_client);
+    assert_eq!(
+        opencoder_session::pending_model_switches(&model_switches),
+        0
+    );
 
-    // The worker persists the session-only Shared model through one
+    // The worker persists the session-only Act model through one
     // acknowledged operation; pure model selection must not request a reload.
     assert!(matches!(
         cmd,
         UiCmd::ApplySession {
-            selection: Some((opencoder_core::ConfigMode::Shared, ref model)),
+            selection: Some((opencoder_core::ConfigMode::Act, ref model)),
             provider_changed: false,
             ..
         } if model == "deepseek/deepseek-chat"

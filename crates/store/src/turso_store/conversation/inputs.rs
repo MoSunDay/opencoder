@@ -95,20 +95,54 @@ fn same_semantic_payload(
         && display_text == input.display_text.as_deref()
 }
 
-pub async fn pending(
+/// Column layout of every input row read below, in the order
+/// [`row_to_input`] decodes.
+const INPUT_COLUMNS: &str =
+    "seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text";
+
+/// Read the input rows of one session matching `predicate`, in drain order.
+/// The projection must stay the one [`row_to_input`] decodes.
+async fn select_inputs(
     conn: &Connection,
-    session_id: &str,
-    delivery: Delivery,
+    predicate: &str,
+    params: impl turso::IntoParams,
 ) -> Result<Vec<SessionInput>> {
-    let mut stmt = conn
-        .prepare_cached("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL ORDER BY admitted_seq ASC")
-        .await?;
-    let mut rows = stmt.query(params![session_id, delivery.as_str()]).await?;
+    let sql = format!(
+        "SELECT {INPUT_COLUMNS} FROM session_inputs WHERE session_id = ? AND {predicate} ORDER BY admitted_seq ASC"
+    );
+    let mut stmt = conn.prepare_cached(sql).await?;
+    let mut rows = stmt.query(params).await?;
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
         out.push(row_to_input(&r)?);
     }
     Ok(out)
+}
+
+pub async fn pending(
+    conn: &Connection,
+    session_id: &str,
+    delivery: Delivery,
+) -> Result<Vec<SessionInput>> {
+    select_inputs(
+        conn,
+        "delivery = ? AND promoted_seq IS NULL",
+        params![session_id, delivery.as_str()],
+    )
+    .await
+}
+
+/// Read the orphaned inputs: the rows [`recover_orphans`] would flip back to
+/// pending (promoted, never recorded). Same predicate and ordering, but no
+/// write — a reader, or an export of a session another process owns, reports
+/// them instead of recovering them.
+pub async fn orphans(conn: &Connection, session_id: &str) -> Result<Vec<SessionInput>> {
+    select_inputs(
+        conn,
+        "promoted_seq IS NOT NULL AND recorded = 0",
+        params![session_id],
+    )
+    .await
 }
 
 /// Promote all pending inputs of `delivery` whose `admitted_seq <= up_to_admitted_seq`.

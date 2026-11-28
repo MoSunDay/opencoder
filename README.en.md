@@ -210,19 +210,19 @@ OpenCoder and [sst/opencode](https://github.com/sst/opencode) (a TypeScript / No
 
 ### 🗄️ Storage
 
-Both are **SQLite under the hood**, persisting as standard `.db` + `.db-wal` + `.db-shm` (WAL mode); the differences are at the driver layer and table model:
+Both are **SQLite under the hood**, persisting as standard `.db` + `.db-wal` (WAL mode; the shared-memory index is `.db-shm` for opencode and `.db-tshm` for opencoder/Turso); the differences are at the driver layer and table model:
 
 | Dimension | opencode `1.17.8` | opencoder `0.1.1` |
 | --- | --- | --- |
-| Database | SQLite (embedded in bun) | Turso `0.8.3` (pure-Rust SQLite-compatible engine) |
+| Database | SQLite (embedded in bun) | Turso `0.9.0-pre.2` (pure-Rust SQLite-compatible engine) |
 | Access layer | Drizzle ORM (JS, runtime migrations via `migration` table) | Hand-written SQL + `Store` trait (`crates/store/src/store.rs`) |
 | Driver language | JS/V8 ↔ SQLite C ABI | Pure Rust, in-process (no C ABI, no FFI) |
-| WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL` (same concurrency model) |
+| WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL` (multi-process shared WAL: any number of opencoder processes may write one database) |
 | Tables (core) | `session` / `message` / `step` / `agent` / `tool_use` / `snapshot` / `checkpoint` / `event` / `subagent` | `sessions` / `messages` / `session_inputs` / `session_events` / `subagent_tasks` / `schema_version` |
 | Migration | Drizzle migration (runtime diff against `migration` table + `meta/_journal.json`) | Single `schema_version` value + idempotent `CREATE TABLE IF NOT EXISTS` |
 | DB file naming | `opencode.db` (varies by channel, e.g. `opencode-dev.db`) | Determined by workdir (one DB per workdir) |
 
-> Both share an equivalent WAL concurrency model (many readers / one writer; reads never block writes). Storage throughput differences mainly come from the driver layer — opencode goes through Drizzle ORM + V8 cross-language hops, while opencoder runs the pure-Rust database engine in-process with no ORM translation layer.
+> Both share the same reader-side WAL concurrency (reads never block writes, writes never block reads). On the write side opencode is many readers / one writer, while opencoder lets any number of processes write the same database: the engine's WAL writer lock serializes transactions and a colliding `BEGIN IMMEDIATE` retries on busy. Only two kinds of operation take the file exclusively for a moment: the first open of a database file (writers arriving meanwhile wait for it), and offline maintenance — `storage checkpoint --writers-stopped` (TRUNCATE) and `storage serve --writable` — which excludes writers through the `<db>.maintenance.lock` lease and fails fast with "writers still active" while any writer is alive. Storage throughput differences mainly come from the driver layer — opencode goes through Drizzle ORM + V8 cross-language hops, while opencoder runs the pure-Rust database engine in-process with no ORM translation layer.
 
 > Note: end-to-end task performance is LLM-dominated (first-token latency is the provider RTT); under the same model both projects are essentially neck-and-neck in actual task throughput. The comparison above isolates the **runtime baseline** — the cost the runtime itself imposes regardless of the LLM.
 

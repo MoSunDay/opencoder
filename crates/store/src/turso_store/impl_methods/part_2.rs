@@ -22,6 +22,15 @@ macro_rules! store_implementation_1 {
 
         }).await
     }
+    async fn orphan_inputs(&self, session_id: &str) -> Result<Vec<SessionInput>> {
+        let session_id = session_id.to_owned();
+        self.db.read(move |conn| async move {
+            let session_id = session_id.as_str();
+
+        inputs::orphans(&conn, session_id).await
+
+        }).await
+    }
     async fn delete_input(&self, input_id: i64) -> Result<()> {
         self.db.write(move |conn| async move {
 

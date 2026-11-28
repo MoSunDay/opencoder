@@ -73,9 +73,11 @@ impl ProviderPatch {
         serde_json::json!({ "model": format!("{}/{}", self.name, self.model_id), "providers": serde_json::Value::Object(providers) })
     }
 
-    /// Scoped provider edits never replace the Shared default or an unrelated
-    /// Act/Plan model. Only the legacy Shared form retains its select-on-save
-    /// behavior.
+    /// `/model` only ever reaches this with Act or Plan: the edit selects the
+    /// provider for that mode and never replaces the Shared default or the
+    /// other mode's model. The Shared branch is kept for first-run
+    /// onboarding (`ProviderForm::new_onboarding`), whose whole purpose is to
+    /// write the configuration file's top-level default.
     pub fn to_json_for_mode(&self, mode: opencoder_core::ConfigMode) -> serde_json::Value {
         let mut patch = self.to_json();
         if mode != opencoder_core::ConfigMode::Shared {
@@ -91,10 +93,9 @@ pub fn delete_provider_json(name: &str) -> serde_json::Value {
     serde_json::json!({ "providers": { name: serde_json::Value::Null } })
 }
 
-pub fn switch_provider_json(name: &str, model_id: &str) -> serde_json::Value {
-    switch_mode_provider_json(opencoder_core::ConfigMode::Shared, name, model_id)
-}
-
+/// Merge-patch selecting `name/model_id` for one `/model` scope. `/model`
+/// has no Shared scope, so a Shared request normalizes to Act (the same
+/// rule as `ModeMenuKind::Model::normalize_mode`).
 pub fn switch_mode_provider_json(
     mode: opencoder_core::ConfigMode,
     name: &str,
@@ -102,8 +103,7 @@ pub fn switch_mode_provider_json(
 ) -> serde_json::Value {
     let model = format!("{}/{}", name, model_id);
     match mode {
-        opencoder_core::ConfigMode::Shared => serde_json::json!({ "model": model }),
-        opencoder_core::ConfigMode::Act => {
+        opencoder_core::ConfigMode::Shared | opencoder_core::ConfigMode::Act => {
             serde_json::json!({ "modes": { "act": { "model": model } } })
         }
         opencoder_core::ConfigMode::Plan => {

@@ -56,9 +56,10 @@ class Connection:
         self.in_transaction = False
         self.total_changes = 0
         self.readonly = readonly
-        command = [database.executable(), 'storage', 'serve', '--database', str(path)]
-        if readonly:
-            command.append('--read-only')
+        # Name the side explicitly: the bridge serves read-only by default, so a
+        # writable connection has to ask for the writer lock itself.
+        command = [database.executable(), 'storage', 'serve', '--database', str(path),
+                   '--read-only' if readonly else '--writable']
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, text=True)
         self.execute(f'PRAGMA busy_timeout={int(timeout * 1000)}')

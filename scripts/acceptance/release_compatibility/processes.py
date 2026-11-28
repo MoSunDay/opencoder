@@ -82,9 +82,14 @@ class Processes:
 
 
 class NativeSql:
-    def __init__(self, binary, database, root):
+    """One native SQL bridge; read-only unless a fixture step must write."""
+
+    def __init__(self, binary, database, root, writable=False):
         self.log = (root / 'sql.log').open('w')
-        self.child = subprocess.Popen([str(binary), 'storage', 'serve', '--database', str(database)],
+        # Only bundles that know `--writable` may receive it; the default sends
+        # no mode flag so an older binary keeps serving with its own default.
+        command = [str(binary), 'storage', 'serve', '--database', str(database)]
+        self.child = subprocess.Popen(command + (['--writable'] if writable else []),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log, text=True)
 
     def query(self, sql):

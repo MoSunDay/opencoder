@@ -14,7 +14,8 @@ use crate::Cli;
 use super::display::{abbreviate_path, format_ts, id8, preview_of, task_head};
 use super::env::tmux_available;
 use super::naming::{fresh_id, id_from_name, resolve_target, session_name};
-use super::registry::{open_registry, register};
+use super::registry::{open_registry, read_records, records_or_legacy_import, register};
+use super::resume::{resume_target, ResumeTarget};
 use super::tmux::{
     attach, current_session_name, kill_session, list_managed, session_exists, tmux_bin,
     ManagedSession,
@@ -49,16 +50,20 @@ pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
         return attach(&name);
     }
 
-    let registry = open_registry().await?;
     // `--session <id>` naming a globally registered stopped session cold-starts
     // it in its recorded workdir instead of seeding a fresh one here.
     if let Some(id) = &cli.session {
-        if registry.get(id).await?.is_some() {
+        if records_or_legacy_import()
+            .await?
+            .iter()
+            .any(|record| &record.id == id)
+        {
             return ts_resume(cli, id).await;
         }
     }
     let workdir = current_workdir(cli)?;
     let id = cli.session.clone().unwrap_or_else(fresh_id);
+    let registry = open_registry().await?;
     register(&registry, &id, &workdir).await?;
     spawn_session(&workdir, &id, cli)
 }
@@ -176,9 +181,9 @@ const LIST_LEGEND: &str =
 /// creation time descending (newest first within each path group).
 pub(crate) async fn ts_list(_cli: &Cli) -> Result<()> {
     let tmux = list_managed()?;
-    let registry = open_registry().await?;
-    sync_live_workdirs(&registry, &tmux).await;
-    let records = registry.list().await?;
+    // Listing only reads: no registry is created and nothing is migrated or
+    // written (recording live workdirs is `ts -c`'s job).
+    let records = read_records().await?.unwrap_or_default();
     let mut rows = build_rows(&records, &tmux);
     sort_rows(&mut rows);
 
@@ -311,39 +316,21 @@ fn sort_rows(rows: &mut [GlobalRow]) {
 /// stopped one from its registry record.
 pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
     let tmux = list_managed()?;
-    let registry = open_registry().await?;
-    let records = registry.list().await?;
-    let id = resolve_managed_id(target, &tmux, &records)?;
-    if let Some(managed) = tmux
-        .iter()
-        .find(|managed| managed.id() == Some(id.as_str()))
+    // Attaching only reads: the registry is inspected read-only, and the
+    // legacy import (a short-lived writer) runs only when no registry exists.
+    let registry = read_records().await?;
+    match resume_target(cli, target, &tmux, registry, || async {
+        open_registry().await?.list().await
+    })
+    .await?
     {
-        return attach(&managed.name);
-    }
-    // Dead: resolve its durable workdir from the registry.
-    let Some(record) = registry.get(&id).await? else {
-        bail!(
-            "no global tmux session matching `{}`. Run `opencoder ts -l` to list.",
-            target
-        );
-    };
-    let workdir = match (&cli.workdir, &record.workdir) {
-        (Some(explicit), _) => {
-            let explicit_dir = opencoder_core::data_dir_for(explicit);
-            if record.store_dir.as_deref() != Some(explicit_dir.as_path()) {
-                bail!("--workdir does not own global tmux session `{id}`");
-            }
-            tokio::fs::canonicalize(explicit)
-                .await
-                .with_context(|| format!("resolve --workdir: {}", explicit.display()))?
+        ResumeTarget::Live(name) => attach(&name),
+        ResumeTarget::Stopped { id, workdir } => {
+            let registry = open_registry().await?;
+            register(&registry, &id, &workdir).await?;
+            spawn_session(&workdir, &id, cli)
         }
-        (None, Some(recorded)) => recorded.clone(),
-        (None, None) => bail!(
-            "global tmux session `{id}` predates workdir tracking; resume once with --workdir <original-path>"
-        ),
-    };
-    register(&registry, &id, &workdir).await?;
-    spawn_session(&workdir, &id, cli)
+    }
 }
 
 /// `opencoder ts -c` -- delete stopped ts sessions from every workdir.
@@ -353,18 +340,33 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
 /// sees in `ts -l`), and unused seeds that were registered at spawn but
 /// never ran, so `ts -l` never listed them. A seed is only purged after its
 /// store session is confirmed message-less; a contentless row whose store
-/// still holds messages is kept and reported, never deleted blind.
+/// still holds messages is kept and reported, never deleted blind. A store
+/// a live session has open is simply shared: the deletion is another writer.
 pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     let tmux = list_managed()?;
     let registry = open_registry().await?;
-    sync_live_workdirs(&registry, &tmux).await;
+    let report = cleanup(&registry, &tmux).await?;
+    print_cleanup_report(&report)
+}
+
+/// What one cleanup pass did. Rows are never removed blind: every dead row
+/// that survived is reported together with the reason.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct CleanupReport {
+    pub removed_stopped: u32,
+    pub swept_seeds: u32,
+    /// Dead rows whose store session still holds messages without a task.
+    pub kept_with_messages: Vec<String>,
+}
+
+/// `ts -c` without the tmux and registry acquisition, so the sweep itself
+/// is testable against a temporary registry.
+async fn cleanup(registry: &TsRegistry, tmux: &[ManagedSession]) -> Result<CleanupReport> {
+    sync_live_workdirs(registry, tmux).await;
     let records = registry.list().await?;
     let live_ids: HashSet<&str> = tmux.iter().filter_map(|m| m.id()).collect();
     let targets = cleanup_targets(&records, &live_ids);
-
-    let mut removed_stopped = 0u32;
-    let mut swept_seeds = 0u32;
-    let mut kept = Vec::<String>::new();
+    let mut report = CleanupReport::default();
     for (dir, entries) in targets {
         let db = dir.join("opencoder.db");
         let store = TursoStore::open(&db)
@@ -382,7 +384,7 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
                             error = %error,
                             "ts: cleanup cannot probe store content; keeping row"
                         );
-                        kept.push(entry.id.clone());
+                        report.kept_with_messages.push(entry.id.clone());
                         continue;
                     }
                 }
@@ -391,7 +393,7 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
                 // The row lost its recorded task but the store session still
                 // holds messages. Keep both so the user can resume or delete
                 // it deliberately instead of losing unmirrored work.
-                kept.push(entry.id.clone());
+                report.kept_with_messages.push(entry.id.clone());
                 continue;
             }
             store.delete_session(&entry.id).await.with_context(|| {
@@ -403,9 +405,9 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
             })?;
             registry.delete(&entry.id).await?;
             if entry.has_content {
-                removed_stopped += 1;
+                report.removed_stopped += 1;
             } else {
-                swept_seeds += 1;
+                report.swept_seeds += 1;
             }
         }
     }
@@ -414,21 +416,32 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     for record in &records {
         if record.store_dir.is_none() && !live_ids.contains(record.id.as_str()) {
             registry.delete(&record.id).await?;
-            swept_seeds += 1;
+            report.swept_seeds += 1;
         }
     }
+    Ok(report)
+}
 
-    if removed_stopped == 0 && swept_seeds == 0 && kept.is_empty() {
+/// Human-readable `ts -c` summary; every survivor names its reason and the
+/// command that resolves it.
+fn print_cleanup_report(report: &CleanupReport) -> Result<()> {
+    if report.removed_stopped == 0
+        && report.swept_seeds == 0
+        && report.kept_with_messages.is_empty()
+    {
         println!("no stopped sessions to clean up.");
         return Ok(());
     }
-    if removed_stopped > 0 {
-        println!("removed {removed_stopped} stopped session(s).");
+    if report.removed_stopped > 0 {
+        println!("removed {} stopped session(s).", report.removed_stopped);
     }
-    if swept_seeds > 0 {
-        println!("swept {swept_seeds} unused seed row(s) (never started, hidden from `ts -l`).");
+    if report.swept_seeds > 0 {
+        println!(
+            "swept {} unused seed row(s) (never started, hidden from `ts -l`).",
+            report.swept_seeds
+        );
     }
-    for id in &kept {
+    for id in &report.kept_with_messages {
         let id8 = &id[..id.len().min(8)];
         println!(
             "kept {id8}: store still holds messages but no task was recorded; \
@@ -447,7 +460,20 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
     let tmux = list_managed()?;
     let registry = open_registry().await?;
     let records = registry.list().await?;
-    let id = resolve_managed_id(target, &tmux, &records)?;
+    delete(&tmux, &records, target, &registry).await
+}
+
+/// `ts -d` once the live tmux sessions, the registry rows and the registry
+/// are known, so the deletion is testable against a temporary registry. A
+/// store a live session has open is simply shared: the deletion is another
+/// writer.
+async fn delete(
+    tmux: &[ManagedSession],
+    records: &[TsRecord],
+    target: &str,
+    registry: &TsRegistry,
+) -> Result<()> {
+    let id = resolve_managed_id(target, tmux, records)?;
     let live = tmux
         .iter()
         .find(|managed| managed.id() == Some(id.as_str()));
@@ -480,7 +506,7 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
 /// Resolve exactly what `ts -l` displays: its eight-character id prefix, a
 /// full bare/prefixed id, or a live tmux `$index`. Prefixes must identify one
 /// global id; registry rows are unique per id, so no duplicate handling.
-fn resolve_managed_id(
+pub(super) fn resolve_managed_id(
     target: &str,
     tmux: &[ManagedSession],
     records: &[TsRecord],
@@ -612,3 +638,7 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
 #[cfg(test)]
 #[path = "actions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "concurrency_tests.rs"]
+mod concurrency_tests;

@@ -1,6 +1,6 @@
 use super::*;
 
-async fn fixture() -> (opencoder_database::Database, Connection) {
+async fn fixture() -> (opencoder_database::Database, ConnectionLease) {
     let db = opencoder_database::Database::open_memory().await.unwrap();
     let connection = db.connect().await.unwrap();
     bootstrap(

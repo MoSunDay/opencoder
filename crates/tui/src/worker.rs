@@ -72,6 +72,14 @@ pub enum UiCmd {
         provider_changed: bool,
         ack: ConfigAck,
     },
+    /// Queue a session-only model selection while a turn runs. The serial
+    /// worker applies it only after the current turn ends and reports the
+    /// outcome through [`UiEvent::ModelCommit`]; there is deliberately no ack
+    /// channel, so the UI never parks its event loop mid-turn.
+    ApplySessionDeferred {
+        config: Box<Config>,
+        selection: Option<(opencoder_core::ConfigMode, String)>,
+    },
     /// Reload a freshly selected local Env and clear durable Act/Plan overrides.
     /// The UI commits its outer state only after this operation acknowledges.
     ReloadEnv {
@@ -118,6 +126,14 @@ pub enum UiEvent {
     /// The `u64` echoes the turn generation from the `ResetCancel` that armed
     /// the turn; the UI drops `TurnDone`s whose generation no longer matches.
     TurnDone(String, u64),
+    /// A deferred session-only selection was applied (or refused) at the turn
+    /// boundary. Ordered after the matching `SessionEvent::ModelSwitch` when
+    /// the effective model actually changed, so the display commit sees the
+    /// same model the next turn will use.
+    ModelCommit {
+        selection: Option<(opencoder_core::ConfigMode, String)>,
+        result: Result<(), String>,
+    },
     /// Background subtask watcher progress. `session` is the parent session whose
     /// registry owns the subtask; delivered on a TUI-internal channel so it
     /// survives session switches (workers are quit on switch).
@@ -240,14 +256,17 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
     }
 }
 
-/// Gate for the worker-acknowledged config menus (`/model`, `/config`,
-/// `/env`). Their outcomes (`ApplySession` / `ReloadConfig` / `ReloadEnv`)
-/// are acknowledged by the worker, which only drains commands between turns
-/// — the whole LLM turn runs inside one `process_cmd`. Opening or applying
-/// one while busy would park the single UI event loop on the ack until the
-/// turn ends, and deadlock outright once the event forwarder's bounded queue
-/// fills (the parked UI is its only drainer). Refuse with the busy flash;
-/// the user retries when idle — the same contract as `gate_switch`.
+/// Gate for the worker-acknowledged config menus (`/config`, `/env`).
+/// Their outcomes (`ReloadConfig` / `ReloadEnv`) are acknowledged by the
+/// worker, which only drains commands between turns — the whole LLM turn
+/// runs inside one `process_cmd`. Opening or applying one while busy would
+/// park the single UI event loop on the ack until the turn ends, and
+/// deadlock outright once the event forwarder's bounded queue fills (the
+/// parked UI is its only drainer). Refuse with the busy flash; the user
+/// retries when idle — the same contract as `gate_switch`. `/model` is NOT
+/// gated here: its session-only selection has a deferred, ack-free path
+/// (`UiCmd::ApplySessionDeferred`) that the worker applies at the turn
+/// boundary, while `/config` and `/env` still require the idle ack.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConfigMenuGate {
     Run,
@@ -491,6 +510,17 @@ pub async fn process_cmd(
                 model_commands::apply_session(sess, &ui_tx, *config, selection, provider_changed)
                     .await;
             let _ = ack.send(result);
+            false
+        }
+        UiCmd::ApplySessionDeferred { config, selection } => {
+            // No ack: the UI is streaming a turn and must not be parked on a
+            // completion. `apply_session` already forwarded ModelSwitch when
+            // the effective model changed; the commit event follows it in the
+            // same channel so the fold applies the display in order.
+            let result =
+                model_commands::apply_session(sess, &ui_tx, *config, selection.clone(), false)
+                    .await;
+            let _ = ui_tx.send(UiEvent::ModelCommit { selection, result });
             false
         }
         UiCmd::ReloadEnv { config, ack } => {

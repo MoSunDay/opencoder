@@ -143,7 +143,7 @@ pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
-        Some(r) => Ok(Some(row_to_meta(&r)?)),
+        Some(r) => Ok(Some(row_to_meta(id, &r)?)),
         None => Ok(None),
     }
 }

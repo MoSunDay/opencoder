@@ -210,6 +210,85 @@ async fn maybe_wrap_gates_on_existing_registry() {
     assert!(registry.get("01AAA").await.unwrap().is_some());
 }
 
+/// Resume on a compacted session reads only the tail after the soft-deleted
+/// head. Inheriting the `Store` trait default would turn that tail load into
+/// a full load plus in-memory drain, so one damaged head row would fail the
+/// whole resume even though the row is never used. Delegating keeps the native
+/// OFFSET path, which never deserializes skipped rows; a full load of the same
+/// session stays strict.
+#[tokio::test]
+async fn load_messages_after_keeps_the_offset_tail_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        TursoStore::open(tmp.path().join("legacy-messages.db"))
+            .await
+            .unwrap(),
+    );
+    // A `messages` shape without NOT NULL constraints, so a NULL can be
+    // planted in the content column.
+    let conn = store.conn().await.unwrap();
+    conn.execute("DROP TABLE messages", ()).await.unwrap();
+    conn.execute(
+        "CREATE TABLE messages (\
+           seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, session_id TEXT NOT NULL,\
+           role TEXT NOT NULL, agent TEXT, model TEXT, blocks_json TEXT, usage_json TEXT,\
+           created_at INTEGER NOT NULL, synthetic INTEGER, display TEXT, provider_state_json TEXT)",
+        (),
+    )
+    .await
+    .unwrap();
+    store.create_session(&ts_meta("01LEGACY")).await.unwrap();
+    // Compacted head (skipped on resume) carries a NULL content column; the
+    // tail is healthy. In production a compacted session (`summary_seq > 0`)
+    // is what makes Resume read only the tail; here the same store call is
+    // driven directly.
+    conn.execute(
+        "INSERT INTO messages (id, session_id, role, blocks_json, usage_json, created_at)\
+         VALUES ('head-corrupt', '01LEGACY', 'user', NULL, '{}', 1)",
+        (),
+    )
+    .await
+    .unwrap();
+    conn.execute(
+        "INSERT INTO messages (id, session_id, role, blocks_json, usage_json, created_at)\
+         VALUES ('tail-ok', '01LEGACY', 'user', '[]', '{}', 2)",
+        (),
+    )
+    .await
+    .unwrap();
+
+    let registry = TsRegistry::open(tmp.path().join("ts.db")).await.unwrap();
+    let mirror = TsMirrorStore {
+        inner: store.clone(),
+        registry,
+        workdir: tmp.path().join("project"),
+        known: Mutex::new(HashSet::new()),
+    };
+
+    // Tail-only load through the mirror: the damaged head is skipped by
+    // OFFSET, so only the healthy tail row is decoded and returned.
+    let tail = mirror
+        .load_messages_after("01LEGACY", 1)
+        .await
+        .expect("skipped head rows must not be deserialized");
+    assert_eq!(tail.len(), 1, "OFFSET 1 keeps only the tail row");
+    assert_eq!(tail[0].id, "tail-ok");
+
+    // The same session still fails a full load: no defaulting, no skipping.
+    let full = match mirror.load_messages("01LEGACY").await {
+        Ok(messages) => panic!("a NULL blocks_json must stay a hard error: {messages:?}"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(
+        full.contains("messages.blocks_json"),
+        "error names the offending column: {full}"
+    );
+    assert!(
+        full.contains("message head-corrupt"),
+        "error names the damaged row: {full}"
+    );
+}
+
 /// Compile-time guarantee that the mirror still implements the full `Store`
 /// trait surface (delegation must not silently drop a method).
 fn _assert_store(_s: &dyn Store) {}

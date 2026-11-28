@@ -30,7 +30,7 @@ fn apply_cli_model(config: &mut Config, model: Option<&str>) -> bool {
 
 /// Entry point: load config, resume or create a session, enter the terminal,
 /// then drive the event loop via `super::run_app`.
-pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
+pub async fn run(opts: &TuiOpts) -> Result<()> {
     crate::boot_clock::mark();
     let t_total = Instant::now();
     let t_config_client = Instant::now();

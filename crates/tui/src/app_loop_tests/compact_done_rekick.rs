@@ -60,6 +60,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         sid,
         &mut queue_items,
@@ -95,6 +96,7 @@ async fn compact_done_rekicks_drain_and_consumes_pending_queue() {
     let _flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         sid,
         &mut queue_items,

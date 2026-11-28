@@ -266,6 +266,15 @@ impl Store for TsMirrorStore {
         self.inner.load_messages(session_id).await
     }
 
+    /// Delegate to the inner store instead of inheriting the trait default
+    /// (full `load_messages` + in-memory drain): Resume on a compacted
+    /// session relies on the native OFFSET query to skip the soft-deleted
+    /// head without deserializing it, so a damaged head row must not fail a
+    /// tail-only load. Mirroring is unaffected — this is a read path.
+    async fn load_messages_after(&self, session_id: &str, skip_count: i64) -> Result<Vec<Message>> {
+        self.inner.load_messages_after(session_id, skip_count).await
+    }
+
     async fn last_message_seq(&self, session_id: &str) -> Result<i64> {
         self.inner.last_message_seq(session_id).await
     }

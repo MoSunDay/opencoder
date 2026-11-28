@@ -29,6 +29,7 @@ macro_rules! fold {
         fold_ui_events(
             $ev,
             &mut $chat,
+            &opencoder_core::Config::default(),
             &$store,
             "plan-chip-test",
             &mut Vec::new(),

@@ -194,7 +194,15 @@ pub(crate) async fn dispatch_slash_action(
                 session_id.to_string(),
             ));
         }
-        SlashAction::Model | SlashAction::Env(_) | SlashAction::Config => {
+        // `/model` opens mid-turn: a session-only selection is queued for the
+        // worker's turn boundary (ack-free), so the menu itself is safe. Only
+        // `/config` and `/env` still require the idle worker ack.
+        SlashAction::Model => {
+            super::app_loop_model::open_config_menu(
+                action, model_menu, config, chat, agent_name, workdir,
+            );
+        }
+        SlashAction::Env(_) | SlashAction::Config => {
             match gate_config_menu(*running) {
                 ConfigMenuGate::Run => {
                     super::app_loop_model::open_config_menu(

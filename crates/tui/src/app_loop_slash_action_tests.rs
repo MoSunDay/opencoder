@@ -384,7 +384,16 @@ async fn slash_action_sidecar_running_still_opens_panel() {
     );
 }
 
-fn config_menu_actions() -> [SlashAction; 3] {
+/// The two menus whose every outcome awaits a worker ack.
+fn config_menu_actions() -> [SlashAction; 2] {
+    [
+        SlashAction::Config,
+        SlashAction::Env(crate::command::EnvCommand::Show),
+    ]
+}
+
+/// `/model` plus the ack-gated pair: all three open while idle.
+fn all_menu_actions() -> [SlashAction; 3] {
     [
         SlashAction::Model,
         SlashAction::Config,
@@ -392,8 +401,8 @@ fn config_menu_actions() -> [SlashAction; 3] {
     ]
 }
 
-/// `/model`, `/config` and `/env` dispatched while a turn is already running
-/// are refused at the dispatcher: the menu stays closed, no `UiCmd` is sent
+/// `/config` and `/env` dispatched while a turn is already running are
+/// refused at the dispatcher: the menu stays closed, no `UiCmd` is sent
 /// (the running turn is untouched) and the config-menu busy flash is raised.
 /// Every outcome of these menus awaits a worker ack the worker only gives
 /// between turns — parking the single UI loop on it froze the TUI.
@@ -478,6 +487,93 @@ async fn slash_action_config_menus_running_refuse_with_busy_flash() {
     }
 }
 
+/// `/model` dispatched while a turn runs still opens its menu: the only
+/// outcome it can produce mid-turn is the session-only pick, which is queued
+/// for the worker's turn boundary without an ack (see
+/// `model_deferred_switch_tests`). Nothing is sent by the dispatch itself
+/// and no busy flash is raised — the running turn is untouched.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn slash_action_model_running_opens_menu_without_worker_command() {
+    let _guard = super::HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let _isolation = opencoder_core::scoped_config_home(tmp.path().join("home"));
+    let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut running = true;
+    let mut follow = true;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
+    let mut cache_salt_menu = None;
+    let mut config = Config::default();
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
+    let mut cancel = CancellationToken::new();
+    let mut turn_gen = 0u64;
+
+    let flow = dispatch_slash_action(
+        SlashAction::Model,
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &sidecar_tx,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut mcp_menu,
+        &mut None,
+        &mut None,
+        &mut cache_salt_menu,
+        "act",
+        &mut config,
+        tmp.path(),
+        &mut mode_flash,
+        7,
+        &mut sys_tokens,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut turn_gen,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(running, "the parent turn keeps running");
+    assert!(
+        matches!(
+            &model_menu,
+            Some(crate::model_menu::ModelMenu::ModeSelect(sel))
+                if sel.kind == crate::model_menu::ModeMenuKind::Model
+        ),
+        "`/model` opens mid-turn"
+    );
+    assert!(mode_flash.is_none(), "no busy flash: the menu opened");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "opening the menu sends nothing while a turn runs"
+    );
+    assert!(
+        !chat
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(_))),
+        "no transcript marker: nothing was refused"
+    );
+}
+
 /// Idle: the same three actions open their menus — `ModeSelect` for `/model`
 /// and `/config` (with the matching kind), the Env manager for `/env` — and
 /// send nothing to the worker until an outcome fires.
@@ -490,7 +586,7 @@ async fn slash_action_config_menus_idle_open_without_worker_command() {
     let tmp = tempfile::tempdir().unwrap();
     let _isolation = opencoder_core::scoped_config_home(tmp.path().join("home"));
     let workdir = tmp.path();
-    for action in config_menu_actions() {
+    for action in all_menu_actions() {
         let store: Arc<dyn Store> = Arc::new(TursoStore::open_memory().await.unwrap());
         let mut chat = ChatView::default();
         let mut running = false;

@@ -68,6 +68,7 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
     let _flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "test-session",
         &mut queue_items,
@@ -157,6 +158,7 @@ async fn done_with_pending_queue_arms_drain_pending() {
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "drain-test",
         &mut queue_items,
@@ -232,6 +234,7 @@ async fn done_with_empty_store_goes_idle() {
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "idle-test",
         &mut queue_items,
@@ -290,6 +293,7 @@ async fn drain_pending_restart_with_dead_worker_quits() {
     let flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "dead-worker-test",
         &mut queue_items,

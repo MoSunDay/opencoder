@@ -99,6 +99,7 @@ pub(crate) fn input_event_prompts_frame(ev: &crossterm::event::Event) -> bool {
 pub(crate) async fn fold_ui_events(
     maybe_ev: Option<UiEvent>,
     chat: &mut ChatView,
+    config: &Config,
     store: &Arc<dyn Store>,
     session_id: &str,
     queue_items: &mut Vec<(i64, String)>,
@@ -400,6 +401,12 @@ pub(crate) async fn fold_ui_events(
             // (workers are quit on every session switch, so the session
             // worker channel cannot carry them across switches).
             UiEvent::SubtaskUpdate { .. } => {}
+            UiEvent::ModelCommit { selection, result } => {
+                // Deferred `/model` pick applied by the worker at the turn
+                // boundary: commit the display only now, so the status bar
+                // never shows a model the in-flight requests were not using.
+                crate::model_session_switch::commit_session_switch(chat, config, selection, result);
+            }
         }
         batch_needs_render |= !hidden_reasoning_append;
         *skip_next_render = !batch_needs_render;
@@ -416,6 +423,7 @@ pub(crate) async fn fold_ui_events(
 pub(crate) async fn handle_ui_events(
     maybe_ev: Option<UiEvent>,
     chat: &mut ChatView,
+    config: &Config,
     store: &Arc<dyn Store>,
     session_id: &str,
     queue_items: &mut Vec<(i64, String)>,
@@ -446,6 +454,7 @@ pub(crate) async fn handle_ui_events(
     let np_flow = fold_ui_events(
         maybe_ev,
         chat,
+        config,
         store,
         session_id,
         queue_items,
@@ -732,66 +741,7 @@ pub(crate) use app_loop_actions::{
     dispatch_slash_action, handle_confirm_key, steer_submit_after_mouse, ModeSwitch,
 };
 
-/// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,
-/// persists the changed keymap fields to disk, reloads config, and rebuilds
-/// the `KeyBindings` so the new shortcuts take effect immediately. On `Quit`,
-/// sends `UiCmd::Quit` and returns [`LoopFlow::Quit`].
-pub(crate) async fn handle_keymap_outcome(
-    keymap_menu: &mut Option<KeymapMenu>,
-    k: KeyEvent,
-    config: &mut Config,
-    keymap: &mut crate::keymap::KeyBindings,
-    workdir: &Path,
-    cmd_tx: &mpsc::Sender<UiCmd>,
-) -> LoopFlow {
-    use crate::keymap_menu::handle_keymap_key;
-    let outcome = handle_keymap_key(keymap_menu, k);
-    apply_keymap_outcome(outcome, config, keymap, workdir, cmd_tx).await
-}
-
-/// Apply a [`KeymapOutcome`] (from keyboard or mouse) with shared side-effects.
-pub(crate) async fn apply_keymap_outcome(
-    outcome: crate::keymap_menu::KeymapOutcome,
-    config: &mut Config,
-    keymap: &mut crate::keymap::KeyBindings,
-    workdir: &Path,
-    cmd_tx: &mpsc::Sender<UiCmd>,
-) -> LoopFlow {
-    use crate::keymap_menu::KeymapOutcome;
-    match outcome {
-        KeymapOutcome::Quit => {
-            let _ = cmd_tx.send(UiCmd::Quit).await;
-            LoopFlow::Quit
-        }
-        KeymapOutcome::Save(patch) => {
-            if Config::save(workdir, &patch).is_ok() {
-                if let Ok(new_config) = Config::load(workdir) {
-                    *config = new_config;
-                    *keymap = crate::keymap::KeyBindings::from_config(config);
-                }
-            }
-            LoopFlow::Proceed
-        }
-        KeymapOutcome::Cancel | KeymapOutcome::Idle => LoopFlow::Proceed,
-    }
-}
-
-/// Handle a mouse event while the keymap modal is open.
-pub(crate) async fn handle_keymap_mouse_event(
-    keymap_menu: &mut Option<KeymapMenu>,
-    btn_rects: &[ratatui::layout::Rect],
-    m: &crossterm::event::MouseEvent,
-    config: &mut Config,
-    keymap: &mut crate::keymap::KeyBindings,
-    workdir: &Path,
-    cmd_tx: &mpsc::Sender<UiCmd>,
-) -> LoopFlow {
-    let outcome = crate::keymap_menu::mouse::handle_keymap_mouse(
-        keymap_menu,
-        btn_rects,
-        m.column,
-        m.row,
-        &m.kind,
-    );
-    apply_keymap_outcome(outcome, config, keymap, workdir, cmd_tx).await
-}
+/// Keymap-modal outcome handling (moved out to keep this file under the
+/// iteration line cap; see `app_loop_keymap.rs`).
+mod app_loop_keymap;
+pub(crate) use app_loop_keymap::{handle_keymap_mouse_event, handle_keymap_outcome};

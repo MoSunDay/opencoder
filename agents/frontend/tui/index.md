@@ -23,7 +23,9 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   `/task` Resume/Fork 先恢复持久化选择，再按 startup 相同优先级重应用显式胜者，
   并从覆盖后的 effective config 构造 client；只有恢复、client 构造、模型持久化及
   新 worker 准备全部成功后才同步外层 config/client/chat/context，任一失败保留原
-  worker、模型状态、历史与草稿，不提交半切换状态
+  worker、模型状态、历史与草稿，不提交半切换状态。Resume 失败的错误链带
+  `task switch resume for session <id>`，切换失败处只按 session id + 错误链记 warn
+  （不记录标题 / 提示词 / 消息内容），用户可见提示不变
 - [worker.rs](../../../crates/tui/src/worker.rs) — 分派 Server 或本地会话 actor，
   桥接 `SessionEvent` 到聊天渲染；turn 代标：`ResetCancel(CancellationToken, gen)`
   重置取消令牌并携带代数、`TurnDone(String, gen)` 回显同代，app 状态逐 turn
@@ -126,11 +128,17 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   成功 `ModelSwitch`。`/cli`、`/skill` 投递失败不提交 live config，明确报告磁盘已保存
   但 reload 投递失败。`ModelSwitch` 事件只同步 `chat.model`、不插入 `[model] …` 转录行。
   worker 只在 turn 之间 ack 这些命令，UI 同步等待 ack 会冻结事件循环（转发器有界队列满后
-  死锁），因此任务运行中 `/model`、`/config`、`/env` 由 `gate_config_menu`
-  （`worker.rs`）在派发层拒绝并显示 `config_menu_busy_flash`；菜单已打开后 turn 才开始时，
-  `handle_model_outcome(.., running)` / `drain_pending_env(.., running)` 再兜底一次；Env 菜单的
-  pending 命令在 `handle_model_key` 执行前即被拒绝、保持 pending（见
-  [changelog](../../../features/changelog/2026-11-27/tui-model-switch-marker-and-busy-gate.md)）
+  死锁），因此任务运行中 `/config`、`/env` 由 `gate_config_menu`（`worker.rs`）在派发层拒绝并
+  显示 `config_menu_busy_flash`；菜单已打开后 turn 才开始时，`handle_model_outcome(.., running)`
+  / `drain_pending_env(.., running)` 再兜底一次；Env 菜单的 pending 命令在 `handle_model_key`
+  执行前即被拒绝、保持 pending（见
+  [changelog](../../../features/changelog/2026-11-27/tui-model-switch-marker-and-busy-gate.md)）。
+  运行中 `/model` 不受此门控：纯模型选择经 `queue_session_switch` 以无 ack 的
+  `UiCmd::ApplySessionDeferred` 投递（`try_send`，UI 永不挂起），worker 在当前 turn 结束时
+  应用并发 `UiEvent::ModelCommit`（排在 `ModelSwitch` 之后、同通道保序），`fold_ui_events`
+  收到后才通过 `commit_session_switch` 提交 `model_overrides` / `shared_model` / `chat.model`
+  显示；含 `providers` 的 patch 运行中仍拒绝（见
+  [changelog](../../../features/changelog/2026-11-28/tui-model-switch-while-running.md)）
 - [app_display.rs](../../../crates/tui/src/app_display.rs) — `compute_display`
   展示标题优先取会话内当前模型（`chat.model`），空态才回退配置默认
 - [agent_menu.rs](../../../crates/tui/src/agent_menu.rs)、
@@ -173,7 +181,8 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
 - `src/vim/` — vim 引擎
 - `src/ts_mirror.rs` — tmux 会话冷启动恢复；`TsMirrorStore` 原样委托模式模型元数据的
   创建/读取/更新接口，保留 `NULL`、`{}` 与显式值，metadata-aware 创建仍触发既有
-  ts 镜像 hook
+  ts 镜像 hook；`load_messages_after` 显式委托 inner 以保留原生 OFFSET 尾部读取
+  （压缩头部不反序列化，避免被跳过的头部坏行拖垮 Resume）
 - [hooks.rs](../../../crates/tui/src/hooks.rs) — `~/.opencoder/hooks.json` TUI 事件命令
 - [clipboard.rs](../../../crates/tui/src/clipboard.rs)、
   [app_loop_paste.rs](../../../crates/tui/src/app_loop_paste.rs) — 剪贴板图片转 PNG 附件

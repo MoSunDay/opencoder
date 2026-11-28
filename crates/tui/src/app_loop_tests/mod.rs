@@ -47,6 +47,7 @@ mod config_busy_gate_tests;
 mod done_error_mirror_tests;
 mod env_model_failure_tests;
 mod env_model_tests;
+mod model_deferred_switch_tests;
 
 mod compact_done_rekick;
 mod stale_turn_done_tests;

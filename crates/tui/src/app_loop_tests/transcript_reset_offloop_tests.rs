@@ -167,6 +167,7 @@ impl FoldCtx {
         fold_ui_events(
             ev,
             &mut self.chat,
+            &opencoder_core::Config::default(),
             &self.store,
             self.session_id,
             &mut self.queue_items,

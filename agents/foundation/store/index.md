@@ -55,9 +55,13 @@ Commit: 0abfe0c77
   [sessions/activity.rs](../../../crates/store/src/turso_store/conversation/sessions/activity.rs)
   （`IdxDelete` 重建并重试一次，重建先建探针索引再换名；重建撞上不可读存储时跳过活跃时间戳降级写入）、列表分页/坏行降级
   [sessions/listing.rs](../../../crates/store/src/turso_store/conversation/sessions/listing.rs)
-  （`updated_at` 活跃时间、点查 fallback 跳过坏行）；
+  （`updated_at` 活跃时间、点查 fallback 跳过坏行）；行解码对
+  `id` / `created_at` / `updated_at` 保持严格（不默认、不跳行），失败带
+  `decode sessions.<column> for session <id>` 定位；
   [messages.rs](../../../crates/store/src/turso_store/conversation/messages.rs)
-  — 消息与分页读取（`load_transcript_page`）；
+  — 消息与分页读取（`load_transcript_page`）；行解码对 legacy 可空
+  `usage_json` / `synthetic` 做 NULL 兼容（默认 usage / `false`），其余列严格并带
+  `decode messages.<column> for session <id> message <id>` 定位；
   [events.rs](../../../crates/store/src/turso_store/conversation/events.rs)
   — 事件追加与有界读取（`events_page` 翻页、`events_tail` 最新窗口 ≤max_rows+payload 预算，web SSE 首连回放在用）；
   [node_tasks.rs](../../../crates/store/src/turso_store/execution/node_tasks.rs)

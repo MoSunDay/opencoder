@@ -49,6 +49,7 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
             fold_ui_events(
                 $ev,
                 &mut chat,
+                &opencoder_core::Config::default(),
                 &store,
                 "tok-cost-idle",
                 &mut queue_items,

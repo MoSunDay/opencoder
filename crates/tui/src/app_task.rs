@@ -491,6 +491,9 @@ pub(crate) async fn handle_clear_all(
 /// (cancellable, with spinner feedback), so the switch itself never blocks
 /// on serial LLM re-runs. Returns the loaded session plus the number of
 /// pending tasks for the post-switch hint marker.
+///
+/// The remote probe runs BEFORE the local resume; its failure must carry the
+/// same switch + session context so the error chain names the path that failed.
 pub(crate) async fn load_session_for_switch(
     store: &Arc<dyn Store>,
     id: &str,
@@ -499,7 +502,9 @@ pub(crate) async fn load_session_for_switch(
     workdir: &Path,
 ) -> Result<(SessionState, usize)> {
     if let Some(session) =
-        crate::remote::load(id, config.clone(), client.clone(), store.clone(), workdir).await?
+        crate::remote::load(id, config.clone(), client.clone(), store.clone(), workdir)
+            .await
+            .with_context(|| format!("task switch remote load for session {id}"))?
     {
         return Ok((session, 0));
     }
@@ -525,8 +530,23 @@ pub(crate) async fn load_session_for_switch(
         client.clone(),
         workdir.to_path_buf(),
     )
-    .await?;
+    .await
+    .with_context(|| format!("task switch resume for session {id}"))?;
     Ok((session, pending))
+}
+
+/// Log a failed `/task` switch and build the user-visible flash text. Only
+/// the picked session id and the error chain are logged — never a title,
+/// prompt or message content.
+pub(crate) fn switch_error(pick: &crate::task::TaskPick, error: &anyhow::Error) -> String {
+    let rendered = format!("{error:#}");
+    match pick {
+        crate::task::TaskPick::Resume(id) | crate::task::TaskPick::Fork(id) => {
+            tracing::warn!(session_id = %id, error = %rendered, "task switch failed");
+        }
+        _ => tracing::warn!(error = %rendered, "task switch failed"),
+    }
+    rendered
 }
 
 /// Marker line text shown after a switch when `n` subagents are pending

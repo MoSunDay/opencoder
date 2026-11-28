@@ -113,7 +113,7 @@ pub async fn load(conn: &Connection, session_id: &str) -> Result<Vec<Message>> {
     let mut rows = stmt.query(params![session_id]).await?;
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
-        out.push(row_to_message(&r)?);
+        out.push(row_to_message(session_id, &r)?);
     }
     Ok(out)
 }
@@ -138,7 +138,7 @@ pub async fn load_after(
     let mut rows = stmt.query(params![session_id, skip_count]).await?;
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
-        out.push(row_to_message(&r)?);
+        out.push(row_to_message(session_id, &r)?);
     }
     Ok(out)
 }

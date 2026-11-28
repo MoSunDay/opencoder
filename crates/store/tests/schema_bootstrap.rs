@@ -252,3 +252,9 @@ mod suite_1;
 
 #[path = "schema_bootstrap/suite_2.rs"]
 mod suite_2;
+
+#[path = "schema_bootstrap/suite_3.rs"]
+mod suite_3;
+
+#[path = "schema_bootstrap/suite_4.rs"]
+mod suite_4;

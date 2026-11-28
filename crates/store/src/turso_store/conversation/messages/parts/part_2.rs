@@ -49,38 +49,60 @@ async fn import_chunk_in_tx(conn: &Connection, session_id: &str, msgs: &[Message
     .await
 }
 
-fn row_to_message(r: &turso::Row) -> Result<Message> {
-    let id: String = r.get(0)?;
-    let role_s: String = r.get(1)?;
-    let agent: Option<String> = r.get(2)?;
-    let model: Option<String> = r.get(3)?;
-    let blocks_json: String = r.get(4)?;
-    let usage_json: String = r.get(5)?;
-    let created_at: i64 = r.get(6)?;
-    let synthetic_i: i64 = r.get(7)?;
+/// Decode one `messages` row. `usage_json` / `synthetic` are non-identifying
+/// metadata, so they are read as nullable: a NULL (e.g. a row written under a
+/// table shape that lacked the current NOT NULL constraints) decodes with the
+/// same defaults a malformed value uses. That tolerance covers only these two
+/// columns; content columns stay strict, and failures carry the session,
+/// message and column so a damaged row can be located instead of surfacing as
+/// a bare "conversion failure".
+fn row_to_message(session_id: &str, r: &turso::Row) -> Result<Message> {
+    let id: String = r
+        .get(0)
+        .with_context(|| format!("decode messages.id for session {session_id}"))?;
+    decode_message_columns(session_id, &id, r)
+}
+
+fn decode_message_columns(session_id: &str, id: &str, r: &turso::Row) -> Result<Message> {
+    let context =
+        |column: &str| format!("decode messages.{column} for session {session_id} message {id}");
+    let role_s: String = r.get(1).with_context(|| context("role"))?;
+    let agent: Option<String> = r.get(2).with_context(|| context("agent"))?;
+    let model: Option<String> = r.get(3).with_context(|| context("model"))?;
+    let blocks_json: String = r.get(4).with_context(|| context("blocks_json"))?;
+    let usage_json: Option<String> = r.get(5).with_context(|| context("usage_json"))?;
+    let created_at: i64 = r.get(6).with_context(|| context("created_at"))?;
+    let synthetic_i: Option<i64> = r.get(7).with_context(|| context("synthetic"))?;
+    let display: Option<String> = r.get(8).with_context(|| context("display"))?;
+    let provider_state_json: Option<String> =
+        r.get(9).with_context(|| context("provider_state_json"))?;
     let blocks: Vec<ContentBlock> = serde_json::from_str(&blocks_json).unwrap_or_else(|e| {
         tracing::warn!(message_id = %id, error = %e, "failed to deserialize message blocks, using empty");
         Vec::new()
     });
-    let usage: MessageUsage = serde_json::from_str(&usage_json).unwrap_or_else(|e| {
-        tracing::warn!(message_id = %id, error = %e, "failed to deserialize message usage, using default");
-        MessageUsage::default()
-    });
+    let usage = match usage_json.as_deref() {
+        Some(json) => serde_json::from_str(json).unwrap_or_else(|e| {
+            tracing::warn!(message_id = %id, error = %e, "failed to deserialize message usage, using default");
+            MessageUsage::default()
+        }),
+        None => MessageUsage::default(),
+    };
+    let provider_state = provider_state_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .with_context(|| context("provider_state_json"))?;
     Ok(Message {
-        provider_state: r
-            .get::<Option<String>>(9)?
-            .map(|s| serde_json::from_str(&s))
-            .transpose()
-            .context("decode provider state")?,
-        id,
+        provider_state,
+        id: id.to_owned(),
         role: parse_role(&role_s),
         blocks,
         model,
         agent,
         usage,
         created_at,
-        synthetic: synthetic_i != 0,
-        display: r.get(8)?,
+        synthetic: synthetic_i.unwrap_or(0) != 0,
+        display,
     })
 }
 

@@ -40,10 +40,12 @@ fn saved_reload_error(chat: &mut ChatView, path: &Path, detail: &str) {
 /// [`LoopFlow::Quit`] for the `Quit` arm, otherwise [`LoopFlow::Proceed`] (the
 /// caller keeps the post-match `continue` inline).
 ///
-/// `running` is the safety net behind `gate_config_menu`: the three
-/// worker-acknowledged outcomes are refused with a busy marker while a turn
-/// runs (see [`worker_outcome_label`]) — the worker only acks between turns,
-/// so awaiting it here would freeze the UI loop.
+/// `running` is the safety net behind `gate_config_menu`: the worker-acknowledged
+/// outcomes are refused with a busy marker while a turn runs (see
+/// [`worker_outcome_label`]) — the worker only acks between turns, so
+/// awaiting it here would freeze the UI loop. The one exception is the
+/// session-only `SaveSessionOnly` pick: mid-turn it takes the ack-free
+/// deferred path (`queue_session_switch`) instead of `switch_session`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_model_outcome(
     model_menu: &mut Option<ModelMenu>,
@@ -77,9 +79,11 @@ pub(crate) async fn handle_model_outcome(
         return LoopFlow::Proceed;
     }
     let outcome = handle_model_key(model_menu, k);
-    if running {
+    if running && !matches!(outcome, ModelOutcome::SaveSessionOnly(_)) {
         // Refuse, never park on the ack: the worker is inside `run_session`
-        // and only drains commands (and acks) once the turn ends.
+        // and only drains commands (and acks) once the turn ends. A
+        // session-only model selection is the exception: it has an ack-free
+        // deferred path and is queued for the turn boundary below.
         if let Some(label) = worker_outcome_label(&outcome) {
             chat.push_marker(busy_marker(label));
             return LoopFlow::Proceed;
@@ -175,7 +179,13 @@ pub(crate) async fn handle_model_outcome(
             }
         }
         ModelOutcome::SaveSessionOnly(json) => {
-            switch_session(json, config, client, cmd_tx, chat).await;
+            if running {
+                // Mid-turn: queue for the worker's turn boundary. The display
+                // stays on the old model until `UiEvent::ModelCommit` lands.
+                crate::model_session_switch::queue_session_switch(json, config, cmd_tx, chat);
+            } else {
+                switch_session(json, config, client, cmd_tx, chat).await;
+            }
             *context_limit = crate::model_scope::effective_for_chat(config, chat).context_limit();
         }
         ModelOutcome::ReloadEnv(new_config, label) => {
@@ -272,9 +282,10 @@ pub(crate) fn worker_outcome_label(outcome: &ModelOutcome) -> Option<&'static st
     }
 }
 
-/// Open one of the worker-acknowledged config menus — the idle branch of the
-/// `SlashAction::Model | Env | Config` dispatch (see `gate_config_menu`).
-/// Pure menu construction: nothing reaches the worker until an outcome fires.
+/// Open one of the config menus — the `/model` dispatch (idle or running:
+/// its session-only pick has a deferred, ack-free path) and the idle branch of
+/// the `/config` / `/env` dispatch (see `gate_config_menu`). Pure menu
+/// construction: nothing reaches the worker until an outcome fires.
 pub(crate) fn open_config_menu(
     action: SlashAction,
     model_menu: &mut Option<ModelMenu>,

@@ -182,6 +182,7 @@ async fn fold_error_resyncs_steer_mirror_from_store() {
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Error("boom".into()))),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "test-session",
         &mut queue_items,

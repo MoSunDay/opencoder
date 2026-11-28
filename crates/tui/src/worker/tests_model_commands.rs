@@ -228,3 +228,92 @@ async fn env_reload_clears_durable_overrides_and_preserves_one_shot_skill_state(
         Some(UiEvent::Session(SessionEvent::ModelSwitch(model))) if model == "env-act"
     ));
 }
+
+/// The mid-turn path: `ApplySessionDeferred` carries no ack channel. The
+/// serial worker applies it at the turn boundary exactly like `ApplySession`
+/// (override persisted, effective model switched, client retained) and then
+/// reports through `ModelCommit` — ordered after the `ModelSwitch` event on
+/// the same channel, so the UI fold commits the display only after the
+/// transcript saw the switch.
+#[tokio::test]
+async fn deferred_session_command_reports_commit_after_model_switch() {
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
+    let next = config("openai/shared", "openai/act");
+    let mut sess = session("model-deferred", next.clone(), store.clone());
+    let original_client = Arc::as_ptr(&sess.client);
+    let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(8);
+    let selection = Some((ConfigMode::Act, "deepseek/session-act".into()));
+
+    let quit = process_cmd(
+        UiCmd::ApplySessionDeferred {
+            config: Box::new(next),
+            selection: selection.clone(),
+        },
+        &mut sess,
+        &evt_tx,
+        0,
+    )
+    .await;
+
+    assert!(!quit);
+    assert!(matches!(
+        evt_rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::ModelSwitch(model))) if model == "session-act"
+    ));
+    assert!(matches!(
+        evt_rx.recv().await,
+        Some(UiEvent::ModelCommit {
+            selection: reported,
+            result: Ok(()),
+        }) if reported == selection
+    ));
+    assert!(
+        evt_rx.try_recv().is_err(),
+        "exactly ModelSwitch then ModelCommit"
+    );
+    assert_eq!(sess.config.model, "openai/shared");
+    assert_eq!(sess.effective_model(), "deepseek/session-act");
+    assert_eq!(Arc::as_ptr(&sess.client), original_client);
+    assert_eq!(
+        store
+            .get_session_model_overrides("model-deferred")
+            .await
+            .unwrap()
+            .unwrap()
+            .act
+            .as_deref(),
+        Some("deepseek/session-act")
+    );
+}
+
+/// Re-selecting the already-effective model emits no `ModelSwitch`, but the
+/// commit still lands so the UI can settle the queued pick's marker.
+#[tokio::test]
+async fn deferred_session_command_without_effective_change_reports_commit_only() {
+    let store = Arc::new(TursoStore::open_memory().await.unwrap());
+    let next = config("openai/shared", "openai/act");
+    let mut sess = session("model-deferred-unchanged", next.clone(), store.clone());
+    let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(8);
+    let selection = Some((ConfigMode::Act, "openai/act".into()));
+
+    process_cmd(
+        UiCmd::ApplySessionDeferred {
+            config: Box::new(next),
+            selection: selection.clone(),
+        },
+        &mut sess,
+        &evt_tx,
+        0,
+    )
+    .await;
+
+    assert!(matches!(
+        evt_rx.recv().await,
+        Some(UiEvent::ModelCommit {
+            selection: reported,
+            result: Ok(()),
+        }) if reported == selection
+    ));
+    assert!(evt_rx.try_recv().is_err(), "no ModelSwitch");
+    assert_eq!(sess.effective_model(), "openai/act");
+}

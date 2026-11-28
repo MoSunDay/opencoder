@@ -48,9 +48,7 @@ mod steer_fire;
 #[path = "subagent_input.rs"]
 mod subagent_input;
 
-pub async fn run(opts: &TuiOpts) -> Result<()> {
-    app_bootstrap::run(opts).await
-}
+pub use app_bootstrap::run;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_app(
@@ -209,7 +207,7 @@ pub(super) async fn run_app(
                 crate::question_menu::abandon_dialog(&mut question_menu, &question_hub);
             }
             let switched = app_task::switch_session(
-                pending.pick,
+                pending.pick.clone(),
                 opts,
                 explicit_model,
                 &mut cmd_tx,
@@ -277,7 +275,7 @@ pub(super) async fn run_app(
                 Err(error) => {
                     // A failed switch keeps the current descent pointer and drops the staged parent.
                     subtask_ui.settle_switch(false, pending.parent_after_switch);
-                    mode_flash = Some((format!("{error:#}"), anim_tick));
+                    mode_flash = Some((app_task::switch_error(&pending.pick, &error), anim_tick));
                 }
             }
         }
@@ -738,7 +736,7 @@ pub(super) async fn run_app(
             // DISABLED (post-reset events stay queued, in order).
             maybe_ev = evt_rx.recv(), if !reset_inflight.load(std::sync::atomic::Ordering::Relaxed) => {
                 match app_loop::handle_ui_events(
-                    maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut plan_skill_active,
+                    maybe_ev, &mut chat, &config, &store, &session_id, &mut queue_items, &mut plan_skill_active,
                     &mut admit_st, &mut running, &mut cancelled, &mut drain_pending, &mut skip_next_render,
                     &mut follow, &cmd_tx, &mut cancel, &mut turn_gen, &mut evt_rx, &mut notepad,
                     &mut question_menu, &question_hub, &mut reset_rebuild, &skill_handle, &mut active_skill,

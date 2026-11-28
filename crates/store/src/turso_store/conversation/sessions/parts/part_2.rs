@@ -36,16 +36,32 @@ fn normalize_agent(agent: Option<String>) -> Option<String> {
     })
 }
 
-fn row_to_meta(r: &turso::Row) -> Result<SessionMeta> {
+/// Decode one `sessions` row. `id` / `created_at` / `updated_at` are strict:
+/// a NULL or wrongly-typed value is treated as damage and the read fails
+/// instead of being defaulted (a fabricated stamp would reorder `/task` and
+/// misplace the resume boundary) or skipped (the session would silently
+/// vanish). The failure names the session and column so the row can be
+/// located; `requested_id` is passed in because the row's own `id` column may
+/// be the unreadable one.
+fn row_to_meta(requested_id: &str, r: &turso::Row) -> Result<SessionMeta> {
+    let id: String = r
+        .get(0)
+        .with_context(|| format!("decode sessions.id for session {requested_id}"))?;
+    let created_at: i64 = r
+        .get(6)
+        .with_context(|| format!("decode sessions.created_at for session {id}"))?;
+    let updated_at: i64 = r
+        .get(7)
+        .with_context(|| format!("decode sessions.updated_at for session {id}"))?;
     Ok(SessionMeta {
-        id: r.get::<String>(0)?,
+        id,
         kind: r.get::<Option<String>>(1)?,
         title: r.get::<Option<String>>(2)?,
         agent: normalize_agent(r.get::<Option<String>>(3)?),
         model: r.get::<Option<String>>(4)?,
         workdir_hash: r.get::<Option<String>>(5)?,
-        created_at: r.get::<i64>(6)?,
-        updated_at: r.get::<i64>(7)?,
+        created_at,
+        updated_at,
         summary: r.get::<Option<String>>(8)?,
         summary_seq: r.get::<Option<i64>>(9)?,
         summary_images: serde_json::from_str(

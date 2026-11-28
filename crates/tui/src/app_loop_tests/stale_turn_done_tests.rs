@@ -47,6 +47,7 @@ async fn armed_drain(
     let _ = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         chat,
+        &opencoder_core::Config::default(),
         store,
         sid,
         &mut queue_items,
@@ -125,6 +126,7 @@ async fn stale_turn_done_is_dropped_entirely() {
     let _ = fold_ui_events(
         Some(UiEvent::TurnDone("plan".into(), 0)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         sid,
         &mut queue_items,
@@ -210,6 +212,7 @@ async fn matching_turn_done_still_processes() {
     let _ = fold_ui_events(
         Some(UiEvent::TurnDone("act".into(), turn_gen)),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         sid,
         &mut queue_items,

@@ -202,6 +202,8 @@ async fn final_say_is_markdown_rendered_after_turn_done() {
             UiEvent::RemoteSnapshot { chat: restored, .. } => chat = *restored,
             // No transcript fold: subtask_events folds registry updates elsewhere.
             UiEvent::SubtaskUpdate { .. } => {}
+            // Display-only commit; no transcript block to fold.
+            UiEvent::ModelCommit { .. } => {}
         }
     }
 

@@ -370,6 +370,106 @@ async fn load_session_for_switch_counts_only_pending_statuses() {
     );
 }
 
+/// A failed switch must name the session it was resuming: the store-level
+/// cause (here: no such session) is wrapped with the `/task` resume context
+/// so a bare resume error cannot reach the switch handler unidentified.
+#[tokio::test]
+async fn load_session_for_switch_error_names_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let store: Arc<dyn Store> = Arc::new(
+        TursoStore::open(dir.path().join("switch-missing.db"))
+            .await
+            .unwrap(),
+    );
+    let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+
+    let error = match load_session_for_switch(
+        &store,
+        "absent-session",
+        Config::default(),
+        &client,
+        dir.path(),
+    )
+    .await
+    {
+        Ok(_) => panic!("an unknown session must fail the switch"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(
+        error.contains("task switch resume for session absent-session"),
+        "error names the switch and the session: {error}"
+    );
+    assert!(
+        error.contains("session not found: absent-session"),
+        "the store-level cause stays in the chain: {error}"
+    );
+}
+
+/// A failed switch on the REMOTE path must be identified the same way: the
+/// remote probe runs before the local resume, so a session tagged as remote
+/// without a bound harness runtime fails the bookmark invariant and must be
+/// wrapped with the `/task` remote-load context, never the resume one.
+#[tokio::test]
+async fn load_session_for_switch_error_names_the_session_on_the_remote_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let store: Arc<dyn Store> = Arc::new(
+        TursoStore::open(dir.path().join("switch-remote-broken.db"))
+            .await
+            .unwrap(),
+    );
+    let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: "agent-broken".into(),
+            kind: Some("tui_remote_agent".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let error = match load_session_for_switch(
+        &store,
+        "agent-broken",
+        Config::default(),
+        &client,
+        dir.path(),
+    )
+    .await
+    {
+        Ok(_) => panic!("a remote session without a binding must fail the switch"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(
+        error.contains("task switch remote load for session agent-broken"),
+        "error names the switch, the remote path and the session: {error}"
+    );
+    assert!(
+        error.contains("Remote task bookmark is incomplete"),
+        "the remote-level cause stays in the chain: {error}"
+    );
+    assert!(
+        !error.contains("task switch resume for session"),
+        "the local resume path must not be blamed: {error}"
+    );
+}
+
+/// `switch_error` returns the text the flash line shows and keeps the whole
+/// cause chain, with and without a session id on the pick.
+#[test]
+fn switch_error_keeps_the_cause_chain() {
+    let error = anyhow::Error::new(std::io::Error::other("damaged row"))
+        .context("decode sessions.created_at for session s1");
+    let text = switch_error(&crate::task::TaskPick::Resume("s1".into()), &error);
+    assert_eq!(text, format!("{error:#}"));
+    assert!(
+        text.contains("s1"),
+        "the chain still names the session: {text}"
+    );
+
+    let plain = switch_error(&crate::task::TaskPick::New, &error);
+    assert_eq!(plain, format!("{error:#}"));
+}
+
 #[path = "switch.rs"]
 mod switch;
 

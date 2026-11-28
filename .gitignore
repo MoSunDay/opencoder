@@ -60,3 +60,4 @@ target-clean/
 .target-release/
 
 *.log
+.tmp/

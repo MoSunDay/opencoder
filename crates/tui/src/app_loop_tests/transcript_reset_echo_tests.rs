@@ -96,6 +96,7 @@ async fn transcript_reset_restores_in_flight_echo_below_rebuilt_view() {
     let flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "sess-reset-echo",
         &mut queue_items,
@@ -227,6 +228,7 @@ async fn done_clears_pending_echo_so_later_bare_reset_does_not_resurrect_it() {
     let _ = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "sess-bare-reset",
         &mut queue_items,
@@ -308,6 +310,7 @@ async fn remote_reset_still_replays_synchronously() {
             Message::user("r1", "remote replayed prompt"),
         ]))),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "sess-remote-reset",
         &mut queue_items,
@@ -458,6 +461,7 @@ async fn bare_clear_fire_drops_in_flight_echo_before_rebuild() {
     let _ = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(Vec::new()))),
         &mut chat,
+        &opencoder_core::Config::default(),
         &store,
         "sess-bare-fire",
         &mut queue_items,

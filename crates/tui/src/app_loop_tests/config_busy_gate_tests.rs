@@ -1,14 +1,17 @@
-//! Busy-turn refusal for the worker-acknowledged config menus (`/model`,
-//! `/config`, `/env`).
+//! Busy-turn refusal for the worker-acknowledged config menus (`/config`,
+//! `/env`) and the deferred, ack-free session-only `/model` pick.
 //!
 //! The local worker runs a whole LLM turn inside one `process_cmd` and only
 //! drains (and acks) config commands between turns. Awaiting that ack from
 //! the single UI event loop froze the TUI until the turn ended — and
 //! deadlocked outright once the event forwarder's bounded queue filled. The
-//! dispatcher gate (`gate_config_menu`) keeps the menus closed while a turn
-//! runs (see `slash_action_tests`); `handle_model_outcome(.., running)`
-//! and `drain_pending_env(.., running)` are the safety net for a turn that
-//! started while a menu was already open.
+//! dispatcher gate (`gate_config_menu`) keeps `/config` and `/env` closed
+//! while a turn runs (see `slash_action_tests`); `handle_model_outcome(..,
+//! running)` and `drain_pending_env(.., running)` are the safety net for a
+//! turn that started while a menu was already open. `/model` is the
+//! exception: its session-only selection is queued (`ApplySessionDeferred`,
+//! no ack) for the worker's turn boundary and the display commits only on
+//! the resulting `UiEvent::ModelCommit` (see `model_deferred_switch_tests`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +25,7 @@ use crate::chat::{ChatBlock, ChatView};
 use crate::command::EnvCommand;
 use crate::model_menu::{EnvMenu, ModelMenu, ModelOutcome, ProviderList};
 use crate::worker::UiCmd;
-use opencoder_core::{Config, ProviderConfig};
+use opencoder_core::{Config, ConfigMode, ProviderConfig};
 use opencoder_llm::{ChatStream, MockChatClient};
 
 fn markers(chat: &ChatView) -> Vec<String> {
@@ -70,7 +73,7 @@ fn worker_outcome_label_marks_only_worker_acked_outcomes() {
 }
 
 /// Two custom providers so the provider list has an entry to switch to.
-fn config() -> Config {
+pub(super) fn config() -> Config {
     let mut config = Config {
         model: "openai/gpt-4o-mini".to_string(),
         provider: ProviderConfig {
@@ -98,7 +101,7 @@ fn config() -> Config {
 /// command channel is read BEFORE the sender drops, so "nothing was sent" is
 /// distinguishable from "channel closed".
 #[allow(clippy::too_many_arguments)]
-async fn press(
+pub(super) async fn press(
     running: bool,
     key: KeyEvent,
     menu: Option<ModelMenu>,
@@ -177,12 +180,13 @@ async fn press(
 }
 
 /// Enter arms the save-scope prompt (a local keystroke — still allowed
-/// mid-turn); the `n` that would send `ApplySession` is refused instead: no
-/// command reaches the worker, outer config / client / session selection stay
-/// unchanged and a busy marker explains why.
+/// mid-turn); the `n` that confirms it no longer waits for the worker: the
+/// session-only pick is queued (`ApplySessionDeferred`, no ack channel),
+/// outer config / client / display selection stay unchanged until the
+/// worker's `ModelCommit`, and the marker says when the switch applies.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn session_only_switch_while_running_is_refused_without_command() {
+async fn session_only_switch_while_running_is_queued_without_ack() {
     let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let workdir = tmp.path();
@@ -204,18 +208,30 @@ async fn session_only_switch_while_running_is_refused_without_command() {
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(menu.is_none(), "the consumed prompt closes");
     assert!(
-        command.is_none(),
-        "no ApplySession may be sent while a turn runs: {command:?}"
+        matches!(
+            &command,
+            Some(UiCmd::ApplySessionDeferred {
+                selection: Some((ConfigMode::Shared, _)),
+                ..
+            })
+        ),
+        "mid-turn the pick is queued for the turn boundary: {command:?}"
     );
     assert_eq!(outer.model, "openai/gpt-4o-mini", "outer config untouched");
     assert!(
         chat.model_overrides.is_none(),
-        "session selection untouched"
+        "the display commits only on ModelCommit"
     );
     assert!(!client_changed, "client untouched");
     let text = markers(&chat).join("\n");
-    assert!(text.contains("[/model] busy"), "{text}");
-    assert!(!text.contains("session only"), "{text}");
+    assert!(text.contains("queued \u{2192}"), "{text}");
+    assert!(
+        text.contains("(applies when the current turn ends)"),
+        "{text}"
+    );
+    assert!(text.contains("[/model] Shared"), "{text}");
+    assert!(!text.contains("switched"), "{text}");
+    assert!(!text.contains("busy"), "{text}");
 
     // Idle again: the very same keystrokes go through to the worker.
     let list = Some(ModelMenu::List(ProviderList::new(&config())));

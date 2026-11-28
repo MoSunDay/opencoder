@@ -1,9 +1,17 @@
 .entity-detail-body { flex: 1; min-height: 0; overflow: auto; overflow-wrap: anywhere; }
 .entity-text-preview { overflow-wrap: anywhere; }
-.entity-text-preview pre { overflow: auto; }
+/* Code surfaces of the Markdown preview mirror the dark .md-body rules in app.css
+   (--oc-* tokens only), so inline code and fenced blocks never fall back to the
+   transparent UA default on the panel. */
+.entity-text-preview pre { overflow: auto; padding: 8px 10px; background: var(--oc-fill-subtle); border: 1px solid var(--oc-border); border-radius: 6px; font-family: var(--oc-mono); }
+.entity-text-preview code { padding: 0 4px; background: var(--oc-fill-subtle); border-radius: 4px; font-family: var(--oc-mono); }
+.entity-text-preview pre code { padding: 0; background: none; }
 .entity-text-preview img { max-width: 100%; }
 .entity-text-preview table { display: block; overflow: auto; max-width: 100%; }
-.entity-html-preview { display: block; width: 100%; height: 320px; border: 1px solid #f0f0f0; border-radius: 6px; background: white; }
-.entity-editor-actions { position: sticky; bottom: 0; background: var(--ant-color-bg-container, #fff); padding: 8px 0; z-index: 1; width: 100%; }
+/* The iframe document (TextPreview.tsx srcDoc) is a separate document that
+   declares and paints the dark palette itself; the element surface uses the
+   same canvas token so no light page shows before or around that document. */
+.entity-html-preview { display: block; width: 100%; height: 320px; border: 1px solid var(--oc-border); border-radius: 6px; background: var(--oc-bg-layout); }
+.entity-editor-actions { position: sticky; bottom: 0; background: var(--oc-panel-bg); padding: 8px 0; z-index: 1; width: 100%; }
 .entity-detail-body a, .entity-detail-body .ant-typography { overflow-wrap: anywhere; }
 @media (max-width: 575px) { .ant-drawer-body .ant-tabs-tab { padding-inline: 0; margin-inline-start: 12px !important; } .ant-drawer-body { padding-inline: 16px; } }

@@ -1,0 +1,253 @@
+/* App shell: top header / brand / sider / menu, Content, the unified page
+   header and the sheet panel, plus the mobile-only navigation and the
+   shell's responsive rules. Imported by app.css (tokens.css comes first).
+   Colors come from the --oc-* tokens; antd component tokens (header height,
+   menu pill, radius) live in theme.js. */
+
+/* ===== App shell: panel header + panel sider on the dark canvas. The
+   borders live here because antd has no header/sider border token; there
+   is no elevation shadow - the 1px border separates header from canvas. ===== */
+.fleet-root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.fleet-layout { flex: 1; min-height: 0; }
+.fleet-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--oc-panel-bg);
+  border-bottom: 1px solid var(--oc-border);
+  position: relative;
+  /* Stacked above the Sider (antd gives it z-index 1) so the header border
+     is never painted over by the sider/content that follow in DOM order. */
+  z-index: 2;
+}
+/* The brand is the first-level navigation trigger: a real button styled as
+   the wordmark, so hover/click/focus open the category-tab popover without
+   adding chrome. */
+.fleet-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--oc-text);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.2px; /* 1px tracked the wordmark out too loosely */
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fleet-brand:hover,
+.fleet-brand[aria-expanded="true"] {
+  background: var(--oc-fill-subtle);
+  color: var(--oc-primary);
+}
+.fleet-brand:focus-visible {
+  outline: 2px solid rgba(var(--oc-primary-rgb), 0.6);
+  outline-offset: 2px;
+}
+.fleet-brand-caret {
+  font-size: 11px;
+  color: var(--oc-text-tertiary);
+}
+/* First-level tabs popover opened by the brand: a narrow column that aligns
+   with the 200px Sider. Four items never overflow, so no scroll box. The
+   panel surface + drop shadow come from the antd Popover tokens
+   (colorBgElevated / dropShadowPopover in theme.js). The panel is
+   .ant-popover-container in antd 6 (the antd 5 -inner class is gone) and it
+   ships borderless; arrow={false} here, so the hairline closes cleanly. */
+.fleet-brand-popover .ant-popover-container {
+  padding: 6px;
+  border: 1px solid var(--oc-border);
+}
+.fleet-nav-panel {
+  width: min(200px, calc(100vw - 48px));
+}
+.fleet-nav-panel .ant-menu {
+  background: transparent;
+  border-inline-end: 0;
+}
+.fleet-nav-panel .ant-menu-item .anticon {
+  font-size: 16px;
+}
+.fleet-header-side {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.fleet-sidebar {
+  background: var(--oc-panel-bg);
+  border-right: 1px solid var(--oc-border);
+}
+/* Pin the collapse toggle to the bottom of the sider: the sider children
+   are a flex column, the menu grows, and margin-top:auto sinks the button. */
+.fleet-sidebar .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.fleet-sidebar .ant-layout-sider-children > .ant-menu {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.fleet-nav-toggle {
+  margin: auto 8px 8px;
+  width: calc(100% - 16px);
+  border-top: 1px solid var(--oc-border);
+  border-radius: 0 0 6px 6px;
+  padding-top: 10px;
+  height: auto;
+}
+.fleet-sidebar.ant-layout-sider-collapsed .fleet-nav-toggle {
+  margin: auto 8px 8px;
+  width: calc(100% - 16px);
+}
+/* Content padding and the gap between page blocks are both 16px. */
+.fleet-content {
+  padding: 16px;
+  min-width: 0;
+  overflow: auto;
+}
+.fleet-notice { margin-bottom: 16px; }
+
+/* ===== Unified page header (PageShell) - title + secondary description on
+   the left, actions slot on the right. Copy comes from nav.js PAGE_META;
+   this is pure layout, colors stay with antd tokens. ===== */
+.oc-page {
+  min-width: 0;
+}
+.oc-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.oc-page-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.oc-page-title.ant-typography {
+  margin: 0;
+  /* One notch under Title level={4}'s 20px: the shell title is chrome, not
+     content, and negative tracking tightens CJK-free wordmarks. */
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.oc-page-desc {
+  font-size: 13px;
+}
+.oc-page-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+@media (max-width: 767px) {
+  .oc-page-header { flex-direction: column; align-items: stretch; }
+  .oc-page-extra { justify-content: flex-end; }
+}
+
+/* Panel sheet for pages that render bare surfaces without their own Card
+   (chat today): panel background, 1px border, the 6px primary radius (the
+   Card borderRadiusLG token), no shadow (--oc-shadow-panel). */
+.fleet-sheet {
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  background: var(--oc-panel-bg);
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  padding: 16px;
+  box-shadow: var(--oc-shadow-panel);
+}
+
+/* Sheet pages dock to the viewport bottom: the pane drops its bottom padding
+   and the sheet squares off its bottom corners, so nothing of the canvas
+   shows under the panel (chat today - SHEET_PAGES in main.jsx owns the
+   pairing). */
+.fleet-content--flush {
+  padding-bottom: 0;
+}
+.fleet-content--flush .fleet-sheet {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* ===== Mobile-only IA controls: the header brand opens the first-level
+   category tabs, and narrow consoles keep the two-level category tabs +
+   page Select rows inside the Content. ===== */
+.fleet-category-tabs {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  gap: 4px;
+  padding: 4px;
+  background: var(--oc-fill-subtle);
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+}
+.fleet-category-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--oc-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.fleet-category-tab:hover { color: var(--oc-text); background: rgba(230, 237, 243, 0.06); }
+.fleet-category-tab[aria-selected="true"] { background: var(--oc-panel-bg); color: var(--oc-primary); }
+.fleet-category-tab:focus-visible { outline: 2px solid var(--oc-primary); outline-offset: -2px; }
+.fleet-content > .fleet-mobile-nav { display: none; }
+@media (max-width: 767px) {
+  .fleet-sidebar { display: none; }
+  .fleet-content > .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
+  .oc-chat-layout { flex-direction: column !important; }
+  .oc-chat-sidebar {
+    width: 100% !important;
+    flex: 0 0 130px;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--oc-border);
+    padding-right: 0 !important;
+    padding-bottom: 10px;
+  }
+  /* Brand button (nowrap, ~190px with its caret) + the five
+     status/identity/action chips need ~450px
+     at their min-content width, so a single row overflows 390px -- and Chromium
+     mobile emulation then grows the layout viewport to the overflow (413px),
+     dragging the document with it. Wrap onto two rows and stop the flex shrink
+     that squeezed the text chips into 12px slivers. antd sets the fixed height
+     and the 48px line-height inline in its cssinjs sheet, hence !important. */
+  .fleet-header {
+    height: auto !important;
+    min-height: 48px;
+    line-height: 1.5 !important;
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 4px 12px !important;
+    padding: 6px 12px !important;
+  }
+  .fleet-header-side { flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; }
+  .fleet-header-side > * { flex: 0 0 auto; }
+  .fleet-content { padding: 12px !important; }
+}

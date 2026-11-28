@@ -91,7 +91,32 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
 - `dag/` — DAG 编辑器、运行页与动态步骤
 - `brain/workbench/` — Brain 计划编辑与运行工作台
 - [brainPanel.jsx](../../../crates/web/spa/src/brainPanel.jsx) — 能力目录管理
-- [theme.js](../../../crates/web/spa/src/theme.js) — antd 主题配置
+- [theme.js](../../../crates/web/spa/src/theme.js) — antd 主题配置与 `--oc-*` 设计 token 的
+  唯一色源（`palette` / `tints` / `SANS` / `FONT_SIZE`：深色画布 `#0d1117`、面板 `#161b22`、
+  主色 `#58a6ff`、状态色、13px 基准字号、48px 头部、16px 内容间距、6px 主圆角、面板无阴影，
+  只有浮层带一层深色投影）；
+  [ui/mono.js](../../../crates/web/spa/src/ui/mono.js) — 唯一等宽字体栈（Latin 等宽在前、
+  CJK 回退在后，与 `--oc-mono` 同序，组件经 `MONO_VAR` 引用）
+- [app.css](../../../crates/web/spa/src/app.css) — 基础层（滚动条 / 焦点 / 内容面 / 浮层边框 /
+  抽屉 / Markdown 覆盖 / 表格兜底），为遵守行数限制按职责拆分并在文件头 `@import`：
+  [styles/tokens.css](../../../crates/web/spa/src/styles/tokens.css)（`--oc-*` token，
+  `color-scheme: dark`）、[styles/shell.css](../../../crates/web/spa/src/styles/shell.css)
+  （头部 / 品牌 / Sider / 统一页头 / sheet 与外壳响应式规则）、
+  [styles/canvas.css](../../../crates/web/spa/src/styles/canvas.css)（DAG 节点与编辑器、
+  React Flow / CodeMirror 外观）；主题配置 ↔ token 的锁步由 `theme.test.js`、
+  `ui/mono.test.js` 守护；组件局部样式只引用 token、不再内联颜色字面量
+  （`brain/workbench/`、`dag/run/`、`project/`、`todo/review/`、`ontology/`、
+  `ui/files/`、`ui/runContent/`），接口 / 状态 / 事件 / 流程与响应式契约不变；实体详情的
+  HTML 预览 iframe（[TextPreview.tsx](../../../crates/web/spa/src/ontology/pages/entityTypes/details/TextPreview.tsx)）
+  是独立文档、`--oc-*` 不跨文档边界，故其 `srcDoc` 以同一 `palette` / `SANS` / `MONO` 派生的
+  iframe 内 token 声明深色 body / code / mark / link 面与 `color-scheme: dark`（sandbox / CSP /
+  data 行为不变），
+  [content.css](../../../crates/web/spa/src/ontology/pages/entityTypes/details/content.css)
+  的 iframe 外框走同一画布 token，`agents/archiveUpload.jsx` 路径列表走 `--oc-fill-subtle` /
+  `--oc-border`；守护测试 [TextPreview.test.tsx](../../../crates/web/spa/src/ontology/pages/entityTypes/details/TextPreview.test.tsx)、
+  [content.test.js](../../../crates/web/spa/src/ontology/pages/entityTypes/details/content.test.js)、
+  [archiveUpload.dom.test.jsx](../../../crates/web/spa/src/agents/archiveUpload.dom.test.jsx)；见
+  [changelog](../../../features/changelog/2026-11-27/server-web-dark-theme.md)
 - `harness/` — Codex 默认配置与档案编辑
 - [Ontology 前端](ontology.md) — 五页面前端（图谱、实体、类型、关系与
   数据保鲜，面板挂载见 `spa/src/ontology/panels.tsx`）；

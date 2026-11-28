@@ -1,0 +1,62 @@
+/* Design tokens for the console. Every --oc-* color here has a twin in
+   theme.js (`palette` / `tints` for antd, or a CSS-only accent), and
+   theme.test.js checks each declaration against the design tokens antd
+   computes, every -rgb twin against its hex sibling and every *-bg wash
+   against the hue it tints. Imported by app.css; the Vite build inlines it
+   into dist/static/app.css. */
+
+:root {
+  color-scheme: dark;
+  /* Reference blue + its rgba() twins (focus rings, selected rows, washes). */
+  --oc-primary: #58a6ff;
+  --oc-primary-rgb: 88, 166, 255;
+  --oc-primary-bg: rgba(88, 166, 255, 0.15);
+  /* Surfaces: canvas behind everything, panel for header / sider / cards /
+     overlays, subtle fill for table heads / labels / tags. */
+  --oc-bg-layout: #0d1117;
+  --oc-panel-bg: #161b22;
+  --oc-bg-container: #161b22;
+  --oc-fill-subtle: #21262d;
+  /* Borders carry the hierarchy: hairlines, then control / node borders. */
+  --oc-border: #30363d;
+  --oc-border-strong: #484f58;
+  /* Text: high-contrast body copy, muted secondary, faint tertiary. */
+  --oc-text: #e6edf3;
+  --oc-text-secondary: #8b949e;
+  --oc-text-tertiary: #6e7681;
+  /* Panels float by their 1px border only (mirrors theme.js shadowPanel:
+     antd only applies boxShadowTertiary to borderless Cards, so the raw-CSS
+     surfaces repeat the value here). */
+  --oc-shadow-panel: none;
+  /* Status hues and their washes (tags, alerts, DAG node states). */
+  --oc-success: #3fb950;
+  --oc-success-rgb: 63, 185, 80;
+  --oc-success-bg: rgba(63, 185, 80, 0.15);
+  --oc-warning: #d29922;
+  --oc-warning-rgb: 210, 153, 34;
+  --oc-warning-bg: rgba(210, 153, 34, 0.15);
+  --oc-error: #f85149;
+  --oc-error-rgb: 248, 81, 73;
+  --oc-error-bg: rgba(248, 81, 73, 0.15);
+  /* Transcript role accents, the DAG binary-node icon accent + markdown
+     heading green. CSS-only (no antd twin); the -rgb twins feed rgba()
+     washes (RoleAvatar). */
+  --oc-accent-user: #39c5cf;
+  --oc-accent-user-rgb: 57, 197, 207;
+  --oc-accent-ai: #b392f0;
+  --oc-accent-ai-rgb: 179, 146, 240;
+  --oc-accent-binary: #d2a8ff;
+  --oc-heading: #56d364;
+  /* Type: prose face with CJK fallbacks (mirrors theme.js SANS), base size
+     (theme.js FONT_SIZE), and the monospace stack for id / uuid / session
+     columns (raw identifiers, not prose; ui/mono.js MONO mirrors it and
+     components reference it as var(--oc-mono, monospace)). */
+  --oc-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol', 'Noto Color Emoji';
+  --oc-font-size-base: 13px;
+  --oc-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC',
+    'Microsoft YaHei', monospace;
+}

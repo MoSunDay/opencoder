@@ -120,7 +120,9 @@ export function MilestoneCanvas({ plan, capabilities = EMPTY_CAPABILITIES, selec
     source: layerFlowId(plan.layers[index].layer_id), target: layerFlowId(layer.layer_id),
     sourceHandle: 'forward-out', targetHandle: 'forward-in', type: 'smoothstep',
     selectable: false, deletable: false, ariaLabel: `第 ${index + 1} 层 → 第 ${index + 2} 层`,
-    style: { stroke: '#87a3c2', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed },
+    // No inline stroke: react-flow paints the path from --xy-edge-stroke
+    // (app.css styles/canvas.css), so the arrowhead and line stay one token.
+    style: { strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed },
   }));
   return <div ref={container} className={`brain-milestone-canvas ${editable ? 'is-editable' : ''}`} aria-label={editable ? '里程碑编辑画布' : '里程碑执行画布'}
     onKeyDown={(event) => {

@@ -1,46 +1,15 @@
 /* Base chrome for the fleet console. Component styling is antd + cssinjs
-   (antd 6, tokens from src/theme.js); this sheet only fixes page-level
-   defaults, the shell surfaces and the DAG node visuals. Emitted as
-   dist/static/app.css by the Vite build contract. */
-
-/* Shared colors match the antd tokens in theme.js; theme.test.js checks
-   these declarations directly. CSS-only accents are defined here. */
-:root {
-  --oc-primary: #1677ff;
-  --oc-primary-rgb: 22, 119, 255;
-  --oc-primary-bg: #e6f4ff;
-  --oc-bg-layout: #f4f6f8;
-  --oc-panel-bg: #ffffff;
-  --oc-bg-container: #ffffff;
-  --oc-border: #eef1f5;
-  --oc-border-strong: #d3dae2;
-  --oc-fill-subtle: #fafbfc;
-  --oc-text: rgba(0, 0, 0, 0.88);
-  --oc-text-secondary: rgba(0, 0, 0, 0.65);
-  --oc-text-tertiary: #8c8c8c;
-  /* Mirrors theme.js `shadowTertiary`: antd only applies that token to
-     borderless Cards, and every Card here is outlined, so the raw-CSS
-     surfaces that do float (.fleet-sheet, .dag-node) carry it themselves. */
-  --oc-shadow-panel: 0 1px 2px rgba(16, 24, 40, 0.04),
-    0 1px 3px rgba(16, 24, 40, 0.06);
-  --oc-success: #52c41a;
-  --oc-success-bg: #f6ffed;
-  --oc-error: #ff4d4f;
-  --oc-error-bg: #fff2f0;
-  --oc-warning: #faad14;
-  /* Transcript role accents, the DAG binary-node icon accent + markdown heading
-     green. The -rgb twins feed rgba() washes (RoleAvatar). */
-  --oc-accent-user: #13c2c2;
-  --oc-accent-user-rgb: 19, 194, 194;
-  --oc-accent-ai: #9254de;
-  --oc-accent-ai-rgb: 146, 84, 222;
-  --oc-accent-binary: #722ed1;
-  --oc-heading: #389e0d;
-  /* Monospace stack for id / uuid / session columns (raw identifiers, not
-     prose). Referenced as var(--oc-mono, monospace) from inline styles. */
-  --oc-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
-    'Liberation Mono', monospace;
-}
+   (antd 6, dark tokens from src/theme.js); this sheet only fixes page-level
+   defaults and the raw-CSS surfaces: base / scrollbars / focus, content
+   blocks, Markdown overrides, drawers and the table safety nets. Split by
+   responsibility, all inlined by the Vite build into dist/static/app.css:
+     styles/tokens.css  --oc-* design tokens (theme.test.js reads it)
+     styles/shell.css   header / brand / sider / page header / sheet
+     styles/canvas.css  DAG nodes + editor, React Flow, CodeMirror
+   Imports must stay first: everything below is the base layer. */
+@import './styles/tokens.css';
+@import './styles/shell.css';
+@import './styles/canvas.css';
 
 html,
 body,
@@ -52,8 +21,8 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: var(--oc-font-sans);
+  font-size: var(--oc-font-size-base);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -62,19 +31,19 @@ body {
    scroll containers (fleet-content, tables, drawers) back some width. ===== */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
+  scrollbar-color: rgba(230, 237, 243, 0.2) transparent;
 }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   /* transparent border + content-box clip = 6px thumb centred in 10px */
-  background: rgba(0, 0, 0, 0.16);
+  background: rgba(230, 237, 243, 0.2);
   background-clip: content-box;
   border: 2px solid transparent;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(230, 237, 243, 0.4);
   background-clip: content-box;
 }
 ::-webkit-scrollbar-corner { background: transparent; }
@@ -83,190 +52,17 @@ body {
    specificity at (0,1,0), so antd components retain their own native ring
    and only the raw-CSS surfaces (DAG nodes, links, custom rows) gain one. */
 :focus-visible {
-  outline: 2px solid rgba(var(--oc-primary-rgb), 0.45);
+  outline: 2px solid rgba(var(--oc-primary-rgb), 0.6);
   outline-offset: 2px;
 }
 ::selection {
-  background: rgba(var(--oc-primary-rgb), 0.16);
+  background: rgba(var(--oc-primary-rgb), 0.3);
 }
 
-/* ===== App shell — light unified: white header/sider on a gray canvas.
-   Colors mirror theme.js Layout tokens; the borders live here because antd
-   has no header/sider border token. ===== */
-.fleet-root {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-.fleet-layout { flex: 1; min-height: 0; }
-.fleet-header {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  background: var(--oc-panel-bg);
-  border-bottom: 1px solid var(--oc-border);
-  /* Hairline lift so the header separates from the canvas without a seam.
-     Stacked above the Sider (antd gives it z-index 1) or the shadow is
-     painted over by the sider/content that follow in DOM order. */
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
-  position: relative;
-  z-index: 2;
-}
-/* The brand is the first-level navigation trigger: a real button styled as
-   the wordmark, so hover/click/focus open the category-tab popover without
-   adding chrome. */
-.fleet-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: -8px;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--oc-text);
-  font: inherit;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.2px; /* 1px tracked the wordmark out too loosely */
-  white-space: nowrap;
-  cursor: pointer;
-}
-.fleet-brand:hover,
-.fleet-brand[aria-expanded="true"] {
-  background: var(--oc-bg-layout);
-}
-.fleet-brand:focus-visible {
-  outline: 2px solid rgba(var(--oc-primary-rgb), 0.45);
-  outline-offset: 2px;
-}
-.fleet-brand-caret {
-  font-size: 11px;
-  color: var(--oc-text-tertiary);
-}
-/* First-level tabs popover opened by the brand: a narrow column that aligns
-   with the 200px Sider. Four items never overflow, so no scroll box. */
-.fleet-brand-popover .ant-popover-inner { padding: 6px; }
-.fleet-nav-panel {
-  width: min(200px, calc(100vw - 48px));
-}
-.fleet-nav-panel .ant-menu {
-  background: transparent;
-  border-inline-end: 0;
-}
-.fleet-nav-panel .ant-menu-item .anticon {
-  font-size: 16px;
-}
-.fleet-header-side {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.fleet-sidebar {
-  background: var(--oc-panel-bg);
-  border-right: 1px solid var(--oc-border);
-}
-/* Pin the collapse toggle to the bottom of the sider: the sider children
-   are a flex column, the menu grows, and margin-top:auto sinks the button. */
-.fleet-sidebar .ant-layout-sider-children {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-}
-.fleet-sidebar .ant-layout-sider-children > .ant-menu {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-.fleet-nav-toggle {
-  margin: auto 8px 8px;
-  width: calc(100% - 16px);
-  border-top: 1px solid var(--oc-border);
-  border-radius: 0 0 6px 6px;
-  padding-top: 10px;
-  height: auto;
-}
-.fleet-sidebar.ant-layout-sider-collapsed .fleet-nav-toggle {
-  margin: auto 8px 8px;
-  width: calc(100% - 16px);
-}
-.fleet-content {
-  padding: 20px;
-  min-width: 0;
-  overflow: auto;
-}
-.fleet-notice { margin-bottom: 12px; }
-
-/* ===== Unified page header (PageShell) — title + secondary description on
-   the left, actions slot on the right. Copy comes from nav.js PAGE_META;
-   this is pure layout, colors stay with antd tokens. ===== */
-.oc-page {
-  min-width: 0;
-}
-.oc-page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-.oc-page-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.oc-page-title.ant-typography {
-  margin: 0;
-  /* One notch under Title level={4}'s 20px: the shell title is chrome, not
-     content, and negative tracking tightens CJK-free wordmarks. */
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.oc-page-desc {
-  font-size: 13px;
-}
-.oc-page-extra {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-@media (max-width: 767px) {
-  .oc-page-header { flex-direction: column; align-items: stretch; }
-  .oc-page-extra { justify-content: flex-end; }
-}
-
-/* White sheet for panels that render bare surfaces without their own Card
-   (chat today) — keeps them reading as a panel on the gray canvas. */
-.fleet-sheet {
-  height: 100%;
-  min-height: 0;
-  box-sizing: border-box;
-  background: var(--oc-panel-bg);
-  border: 1px solid var(--oc-border);
-  border-radius: 10px; /* matches the Card borderRadiusLG = 10 token */
-  padding: 14px;
-  box-shadow: var(--oc-shadow-panel);
-}
-
-/* Sheet pages dock to the viewport bottom: the pane drops its bottom padding
-   and the sheet squares off its bottom corners, so nothing gray shows under
-   the panel (chat today — SHEET_PAGES in main.jsx owns the pairing). */
-.fleet-content--flush {
-  padding-bottom: 0;
-}
-.fleet-content--flush .fleet-sheet {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-/* Transcript long-line handling inside collapsible tool blocks. */
-.ant-collapse-content-box pre {
+/* Transcript long-line handling inside collapsible tool blocks (antd 6
+   wraps the panel children in .ant-collapse-body; the antd 5 -content-box
+   element no longer exists). */
+.ant-collapse-body pre {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
@@ -277,16 +73,16 @@ body {
    the row to checkbox-selection styling that this table does not have.
    Scoped under the panel's own .oc-todo-runs wrapper like every other rule in
    this sheet. !important is required because antd's generated row-background
-   and hover rules outrank a bare class selector — and the :hover twin exists
+   and hover rules outrank a bare class selector -- and the :hover twin exists
    because in a click-to-select table the pointer is always resting on the
    selected row, so a lone !important wash would freeze out hover feedback and
-   the row would never react. Selected 0.10 sits clearly above the rowHoverBg
-   #f5f9ff so a chosen row is distinguishable from a merely hovered one. */
+   the row would never react. Selected 0.12 sits clearly above the 4% row
+   hover so a chosen row is distinguishable from a merely hovered one. */
 .oc-todo-runs .oc-row-selected > td {
-  background: rgba(var(--oc-primary-rgb), 0.10) !important;
+  background: rgba(var(--oc-primary-rgb), 0.12) !important;
 }
 .oc-todo-runs .oc-row-selected:hover > td {
-  background: rgba(var(--oc-primary-rgb), 0.16) !important;
+  background: rgba(var(--oc-primary-rgb), 0.2) !important;
 }
 
 .execution-messages { margin-top: 16px; }
@@ -305,6 +101,8 @@ body {
   border: 1px solid var(--oc-border);
   border-radius: 6px;
   background: var(--oc-fill-subtle);
+  color: var(--oc-text);
+  font-family: var(--oc-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -326,292 +124,93 @@ body {
   white-space: nowrap;
 }
 
-/* ===== DAG 工作流面板 ===== */
-/* Live graph node boxes (fixed size mirrors dagLayout.js NODE_W/NODE_H). */
-.dag-node {
-  width: 176px;
-  min-height: 52px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1.5px solid var(--oc-border-strong);
-  background: var(--oc-fill-subtle);
-  font-size: 12px;
-  box-shadow: var(--oc-shadow-panel);
-}
-.dag-node-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.dag-node-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dag-node-kind {
-  margin-left: auto;
-  color: var(--oc-text-tertiary);
-  font-size: 11px;
-}
-.dag-node-status {
-  margin-top: 4px;
-  color: var(--oc-text-secondary);
-}
-.dag-node--pending { border-color: var(--oc-border-strong); background: var(--oc-fill-subtle); }
-.dag-node--running {
-  border-color: var(--oc-primary);
-  background: var(--oc-primary-bg);
-  animation: dag-node-pulse 1.6s ease-in-out infinite;
-}
-.dag-node--done { border-color: var(--oc-success); background: var(--oc-success-bg); }
-.dag-node--error { border-color: var(--oc-error); background: var(--oc-error-bg); }
-.dag-node--skipped {
-  border-color: var(--oc-border-strong);
-  background: var(--oc-bg-layout);
-  color: var(--oc-text-tertiary);
-  border-style: dashed;
-}
-.dag-node--selected { box-shadow: 0 0 0 2px var(--oc-primary); }
-@keyframes dag-node-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--oc-primary-rgb), 0.35); }
-  50% { box-shadow: 0 0 0 6px rgba(var(--oc-primary-rgb), 0.08); }
+/* ===== Content surfaces: the few antd defaults the tokens cannot reach.
+   Tables / forms / buttons / tags take their fill, border, hover and
+   selected values from theme.js (Table / Form / Button / Tag component
+   tokens); only the empty state and the floating-layer borders live here. ===== */
+.ant-empty-description { color: var(--oc-text-secondary); }
+.ant-empty-normal { margin-block: 24px; }
+/* Floating layers: panel + 1px border + one dark drop. Fill and shadow are
+   token-driven (colorBgElevated; boxShadow for Modal, boxShadowSecondary for
+   dropdown / select / picker popups -- see theme.js); antd 6 ships these
+   containers borderless (Modal container: border 0), so the hairline is
+   restated here. Panel classes are the antd 6 ones (-modal-container); the
+   antd 5 -content / -inner / -content-box elements are gone, so selectors
+   must not carry them. Popover / Tooltip stay borderless on purpose: the
+   clip-path arrow paints over the container edge and cannot carry a border,
+   so they float on the drop-shadow filter alone (the arrowless brand
+   popover gets its hairline in styles/shell.css). */
+.ant-modal .ant-modal-container,
+.ant-dropdown .ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-picker-panel-container {
+  border: 1px solid var(--oc-border);
 }
 
-/* DAG result canvas. */
-.dag-detail-graph {
-  flex: 1 1 62%;
-  min-width: 0;
-  border: 1px solid var(--oc-border);
-  border-radius: 8px;
-  overflow: hidden;
+/* ===== Drawers: execution detail (fleet/detail.jsx) and the rest. The
+   panel is .ant-drawer-content-wrapper > .ant-drawer-section (antd 6 has no
+   -content element); docked to the viewport edge it separates by one
+   hairline on its inner edge alone (border-box so a 100vw drawer cannot
+   overflow by the border). The title wraps so long identifiers stay
+   readable; the header / body use the 16px content gap on every width. ===== */
+.ant-drawer-right > .ant-drawer-content-wrapper {
+  border-left: 1px solid var(--oc-border);
+  box-sizing: border-box;
 }
-/* ===== DAG 画布编辑器 ===== */
-/* Editable step cards — fixed box mirrors canvasLayout.js EDIT_NODE_W/H. */
-.dag-edit-node {
-  width: 240px;
-  min-height: 72px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1.5px solid var(--oc-border-strong);
-  background: var(--oc-bg-container, #fff);
-  font-size: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+.ant-drawer-left > .ant-drawer-content-wrapper {
+  border-right: 1px solid var(--oc-border);
+  box-sizing: border-box;
 }
-.dag-edit-node-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.ant-drawer .ant-drawer-header {
+  border-bottom: 1px solid var(--oc-border);
+  padding: 12px 16px;
 }
-.dag-edit-node-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dag-edit-node-kind {
-  margin-left: auto;
-  color: var(--oc-text-tertiary);
-  font-size: 11px;
-  border: 1px solid var(--oc-border);
-  border-radius: 4px;
-  padding: 0 4px;
-}
-.dag-edit-node--agent .dag-edit-node-head .anticon { color: var(--oc-primary); }
-.dag-edit-node--binary .dag-edit-node-head .anticon { color: var(--oc-accent-binary); }
-.dag-edit-node-deps {
-  margin-top: 6px;
-  color: var(--oc-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dag-edit-node--invalid { border-color: var(--oc-error); }
-.dag-edit-node--invalid .dag-edit-node-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--oc-error);
-  flex: none;
-}
-.dag-edit-node--selected { box-shadow: 0 0 0 2px var(--oc-primary); }
-
-/* Editor shell: palette | canvas stage | inspector. */
-.dag-edit-wrap {
-  display: flex;
-  gap: 8px;
-  height: calc(100vh - 220px);
-  min-height: 420px;
-}
-.dag-edit-pal {
-  width: 148px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.dag-edit-pal-card {
-  padding: 8px;
-  border: 1px dashed var(--oc-border-strong);
-  border-radius: 8px;
-  cursor: grab;
-  user-select: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.dag-edit-pal-card:hover { border-color: var(--oc-primary); }
-.dag-edit-stage {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  border: 1px solid var(--oc-border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.dag-edit-toolbar {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 4;
-  background: var(--oc-bg-container, #fff);
-  border-radius: 6px;
-  padding: 4px 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.dag-edit-inspector {
-  width: 260px;
-  flex: none;
-  border: 1px solid var(--oc-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  overflow-y: auto;
-}
-
-/* Mobile-only IA controls: the header brand opens the first-level category
-   tabs, and narrow consoles keep the two-level category tabs + page Select
-   rows inside the Content. */
-.fleet-category-tabs {
-  display: flex;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: thin;
-  gap: 4px;
-  padding: 4px;
-  background: var(--oc-bg-layout);
-  border-radius: 8px;
-}
-.fleet-category-tab {
-  flex: 0 0 auto;
-  white-space: nowrap;
-  padding: 6px 12px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.fleet-category-tab[aria-selected="true"] { background: var(--oc-bg-container); color: var(--oc-primary); }
-.fleet-category-tab:focus-visible { outline: 2px solid var(--oc-primary); outline-offset: -2px; }
-.fleet-content > .fleet-mobile-nav { display: none; }
-@media (max-width: 767px) {
-  .fleet-sidebar { display: none; }
-  .fleet-content > .fleet-mobile-nav { display: inline-flex; width: 100%; margin-bottom: 8px; }
-  .oc-chat-layout { flex-direction: column !important; }
-  .oc-chat-sidebar {
-    width: 100% !important;
-    flex: 0 0 130px;
-    border-right: 0 !important;
-    border-bottom: 1px solid var(--oc-border);
-    padding-right: 0 !important;
-    padding-bottom: 10px;
-  }
-  /* Brand button (nowrap, ~190px with its caret) + the five
-     status/identity/action chips need ~450px
-     at their min-content width, so a single row overflows 390px -- and Chromium
-     mobile emulation then grows the layout viewport to the overflow (413px),
-     dragging the document with it. Wrap onto two rows and stop the flex shrink
-     that squeezed the text chips into 12px slivers. antd sets the fixed height
-     and the 56px line-height inline in its cssinjs sheet, hence !important. */
-  .fleet-header {
-    height: auto !important;
-    min-height: 56px;
-    line-height: 1.5 !important;
-    flex-wrap: wrap;
-    align-content: center;
-    gap: 4px 12px !important;
-    padding: 6px 12px !important;
-  }
-  .fleet-header-side { flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; }
-  .fleet-header-side > * { flex: 0 0 auto; }
-  .fleet-content { padding: 12px !important; }
-  /* Safety net for any list table that forgets scroll={{ x }}: without its own
-     horizontal scroller a table cannot shrink below its cells' min-content, so
-     it widens .fleet-content and drags the mobile nav sideways with the rows.
-     The panels all pass scroll={{ x: 'max-content' }} already (which renders
-     .ant-table-content/.ant-table-body); this only guarantees the clipping. */
-  .ant-table-content,
-  .ant-table-body { overflow-x: auto; }
-  .dag-detail-graph { flex-basis: auto; height: 420px; }
-  .dag-edit-wrap { flex-direction: column; height: auto; }
-  .dag-edit-stage { height: 380px; }
-  .dag-edit-inspector { width: auto; }
-  .dag-edit-pal { width: auto; flex-direction: row; }
-  .ant-drawer-content-wrapper { max-width: 100vw; }
-}
-
-/* Execution identifiers and messages remain readable in the mobile drawer. */
+.ant-drawer .ant-drawer-body { padding: 16px; }
 .oc-execution-detail .ant-drawer-title { overflow-wrap: anywhere; }
 @media (max-width: 767px) {
   .oc-execution-detail .ant-drawer-content-wrapper { width: 100vw !important; }
   .oc-execution-detail .ant-drawer-body { padding: 16px; }
 }
 
-/* Click-to-connect affordance: grow the tiny handles so they are actually
-   clickable, pulse the armed source, invite clicks on legal targets. */
-.dag-edit-stage .react-flow__handle {
-  width: 10px;
-  height: 10px;
+/* ===== Markdown bodies (src/project/markdown.jsx renders .md-body; the
+   base rules live in project/project.css with light literals). `:root`
+   out-specifies that sheet (same 0,1,0 / 0,1,1 selectors, loaded later)
+   without touching it: inline code, code blocks, quotes and table borders
+   switch to the dark tokens, prose stays 13px. ===== */
+:root .md-body { color: var(--oc-text); font-size: 13px; }
+:root .md-body--empty { color: var(--oc-text-tertiary); }
+:root .md-body code {
+  background: var(--oc-fill-subtle);
+  border: 1px solid var(--oc-border);
+  border-radius: 4px;
+  font-family: var(--oc-mono);
 }
-/* Link mode: the second click of click-to-connect must land on the node
-   card, but the 10px handles straddle the card edge and would swallow it
-   (feeding onConnectEnd a phantom "dropped" drag that silently re-arms).
-   Disable their hit-testing for the duration; handle-drag connecting stays
-   available outside link mode. */
-.dag-edit-stage--linkmode .react-flow__handle,
-.dag-edit-stage--linkmode .react-flow__handle.connectionindicator,
-.dag-edit-stage--linkmode .react-flow__handle.connectingfrom {
-  pointer-events: none !important;
-}
-.dag-edit-node--linksrc {
-  border-color: var(--oc-primary);
-  box-shadow: 0 0 0 2px var(--oc-primary), 0 0 14px rgba(22, 119, 255, 0.35);
-}
-.dag-edit-node--linktgt { cursor: crosshair; }
-.dag-edit-node--linktgt:hover {
-  border-color: var(--oc-primary);
-  box-shadow: 0 0 0 2px var(--oc-primary);
-}
-.dag-edit-linkbar {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: calc(100% - 16px);
-  padding: 4px 10px;
-  border: 1px solid var(--oc-primary);
+:root .md-body pre {
+  background: var(--oc-fill-subtle);
+  border: 1px solid var(--oc-border);
   border-radius: 6px;
-  background: var(--oc-bg-container, #fff);
-  color: var(--oc-primary);
-  font-size: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+:root .md-body pre code { background: none; border: 0; }
+:root .md-body blockquote {
+  border-left: 3px solid var(--oc-border-strong);
+  color: var(--oc-text-secondary);
+}
+:root .md-body th,
+:root .md-body td { border: 1px solid var(--oc-border); }
+:root .md-body th { background: var(--oc-fill-subtle); }
+:root .md-body a { color: var(--oc-primary); }
+:root .md-body a:hover { color: var(--oc-text); }
+:root .md-body hr { border: 0; border-top: 1px solid var(--oc-border); }
+:root .md-body table { display: block; max-width: 100%; overflow-x: auto; }
+
+/* ===== Mobile safety net for list tables that forget scroll={{ x }}:
+   without its own horizontal scroller a table cannot shrink below its cells'
+   min-content, so it widens .fleet-content and drags the mobile nav
+   sideways with the rows. The panels all pass scroll={{ x: 'max-content' }}
+   already (which renders .ant-table-content/.ant-table-body); this only
+   guarantees the clipping. ===== */
+@media (max-width: 767px) {
+  .ant-table-content,
+  .ant-table-body { overflow-x: auto; }
+  .ant-drawer-content-wrapper { max-width: 100vw; }
 }

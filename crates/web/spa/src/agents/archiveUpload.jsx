@@ -41,7 +41,7 @@ export function ArchiveUpload({cat,files,disabled,onMerge,onError}) {
       <p>压缩包内共 {pending?.paths.length ?? 0} 个文件：新增 {pending?.added ?? 0} 个，覆盖同名 {pending?.overwritten ?? 0} 个。</p>
       <p>同名文件将被直接覆盖；只覆盖同名文件，不会删除或清空目录，目录中原有的其他文件全部保留。</p>
       <p><Typography.Text type="secondary">导入后需点击「保存」才会生效。</Typography.Text></p>
-      <div style={{maxHeight:160,overflow:'auto',background:'#fafafa',border:'1px solid #f0f0f0',borderRadius:4,padding:'4px 8px',fontSize:12}}>
+      <div style={{maxHeight:160,overflow:'auto',background:'var(--oc-fill-subtle)',border:'1px solid var(--oc-border)',borderRadius:4,padding:'4px 8px',fontSize:12}}>
         {pending?.paths.map(path => <div key={path}>{path}</div>)}
       </div>
       {!!pending?.skipped && <p><Typography.Text type="secondary">已忽略 {pending.skipped} 个不受支持的条目（隐藏文件 / 系统元数据）。</Typography.Text></p>}

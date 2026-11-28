@@ -1,0 +1,351 @@
+/* Canvases: DAG run-view nodes, the DAG editor shell, and the presentation
+   of the two third-party canvas libraries (React Flow, CodeMirror). Imported
+   by app.css after shell.css. Presentation only: node / edge / handle
+   geometry that the JS layout code mirrors (dagLayout.js NODE_W/NODE_H,
+   canvasLayout.js EDIT_NODE_W/H) keeps its exact pixel values. */
+
+/* ===== DAG workflow panel ===== */
+/* Live graph node boxes (fixed size mirrors dagLayout.js NODE_W/NODE_H). */
+.dag-node {
+  width: 176px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--oc-border-strong);
+  background: var(--oc-fill-subtle);
+  font-size: 12px;
+  box-shadow: var(--oc-shadow-panel);
+}
+.dag-node-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dag-node-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dag-node-kind {
+  margin-left: auto;
+  color: var(--oc-text-tertiary);
+  font-size: 11px;
+}
+.dag-node-status {
+  margin-top: 4px;
+  color: var(--oc-text-secondary);
+}
+.dag-node--pending { border-color: var(--oc-border-strong); background: var(--oc-fill-subtle); }
+.dag-node--running {
+  border-color: var(--oc-primary);
+  background: var(--oc-primary-bg);
+  animation: dag-node-pulse 1.6s ease-in-out infinite;
+}
+.dag-node--done { border-color: var(--oc-success); background: var(--oc-success-bg); }
+.dag-node--error { border-color: var(--oc-error); background: var(--oc-error-bg); }
+.dag-node--skipped {
+  border-color: var(--oc-border-strong);
+  background: var(--oc-bg-layout);
+  color: var(--oc-text-tertiary);
+  border-style: dashed;
+}
+.dag-node--selected { box-shadow: 0 0 0 2px var(--oc-primary); }
+@keyframes dag-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--oc-primary-rgb), 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(var(--oc-primary-rgb), 0.08); }
+}
+
+/* DAG result canvas: a bordered panel surface; the React Flow rules below
+   paint the dot grid, controls and minimap on top of it. */
+.dag-detail-graph {
+  flex: 1 1 62%;
+  min-width: 0;
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--oc-panel-bg);
+}
+/* ===== DAG canvas editor ===== */
+/* Editable step cards - fixed box mirrors canvasLayout.js EDIT_NODE_W/H. */
+.dag-edit-node {
+  width: 240px;
+  min-height: 72px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--oc-border-strong);
+  background: var(--oc-panel-bg);
+  font-size: 12px;
+  box-shadow: var(--oc-shadow-panel);
+}
+.dag-edit-node-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dag-edit-node-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dag-edit-node-kind {
+  margin-left: auto;
+  color: var(--oc-text-tertiary);
+  font-size: 11px;
+  border: 1px solid var(--oc-border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.dag-edit-node--agent .dag-edit-node-head .anticon { color: var(--oc-primary); }
+.dag-edit-node--binary .dag-edit-node-head .anticon { color: var(--oc-accent-binary); }
+.dag-edit-node-deps {
+  margin-top: 6px;
+  color: var(--oc-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dag-edit-node--invalid { border-color: var(--oc-error); }
+.dag-edit-node--invalid .dag-edit-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--oc-error);
+  flex: none;
+}
+.dag-edit-node--selected { box-shadow: 0 0 0 2px var(--oc-primary); }
+
+/* Editor shell: palette | canvas stage | inspector. 8px gaps, 6px radius,
+   1px borders, no shadows. */
+.dag-edit-wrap {
+  display: flex;
+  gap: 8px;
+  height: calc(100vh - 220px);
+  min-height: 420px;
+}
+.dag-edit-pal {
+  width: 148px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dag-edit-pal-card {
+  padding: 8px;
+  border: 1px dashed var(--oc-border-strong);
+  border-radius: 6px;
+  background: var(--oc-fill-subtle);
+  cursor: grab;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dag-edit-pal-card:hover { border-color: var(--oc-primary); }
+.dag-edit-stage {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--oc-panel-bg);
+}
+.dag-edit-toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  background: var(--oc-panel-bg);
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.dag-edit-inspector {
+  width: 260px;
+  flex: none;
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--oc-panel-bg);
+  overflow-y: auto;
+}
+
+/* ===== React Flow presentation (DAG run view, DAG editor, brain canvases).
+   The library ships light defaults as --xy-* custom properties on
+   `.react-flow`; `:root .react-flow` outranks that rule regardless of sheet
+   order, so every canvas picks up the dark tokens without touching the
+   JSX. ===== */
+:root .react-flow {
+  --xy-edge-stroke-default: var(--oc-border-strong);
+  --xy-edge-stroke-selected-default: var(--oc-primary);
+  --xy-connectionline-stroke-default: var(--oc-primary);
+  --xy-background-color-default: var(--oc-panel-bg);
+  --xy-background-pattern-dots-color-default: var(--oc-border);
+  --xy-background-pattern-lines-color-default: var(--oc-border);
+  --xy-background-pattern-cross-color-default: var(--oc-border);
+  --xy-minimap-background-color-default: var(--oc-panel-bg);
+  --xy-minimap-mask-background-color-default: rgba(1, 4, 9, 0.6);
+  --xy-minimap-node-background-color-default: var(--oc-border-strong);
+  --xy-selection-background-color-default: rgba(var(--oc-primary-rgb), 0.08);
+  --xy-selection-border-default: 1px dotted rgba(var(--oc-primary-rgb), 0.8);
+  --xy-controls-button-background-color-default: var(--oc-panel-bg);
+  --xy-controls-button-background-color-hover-default: var(--oc-fill-subtle);
+  --xy-controls-button-color-default: var(--oc-text-secondary);
+  --xy-controls-button-color-hover-default: var(--oc-text);
+  --xy-controls-button-border-color-default: var(--oc-border);
+  --xy-controls-box-shadow-default: 0 0 0 1px var(--oc-border);
+  --xy-edge-label-background-color-default: var(--oc-panel-bg);
+  --xy-edge-label-color-default: var(--oc-text-secondary);
+  --xy-attribution-background-color-default: rgba(1, 4, 9, 0.6);
+  --xy-node-boxshadow-hover-default: none;
+  --xy-node-boxshadow-selected-default: 0 0 0 2px var(--oc-primary);
+  --xy-handle-background-color-default: var(--oc-primary);
+  --xy-handle-border-color-default: var(--oc-panel-bg);
+}
+/* A Background `color` prop (brain layered canvas passes a light hex) wins
+   over the custom properties via --xy-...-props; the paint properties
+   themselves outrank it with this specificity. */
+:root .react-flow .react-flow__background-pattern {
+  fill: var(--oc-border);
+  stroke: var(--oc-border);
+}
+:root .react-flow .react-flow__background-pattern.dots { stroke-width: 0; }
+:root .react-flow .react-flow__attribution {
+  background: transparent;
+  color: var(--oc-text-tertiary);
+}
+:root .react-flow .react-flow__attribution a { color: var(--oc-text-secondary); }
+
+/* ===== CodeMirror presentation (file editor). editor.jsx mounts
+   EditorView.theme without the dark flag, so the base theme applies its
+   light variant (selectors like `.cm-light .cm-activeLine`, specificity
+   0,2,0; the focused selection is 0,5,0). `.file-editor .cm-editor`
+   out-specifies both and the styles mount before app.css. ===== */
+.file-editor .cm-editor {
+  background: var(--oc-bg-container);
+  color: var(--oc-text);
+  font-size: 13px;
+}
+.file-editor .cm-editor.cm-focused {
+  outline: 1px solid rgba(var(--oc-primary-rgb), 0.45);
+}
+.file-editor .cm-editor .cm-content { caret-color: var(--oc-primary); }
+.file-editor .cm-editor .cm-content ::selection {
+  background: rgba(var(--oc-primary-rgb), 0.3);
+}
+.file-editor .cm-editor .cm-selectionBackground,
+.file-editor .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: rgba(var(--oc-primary-rgb), 0.25);
+}
+.file-editor .cm-editor .cm-activeLine { background: rgba(230, 237, 243, 0.04); }
+.file-editor .cm-editor .cm-gutters {
+  background: var(--oc-panel-bg);
+  color: var(--oc-text-tertiary);
+  border-color: var(--oc-border);
+}
+.file-editor .cm-editor .cm-activeLineGutter {
+  background: rgba(230, 237, 243, 0.06);
+  color: var(--oc-text-secondary);
+}
+.file-editor .cm-editor .cm-cursor,
+.file-editor .cm-editor .cm-dropCursor { border-left-color: var(--oc-primary); }
+.file-editor .cm-editor .cm-specialChar { color: var(--oc-error); }
+.file-editor .cm-editor .cm-placeholder { color: var(--oc-text-tertiary); }
+.file-editor .cm-editor .cm-foldPlaceholder {
+  background: var(--oc-fill-subtle);
+  border: 1px solid var(--oc-border);
+  color: var(--oc-text-secondary);
+}
+.file-editor .cm-editor.cm-focused .cm-matchingBracket {
+  background: rgba(var(--oc-primary-rgb), 0.25);
+}
+.file-editor .cm-editor.cm-focused .cm-nonmatchingBracket {
+  background: rgba(var(--oc-error-rgb), 0.3);
+}
+.file-editor .cm-editor .cm-searchMatch { background: rgba(var(--oc-warning-rgb), 0.25); }
+.file-editor .cm-editor .cm-searchMatch-selected { background: rgba(var(--oc-warning-rgb), 0.45); }
+.file-editor .cm-editor .cm-panels {
+  background: var(--oc-panel-bg);
+  color: var(--oc-text);
+}
+.file-editor .cm-editor .cm-panels-top { border-bottom: 1px solid var(--oc-border); }
+.file-editor .cm-editor .cm-panels-bottom { border-top: 1px solid var(--oc-border); }
+.file-editor .cm-editor .cm-button {
+  background: var(--oc-fill-subtle);
+  border: 1px solid var(--oc-border-strong);
+  color: var(--oc-text);
+}
+.file-editor .cm-editor .cm-button:hover { background: var(--oc-primary-bg); color: var(--oc-primary); }
+.file-editor .cm-editor .cm-textfield {
+  background: var(--oc-bg-layout);
+  border: 1px solid var(--oc-border-strong);
+  color: var(--oc-text);
+}
+.file-editor .cm-editor .cm-tooltip {
+  background: var(--oc-panel-bg);
+  border: 1px solid var(--oc-border);
+  color: var(--oc-text);
+}
+.file-editor .cm-editor .cm-tooltip-autocomplete > ul > li { color: var(--oc-text); }
+.file-editor .cm-editor .cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--oc-fill-subtle);
+  color: var(--oc-primary);
+}
+.file-editor .cm-editor .cm-completionDetail { color: var(--oc-text-tertiary); }
+
+/* ===== Canvas responsive rules ===== */
+@media (max-width: 767px) {
+  .dag-detail-graph { flex-basis: auto; height: 420px; }
+  .dag-edit-wrap { flex-direction: column; height: auto; }
+  .dag-edit-stage { height: 380px; }
+  .dag-edit-inspector { width: auto; }
+  .dag-edit-pal { width: auto; flex-direction: row; }
+}
+
+/* ===== Click-to-connect affordance: grow the tiny handles so they are
+   actually clickable, pulse the armed source, invite clicks on legal
+   targets. ===== */
+.dag-edit-stage .react-flow__handle {
+  width: 10px;
+  height: 10px;
+}
+/* Link mode: the second click of click-to-connect must land on the node
+   card, but the 10px handles straddle the card edge and would swallow it
+   (feeding onConnectEnd a phantom "dropped" drag that silently re-arms).
+   Disable their hit-testing for the duration; handle-drag connecting stays
+   available outside link mode. */
+.dag-edit-stage--linkmode .react-flow__handle,
+.dag-edit-stage--linkmode .react-flow__handle.connectionindicator,
+.dag-edit-stage--linkmode .react-flow__handle.connectingfrom {
+  pointer-events: none !important;
+}
+.dag-edit-node--linksrc {
+  border-color: var(--oc-primary);
+  box-shadow: 0 0 0 2px var(--oc-primary), 0 0 14px rgba(var(--oc-primary-rgb), 0.35);
+}
+.dag-edit-node--linktgt { cursor: crosshair; }
+.dag-edit-node--linktgt:hover {
+  border-color: var(--oc-primary);
+  box-shadow: 0 0 0 2px var(--oc-primary);
+}
+.dag-edit-linkbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  padding: 4px 10px;
+  border: 1px solid var(--oc-primary);
+  border-radius: 6px;
+  background: var(--oc-panel-bg);
+  color: var(--oc-primary);
+  font-size: 12px;
+}

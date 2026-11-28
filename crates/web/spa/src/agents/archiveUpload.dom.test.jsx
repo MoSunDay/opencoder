@@ -75,3 +75,15 @@ it('blocks the antd default upload so no background request is ever sent',async(
     expect(onError.mock.calls.every(call => call[0] === '')).toBe(true); // 只允许清空 Alert 的空串，无真实错误
   } finally { fetchSpy.mockRestore(); }
 });
+
+it('paints the path list with theme tokens, never light inline literals',async()=>{
+  const {onMerge}=mount({'note.md':entry('note.md','old')});
+  fireEvent.change(document.querySelector('input[type=file]'),{target:{files:[zipFile({'note.md':strToU8('new'),'add/more.md':strToU8('extra')})]}});
+  await screen.findByText(/共 2 个文件：新增 1 个，覆盖同名 1 个/);
+  const list=screen.getByText('add/more.md').parentElement;
+  expect(list.style.background).toBe('var(--oc-fill-subtle)'); // 深色主题：填充面 token
+  expect(list.style.border).toBe('1px solid var(--oc-border)');
+  expect(document.querySelector('.ant-modal').innerHTML).not.toMatch(/#fafafa|#f0f0f0|#fff\b/i);
+  fireEvent.click(screen.getByRole('button',{name:'覆盖上传'}));
+  await waitFor(()=>expect(onMerge).toHaveBeenCalled()); // 合并流程不受显示改动影响
+});

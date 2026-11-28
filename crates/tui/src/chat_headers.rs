@@ -1,14 +1,16 @@
-//! Header line-accounting for Thinking / Subagent / step-row / Compaction
-//! / turn-live-region blocks.
+//! Header line-accounting for Thinking / Subagent / subagent-group / step-row
+//! / Compaction / turn-live-region blocks.
 //!
-//! Walks `ChatView.blocks` with the identical per-block line accounting that
-//! `flatten_with` emits, so click hit-rects stay aligned with the live render.
+//! Walks `ChatView.blocks` in `steps::render_order` (the subagent run between
+//! a ladder and its Say renders above the pair) with the identical per-block
+//! line accounting that `flatten_with` emits, so click hit-rects stay aligned
+//! with the live render.
 //! Extracted from `chat.rs` for the line gate; behavior unchanged.
 
 use super::live_turn;
 use super::{
-    step_render, ChatBlock, ChatView, CompactionHeader, LiveHeader, SubagentHeader, ThinkingHeader,
-    ToolCallHeader,
+    step_render, ChatBlock, ChatView, CompactionHeader, LiveHeader, SubagentGroupHeader,
+    SubagentHeader, ThinkingHeader, ToolCallHeader,
 };
 
 impl ChatView {
@@ -21,10 +23,20 @@ impl ChatView {
         self.collect_headers().0
     }
 
-    /// Return each Subagent block's `(block_idx, header_line_idx)`. Mirrors
-    /// `thinking_headers`; used to build click hit-rects for subagent headers.
+    /// Return each Subagent block's `(block_idx, header_line_idx)` — only
+    /// while the view's subagent groups are expanded (collapsed, the rows
+    /// are not rendered and carry no target). Mirrors `thinking_headers`;
+    /// used to build click hit-rects for the subagent rows.
     pub fn subagent_headers(&self) -> Vec<SubagentHeader> {
         self.collect_headers().1
+    }
+
+    /// Return each subagent GROUP header line (the `> subagents` /
+    /// `▸ subagents` row opening every maximal contiguous run of Subagent
+    /// blocks) in render order — one per run in both disclosure states.
+    /// Clicking one toggles every run of the view (`toggle_subagents`).
+    pub fn subagent_group_headers(&self) -> Vec<SubagentGroupHeader> {
+        self.collect_headers().5
     }
 
     /// Return each clickable row inside `StepGroup` blocks — the turn row,
@@ -46,10 +58,11 @@ impl ChatView {
     }
 
     /// Single pass over all blocks computing the header line index of every
-    /// Thinking / Subagent / step-row block, using the identical per-block
-    /// line accounting that `flatten_with()` emits. Keeping the accounting in
-    /// one place guarantees hit-rect indices stay aligned with the live
-    /// render.
+    /// Thinking / Subagent / subagent-group / step-row block, using the
+    /// identical per-block line accounting that `flatten_with()` emits.
+    /// Keeping the accounting in one place guarantees hit-rect indices stay
+    /// aligned with the live render. Tuple positions are stable
+    /// (`live_headers()` reads `.4`, `subagent_group_headers()` reads `.5`).
     #[allow(clippy::type_complexity)]
     pub(crate) fn collect_headers(
         &self,
@@ -59,13 +72,19 @@ impl ChatView {
         Vec<CompactionHeader>,
         Vec<ToolCallHeader>,
         Vec<LiveHeader>,
+        Vec<SubagentGroupHeader>,
     ) {
         let mut think = Vec::new();
         let mut sub = Vec::new();
         let mut compaction = Vec::new();
         let mut tool_calls = Vec::new();
         let mut live = Vec::new();
+        let mut sub_groups = Vec::new();
         let mut line_idx = 0usize;
+        // Subagent GROUP header mirror (`flatten_with`): one line before each
+        // maximal contiguous run of Subagent blocks. Tracked BEFORE the match
+        // so arms that `continue` (the streaming Say) cannot desync it.
+        let mut prev_was_sub = false;
         let merged_say = |i: usize| -> bool {
             // Only a SEALED follower merges (`done == true`) — the same
             // pairing lookup `flatten_with` uses (`steps::say_after_group`;
@@ -77,7 +96,21 @@ impl ChatView {
                 Some(ChatBlock::Assistant { done: true, .. })
             )
         };
-        for (block_idx, block) in self.blocks.iter().enumerate() {
+        for block_idx in super::steps::render_order(&self.blocks) {
+            let block = &self.blocks[block_idx];
+            let is_sub = matches!(block, ChatBlock::Subagent { .. });
+            if is_sub && !prev_was_sub {
+                sub_groups.push(SubagentGroupHeader {
+                    header_line_idx: line_idx,
+                });
+                line_idx += 1;
+            }
+            // The blank row between a subagent section and the Say below
+            // it (`flatten_with` pushes it at the same boundary).
+            if prev_was_sub && !is_sub && super::steps::opens_with_say(&self.blocks, block_idx) {
+                line_idx += 1;
+            }
+            prev_was_sub = is_sub;
             match block {
                 ChatBlock::Marker(lines) => line_idx += lines.len(),
                 ChatBlock::User { rendered } => line_idx += 1 + rendered.len(),
@@ -283,11 +316,16 @@ impl ChatView {
                         } + 1;
                 }
                 ChatBlock::Subagent { .. } => {
-                    sub.push(SubagentHeader {
-                        block_idx,
-                        header_line_idx: line_idx,
-                    });
-                    line_idx += 1; // header only — no inline expansion
+                    // Row lines only while EXPANDED — collapsed, the group
+                    // header (counted above) is the run's only line and the
+                    // row carries no click target.
+                    if !self.subagents_collapsed {
+                        sub.push(SubagentHeader {
+                            block_idx,
+                            header_line_idx: line_idx,
+                        });
+                        line_idx += 1; // header only — no inline expansion
+                    }
                 }
                 ChatBlock::Plan { rendered, .. } => {
                     line_idx += 1 + rendered.len() + 1;
@@ -301,6 +339,6 @@ impl ChatView {
         // with the flatten output. It retires when progress settles; the
         // open Say, by contrast, IS transcript content (accounted above —
         // raw rows while it streams, rendered rows once sealed).
-        (think, sub, compaction, tool_calls, live)
+        (think, sub, compaction, tool_calls, live, sub_groups)
     }
 }

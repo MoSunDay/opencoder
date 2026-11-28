@@ -85,7 +85,22 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
     // between collect_headers and flatten_with is caught regardless of which
     // side regresses. (collect_headers is private, so we mirror its math.)
     let mut expected = 0usize;
-    for (bi, block) in view.blocks.iter().enumerate() {
+    // Subagent GROUP header (see flatten_with): one line before each maximal
+    // contiguous run of `Subagent` blocks, in both disclosure states. The
+    // walk follows `steps::render_order` (a run between a ladder and its
+    // Say renders above the pair) and counts the blank that separates a
+    // subagent section from the Say below it.
+    let mut prev_was_sub = false;
+    for bi in super::super::steps::render_order(&view.blocks) {
+        let block = &view.blocks[bi];
+        let is_sub = matches!(block, ChatBlock::Subagent { .. });
+        if is_sub && !prev_was_sub {
+            expected += 1; // `> subagents` / `▸ subagents` group header
+        }
+        if prev_was_sub && !is_sub && super::super::steps::opens_with_say(&view.blocks, bi) {
+            expected += 1; // blank between the section and the Say
+        }
+        prev_was_sub = is_sub;
         // Pair merge (see flatten_with): a StepGroup whose Say — the NEXT
         // block, or behind `Subagent` blocks (`steps::say_after_group`,
         // transparent to the pair) — is SEALED (`done: true`) renders one
@@ -214,7 +229,11 @@ pub(super) fn assert_line_accounting_matches(view: &ChatView) {
                     } + 1;
             }
             ChatBlock::Subagent { .. } => {
-                expected += 1;
+                // The row renders only while EXPANDED — collapsed, the group
+                // header (counted above) is the run's only line.
+                if !view.subagents_collapsed {
+                    expected += 1;
+                }
             }
             ChatBlock::Plan { rendered, .. } => {
                 expected += 1 + rendered.len() + 1;
@@ -349,3 +368,5 @@ fn empty_image_followed_by_tool_alignment() {
 
 #[path = "line_accounting/step_ladder.rs"]
 mod step_ladder;
+#[path = "line_accounting/subagent_group.rs"]
+mod subagent_group;

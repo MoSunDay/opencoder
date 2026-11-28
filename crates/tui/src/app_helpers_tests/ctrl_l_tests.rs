@@ -105,6 +105,107 @@ fn ctrl_l_exits_subagent_and_returns_to_follow_mode() {
     assert_all_thinking_collapsed(&chat);
 }
 
+/// Ctrl+L also collapses every subagent group (parent AND focused child) to
+/// its `▸ subagents` header-only shape — the view-wide disclosure state, not
+/// a block fold: `subagents_collapsed` is set on each view
+/// `collapse_all_collapsible` runs on, and the ctx-switch exit still happens.
+#[test]
+fn ctrl_l_collapses_subagent_rows_in_parent_and_focused_child() {
+    // Parent only (no focus): the parent's rows collapse.
+    let (mut chat, sub_idx) = chat_with_subagent();
+    assert!(!chat.subagents_collapsed, "subagent rows start expanded");
+    let mut subagent_focus: Option<usize> = None;
+    let mut follow = false;
+    let mut last_esc = None;
+    let mut input = String::new();
+    let mut cursor = 0usize;
+    let mut needs_clear = false;
+    let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
+    let consumed = pre_key_intercept(
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+        &KeyBindings::default(),
+        &mut subagent_focus,
+        &mut follow,
+        &mut last_esc,
+        &mut chat,
+        &mut input,
+        &mut cursor,
+        &mut needs_clear,
+        &sidecar_tx,
+    );
+    assert!(consumed);
+    assert!(
+        chat.subagents_collapsed,
+        "Ctrl+L must collapse the parent's subagent rows"
+    );
+    assert!(
+        crate::chat::block_text(&chat).contains("\u{25b8} subagents"),
+        "the parent run collapses to its closed group header"
+    );
+    assert!(
+        !crate::chat::block_text(&chat).contains(" subagent ["),
+        "the parent's subagent rows are not rendered while collapsed"
+    );
+    // Without a focus the child view is never visited: its own rows keep
+    // their (expanded) state.
+    let ChatBlock::Subagent { view, .. } = &chat.blocks[sub_idx] else {
+        panic!("subagent block at {sub_idx}");
+    };
+    assert!(
+        !view.subagents_collapsed,
+        "an unfocused child view is not touched"
+    );
+
+    // Focused child running a nested subagent of its own: Ctrl+L collapses
+    // the CHILD's rows too (before exiting it), on top of the parent's.
+    let (mut chat, sub_idx) = chat_with_subagent();
+    chat.apply(&SessionEvent::SubagentChild {
+        id: "s1".into(),
+        ev: Box::new(SessionEvent::SubagentStart {
+            id: "nested".into(),
+            kind: "explore".into(),
+            prompt: "inner".into(),
+            child_session_id: "c-nested".into(),
+        }),
+    });
+    let mut subagent_focus = Some(sub_idx);
+    let mut follow = false;
+    let mut last_esc = None;
+    let mut input = "hello".to_string();
+    let mut cursor = 5usize;
+    let mut needs_clear = false;
+    let (sidecar_tx, _sidecar_rx) = mpsc::channel::<crate::sidecar_ui::SidecarCmd>(8);
+    let consumed = pre_key_intercept(
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+        &KeyBindings::default(),
+        &mut subagent_focus,
+        &mut follow,
+        &mut last_esc,
+        &mut chat,
+        &mut input,
+        &mut cursor,
+        &mut needs_clear,
+        &sidecar_tx,
+    );
+    assert!(consumed);
+    assert_eq!(subagent_focus, None, "Ctrl+L still exits the child view");
+    assert!(
+        chat.subagents_collapsed,
+        "parent rows collapse after the exit"
+    );
+    let ChatBlock::Subagent { view, .. } = &chat.blocks[sub_idx] else {
+        panic!("subagent block at {sub_idx}");
+    };
+    assert!(
+        view.subagents_collapsed,
+        "the focused child's rows collapse before the exit"
+    );
+    assert!(
+        crate::chat::block_text(view).contains("\u{25b8} subagents"),
+        "the child's nested run collapses to its closed group header"
+    );
+}
+
 /// Ctrl+L resets every StepGroup (parent AND focused child) to the collapsed
 /// state — open steps and expanded call outputs are one keystroke away from
 /// the static marker + closed step rows.

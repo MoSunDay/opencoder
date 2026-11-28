@@ -85,7 +85,7 @@ fn header_line_indices_aligned_with_flatten_with_preamble_visible() {
             txt,
         );
     }
-    // Every subagent header points at a flatten line containing "subagent".
+    // Every subagent row header points at a flatten line containing "subagent".
     let sh = v.subagent_headers();
     assert_eq!(sh.len(), 2);
     for h in &sh {
@@ -97,9 +97,16 @@ fn header_line_indices_aligned_with_flatten_with_preamble_visible() {
             txt,
         );
     }
+    // The run's single `> subagents` group header opens the run: its index
+    // points at the exact header line, one row above the first subagent row.
+    let sg = v.subagent_group_headers();
+    assert_eq!(sg.len(), 1, "one group header per contiguous run");
+    assert_eq!(line_text(sg[0].header_line_idx), "> subagents");
+    assert_eq!(sg[0].header_line_idx + 1, sh[0].header_line_idx);
     // No two headers collide on the same rendered line.
     let mut all_idx: Vec<usize> = th.iter().map(|h| h.header_line_idx).collect();
     all_idx.extend(sh.iter().map(|h| h.header_line_idx));
+    all_idx.extend(sg.iter().map(|h| h.header_line_idx));
     let mut sorted = all_idx.clone();
     sorted.sort_unstable();
     sorted.dedup();

@@ -7,13 +7,19 @@
 //! while its own Say streamed standalone below it, and never merged into
 //! `Say(n steps): <preview>` on seal. `steps::say_after_group` /
 //! `steps::group_before_say` make `Subagent` blocks TRANSPARENT to the pair
-//! (render and hit accounting share the lookup); the subagent row renders in
-//! block order — merged header, its separator blank, the subagent row, then
-//! the Say body.
+//! (render and hit accounting share the lookup). RENDER order hoists that
+//! subagent section ABOVE the Say pair (`steps::render_order`): the section
+//! never cuts through the Say — header, ladder and body stay contiguous —
+//! and a blank row separates the section from the Say below it. The order
+//! is the same while the Say streams (the ladder is retired then), so it
+//! does not jump on seal.
 
 use super::super::*;
 use super::line_accounting::assert_line_accounting_matches;
 
+/// The subagent GROUP header — one row opening every contiguous run of
+/// Subagent blocks (`subagents_collapsed == false` here).
+const SUBAGENT_GROUP: &str = "> subagents";
 const SUBAGENT_DONE_ROW: &str =
     "\u{2937} subagent [explore] p \u{2714} done, 0 Steps [\u{2192} view]  child done";
 
@@ -139,9 +145,11 @@ fn view_with(blocks: Vec<ChatBlock>) -> ChatView {
 
 /// Streaming window: the Say behind the subagent row still RETIRES the
 /// ladder the moment it begins (no `N Steps` row above the subagent), the
-/// subagent row stays in block order, and the Say renders standalone
+/// subagent row stays under its `> subagents` group header, ONE blank
+/// separates the section from the Say, and the Say renders standalone
 /// (`say:` header + spinner + raw body). Hit accounting follows: the
-/// retired ladder registers no step target and the subagent header is row 0.
+/// retired ladder registers no step target, the group header is row 0, the
+/// subagent row is row 1 and the Say header row 3.
 #[test]
 fn streaming_say_after_a_subagent_retires_the_ladder_behind_the_subagent_row() {
     let mut v = ChatView::default();
@@ -157,7 +165,9 @@ fn streaming_say_after_a_subagent_retires_the_ladder_behind_the_subagent_row() {
     assert_eq!(
         lines(&v),
         vec![
+            SUBAGENT_GROUP,
             SUBAGENT_DONE_ROW,
+            "",
             "\u{276f} Say: \u{280b} ",
             "    final answer",
         ]
@@ -167,15 +177,19 @@ fn streaming_say_after_a_subagent_retires_the_ladder_behind_the_subagent_row() {
         "the retired ladder registers no step target: {:?}",
         v.tool_call_headers()
     );
-    assert_eq!(v.subagent_headers()[0].header_line_idx, 0);
+    // Group header at row 0, the subagent row right below it.
+    assert_eq!(v.subagent_group_headers()[0].header_line_idx, 0);
+    assert_eq!(v.subagent_headers()[0].header_line_idx, 1);
     assert_line_accounting_matches(&v);
 }
 
-/// Sealed: the pair merges ACROSS the subagent row — one clickable
-/// `▸ Say(3 steps): final answer` header row, its separator blank, the
-/// subagent row, and the single-line body hidden (preview dedup). The
-/// `Done` boundary still adds its one blank: the subagent row terminates
-/// the pair, so `last_block_ends_blank` must not be fooled by the merge.
+/// Sealed: the pair merges ACROSS the subagent row and renders BELOW the
+/// hoisted section — the `> subagents` header, the subagent row, one blank,
+/// then the clickable `▸ Say(3 steps): final answer` header row with its
+/// separator blank (the single-line body is hidden by preview dedup). The
+/// pair still ends on that blank, so the `Done` boundary adds NO extra
+/// marker (`last_block_ends_blank` stays true — the hoisted rows are not
+/// the pair's tail anymore).
 #[test]
 fn sealed_say_after_a_subagent_merges_into_the_ladder_behind_the_subagent_row() {
     let mut v = ChatView::default();
@@ -186,50 +200,60 @@ fn sealed_say_after_a_subagent_merges_into_the_ladder_behind_the_subagent_row() 
         [
             ChatBlock::StepGroup { steps, .. },
             ChatBlock::Subagent { .. },
-            ChatBlock::Assistant { done: true, .. },
-            ChatBlock::Marker(_)
+            ChatBlock::Assistant { done: true, .. }
         ] if steps.len() == 3
     ));
     assert_eq!(
         lines(&v),
         vec![
-            "\u{25b8} Say(3 steps): final answer",
-            "",
+            SUBAGENT_GROUP,
             SUBAGENT_DONE_ROW,
+            "",
+            "\u{25b8} Say(3 steps): final answer",
             "",
         ]
     );
-    // The merged header row IS the group's click target (row 0); the
-    // subagent header sits right below the header + its separator blank.
+    // The merged header row IS the group's click target (row 3); the
+    // subagent section sits above it — group header row 0, subagent row 1.
     let headers = v.tool_call_headers();
     assert_eq!(headers.len(), 1);
-    assert_eq!(headers[0].header_line_idx, 0);
-    assert_eq!(v.subagent_headers()[0].header_line_idx, 2);
+    assert_eq!(headers[0].header_line_idx, 3);
+    assert_eq!(v.subagent_group_headers()[0].header_line_idx, 0);
+    assert_eq!(v.subagent_headers()[0].header_line_idx, 1);
     assert_line_accounting_matches(&v);
 
-    // Opening the ladder re-renders it between the header and the subagent
-    // row: header, separator blank, ladder rows + their trailing blank,
-    // then the subagent row; the body is still hidden, so nothing follows.
+    // Opening the ladder re-renders it right below the merged header, ABOVE
+    // nothing but the Say body: group header, subagent row, blank, header,
+    // separator blank, ladder rows + their trailing blank; the body is still
+    // hidden, so the ladder's blank is the last line.
     v.toggle_tool_call_at(0, 0);
     let flat = lines(&v);
-    assert_eq!(flat[0], "\u{276f} Say(3 steps): final answer");
-    assert_eq!(flat[flat.len() - 2], SUBAGENT_DONE_ROW, "{flat:?}");
+    assert_eq!(flat[3], "\u{276f} Say(3 steps): final answer");
+    assert_eq!(flat[0], SUBAGENT_GROUP, "{flat:?}");
+    assert_eq!(flat[1], SUBAGENT_DONE_ROW, "{flat:?}");
+    assert_eq!(flat[2], "", "{flat:?}");
     assert_eq!(flat.last().unwrap(), "", "{flat:?}");
     assert_eq!(
+        v.subagent_group_headers()[0].header_line_idx,
+        0,
+        "group header must sit on its rendered row: {flat:?}"
+    );
+    assert_eq!(
         v.subagent_headers()[0].header_line_idx,
-        flat.len() - 2,
+        1,
         "subagent header must sit on its rendered row: {flat:?}"
     );
     assert_line_accounting_matches(&v);
 }
 
 /// The `Done` boundary's blank gate is precise about WHERE a hidden-body
-/// pair ends: strictly adjacent, the merged header's separator blank closes
-/// the pair (true → the boundary must not stack a second blank); behind a
-/// subagent row, that row is the last visible line (false → the boundary
-/// adds its blank).
+/// pair ends: strictly adjacent OR behind a hoisted subagent row, the merged
+/// header's separator blank closes the pair (true → the boundary must not
+/// stack a second blank); every OTHER intervening block still breaks the
+/// pair and leaves the Say body as the last line (false → the boundary adds
+/// its blank).
 #[test]
-fn hidden_say_pair_behind_a_subagent_row_does_not_end_blank() {
+fn hidden_say_pair_behind_a_subagent_row_still_ends_blank() {
     let adjacent = view_with(vec![step_with_call("a"), sealed_say("final answer")]);
     assert!(adjacent.last_block_ends_blank());
     let split = view_with(vec![
@@ -237,7 +261,7 @@ fn hidden_say_pair_behind_a_subagent_row_does_not_end_blank() {
         subagent_block(),
         sealed_say("final answer"),
     ]);
-    assert!(!split.last_block_ends_blank());
+    assert!(split.last_block_ends_blank());
     // Every OTHER intervening block still breaks the pair.
     let marker_between = view_with(vec![
         step_with_call("a"),
@@ -275,8 +299,100 @@ fn replayed_ladder_behind_a_subagent_block_pairs_with_its_say_like_live() {
     let v = view_with(blocks);
     assert_eq!(
         lines(&v),
-        vec!["\u{25b8} Say(3 steps): final answer", "", SUBAGENT_DONE_ROW,]
+        vec![
+            SUBAGENT_GROUP,
+            SUBAGENT_DONE_ROW,
+            "",
+            "\u{25b8} Say(3 steps): final answer",
+            "",
+        ]
     );
-    assert_eq!(v.subagent_headers()[0].header_line_idx, 2);
+    assert_eq!(v.subagent_headers()[0].header_line_idx, 1);
+    assert_line_accounting_matches(&v);
+}
+
+/// Collapsed, the section is just the `▸ subagents` header — the blank
+/// before the Say below it stays: the rule is about the Say ROW that
+/// follows, not about the hidden rows.
+#[test]
+fn collapsed_subagent_section_before_a_say_keeps_the_separating_blank() {
+    let mut v = view_with(vec![
+        step_with_call("a"),
+        subagent_block(),
+        sealed_say("final answer"),
+    ]);
+    v.toggle_subagents();
+    assert_eq!(
+        lines(&v),
+        vec![
+            "\u{25b8} subagents",
+            "",
+            "\u{25b8} Say(1 step): final answer",
+            "",
+        ]
+    );
+    assert_eq!(v.subagent_group_headers()[0].header_line_idx, 0);
+    assert!(v.subagent_headers().is_empty(), "collapsed hides the rows");
+    assert_line_accounting_matches(&v);
+}
+
+/// A section split around the ladder in BLOCK order (`[Sub A, G, Sub B,
+/// Say]`) is ONE section in RENDER order: `render_order` emits
+/// `group + 1..say` (B) before the group, so both rows land above the pair
+/// under ONE `> subagents` header, then the blank, then the merged Say
+/// pair — the rows never straddle the pair and never share a header with
+/// anything else.
+#[test]
+fn subagents_on_both_sides_of_the_ladder_merge_into_one_section_above_the_say() {
+    let mut second = subagent_block();
+    if let ChatBlock::Subagent {
+        id,
+        child_session_id,
+        ..
+    } = &mut second
+    {
+        *id = "s2".into();
+        *child_session_id = "c2".into();
+    }
+    let v = view_with(vec![
+        subagent_block(),
+        step_with_call("a"),
+        second,
+        sealed_say("final answer"),
+    ]);
+    assert_eq!(
+        lines(&v),
+        vec![
+            SUBAGENT_GROUP,
+            SUBAGENT_DONE_ROW,
+            SUBAGENT_DONE_ROW,
+            "",
+            "\u{25b8} Say(1 step): final answer",
+            "",
+        ]
+    );
+    assert_eq!(v.subagent_group_headers().len(), 1, "one contiguous run");
+    assert_eq!(v.subagent_group_headers()[0].header_line_idx, 0);
+    assert_eq!(
+        v.subagent_headers()
+            .iter()
+            .map(|h| h.header_line_idx)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(v.tool_call_headers()[0].header_line_idx, 4);
+    assert_line_accounting_matches(&v);
+}
+
+/// The blank is Say-specific: a subagent run followed by a ladder that has
+/// NO Say keeps plain block order — no blank is invented between them.
+#[test]
+fn subagent_run_before_a_ladder_without_a_say_gets_no_blank() {
+    let v = view_with(vec![subagent_block(), step_with_call("a")]);
+    assert_eq!(
+        lines(&v),
+        vec![SUBAGENT_GROUP, SUBAGENT_DONE_ROW, "\u{25b8} 1 Step", "",]
+    );
+    assert_eq!(v.subagent_headers()[0].header_line_idx, 1);
     assert_line_accounting_matches(&v);
 }

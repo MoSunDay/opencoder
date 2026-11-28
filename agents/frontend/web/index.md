@@ -52,8 +52,17 @@ axum HTTP + SSE 会话管理与内嵌 React SPA。
   settle 即无），settle 后实时区清空；与 TUI `chat_live_turn.rs` 同契约；夹在
   阶梯与其 Say 之间的 subagent 块对配对透明：`bubbleItems.js::itemsFromTurns`
   把 run 内 `subagent` 部分与 `sys` 同样吸收进同一气泡（保持块序），
-  `transcript.jsx::AssistantTurnContent` 在头行与 Say 正文之间渲染（见
-  [changelog](../../../features/changelog/2026-11-23/subagent-transparent-step-say-pairing.md)）
+  `transcript.jsx::AssistantTurnContent` 把该段渲染在头行**上方**（不切入 Say：
+  头行与正文连续，见
+  [changelog](../../../features/changelog/2026-11-27/subagent-section-above-say.md)）
+- [subagentFold.js](../../../crates/web/spa/src/subagentFold.js)、
+  [subagentBlock.jsx](../../../crates/web/spa/src/subagentBlock.jsx) — subagent 块的
+  转录级统一披露（TUI `toggle_subagents` 同契约）：`TranscriptView` 持有唯一的
+  `{ open, toggle }`（默认收起）经 `SubagentFoldContext` 下发，每个 subagent 头部显示
+  阶梯同款 `❯`/`▸`（`stepsBlock.jsx::disclosureIcon`），点击任一头部即同时开 / 合全部
+  subagent 块（`[→ view]` 阻止冒泡，仍只打开回放弹窗）；Ctrl/Cmd+L 与 `⤒ 收起` 走同一
+  `collapseAll`：bump epoch 重挂气泡并把 subagent 披露置为收起（见
+  [changelog](../../../features/changelog/2026-11-27/subagent-fold-toggle.md)）
 - [chat/inputAttempt.js](../../../crates/web/spa/src/chat/inputAttempt.js) — 人工输入 ID
   的生成与重试规则
 - [nav.js](../../../crates/web/spa/src/nav.js)、

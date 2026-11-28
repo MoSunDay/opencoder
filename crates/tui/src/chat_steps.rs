@@ -131,6 +131,46 @@ pub(crate) fn group_before_say(blocks: &[ChatBlock], say: usize) -> Option<usize
     None
 }
 
+/// Render order shared by `flatten_with` and `collect_headers`: block order,
+/// except that the `Subagent` blocks a ladder's Say-pair skips over
+/// (`say_after_group`) render BEFORE that ladder. The pair — merged header,
+/// ladder, Say body — stays ONE contiguous unit, so the subagent section
+/// sits ABOVE the Say instead of cutting through it, exactly where it
+/// already sits while the Say streams (the ladder is retired then).
+/// Streaming and sealed followers alike, so the order does not jump when
+/// the Say seals. `say_after_group` stops at the first non-Subagent block,
+/// so `group + 1..say` is precisely the run to hoist.
+pub(crate) fn render_order(blocks: &[ChatBlock]) -> Vec<usize> {
+    let mut order = Vec::with_capacity(blocks.len());
+    let mut i = 0;
+    while i < blocks.len() {
+        if matches!(blocks[i], ChatBlock::StepGroup { .. }) {
+            if let Some(say) = say_after_group(blocks, i) {
+                order.extend(i + 1..say);
+                order.push(i);
+                i = say;
+                continue;
+            }
+        }
+        order.push(i);
+        i += 1;
+    }
+    order
+}
+
+/// True when block `bi`'s FIRST rendered line is a Say header: a standalone
+/// Say (`say:` row, streaming or unpaired) or a ladder whose follower Say
+/// merges into its own header row (`Say(n steps)`; a streaming follower
+/// retires the ladder, leaving the same Say row next). Drives the blank
+/// line between a subagent section and the Say below it.
+pub(crate) fn opens_with_say(blocks: &[ChatBlock], bi: usize) -> bool {
+    match blocks.get(bi) {
+        Some(ChatBlock::Assistant { .. }) => group_before_say(blocks, bi).is_none(),
+        Some(ChatBlock::StepGroup { .. }) => say_after_group(blocks, bi).is_some(),
+        _ => false,
+    }
+}
+
 /// A reasoning delta starts a new step after the previous step has already
 /// reached calls (or was explicitly sealed). Further deltas of the same
 /// reasoning run append to the still-open, call-less step.

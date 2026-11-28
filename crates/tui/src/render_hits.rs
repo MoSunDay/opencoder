@@ -30,8 +30,17 @@ pub(crate) struct MouseHits {
     /// Clickable Thinking-block header rows; clicking toggles collapse.
     /// One entry per Thinking block currently visible in the body viewport.
     pub thinking_btns: Vec<ThinkingBtn>,
-    /// Clickable Subagent-block header rows; clicking toggles collapse.
+    /// Clickable Subagent-block rows; clicking enters that subagent's view
+    /// (ctx-switch). Present only while the view's subagent groups are
+    /// expanded — collapsed, the rows are not rendered (only the group
+    /// header is, see `subagent_group_btns`).
     pub subagent_btns: Vec<SubagentBtn>,
+    /// Clickable `> subagents` / `▸ subagents` GROUP header rows (one per
+    /// maximal contiguous run of Subagent blocks, present in BOTH disclosure
+    /// states); one per run currently visible in the body viewport. Clicking
+    /// toggles every run of the focused view between its rows and the
+    /// collapsed header-only shape.
+    pub subagent_group_btns: Vec<SubagentGroupBtn>,
     /// Clickable rows inside `StepGroup` blocks — turn, step, and each open
     /// step's function-call rows, in render order.
     pub tool_call_btns: Vec<ToolCallBtn>,
@@ -55,10 +64,21 @@ pub(crate) struct ThinkingBtn {
     pub rect: Rect,
 }
 
-/// A clickable Subagent-block header.
+/// A clickable Subagent-block row; `block_idx` indexes `ChatView::blocks`
+/// and clicking the row enters that subagent's view (ctx-switch).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SubagentBtn {
     pub block_idx: usize,
+    pub rect: Rect,
+}
+
+/// A clickable `> subagents` / `▸ subagents` GROUP header row (the one row
+/// every maximal contiguous run of Subagent blocks opens with). Clicking
+/// toggles every run of the focused view between its rows and the collapsed
+/// header-only shape (`ChatView::toggle_subagents`) without entering a
+/// subagent.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SubagentGroupBtn {
     pub rect: Rect,
 }
 
@@ -150,8 +170,43 @@ pub(super) fn record_live_hits(
     }
 }
 
-/// Populate `out` with one `SubagentBtn` per Subagent-block header line that is
-/// currently visible inside the body viewport. Mirrors
+/// Populate `out` with one `SubagentGroupBtn` per `> subagents` /
+/// `▸ subagents` group header line that is currently visible inside the body
+/// viewport. Mirrors `record_live_hits` (header-only target: full text width,
+/// one row tall); the data source is `ChatView::subagent_group_headers`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn record_subagent_group_hits(
+    chat: &ChatView,
+    cache: &ViewportCache,
+    text_w: u16,
+    scroll_y: usize,
+    visible_h: usize,
+    x: u16,
+    y0: u16,
+    out: &mut Vec<SubagentGroupBtn>,
+) {
+    let headers = chat.subagent_group_headers();
+    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
+        return;
+    }
+    let viewport_bottom = scroll_y + visible_h;
+    for h in headers {
+        let header_row = cache.row_of_line(h.header_line_idx);
+        if header_row >= viewport_bottom {
+            break;
+        }
+        if header_row >= scroll_y {
+            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
+            out.push(SubagentGroupBtn {
+                rect: Rect::new(x, screen_y, text_w, 1),
+            });
+        }
+    }
+}
+
+/// Populate `out` with one `SubagentBtn` per visible Subagent-block row
+/// (expanded state only — `subagent_headers` is empty while collapsed) that
+/// is currently visible inside the body viewport. Mirrors
 /// `record_thinking_hits`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn record_subagent_hits(

@@ -183,10 +183,26 @@ pub(crate) async fn handle_mouse(
                     break;
                 }
             }
-            // Click on a Subagent-block header: enter
-            // the subagent's perspective (ctx-switch).
-            // No inline expansion — the child view and
-            // its context stats are shown full-body.
+            // Click the SUBAGENT GROUP header (`> subagents` / `▸ subagents`,
+            // one per contiguous run of Subagent blocks): toggle every run of
+            // the focused view between its rows and the collapsed header-only
+            // shape (`toggle_subagents`, subagent-aware like the live header)
+            // WITHOUT entering a subagent and WITHOUT touching scroll /
+            // follow / focus. The header renders in both states, so the
+            // target exists collapsed too.
+            for btn in &hits.subagent_group_btns {
+                if in_rect(btn.rect, m.column, m.row) {
+                    if let Some(v) = collapse_view(chat, *subagent_focus) {
+                        v.toggle_subagents();
+                    }
+                    consumed = true;
+                    break;
+                }
+            }
+            // Click on a visible Subagent-block row (expanded state only):
+            // enter the subagent's perspective (ctx-switch) — no inline
+            // expansion; the child view and its context stats are shown
+            // full-body. The row never toggles the group fold.
             for btn in &hits.subagent_btns {
                 if in_rect(btn.rect, m.column, m.row) {
                     *scroll = 0;

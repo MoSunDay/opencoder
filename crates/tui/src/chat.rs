@@ -32,6 +32,14 @@ pub(crate) const PLAN_HEADER: &str = "\u{2576}\u{2500} plan \u{2500}\u{2574}";
 /// collapsed to the header. Declared here so the whole crate (render,
 /// tests) shares the exact prefix shape.
 pub(crate) const LIVE_ROW_OPEN_PREFIX: &str = "> ";
+/// Label of the SUBAGENT GROUP header row (`chat_flatten.rs`): every maximal
+/// contiguous run of `ChatBlock::Subagent` blocks opens with ONE
+/// `{prefix}subagents` row — `> subagents` (`LIVE_ROW_OPEN_PREFIX`) while the
+/// view's subagent rows are expanded, `▸ subagents`
+/// (`GROUP_ROW_CLOSED_PREFIX`) while collapsed to the header. Same marker
+/// pair and style as the TURN LIVE REGION header; declared here so the whole
+/// crate (render, tests) shares the exact row shape.
+pub(crate) const SUBAGENT_GROUP_LABEL: &str = "subagents";
 
 /// Body lines of streaming assistant `raw`, mirroring `flatten_with`: drop the
 /// single trailing empty element from a terminating newline (interior blanks kept).
@@ -613,6 +621,23 @@ impl ChatView {
         self.live_collapsed = !self.live_collapsed;
     }
 
+    /// Toggle this view's SUBAGENT GROUP disclosure between the expanded
+    /// shape (a `> subagents` group header row followed by every
+    /// `⤷ subagent …` row of the run, full detail: duration, ` [→ view]`,
+    /// summary) and the collapsed shape (the `▸ subagents` header row ONLY —
+    /// the run's rows are not rendered at all). One group header per maximal
+    /// contiguous run of `ChatBlock::Subagent` blocks; every run of the view
+    /// follows the same flag. Bound to the group header click
+    /// (`SubagentGroupBtn`, `app_mouse.rs`; subagent-aware: toggles the
+    /// focused child view) — one click folds the whole view at once and
+    /// never enters a subagent. Unlike the live region this is sticky
+    /// transcript disclosure, NOT per-turn state: `begin_turn` never re-arms
+    /// it, so the choice persists across turns (Ctrl+L only sets the
+    /// collapsed side via `collapse_all_collapsible`).
+    pub fn toggle_subagents(&mut self) {
+        self.subagents_collapsed = !self.subagents_collapsed;
+    }
+
     /// Collapse every collapsible block (Thinking + Compaction + StepGroup)
     /// in this view. Bound to Ctrl+L: clears any expanded reasoning blocks
     /// and closes every level of the tool ladder — turn fold, step folds,
@@ -621,8 +646,13 @@ impl ChatView {
     /// subagent view before exiting it). The TURN LIVE REGION collapses to
     /// its `▸ streaming` header row too — it keeps streaming there (its header
     /// stays clickable to re-expand) and re-expands on the next armed turn.
+    /// Every subagent group collapses to its `▸ subagents` header row as
+    /// well (`subagents_collapsed` — the run's rows stop rendering); that
+    /// fold persists across turns and is re-opened only by the group header
+    /// click (`toggle_subagents`).
     pub fn collapse_all_collapsible(&mut self) {
         self.live_collapsed = true;
+        self.subagents_collapsed = true;
         for block in &mut self.blocks {
             match block {
                 ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {

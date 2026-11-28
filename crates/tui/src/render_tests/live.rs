@@ -63,6 +63,7 @@ fn draw_body(v: &ChatView, width: u16, height: u16, follow: bool) -> ratatui::bu
                 &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 &mut None,
                 true,
                 0,

@@ -9,10 +9,31 @@ use ratatui::text::{Line, Span};
 
 use super::live_turn;
 use super::{
-    assistant_rows, push_duration_span, render_collapsible, step_render, SayHeader, PLAN_HEADER,
-    ROLE_SAY_HEADER, ROLE_USER_HEADER, SPINNER,
+    assistant_rows, push_duration_span, render_collapsible, step_render, SayHeader,
+    GROUP_ROW_CLOSED_PREFIX, LIVE_ROW_OPEN_PREFIX, PLAN_HEADER, ROLE_SAY_HEADER, ROLE_USER_HEADER,
+    SPINNER, SUBAGENT_GROUP_LABEL,
 };
 use super::{steps, theme, types, ChatBlock, ChatView};
+
+/// The SUBAGENT GROUP header row — ONE per maximal contiguous run of
+/// `ChatBlock::Subagent` blocks (`flatten_opts`): `{prefix}{SUBAGENT_GROUP_LABEL}`,
+/// i.e. `> subagents` while the run's rows follow and `▸ subagents` while
+/// the view is collapsed to the header. Styled exactly like the TURN LIVE
+/// REGION header (`live_turn::render_lines`): dim warn color. Unlike that
+/// transient region it is transcript STRUCTURE, so copy mode keeps it.
+fn subagent_group_header_line(collapsed: bool) -> Line<'static> {
+    let prefix = if collapsed {
+        GROUP_ROW_CLOSED_PREFIX
+    } else {
+        LIVE_ROW_OPEN_PREFIX
+    };
+    Line::from(Span::styled(
+        format!("{prefix}{SUBAGENT_GROUP_LABEL}"),
+        Style::default()
+            .fg(theme::warn_color())
+            .add_modifier(Modifier::DIM),
+    ))
+}
 
 impl ChatView {
     /// Flatten all blocks into a single `Vec<Line>` for rendering, using
@@ -32,14 +53,36 @@ impl ChatView {
     /// Copy-mode flatten: same shapes as [`Self::flatten_with`] minus the
     /// TURN LIVE REGION — its rows are transient streaming UI, never
     /// transcript content, so copy text (and copy-mode scroll geometry)
-    /// excludes the whole region while the turn still streams.
+    /// excludes the whole region while the turn still streams. The
+    /// `> subagents` group header is transcript STRUCTURE and stays.
     pub fn flatten_for_copy(&self, anim_tick: u32, now_ms: i64) -> Vec<Line<'static>> {
         self.flatten_opts(anim_tick, now_ms, false)
     }
 
     fn flatten_opts(&self, anim_tick: u32, now_ms: i64, include_live: bool) -> Vec<Line<'static>> {
         let mut out = Vec::with_capacity(self.blocks.len() * 2);
-        for (bi, block) in self.blocks.iter().enumerate() {
+        // SUBAGENT GROUP header: every maximal contiguous run of
+        // `ChatBlock::Subagent` blocks opens with ONE `> subagents` /
+        // `▸ subagents` row (view-wide `subagents_collapsed`) — the run
+        // state is updated BEFORE the match so arms that `continue` (the
+        // streaming Say) cannot desync it. `collect_headers`
+        // (`chat_headers.rs`) mirrors this line for line.
+        let mut in_subagent_run = false;
+        for bi in steps::render_order(&self.blocks) {
+            let block = &self.blocks[bi];
+            let is_subagent = matches!(block, ChatBlock::Subagent { .. });
+            if is_subagent && !in_subagent_run {
+                out.push(subagent_group_header_line(self.subagents_collapsed));
+            }
+            // BLANK between a subagent section and the Say below it: the
+            // Say never shares the section's visual group —
+            // `steps::render_order` hoists the section above the Say pair
+            // (it must not cut through the Say), and this row keeps the two
+            // apart. Mirrored line for line by `collect_headers`.
+            if in_subagent_run && !is_subagent && steps::opens_with_say(&self.blocks, bi) {
+                out.push(Line::from(""));
+            }
+            in_subagent_run = is_subagent;
             match block {
                 ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
                 ChatBlock::User { rendered } => {
@@ -95,8 +138,9 @@ impl ChatView {
                     // pair) — the group row already renders the merged
                     // `❯ Say(n steps): <preview>` header, so the standalone
                     // header row is dropped here — the Say body follows the
-                    // merged header (plus its separator blank, and any
-                    // subagent rows in block order) below.
+                    // merged header (plus its separator blank) below. The
+                    // subagent rows between ladder and Say render ABOVE the
+                    // pair (`steps::render_order`), never inside it.
                     let merged = steps::group_before_say(&self.blocks, bi).is_some();
                     if !merged {
                         out.push(Line::from(Span::styled(
@@ -245,6 +289,14 @@ impl ChatView {
                     elapsed_ms,
                     ..
                 } => {
+                    // View-wide disclosure (`subagents_collapsed`) lives on
+                    // the run's group header above: collapsed, that `▸ subagents`
+                    // row is the run's ONLY line — nothing renders per block;
+                    // expanded, the row is the full-detail shape below (the
+                    // header carries the marker, the row carries none).
+                    if self.subagents_collapsed {
+                        continue;
+                    }
                     let step_count = view
                         .blocks
                         .iter()
@@ -328,25 +380,17 @@ impl ChatView {
         fn blank_line(l: &Line<'static>) -> bool {
             l.spans.iter().all(|s| s.content.trim().is_empty())
         }
-        // 合并对（上方是它的 StepGroup，中间隔着 Subagent 行也算）且正文
-        // 整块隐藏（单行 Say / 空正文）时，整对以「Say 之前最后一个可见
-        // 行」收尾：阶梯紧邻 Say 时是头部后的空行（闭合）或 ladder 尾部
-        // 空行（展开），已经是 blank —— 边界不得再叠加第二个空行；阶梯与
-        // Say 之间隔着 Subagent 行时，最后一行是 subagent 行（无尾随空
-        // 行），边界照常补空行。流式中的 Say（rendered 尚空，同样判为
-        // Hidden）沿用这一口径：阶梯紧邻时视为已收尾，其余落到下方按 raw
-        // 尾行判定。
+        // 合并对且正文整块隐藏（单行 Say / 空正文）时，整对以自己的收尾
+        // 空行结束：闭合是头部后的分隔空行，展开是 ladder 自带的尾部空
+        // 行 —— 边界不得再叠加第二个空行。隔在阶梯与 Say 之间的 Subagent
+        // 行由 `steps::render_order` 提到整对上方，不改变这个收尾（它们
+        // 不再是最后一行）。流式中的 Say（rendered 尚空，同样判为 Hidden）
+        // 沿用这一口径。
         if let Some(ChatBlock::Assistant { rendered, .. }) = self.blocks.last() {
             if step_render::merged_say_body_decision(rendered) == step_render::SayBody::Hidden
                 && steps::group_before_say(&self.blocks, self.blocks.len() - 1).is_some()
             {
-                return matches!(
-                    self.blocks
-                        .len()
-                        .checked_sub(2)
-                        .and_then(|i| self.blocks.get(i)),
-                    Some(ChatBlock::StepGroup { .. })
-                );
+                return true;
             }
         }
         match self.blocks.last() {

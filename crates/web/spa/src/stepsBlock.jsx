@@ -66,7 +66,10 @@ const { Text, Paragraph } = Typography;
 
 // One disclosure glyph, changing with the actual state (TUI ▸ / ❯).
 // A literal glyph in the label plus antd's default icon produced two arrows.
-const disclosureIcon = ({ isActive }) => <span aria-hidden="true">{isActive ? '❯' : '▸'}</span>;
+// Exported for the subagent blocks (subagentBlock.jsx), so every collapsible
+// row of the transcript — ladder levels and subagent headers alike — shows
+// the same ❯ / ▸ glyph.
+export const disclosureIcon = ({ isActive }) => <span aria-hidden="true">{isActive ? '❯' : '▸'}</span>;
 
 /// Reasoning row for standalone `think` turns (pure-text rounds): ghost
 /// collapse, renders even with empty text so a reasoning-only frame still

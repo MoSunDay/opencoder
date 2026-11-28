@@ -4,13 +4,18 @@
 // parity: one collapsible block per subagent, plus a drill-in modal that
 // replays the child session read-only from /events after=0 (same authenticated
 // stream as the main console, folded by the same reduceFrame — NOT a
-// Bubble.List, the block stays light). Self-contained: no props drilled
-// in from chat state.
+// Bubble.List, the block stays light). The disclosure state comes from
+// subagentFold.js (useSubagentFold): every block shares ONE transcript-wide
+// `open` flag, so any subagent header toggles all of them (TUI
+// toggle_subagents); the header glyph is the ladder's own ❯ / ▸
+// (disclosureIcon, stepsBlock.jsx). No props drilled in from chat state.
 
 import { Collapse, Modal, Tag, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { emptyStream, reduceFrame } from './reduce.js';
 import { openStream } from './sse.js';
+import { disclosureIcon } from './stepsBlock.jsx';
+import { useSubagentFold } from './subagentFold.js';
 import { MONO_VAR } from './ui/mono.js';
 import { statusColor } from './ui/statusTag.jsx';
 
@@ -130,7 +135,9 @@ function SubagentLabel({ turn, open, onView }) {
 }
 
 export function SubagentContent({ turn }) {
-  const [open, setOpen] = useState(false);
+  // Transcript-wide disclosure (subagentFold.js): `open` drives this block's
+  // glyph AND body, `toggle` flips every subagent block of the transcript.
+  const { open, toggle } = useSubagentFold();
   const [viewing, setViewing] = useState(false);
   const [child, setChild] = useState(emptyStream);
   const streamRef = useRef(null);
@@ -163,8 +170,12 @@ export function SubagentContent({ turn }) {
     <div>
       <Collapse
         size="small"
+        expandIcon={disclosureIcon}
         activeKey={open ? ['sa'] : []}
-        onChange={(keys) => setOpen((Array.isArray(keys) ? keys : [keys]).includes('sa'))}
+        // antd's keys argument is ignored on purpose: the state is the
+        // transcript-wide flag, so a click anywhere on this header means
+        // "flip all subagent blocks" ([→ view] stops propagation above).
+        onChange={() => toggle()}
         items={[{
           key: 'sa',
           label: <SubagentLabel turn={turn} open={open} onView={() => setViewing(true)} />,

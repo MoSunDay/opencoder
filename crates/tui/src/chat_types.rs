@@ -102,10 +102,18 @@ pub enum ChatBlock {
         filename: String,
         rendered: Vec<Line<'static>>,
     },
-    /// Foldable subagent block. Clicking the header enters the subagent's
+    /// Foldable subagent block. Clicking its row enters the subagent's
     /// perspective (ctx-switch) showing its child `view` as the full body plus
-    /// its own context stats. The header always renders as a single clickable
-    /// line with running/done/failed status — no inline expansion.
+    /// its own context stats. The row always renders as a single clickable
+    /// line with running/done/failed status — no inline expansion. The
+    /// disclosure lives ONE level up: every maximal contiguous run of
+    /// `Subagent` blocks opens with a `> subagents` / `▸ subagents` group
+    /// header row (`SUBAGENT_GROUP_LABEL`, styled like the TURN LIVE REGION
+    /// header); while the view's `subagents_collapsed` is set the run's rows
+    /// are NOT rendered at all (header only), otherwise every row renders
+    /// with full detail — status, duration, ` [→ view]` and the summary.
+    /// Clicking the group header toggles all runs of the focused view at
+    /// once; clicking a visible row enters that subagent.
     Subagent {
         id: String,
         child_session_id: String,
@@ -268,6 +276,19 @@ pub struct ChatView {
     /// `true` renders the `▸ streaming` header row only. Re-armed (`false`) on
     /// every newly-admitted running turn; collapsed by click and Ctrl+L.
     pub live_collapsed: bool,
+    /// Whether this view's SUBAGENT GROUPS are collapsed to their header
+    /// rows (see the `Subagent` variant). Like the Thinking fold this is the
+    /// user's sticky disclosure choice for the transcript, NOT per-turn
+    /// state: `false` (the `Default`) renders every maximal contiguous run
+    /// of `Subagent` blocks as a `> subagents` group header followed by the
+    /// run's `⤷ subagent …` rows (duration, ` [→ view]`, summary); `true`
+    /// renders only the `▸ subagents` header per run — no row at all, so the
+    /// line count shrinks by one per hidden block. It is view-wide (one
+    /// toggle folds every run of the focused view at once), toggled by the
+    /// group header click (`toggle_subagents`), set by Ctrl+L
+    /// (`collapse_all_collapsible`, which never re-expands) and NEVER
+    /// re-armed by `begin_turn` — it persists across turns.
+    pub subagents_collapsed: bool,
     /// The `/sidecar` Q/A panel while it is open (never inside `blocks` —
     /// see `SidecarPanel`). Cleared on exit (ESC / Ctrl+L) and on `/task`
     /// switches; `None` plus `sidecar_focus == false` is the closed state.
@@ -283,10 +304,24 @@ pub struct ThinkingHeader {
     pub header_line_idx: usize,
 }
 
-/// Locates a `Subagent` block's header line for mouse hit-testing.
+/// Locates a `Subagent` block's header line for mouse hit-testing. Only
+/// reported while the view's subagent groups are expanded (`subagents_collapsed
+/// == false`) — collapsed, the row is not rendered, so no target exists.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SubagentHeader {
     pub block_idx: usize,
+    pub header_line_idx: usize,
+}
+
+/// Locates the `> subagents` / `▸ subagents` group header line — the one row
+/// every maximal contiguous run of `ChatBlock::Subagent` blocks opens with —
+/// for mouse hit-testing: clicking it toggles every run of the view between
+/// its rows and the collapsed header-only shape (`ChatView::toggle_subagents`).
+/// `header_line_idx` is its index within `ChatView::flatten()`; the header
+/// always renders, so a run keeps its target while collapsed (a later run's
+/// index shifts with the rows hidden above it).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SubagentGroupHeader {
     pub header_line_idx: usize,
 }
 

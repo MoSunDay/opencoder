@@ -322,15 +322,24 @@ describe('StepsContent three-level drill-down', () => {
     expect(screen.getByText(/🔧 read/)).toBeTruthy();
   });
 
-  it('keeps a subagent block between the ladder and its Say inside ONE bubble, in block order', () => {
-    // TUI parity (chat_steps.rs say_after_group): the subagent block is
-    // transparent to the ladder/Say pair — the header is still the pair's
-    // own row (`2 Steps` once done, `2 Steps: <preview>` + running tag while
-    // sayActive) and the block renders BETWEEN the header row and the Say
-    // body.
+  it('renders the subagent section above the ladder/Say pair inside ONE bubble', () => {
+    // TUI parity (chat_steps.rs render_order): the subagent block absorbed
+    // between the ladder and its Say is HOISTED above the pair — the section
+    // never cuts through the Say, and the pair's own header row (`2 Steps`
+    // once done, `2 Steps: <preview>` + running tag while sayActive) stays
+    // contiguous with the Say body. The section wrapper carries the blank
+    // line the TUI inserts between a subagent section and the Say below it
+    // (jsdom has no layout, so the bottom margin is the contract).
     const subagent = {
       kind: 'subagent', id: 'sa1', name: 'explore', prompt: 'look', childSessionId: 'c1',
       status: 'done', ok: true, summary: 'found 3 files', events: [], usage: null, startedAt: 0,
+    };
+    const precedes = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const sectionWrapper = (row) => {
+      for (let el = row; el; el = el.parentElement) {
+        if (el.style && el.style.marginBottom === '8px') return el;
+      }
+      return null;
     };
     const done = mount([stepsTurn(), subagent, { kind: 'text', role: 'assistant', text: 'final answer' }]);
     expect(done.container.querySelectorAll('.ant-bubble')).toHaveLength(1);
@@ -338,11 +347,15 @@ describe('StepsContent three-level drill-down', () => {
     const block = screen.getByText(/🤖 explore · done/);
     const say = done.container.querySelector('.md-body');
     expect(say.textContent).toContain('final answer');
-    expect(group.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(block.compareDocumentPosition(say) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(precedes(block, group)).toBeTruthy();
+    expect(precedes(group, say)).toBeTruthy();
+    const wrapper = sectionWrapper(block);
+    expect(wrapper).toBeTruthy();
+    expect(precedes(wrapper, group)).toBeTruthy();
 
-    // Streaming window: same shape with the running tag on the Say row and
-    // the raw preview body still below the block.
+    // Streaming window: same order with the running tag on the Say row — the
+    // block sits ABOVE that row and the raw preview body stays below it, so
+    // the section does not move when the Say seals.
     cleanup();
     const streaming = mount([
       { ...stepsTurn(), sayStreaming: true },
@@ -350,10 +363,31 @@ describe('StepsContent three-level drill-down', () => {
       { kind: 'text', role: 'assistant', text: 'partial answer line one\nmore below' },
     ]);
     expect(streaming.container.querySelectorAll('.ant-bubble')).toHaveLength(1);
-    expect(screen.getByText('2 Steps: partial answer line one')).toBeTruthy();
+    const sayRow = screen.getByText('2 Steps: partial answer line one');
     expect(screen.getByText('running')).toBeTruthy();
-    expect(screen.getByText(/🤖 explore · done/).compareDocumentPosition(screen.getByText('more below'))
-      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const streamingBlock = screen.getByText(/🤖 explore · done/);
+    expect(precedes(streamingBlock, sayRow)).toBeTruthy();
+    expect(precedes(streamingBlock, screen.getByText('more below'))).toBeTruthy();
+    expect(precedes(sayRow, screen.getByText('more below'))).toBeTruthy();
+  });
+
+  it('hoists the subagent section above a whitespace-only Say (TUI opens the Say block on the first delta)', () => {
+    // TUI parity (chat_stream.rs): ANY TextDelta opens the Say block, so
+    // `[ladder, subagent, Say("")]` already hoists the section there. The
+    // lead therefore ends at the first text part regardless of its content;
+    // only a Say with NO text part yet keeps the section below the header
+    // (the TUI has no Say block to pair with either).
+    const subagent = {
+      kind: 'subagent', id: 'sa1', name: 'explore', prompt: 'look', childSessionId: 'c1',
+      status: 'done', ok: true, summary: 'found 3 files', events: [], usage: null, startedAt: 0,
+    };
+    const precedes = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const whitespace = mount([stepsTurn(), subagent, { kind: 'text', role: 'assistant', text: '\n' }]);
+    expect(precedes(screen.getByText(/🤖 explore · done/), screen.getByText('2 Steps'))).toBeTruthy();
+    cleanup();
+    // No Say part at all: block order, the section stays below the header.
+    const pending = mount([stepsTurn(), subagent]);
+    expect(precedes(screen.getByText('2 Steps'), screen.getByText(/🤖 explore · done/))).toBeTruthy();
   });
 
   it('renders `N Steps + Say` as one visual Turn bubble', () => {

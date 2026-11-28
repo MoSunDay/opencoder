@@ -42,7 +42,7 @@ pub(crate) use status_bar::SPINNER;
 /// button types live in `render_hits.rs` next to their recorders; re-exported
 /// here so `crate::render::MouseHits` paths stay stable.
 pub(crate) use hit_records::{
-    CompactionBtn, LiveBtn, MouseHits, SubagentBtn, ThinkingBtn, ToolCallBtn,
+    CompactionBtn, LiveBtn, MouseHits, SubagentBtn, SubagentGroupBtn, ThinkingBtn, ToolCallBtn,
 };
 
 pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
@@ -200,6 +200,7 @@ pub(crate) fn render<B: Backend + 'static>(
         hits.attach_del_btns.clear();
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
+        hits.subagent_group_btns.clear();
         hits.tool_call_btns.clear();
         hits.compaction_btns.clear();
         hits.live_btns.clear();
@@ -219,6 +220,7 @@ pub(crate) fn render<B: Backend + 'static>(
                 &mut hits.top_btn,
                 &mut hits.thinking_btns,
                 &mut hits.subagent_btns,
+                &mut hits.subagent_group_btns,
                 &mut hits.tool_call_btns,
                 &mut hits.compaction_btns,
                 &mut hits.live_btns,
@@ -374,6 +376,7 @@ fn clear_chat_hits(hits: &mut MouseHits) {
     hits.attach_del_btns.clear();
     hits.thinking_btns.clear();
     hits.subagent_btns.clear();
+    hits.subagent_group_btns.clear();
     hits.tool_call_btns.clear();
     hits.compaction_btns.clear();
     hits.live_btns.clear();
@@ -395,6 +398,7 @@ fn render_body(
     top_btn: &mut Option<Rect>,
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
+    subagent_group_btns: &mut Vec<SubagentGroupBtn>,
     tool_call_btns: &mut Vec<ToolCallBtn>,
     compaction_btns: &mut Vec<CompactionBtn>,
     live_btns: &mut Vec<LiveBtn>,
@@ -489,6 +493,16 @@ fn render_body(
         inner.x,
         inner.y,
         subagent_btns,
+    );
+    hit_records::record_subagent_group_hits(
+        chat,
+        cache,
+        text_w,
+        scroll_y,
+        content_vis,
+        inner.x,
+        inner.y,
+        subagent_group_btns,
     );
     hit_records::record_tool_call_hits(
         chat,

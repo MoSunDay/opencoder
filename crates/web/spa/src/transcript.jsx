@@ -17,15 +17,22 @@
 //            stepsBlock.jsx alongside the ladder)
 //   sys    → placement start, variant borderless, centered secondary text
 //   subagent → placement start, variant borderless, 🤖 fold block with
-//            status tag + child replay drill-in (subagentBlock.jsx)
+//            status tag + child replay drill-in (subagentBlock.jsx); its
+//            header shows the shared disclosure glyph (❯ / ▸) and ALL
+//            subagent blocks of the transcript open / close together
 // Assistant Say stays visible at the Turn level — never folded into Steps.
 // Collapse-all: Ctrl/Cmd+L (window keydown) or the `⤒ 收起` link bumps an
-// epoch key on Bubble.List, remounting every bubble so all Collapses (step
-// rows, call rows, subagent blocks) reset closed.
+// epoch key on Bubble.List, remounting every bubble so the uncontrolled
+// Collapses (step rows, call rows) reset closed, and closes the subagent
+// disclosure at the same time. That disclosure is ONE transcript-wide
+// `{ open, toggle }` (subagentFold.js, TUI toggle_subagents parity) held
+// here — not inside the remounted bubbles — and handed to every subagent
+// block through SubagentFoldContext: any subagent header toggles all of
+// them; the default is closed (▸).
 // UsageFooter / StatusTag (moved from render.jsx verbatim in spirit) stay
 // below the list; the empty-state hint keeps the old wording contract.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bubble } from '@ant-design/x';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import { Avatar, Empty, Tag, Typography } from 'antd';
@@ -35,6 +42,7 @@ import { sayPresentation } from './transcript/markdown.js';
 import { AssistantText, TextRows } from './transcript/text.jsx';
 import { Markdown } from './project/markdown.jsx';
 import { SubagentContent } from './subagentBlock.jsx';
+import { SubagentFoldContext } from './subagentFold.js';
 import { MONO_VAR } from './ui/mono.js';
 
 const { Text, Paragraph } = Typography;
@@ -87,9 +95,10 @@ function TextContent({ turn }) {
 /// BODY still renders below as sibling nodes.
 ///
 /// Subagent blocks absorbed between the ladder and its Say (`itemsFromTurns`)
-/// render in block order — header row, the subagent block, then the Say
-/// body — the same order the TUI flattens (`chat_flatten.rs`); parts from
-/// the first Say text on keep their place below the body.
+/// render ABOVE the pair's header row: the section never cuts through the
+/// Say — header row and Say body stay contiguous — the same order the TUI
+/// flattens (`chat_steps.rs::render_order` hoists the section above the
+/// pair); parts from the first Say text on keep their place below the body.
 function AssistantTurnContent({ turn }) {
   const say = turn && Array.isArray(turn.say) ? turn.say : [];
   // Streaming keeps the compact raw preview. Completed answers render the
@@ -100,22 +109,30 @@ function AssistantTurnContent({ turn }) {
     const isText = (part) => part.kind === 'text' && !part.image;
     return { preview: '', rows: [], markdown: say.filter(isText).map((part) => part.text || '').join(''), other: say.filter((part) => !isText(part)) };
   }, [say, turn.sayActive]);
+  // The lead ends at the FIRST text part, empty or not: the TUI opens its
+  // Say block on the first delta of any content (chat_stream.rs), so a
+  // whitespace-only first chunk already hoists the section there. Without
+  // a text part at all (`[subagent]`, Say not started) nothing hoists —
+  // the TUI has no Say block to pair with either, so the order matches in
+  // every window and does not move when the text turns non-empty.
   const firstSay = say.findIndex((part) => (
-    part && part.kind === 'text' && !part.image && typeof part.text === 'string' && part.text.trim().length > 0
+    part && part.kind === 'text' && !part.image && typeof part.text === 'string'
   ));
   const lead = firstSay < 0 ? [] : say.slice(0, firstSay).filter((part) => part && part.kind === 'subagent');
   const body = presentation.other.filter((part) => !lead.includes(part));
   return (
     <div>
+      {/* The subagent section sits ABOVE the pair (never inside the Say):
+          header row and Say body stay contiguous, like the TUI. */}
+      {lead.map((part, index) => (
+        <div key={'subagent:' + index} style={{ marginBottom: 8 }}>
+          <SubagentContent turn={part} />
+        </div>
+      ))}
       <StepsContent turn={turn} preview={presentation.preview} />
-      {lead.length > 0 || body.length > 0 || presentation.rows.length > 0 || presentation.markdown ? (
+      {body.length > 0 || presentation.rows.length > 0 || presentation.markdown ? (
         // Keep the answer body separate from the expandable step summary.
         <div style={{ marginTop: 16 }}>
-          {lead.map((part, index) => (
-            <div key={'subagent:' + index} style={{ marginBottom: 8 }}>
-              <SubagentContent turn={part} />
-            </div>
-          ))}
           {presentation.markdown && <Markdown text={presentation.markdown} />}
           {!!presentation.rows.length && <TextRows rows={presentation.rows} />}
           {body.map((part, index) => {
@@ -205,6 +222,8 @@ const BUBBLE_ROLES = {
   },
   // Subagent fold block: header + status + drill-in replay live in
   // subagentBlock.jsx; the bubble itself stays borderless like tool rows.
+  // Its ❯ / ▸ disclosure is the ONE transcript-wide flag (SubagentFoldContext
+  // above), so every subagent block of this list opens / closes together.
   subagent: {
     placement: 'start',
     variant: 'borderless',
@@ -251,21 +270,32 @@ export function EmptyHint({ text }) {
 export function TranscriptView({ turns, usage, status, error, emptyText, active = true, autoScroll = true }) {
   const empty = isEmptyTranscript(turns, usage);
   // Collapse-all epoch: Ctrl/Cmd+L (or the ⤒ link) bumps the key on
-  // Bubble.List, remounting every bubble so all Collapses reset closed —
-  // step rows, call rows and subagent blocks alike. Say bubbles remount
+  // Bubble.List, remounting every bubble so the uncontrolled Collapses
+  // reset closed — step rows and call rows alike. Say bubbles remount
   // too but hold no local state, so nothing visually changes for them.
   const [epoch, setEpoch] = useState(0);
+  // The subagent disclosure is NOT bubble-local: one transcript-wide flag
+  // (default closed) drives every subagent block's ❯ / ▸ glyph and body,
+  // toggled from any subagent header (TUI toggle_subagents). It lives here
+  // because the bubbles remount on collapse-all — so that path must close
+  // it explicitly, next to the epoch bump.
+  const [subagentsOpen, setSubagentsOpen] = useState(false);
+  const collapseAll = useCallback(() => {
+    setEpoch((e) => e + 1);
+    setSubagentsOpen(false);
+  }, []);
   useEffect(() => {
     if (!active) return undefined;
     const onKey = (e) => {
       if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        setEpoch(epoch + 1);
+        collapseAll();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [epoch, active]);
+  }, [collapseAll, active]);
+  const fold = useMemo(() => ({ open: subagentsOpen, toggle: () => setSubagentsOpen((v) => !v) }), [subagentsOpen]);
   return (
     <div>
       {empty ? (
@@ -274,14 +304,16 @@ export function TranscriptView({ turns, usage, status, error, emptyText, active 
         <>
           <div style={{ textAlign: 'right' }}>
             <Typography.Link
-              onClick={() => setEpoch(epoch + 1)}
+              onClick={collapseAll}
               type="secondary"
               style={{ fontFamily: MONO_VAR, fontSize: 12 }}
             >
               ⤒ 收起
             </Typography.Link>
           </div>
-          <Bubble.List key={epoch} items={itemsFromTurns(turns)} role={BUBBLE_ROLES} autoScroll={autoScroll} />
+          <SubagentFoldContext.Provider value={fold}>
+            <Bubble.List key={epoch} items={itemsFromTurns(turns)} role={BUBBLE_ROLES} autoScroll={autoScroll} />
+          </SubagentFoldContext.Provider>
         </>
       )}
       <UsageFooter usage={usage} />

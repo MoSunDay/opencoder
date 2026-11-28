@@ -40,6 +40,7 @@ mod live;
 mod queue_panel;
 mod status_bar;
 mod status_ctx;
+mod subagent_group;
 mod thinking;
 mod timer;
 mod tok_cost;

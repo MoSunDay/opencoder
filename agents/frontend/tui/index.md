@@ -54,11 +54,28 @@ ratatui + crossterm 终端交互界面。细节以代码为准。
   无 Say**。open Say 是转录内容：Say 一开始其上方阶梯整体退场（`chat_flatten.rs` 经 `chat_steps.rs::group_before_say` 检测下邻 open `Assistant`——中间隔 Subagent 块亦算——即跳过 `flatten_step_group`，行数/点击镜像 `chat_headers.rs` 同门控（同一查找），`open` 披露标记不动、seal 后恢复），流式期间独立形态（`❯ Say:` 头行（`chat.rs`
   ROLE_SAY_HEADER）+ running 提示 + raw body 全量，共享滚动/复制），seal 后才与邻接阶梯
   （同样可隔 Subagent 块，`chat_steps.rs::say_after_group`；`last_block_ends_blank`
-  仅紧邻时不叠空行）合并为 `Say(n steps)` 头行（渲染正文 + 预览去重，步数随合并
-  回归；见 [changelog](../../../features/changelog/2026-11-23/subagent-transparent-step-say-pairing.md)）；copy 模式经
+  合并对自带收尾空行、不叠空行）合并为 `Say(n steps)` 头行（渲染正文 + 预览去重，步数随合并
+  回归；见 [changelog](../../../features/changelog/2026-11-23/subagent-transparent-step-say-pairing.md)）；夹在阶梯与其
+  Say 之间的 Subagent 段整体提到该 Say 对**上方**渲染（`chat_steps.rs::render_order`，
+  flatten/headers/测试镜像共用；分组头、subagent 行、一个空行，再接 `Say(n steps)` 头行
+  与正文——subagent 下一行是 Say 时补空行，收起态亦然，见
+  [changelog](../../../features/changelog/2026-11-27/subagent-section-above-say.md)）；copy 模式经
   `flatten_for_copy`（`flatten_opts(.., include_live)`，配合
   `render_viewport.rs` build_for_copy/includes_live/refresh_copy_cache）
   排除 live 区，复制文本保持纯转录（与 SPA `stepsBlock.jsx` 同契约）
+- `src/chat.rs` toggle_subagents / `chat_flatten.rs` subagent 分组头 — 每段极大连续的
+  Subagent 块（非 Subagent 块分段）前置一行与 live 区同款样式的分组头（dim warn）：
+  `> subagents`（`LIVE_ROW_OPEN_PREFIX` + `SUBAGENT_GROUP_LABEL`）展开态，其下每行
+  `⤷ subagent [kind] prompt …` 保持完整明细（状态、时长、` [→ view]`、摘要），行本身
+  不带标记；`▸ subagents`（`GROUP_ROW_CLOSED_PREFIX`）收起态只留分组头，subagent 行
+  不渲染。状态是视图级 `ChatView::subagents_collapsed`（默认展开、跨 turn 持久、
+  `begin_turn` 不重置）：`chat_headers.rs` 的 `subagent_group_headers()` 两种状态都登记
+  分组头（`SubagentGroupBtn`），`subagent_headers()` 仅展开态登记行（`SubagentBtn`）；
+  点击分组头（`app_mouse.rs`，经 `collapse_view` 作用于聚焦子视图）一次折叠 / 展开该
+  视图全部分组，不进入子视图、不动滚动 / focus；点击可见的 subagent 行进入子代理视角；
+  copy 模式保留分组头（转录结构，不同于瞬态 live 区）；Ctrl+L
+  （`collapse_all_collapsible`）同样收起（见
+  [changelog](../../../features/changelog/2026-11-27/subagent-fold-toggle.md)）
 - [chat_steps_replay.rs](../../../crates/tui/src/chat_steps_replay.rs) — 回放侧
   Step 阶梯归一：`coalesce_steps` 折叠 Thinking、按 Say 闭合并组（与
   `chat_steps.rs` 共用阶梯语义）

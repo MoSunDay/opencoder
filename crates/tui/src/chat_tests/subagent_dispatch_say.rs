@@ -83,6 +83,7 @@ fn subagent_dispatch_header_renders_markdown_and_body_does_not_repeat() {
             "",
             "    ",
             "    \u{2022} item2",
+            "> subagents",
             "\u{2937} subagent [explore] p \u{280b} running, 0 Steps 0s [\u{2192} view]",
         ],
         "dispatch pair: {flat:?}"
@@ -135,6 +136,7 @@ fn subagent_dispatch_single_line_markdown_say_hides_body() {
         vec![
             "\u{25b8} Say(1 step): 派个 subagent",
             "",
+            "> subagents",
             "\u{2937} subagent [explore] p \u{280b} running, 0 Steps 0s [\u{2192} view]",
         ],
         "single-line markdown say: header only, no echo below: {flat:?}"

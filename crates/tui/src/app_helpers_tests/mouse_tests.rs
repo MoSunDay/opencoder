@@ -1,7 +1,7 @@
 use super::mouse_helpers::{empty_hits, StubStore};
 use crate::app_helpers::*;
 use crate::queue_panel;
-use crate::render::{MouseHits, SubagentBtn};
+use crate::render::{MouseHits, SubagentBtn, SubagentGroupBtn};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use opencoder_session::SessionEvent;
 use ratatui::layout::Rect;
@@ -87,6 +87,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
         attach_del_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
+        subagent_group_btns: Vec::new(),
         tool_call_btns: Vec::new(),
         compaction_btns: Vec::new(),
         live_btns: Vec::new(),
@@ -200,6 +201,7 @@ async fn thinking_header_toggles_even_right_after_another_click() {
             rect: header_rect,
         }],
         subagent_btns: Vec::new(),
+        subagent_group_btns: Vec::new(),
         tool_call_btns: Vec::new(),
         compaction_btns: Vec::new(),
         live_btns: Vec::new(),
@@ -275,6 +277,7 @@ async fn compaction_header_click_toggles_collapse() {
         attach_del_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
+        subagent_group_btns: Vec::new(),
         tool_call_btns: Vec::new(),
         compaction_btns: vec![crate::render::CompactionBtn {
             block_idx: crate::chat::ChatView::compaction_headers(&chat)[0].block_idx,
@@ -327,3 +330,5 @@ async fn compaction_header_click_toggles_collapse() {
 mod hierarchy_and_actions;
 #[path = "mouse_tests/steer_actions.rs"]
 mod steer_actions;
+#[path = "mouse_tests/subagent_fold.rs"]
+mod subagent_fold;
